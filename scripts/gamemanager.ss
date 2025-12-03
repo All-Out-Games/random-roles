@@ -23,7 +23,7 @@ ao_update :: proc(dt: float) {
   }
 
 ao_update_lobby :: proc(dt: float) {
-	if(players.count >= MIN_NUMBER_OF_PLAYERS)
+	if(players.elements.count >= MIN_NUMBER_OF_PLAYERS)
 	{
 		game_state = Game_State.INGAME;
 	}
