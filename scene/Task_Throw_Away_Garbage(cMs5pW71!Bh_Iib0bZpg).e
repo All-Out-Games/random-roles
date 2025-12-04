@@ -5,8 +5,8 @@
   "name": "Task_Throw_Away_Garbage",
   "local_enabled": true,
   "local_position": {
-    "X": 0.6177854537963867,
-    "Y": -0.8343226909637451
+    "X": -2.6032719612121582,
+    "Y": -4.1816968917846680
   },
   "local_rotation": 0,
   "local_scale": {
