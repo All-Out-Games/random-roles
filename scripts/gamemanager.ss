@@ -183,7 +183,7 @@ assign_players_to_types :: proc() {
 	
 	//I WANT SWITCH STATEMENT SO BAD
 	if player_count < 5 {
-		civ_count = 1;
+		civ_count = player_count - 1;
 		an_count = 0;
 		tr_count = 1;
 	} else if player_count == 5 {
