@@ -1,7 +1,7 @@
 import "core:core.ss"
 import "player.ss"
 
-MIN_NUMBER_OF_PLAYERS: int : 2;
+MIN_NUMBER_OF_PLAYERS: int : 4;
 
 Game_State :: enum {
     LOBBY;
@@ -58,9 +58,19 @@ get_alive_player_count :: proc() -> int {
 	return alive_count;
 }
 
-end_game_with_victor :: proc(victor: Player) {
+get_civilian_player_count :: proc() -> int {
+	civilian_count := 0;
+	for i: 0..players.elements.count-1 {
+		if players.elements[i].player_state == Player_State.ALIVE && players.elements[i].player_type == Player_Type.CIVILIAN {
+			civilian_count += 1;
+		}
+	}
+	return civilian_count;
+}
+
+end_game_with_victor :: proc(victor: Player_Type) {
 	// Notify everyone about the victor
-	victor_message := aprint("Victory! % wins the round!", .{victor.player_type});
+	victor_message := aprint("Victory! % wins the round!", .{victor});
 	for i: 0..players.elements.count-1 {
 		players.elements[i]->Notify(victor_message);
 	}
@@ -146,22 +156,12 @@ ao_update_lobby :: proc(dt: float) {
 
 ao_update_ingame :: proc(dt: float) {
 	alive_count := get_alive_player_count();
+	civilian_count := get_civilian_player_count();
 	
 	// Check if only one player is alive
-	if alive_count == 1 {
-		// Find the victor
-		victor: Player = null;
-		for i: 0..players.elements.count-1 {
-			if players.elements[i].player_state == Player_State.ALIVE {
-				victor = players.elements[i];
-				break;
-			}
-		}
-		
+	if civilian_count == 0 {
 		// End the game with the victor
-		if victor != null {
-			end_game_with_victor(victor);
-		}
+		end_game_with_victor(Player_Type.TRAITOR);
 	}
 }
 
@@ -182,11 +182,11 @@ assign_players_to_types :: proc() {
 	tr_count: int;
 	
 	//I WANT SWITCH STATEMENT SO BAD
-	if player_count == 2 {
+	if player_count < 5 {
 		civ_count = 1;
 		an_count = 0;
 		tr_count = 1;
-	} else if player_count <= 5 {
+	} else if player_count == 5 {
 		civ_count = 3;
 		an_count = 1;
 		tr_count = 1;
