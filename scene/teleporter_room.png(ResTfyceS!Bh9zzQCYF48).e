@@ -23,6 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Teleporter_Room/teleporter_room.png"
+    "texture": "sprites/phota/Teleporter_Room/teleporter_room.png",
+    "layer": -4
   }
 }

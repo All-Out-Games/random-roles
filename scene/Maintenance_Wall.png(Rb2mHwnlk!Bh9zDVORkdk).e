@@ -24,6 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Maintenance/Maintenance_Wall.png",
-    "depth_offset": -1.5701404809951782
+    "depth_offset": -1.5701404809951782,
+    "layer": -4
   }
 }

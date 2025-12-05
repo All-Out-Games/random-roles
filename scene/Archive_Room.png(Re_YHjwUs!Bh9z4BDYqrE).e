@@ -23,6 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Archives/Archive_Room.png"
+    "texture": "sprites/phota/Archives/Archive_Room.png",
+    "layer": -4
   }
 }
