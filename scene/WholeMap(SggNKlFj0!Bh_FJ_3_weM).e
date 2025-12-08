@@ -21,7 +21,6 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Navmesh",
   "data": {
-    "debug_enabled": true,
-    "debug_rebuild_every_frame": true
+    "debug_enabled": true
   }
 }
