@@ -32,7 +32,7 @@ on_player_go_passive :: proc(player: Player) {
 	//Later: TP to lobby!
 }
 
-ao_start :: proc(dt: float) {
+ao_start :: proc() {
 	game_state = Game_State.LOBBY;
 	countdown_active = false;
 	countdown_start_time = 0.0;
@@ -70,7 +70,7 @@ get_civilian_player_count :: proc() -> int {
 
 end_game_with_victor :: proc(victor: Player_Type) {
 	// Notify everyone about the victor
-	victor_message := aprint("Victory! % wins the round!", .{victor});
+	victor_message := format_string("Victory! % wins the round!", .{victor});
 	for i: 0..players.elements.count-1 {
 		players.elements[i]->Notify(victor_message);
 	}
@@ -99,7 +99,7 @@ ao_update_lobby :: proc(dt: float) {
 		} else {
 			// Display wait timer
 			remaining := 60.0 - elapsed;
-			wait_text := aprint("Next round in: %{.2} seconds", .{remaining});
+			wait_text := format_string("Next round in: %{.2} seconds", .{remaining});
 			
 			screen := UI.get_safe_screen_rect();
 			rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -150, -25, -150, -25);
@@ -110,7 +110,7 @@ ao_update_lobby :: proc(dt: float) {
 			ts.halign = .CENTER;
 			ts.valign = .CENTER;
 			
-			UI.text(rect, wait_text, ts);
+			UI.text(rect, ts, wait_text);
 			return;
 		}
 	}
@@ -132,7 +132,7 @@ ao_update_lobby :: proc(dt: float) {
 		} else {
 			// Display countdown on screen
 			remaining := 10.0 - elapsed;
-			countdown_text := aprint("Game starting in: %{.2}", .{remaining});
+			countdown_text := format_string("Game starting in: %{.2}", .{remaining});
 			
 			screen := UI.get_safe_screen_rect();
 			rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -100, -25, -100, -25);
@@ -143,7 +143,7 @@ ao_update_lobby :: proc(dt: float) {
 			ts.halign = .CENTER;
 			ts.valign = .CENTER;
 			
-			UI.text(rect, countdown_text, ts);
+			UI.text(rect, ts, countdown_text);
 		}
 	} else {
 		// Player count dropped below threshold, reset countdown
@@ -180,8 +180,7 @@ assign_players_to_types :: proc() {
 	civ_count: int;
 	an_count: int;
 	tr_count: int;
-	
-	//I WANT SWITCH STATEMENT SO BAD
+
 	if player_count < 5 {
 		civ_count = player_count - 1;
 		an_count = 0;
@@ -206,7 +205,8 @@ assign_players_to_types :: proc() {
 		civ_count = 5;
 		an_count = 2;
 		tr_count = 2;
-	} else if player_count >= 10 {
+	} else {
+		// player_count >= 10
 		civ_count = player_count - 4;
 		an_count = 2;
 		tr_count = 2;
@@ -244,7 +244,7 @@ assign_players_to_types :: proc() {
 		if i < type_list.count {
 			players.elements[i].player_state = Player_State.ALIVE;
 			players.elements[i].player_type = type_list[i];
-			message := aprint("Player type assigned: %", .{type_list[i]});
+			message := format_string("Player type assigned: %", .{type_list[i]});
 			players.elements[i]->Notify(message);
 		}
 	}

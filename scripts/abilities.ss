@@ -2,7 +2,7 @@ import "core:core.ss"
 import "gamemanager.ss"
 import "tools.ss"
 
-Kill_Ability :: class : Ability {
+Kill_Ability :: class : Ability_Base {
     NAME :: "Kill";
     ICON :: "sprites/icons/kill_ability.png";
 
@@ -32,7 +32,7 @@ Kill_Ability :: class : Ability {
     }
 }
 
-Report_Ability :: class : Ability {
+Report_Ability :: class : Ability_Base {
     NAME :: "Report";
     ICON :: "sprites/icons/report_ability.png";
 
