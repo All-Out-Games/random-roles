@@ -26,18 +26,58 @@ countdown_active: bool;
 game_end_time: float;
 waiting_for_restart: bool;
 
-on_player_go_passive :: proc(player: Player) {
-	player.player_state = Player_State.PASSIVE;
+on_player_go_dead :: proc(player: Player) {
+	player.player_state = Player_State.DEAD;
+	player->add_ghost_reason("spectator");
 	player->Notify("You are dead!");
-	//Later: TP to lobby!
 }
 
-ao_start :: proc() {
+on_player_go_passive :: proc(player: Player) {
+	player.player_state = Player_State.PASSIVE;
+	world_references->teleport_near_lobby(player);
+	player->remove_ghost_reason("spectator");
+}
+
+on_player_go_alive :: proc(player: Player) {
+	player.player_state = Player_State.ALIVE;
+	player->remove_ghost_reason("spectator");
+}
+
+close_all_doors :: proc() {
+	foreach door: component_iterator(Door) {
+		door->close_door();
+	}
+}
+
+open_all_doors :: proc() {
+	foreach door: component_iterator(Door) {
+		door->open_door();
+	}
+}
+
+setup_lobby :: proc() {
 	game_state = Game_State.LOBBY;
 	countdown_active = false;
 	countdown_start_time = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
+	close_all_doors();
+	foreach player: component_iterator(Player) {
+		world_references->teleport_near_lobby(player);
+	}
+}
+
+setup_ingame :: proc() {
+	game_state = Game_State.INGAME;
+	countdown_active = false;
+	countdown_start_time = 0.0;
+	game_end_time = 0.0;
+	waiting_for_restart = false;
+	open_all_doors();
+}
+
+ao_start :: proc() {
+	setup_lobby();
   }
 
 ao_update :: proc(dt: float) {
@@ -58,14 +98,14 @@ get_alive_player_count :: proc() -> int {
 	return alive_count;
 }
 
-get_civilian_player_count :: proc() -> int {
-	civilian_count := 0;
+get_player_count :: proc(type: Player_Type) -> int {
+	count := 0;
 	for i: 0..players.elements.count-1 {
-		if players.elements[i].player_state == Player_State.ALIVE && players.elements[i].player_type == Player_Type.CIVILIAN {
-			civilian_count += 1;
+		if players.elements[i].player_state == Player_State.ALIVE && players.elements[i].player_type == type {
+			count += 1;
 		}
 	}
-	return civilian_count;
+	return count;
 }
 
 end_game_with_victor :: proc(victor: Player_Type) {
@@ -81,9 +121,7 @@ end_game_with_victor :: proc(victor: Player_Type) {
 	}
 	
 	// Return to lobby and start wait timer
-	game_state = Game_State.LOBBY;
-	waiting_for_restart = true;
-	game_end_time = get_time();
+	setup_lobby();
 }
 
 ao_update_lobby :: proc(dt: float) {
@@ -127,8 +165,7 @@ ao_update_lobby :: proc(dt: float) {
 		if elapsed >= 10.0 {
 			// Start the game
 			assign_players_to_types();
-			game_state = Game_State.INGAME;
-			countdown_active = false;
+			setup_ingame();
 		} else {
 			// Display countdown on screen
 			remaining := 10.0 - elapsed;
@@ -156,12 +193,22 @@ ao_update_lobby :: proc(dt: float) {
 
 ao_update_ingame :: proc(dt: float) {
 	alive_count := get_alive_player_count();
-	civilian_count := get_civilian_player_count();
-	
-	// Check if only one player is alive
-	if civilian_count == 0 {
-		// End the game with the victor
+	civilian_count := get_player_count(Player_Type.CIVILIAN);
+	traitor_count := get_player_count(Player_Type.TRAITOR);
+	anarchist_count := get_player_count(Player_Type.ANARCHIST);
+
+	//Win Conditions
+	// -- Traitor: Only traitors alive
+	if traitor_count > 0 && traitor_count == alive_count {
 		end_game_with_victor(Player_Type.TRAITOR);
+	}
+	// -- Anarchist: Only anarchists alive
+	if anarchist_count > 0 && anarchist_count == alive_count {
+		end_game_with_victor(Player_Type.ANARCHIST);
+	}
+	// -- Civilian: Only civilians alive
+	if civilian_count > 0 && civilian_count == alive_count {
+		end_game_with_victor(Player_Type.CIVILIAN);
 	}
 }
 
@@ -242,10 +289,12 @@ assign_players_to_types :: proc() {
 	// Assign types to players
 	for i: 0..players.elements.count-1 {
 		if i < type_list.count {
-			players.elements[i].player_state = Player_State.ALIVE;
+			on_player_go_alive(players.elements[i]);
 			players.elements[i].player_type = type_list[i];
-			message := format_string("Player type assigned: %", .{type_list[i]});
-			players.elements[i]->Notify(message);
+			if(players.elements[i]->is_local_or_server()) {
+				message := format_string("Player type assigned: %", .{type_list[i]});
+				players.elements[i]->Notify(message);
+			}
 		}
 	}
 }

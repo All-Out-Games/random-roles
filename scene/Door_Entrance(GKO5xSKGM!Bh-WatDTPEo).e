@@ -2,7 +2,7 @@
 416611827713
 1733854428176780 1765228171055919400
 {
-  "name": "Door Entrance",
+  "name": "Door_Entrance",
   "local_enabled": true,
   "local_position": {
     "X": -3.7847671508789062,
@@ -17,19 +17,10 @@
 },
 {
   "cid": 1,
-  "aoid": "1733954223197399:1765228192288883100",
+  "aoid": "1739449682687845:1765229361534550200",
   "component_type": "Internal_Component",
-  "internal_component_type": "Box_Collider",
+  "internal_component_type": "Door",
   "data": {
-    "make_navmesh_loop": true,
-    "flip_navmesh_loop": true,
-    "size": {
-      "X": 0.2100000083446503,
-      "Y": 2.2851781845092773
-    },
-    "offset": {
-      "X": 0.0270376205444336,
-      "Y": 0.0938613414764404
-    }
+    "collider_entity": "1737907430250412:1765229033396023400"
   }
 }

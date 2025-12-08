@@ -23,4 +23,13 @@
   "data": {
     "debug_enabled": true
   }
+},
+{
+  "cid": 2,
+  "aoid": "1744311500326073:1765230395962920600",
+  "component_type": "Internal_Component",
+  "internal_component_type": "World_References",
+  "data": {
+    "lobby_spawn": "1744433382918415:1765230421895364100"
+  }
 }

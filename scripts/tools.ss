@@ -34,3 +34,9 @@ make_finder :: proc($T: typeid, position: v2, range := 999999999.0) -> Finder(T)
     result.closest_distance = range;
     return result;
 }
+
+rebuild_all_navmeshes :: proc() {
+    foreach navmesh: component_iterator(Navmesh) {
+        navmesh->rebuild_immediately();
+    }
+}

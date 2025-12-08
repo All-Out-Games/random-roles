@@ -4,7 +4,10 @@ import "tools.ss"
 
 Kill_Ability :: class : Ability_Base {
     NAME :: "Kill";
-    ICON :: "sprites/icons/kill_ability.png";
+
+    on_init :: proc(instance: Kill_Ability) {
+        instance.icon = get_asset(Texture_Asset, "sprites/icons/kill_ability.png");
+    }
 
     get_closest_alive_player :: proc(instance: Kill_Ability, player: Player) -> Player {
         finder := make_finder(Player, player.entity.world_position, 5.0);
@@ -24,9 +27,8 @@ Kill_Ability :: class : Ability_Base {
         if params.clicked && params.can_use {
             closest_alive_player := instance->get_closest_alive_player(player);
             if closest_alive_player != null {
-                closest_alive_player.player_state = Player_State.DEAD;
-                //For now: Immediate passive, later will do death animation first!
-                on_player_go_passive(closest_alive_player);
+                //Need to add corpse on floor!
+                on_player_go_dead(closest_alive_player);
             }
         }
     }
@@ -34,7 +36,10 @@ Kill_Ability :: class : Ability_Base {
 
 Report_Ability :: class : Ability_Base {
     NAME :: "Report";
-    ICON :: "sprites/icons/report_ability.png";
+
+    on_init :: proc(instance: Report_Ability) {
+        instance.icon = get_asset(Texture_Asset, "sprites/icons/report_ability.png");
+    }
 
     get_closest_dead_player :: proc(instance: Report_Ability, player: Player) -> Player {
         finder := make_finder(Player, player.entity.world_position, 5.0);
