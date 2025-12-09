@@ -6,6 +6,7 @@ MIN_NUMBER_OF_PLAYERS: int : 4;
 Game_State :: enum {
     LOBBY;
 	INGAME;
+	VOTING;
 }
 
 Player_Type :: enum {
@@ -25,6 +26,7 @@ countdown_start_time: float;
 countdown_active: bool;
 game_end_time: float;
 waiting_for_restart: bool;
+voting_start_time: float;
 
 on_player_go_dead :: proc(player: Player) {
 	player.player_state = Player_State.DEAD;
@@ -67,6 +69,9 @@ setup_lobby :: proc() {
 	foreach player: component_iterator(Player) {
 		on_player_go_passive(player);
 	}
+	foreach corpse: component_iterator(Corpse) {
+		destroy_entity(corpse.entity);
+	}
 }
 
 setup_ingame :: proc() {
@@ -75,7 +80,32 @@ setup_ingame :: proc() {
 	countdown_start_time = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
+	voting_start_time = 0.0;
 	open_all_doors();
+}
+
+setup_voting :: proc() {
+	game_state = Game_State.VOTING;
+	voting_start_time = get_time();
+	close_all_doors();
+	
+	// Teleport all alive players to voting area
+	for i: 0..players.elements.count-1 {
+		if players.elements[i].player_state == Player_State.ALIVE {
+			world_references->teleport_to_voting(players.elements[i]);
+		}
+	}
+	
+	// Notify all players
+	for i: 0..players.elements.count-1 {
+		players.elements[i]->Notify("A body has been reported! Meeting in progress.");
+	}
+}
+
+start_meeting :: proc() {
+	if game_state == Game_State.INGAME {
+		setup_voting();
+	}
 }
 
 ao_start :: proc() {
@@ -87,6 +117,8 @@ ao_update :: proc(dt: float) {
 		ao_update_lobby(dt);
 	} else if(game_state == Game_State.INGAME) {
 		ao_update_ingame(dt);
+	} else if(game_state == Game_State.VOTING) {
+		ao_update_voting(dt);
 	}
   }
 
@@ -207,6 +239,44 @@ ao_update_ingame :: proc(dt: float) {
 	// -- Civilian: Only civilians alive
 	if civilian_count > 0 && civilian_count == alive_count {
 		end_game_with_victor(Player_Type.CIVILIAN);
+	}
+}
+
+ao_update_voting :: proc(dt: float) {
+	current_time := get_time();
+	elapsed := current_time - voting_start_time;
+	
+	// Display voting timer
+	remaining := 60.0 - elapsed;
+	if remaining < 0.0 { remaining = 0.0; }
+	
+	voting_text := format_string("Voting ends in: %{.0} seconds", .{remaining});
+	
+	screen := UI.get_safe_screen_rect();
+	rect := screen->subrect(0.5, 0.1, 0.5, 0.1, -150, -25, -150, -25);
+	
+	ts := UI.default_text_settings();
+	ts.size = 48;
+	ts.color = .{1, 1, 1, 1};
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	
+	UI.text(rect, ts, voting_text);
+	
+	// After 1 minute, end voting and return to game
+	if elapsed >= 60.0 {
+		end_voting();
+	}
+}
+
+end_voting :: proc() {
+	game_state = Game_State.INGAME;
+	voting_start_time = 0.0;
+	open_all_doors();
+	
+	// Notify all players
+	for i: 0..players.elements.count-1 {
+		players.elements[i]->Notify("Voting has ended. The game continues!");
 	}
 }
 

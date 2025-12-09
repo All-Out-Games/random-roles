@@ -8,8 +8,6 @@ Player :: class : Player_Base {
     player_type: Player_Type;
     player_state: Player_State;
 
-    delay_before_ghost: float;
-    
     Notify :: proc(using this: Player, message: string) {
         if this->is_local_or_server() {
             Notifier.notify(message);
@@ -24,10 +22,11 @@ Player :: class : Player_Base {
             world_references->teleport_near_lobby(this);
         } else if game_state == Game_State.INGAME {
             on_player_go_dead(this);
+        } else if game_state == Game_State.VOTING {
+            on_player_go_dead(this);
+            world_references->teleport_to_voting(this);
         }
 
-        this.delay_before_ghost = -1.0;
-        
         register_ability(this, Kill_Ability);
         register_ability(this, Report_Ability);
     }
@@ -35,14 +34,6 @@ Player :: class : Player_Base {
     ao_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
             this->setup_player_colors();
-        }
-        if this.delay_before_ghost > 0.0 {
-            this.delay_before_ghost -= delta_time;
-            if this.delay_before_ghost <= 0.0 {
-                this.delay_before_ghost = -1.0;
-                on_player_go_dead(this);
-                this->set_trigger("RESET");
-            }
         }
     }
 
@@ -79,8 +70,8 @@ Player :: class : Player_Base {
 
     kill :: proc(using this: Player) {
         //freeze_player = true;
-        this->set_trigger("death");
-        this.delay_before_ghost = 2.0;
+        on_player_go_dead(this);
+        world_references->spawn_corpse(this);
     }
 
     revive :: proc(using this: Player) {
@@ -107,4 +98,7 @@ Task_Interactable :: class : Component {
     can_use :: proc(using this: Task_Interactable, player: Player) -> bool {
         return player.player_state == Player_State.ALIVE && player.player_type == Player_Type.CIVILIAN;
     }
+}
+
+Corpse :: class : Component {
 }

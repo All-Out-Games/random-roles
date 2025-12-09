@@ -21,7 +21,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Navmesh",
   "data": {
-    "debug_enabled": true
+
   }
 },
 {
@@ -30,6 +30,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "World_References",
   "data": {
-    "lobby_spawn": "1744433382918415:1765230421895364100"
+    "lobby_spawn": "1744433382918415:1765230421895364100",
+    "voting_spawn": "131301273908801:1765314628047534000"
   }
 }
