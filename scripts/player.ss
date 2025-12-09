@@ -7,6 +7,8 @@ players: List(Player);
 Player :: class : Player_Base {
     player_type: Player_Type;
     player_state: Player_State;
+
+    delay_before_ghost: float;
     
     Notify :: proc(using this: Player, message: string) {
         if this->is_local_or_server() {
@@ -23,6 +25,8 @@ Player :: class : Player_Base {
         } else if game_state == Game_State.INGAME {
             on_player_go_dead(this);
         }
+
+        this.delay_before_ghost = -1.0;
         
         register_ability(this, Kill_Ability);
         register_ability(this, Report_Ability);
@@ -31,6 +35,14 @@ Player :: class : Player_Base {
     ao_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
             this->setup_player_colors();
+        }
+        if this.delay_before_ghost > 0.0 {
+            this.delay_before_ghost -= delta_time;
+            if this.delay_before_ghost <= 0.0 {
+                this.delay_before_ghost = -1.0;
+                on_player_go_dead(this);
+                this->set_trigger("RESET");
+            }
         }
     }
 
@@ -46,8 +58,8 @@ Player :: class : Player_Base {
     }
 
     setup_player_colors :: proc(using this: Player) {
-        if player_type == Player_Type.CIVILIAN || player_state != Player_State.ALIVE {
-            //Civilians & dead / lobby / spectators don't know who is who, no colors to set!
+        if player_type != Player_Type.TRAITOR || player_state != Player_State.ALIVE {
+            //Non Traitors & dead / lobby / spectators don't know who is who, no colors to set!
             foreach player: component_iterator(Player) {
                 player.do_name_color_override = false;
             }
@@ -63,6 +75,21 @@ Player :: class : Player_Base {
                 }
             }
         }
+    }
+
+    kill :: proc(using this: Player) {
+        //freeze_player = true;
+        this->set_trigger("death");
+        this.delay_before_ghost = 2.0;
+    }
+
+    revive :: proc(using this: Player) {
+        //freeze_player = false;
+        this->set_trigger("RESET");
+    }
+
+    set_trigger :: proc(using this: Player, trigger: string) {
+        this.animator.instance.state_machine->set_trigger(trigger);
     }
 }
 

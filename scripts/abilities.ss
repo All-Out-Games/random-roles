@@ -27,8 +27,8 @@ Kill_Ability :: class : Ability_Base {
         if params.clicked && params.can_use {
             closest_alive_player := instance->get_closest_alive_player(player);
             if closest_alive_player != null {
+                closest_alive_player->kill();
                 //Need to add corpse on floor!
-                on_player_go_dead(closest_alive_player);
             }
         }
     }

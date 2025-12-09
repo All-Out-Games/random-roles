@@ -33,12 +33,14 @@ on_player_go_dead :: proc(player: Player) {
 }
 
 on_player_go_passive :: proc(player: Player) {
+	player->revive();
 	player.player_state = Player_State.PASSIVE;
 	world_references->teleport_near_lobby(player);
 	player->remove_ghost_reason("spectator");
 }
 
 on_player_go_alive :: proc(player: Player) {
+	player->revive();
 	player.player_state = Player_State.ALIVE;
 	player->remove_ghost_reason("spectator");
 }
@@ -63,7 +65,7 @@ setup_lobby :: proc() {
 	waiting_for_restart = false;
 	close_all_doors();
 	foreach player: component_iterator(Player) {
-		world_references->teleport_near_lobby(player);
+		on_player_go_passive(player);
 	}
 }
 
@@ -201,10 +203,6 @@ ao_update_ingame :: proc(dt: float) {
 	// -- Traitor: Only traitors alive
 	if traitor_count > 0 && traitor_count == alive_count {
 		end_game_with_victor(Player_Type.TRAITOR);
-	}
-	// -- Anarchist: Only anarchists alive
-	if anarchist_count > 0 && anarchist_count == alive_count {
-		end_game_with_victor(Player_Type.ANARCHIST);
 	}
 	// -- Civilian: Only civilians alive
 	if civilian_count > 0 && civilian_count == alive_count {
