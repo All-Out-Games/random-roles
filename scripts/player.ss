@@ -90,6 +90,7 @@ Player :: class : Player_Base {
         //freeze_player = true;
         on_player_go_dead(this);
         world_references->spawn_corpse(this);
+        log(format_string("Player % killed", .{this.entity.id}));
     }
 
     revive :: proc(using this: Player) {

@@ -1,4 +1,5 @@
 import "core:core.ss"
+import "gamemanager.ss"
 
 RR_Projectile :: class : Component {
     sprite: Sprite_Renderer @ao_serialize;
@@ -10,21 +11,19 @@ RR_Projectile :: class : Component {
     owner: Entity;
     hit_radius: float;
 
-    start_rotation: float;
-
     ao_start :: proc(using this: RR_Projectile) {
         spawn_time = get_time();
         if hit_radius == 0 {
             hit_radius = 0.5;
         }
-
-        rng := rng_seed(entity.id);
-        start_rotation = rng_range_float(&rng, 0, 360);
     }
 
     ao_update :: proc(using this: RR_Projectile, dt: float) {
+        // Set rotation to face the direction of travel
+        direction_angle := to_degrees(atan2(velocity.y, velocity.x));
+        sprite.entity->set_local_rotation(direction_angle);
+
         time_alive := get_time() - spawn_time;
-        sprite.entity->set_local_rotation(start_rotation + time_alive * 1440);
 
         // Move RR_Projectile
         entity->add_local_position(velocity * dt);
@@ -37,15 +36,33 @@ RR_Projectile :: class : Component {
                 if player.player_state == Player_State.DEAD continue;
                 if alive(owner) && owner == player.entity continue;
                 if in_range(player.entity.world_position - entity.world_position, hit_radius) {
-                    player->kill();
+                    // False Fire: Sheriff shooting a civilian kills the Sheriff instead
+                    player_to_kill: Player = player;
+                    if alive(owner) {
+                        owner_player := owner->get_component(Player);
+                        if owner_player != null {
+                            // Check if shooter is Sheriff (civilian with sheriff role)
+                            is_sheriff := owner_player.player_type == Player_Type.CIVILIAN && owner_player.player_role == Player_Role.SHERIFF;
+                            // Check if target is a civilian (not traitor or anarchist)
+                            target_is_civilian := player.player_type == Player_Type.CIVILIAN;
+                            
+                            if is_sheriff && target_is_civilian {
+                                // False Fire! Sheriff shot an innocent - Sheriff dies instead
+                                player_to_kill = owner_player;
+                                owner_player->Notify("False Fire! You shot an innocent and paid the price!");
+                            }
+                        }
+                    }
+                    
+                    player_to_kill->kill();
                     destroy_self = true;
                     {
                         sfx := default_sfx_desc();
-                        sfx->set_position(player.entity.world_position);
+                        sfx->set_position(player_to_kill.entity.world_position);
                         sfx.volume = 0.75;
                         sfx.volume_perturb = 0.1;
                         sfx.speed_perturb = 0.2;
-                        SFX.play(get_asset(SFX_Asset, "sfx/stabbed.wav"), sfx);
+                        SFX.play(get_asset(SFX_Asset, "sfx/death.wav"), sfx);
                     }
                     break;
                 }

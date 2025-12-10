@@ -461,10 +461,17 @@ assign_players_to_types :: proc() {
 		}
 	}
 
-	// Assign roles to civilians
+	// Assign roles - only one Sheriff among civilians, rest get NONE
+	sheriff_assigned := false;
 	for i: 0..players.elements.count-1 {
-		if players.elements[i].player_type == Player_Type.CIVILIAN {
+		if players.elements[i].player_type == Player_Type.CIVILIAN && !sheriff_assigned {
 			players.elements[i].player_role = Player_Role.SHERIFF;
+			sheriff_assigned = true;
+			if players.elements[i]->is_local_or_server() {
+				players.elements[i]->Notify("You are the Sheriff!");
+			}
+		} else {
+			players.elements[i].player_role = Player_Role.NONE;
 		}
 	}
 }
