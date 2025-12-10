@@ -21,12 +21,19 @@ Player_State :: enum {
 	DEAD;
 }
 
+Player_Role :: enum {
+    NONE;
+	//Civilian Roles
+	SHERIFF;
+}
+
 game_state: Game_State;
 countdown_start_time: float;
 countdown_active: bool;
 game_end_time: float;
 waiting_for_restart: bool;
 voting_start_time: float;
+round_number: int;
 
 on_player_go_dead :: proc(player: Player) {
 	player.player_state = Player_State.DEAD;
@@ -177,6 +184,8 @@ end_game_with_victor :: proc(victor: Player_Type) {
 	for i: 0..players.elements.count-1 {
 		players.elements[i].player_state = Player_State.PASSIVE;
 	}
+
+	round_number += 1;
 	
 	// Return to lobby and start wait timer
 	setup_lobby();
@@ -432,7 +441,7 @@ assign_players_to_types :: proc() {
 	}
 	
 	// Shuffle the type list using Fisher-Yates algorithm
-	rng := rng_seed(player_count.(u64));
+	rng := rng_seed((player_count.(u64) + round_number.(u64)));
 	for i: 0..type_list.count-1 {
 		j := rng_range_int(&rng, i, type_list.count-1);
 		temp := type_list[i];
@@ -449,6 +458,13 @@ assign_players_to_types :: proc() {
 				message := format_string("Player type assigned: %", .{type_list[i]});
 				players.elements[i]->Notify(message);
 			}
+		}
+	}
+
+	// Assign roles to civilians
+	for i: 0..players.elements.count-1 {
+		if players.elements[i].player_type == Player_Type.CIVILIAN {
+			players.elements[i].player_role = Player_Role.SHERIFF;
 		}
 	}
 }

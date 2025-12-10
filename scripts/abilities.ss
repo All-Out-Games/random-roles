@@ -1,6 +1,7 @@
 import "core:core.ss"
 import "gamemanager.ss"
 import "tools.ss"
+import "projectile.ss"
 
 Kill_Ability :: class : Ability_Base {
     NAME :: "Kill";
@@ -222,6 +223,91 @@ Vote_Ability :: class : Ability_Base {
         defer UI.pop_id();
         if UI.button(close_rect, bs, close_ts, "Close").clicked {
             instance.voting_ui_open = false;
+        }
+    }
+}
+
+Always_Aiming_Ability_Data :: struct {
+    aim:   bool;
+    shoot: bool;
+}
+
+update_always_aiming_ability :: proc(player: Player, params: ref Ability_Update_Params) -> Always_Aiming_Ability_Data {
+    if player.player_state != Player_State.ALIVE {
+        return .{};
+    }
+
+    result: Always_Aiming_Ability_Data;
+    if params.held {
+        if length(params.drag_offset) > 0.1 {
+            result.aim = true;
+            result.shoot = true;
+        }
+    }
+    else {
+        if player.device_kind == .PC {
+            if player.active_ability == null {
+                UI.push_layer(-1000);
+                defer UI.pop_layer();
+                UI.push_id("click to shoot");
+                defer UI.pop_id();
+
+                interact := UI.button(UI.get_screen_rect(), .{}, .{}, "");
+
+                if interact.hovering {
+                    result.aim = true;
+                    params.drag_direction = normalize(get_mouse_world_position() - player.entity.world_position);
+                }
+
+                if params.can_use {
+                    if interact.active {
+                        result.shoot = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if result.aim {
+        player.last_aim_direction = params.drag_direction;
+        draw_thin_aiming_line(player.entity.world_position, params.drag_direction, 1.0 / player.camera.size * 4);
+    }
+
+    return result;
+}
+
+shoot_projectile :: proc(spawn_position: v2, velocity: v2, damage: int, lifetime: float, owner: Entity) -> Entity {
+    prefab := get_asset(Prefab_Asset, "prefabs/RR_Projectile.prefab");
+    entity := instantiate(prefab);
+    entity->set_local_position(spawn_position);
+
+    projectile := entity->get_component(RR_Projectile);
+    projectile.velocity = velocity;
+    projectile.lifetime = lifetime;
+    projectile.damage = damage;
+    projectile.owner = owner;
+    return entity;
+}
+
+Shoot_Ability :: class : Ability_Base {
+    on_init :: proc(ability: Shoot_Ability) {
+        ability.name = "Shoot";
+        ability.disable_keybind = true;
+        ability.is_aimed_ability = true;
+    }
+
+    on_update :: proc(ability: Shoot_Ability, player: Player, params: Ability_Update_Params) {
+        aiming := update_always_aiming_ability(player, &params);
+        if params.can_use {
+            if aiming.shoot {
+                sfx := default_sfx_desc();
+                sfx->set_position(player.entity.local_position);
+                sfx.volume_perturb = 0.2;
+                sfx.speed_perturb = 0.1;
+                shoot_projectile(player.entity.world_position, params.drag_direction * 10.0, 1, 0.75, player.entity);
+                SFX.play(get_asset(SFX_Asset, "sfx/shoot.wav"), sfx);
+                ability.current_cooldown = 30.0;
+            }
         }
     }
 }

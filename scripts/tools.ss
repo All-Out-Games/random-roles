@@ -40,3 +40,12 @@ rebuild_all_navmeshes :: proc() {
         navmesh->rebuild_immediately();
     }
 }
+
+try_find_closest_point_on_navmesh :: proc(position: v2, point: ref v2) -> bool {
+    foreach navmesh: component_iterator(Navmesh) {
+        if navmesh->try_find_closest_point_on_navmesh(position, point) {
+            return true;
+        }
+    }
+    return false;
+}

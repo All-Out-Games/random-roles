@@ -7,8 +7,11 @@ players: List(Player);
 Player :: class : Player_Base {
     player_type: Player_Type;
     player_state: Player_State;
+    player_role: Player_Role;
     voted_for: Player;  // Who this player voted for (null if no vote yet)
     votes_received: int;  // How many votes this player has received
+    active_ability: Ability_Base;
+    last_aim_direction: v2;
 
     Notify :: proc(using this: Player, message: string) {
         if this->is_local_or_server() {
@@ -32,6 +35,7 @@ Player :: class : Player_Base {
         register_ability(this, Kill_Ability);
         register_ability(this, Report_Ability);
         register_ability(this, Vote_Ability);
+        register_ability(this, Shoot_Ability);
     }
 
     ao_update :: proc(using this: Player, delta_time: float) {
@@ -51,6 +55,10 @@ Player :: class : Player_Base {
                 // During gameplay, show kill (for traitors) and report
                 if player_type == Player_Type.TRAITOR {
                     draw_ability_button(this, Kill_Ability, abilityIndex);
+                    abilityIndex += 1;
+                }
+                if player_type == Player_Type.CIVILIAN && player_role == Player_Role.SHERIFF {
+                    draw_ability_button(this, Shoot_Ability, abilityIndex);
                     abilityIndex += 1;
                 }
                 draw_ability_button(this, Report_Ability, abilityIndex);
