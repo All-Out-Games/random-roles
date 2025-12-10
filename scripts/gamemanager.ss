@@ -89,6 +89,12 @@ setup_voting :: proc() {
 	voting_start_time = get_time();
 	close_all_doors();
 	
+	// Reset all votes
+	for i: 0..players.elements.count-1 {
+		players.elements[i].voted_for = null;
+		players.elements[i].votes_received = 0;
+	}
+	
 	// Teleport all alive players to voting area
 	for i: 0..players.elements.count-1 {
 		if players.elements[i].player_state == Player_State.ALIVE {
@@ -100,6 +106,24 @@ setup_voting :: proc() {
 	for i: 0..players.elements.count-1 {
 		players.elements[i]->Notify("A body has been reported! Meeting in progress.");
 	}
+}
+
+cast_vote :: proc(voter: Player, target: Player) {
+	if voter.voted_for != null {
+		// Already voted, can't change vote
+		return;
+	}
+	if voter.player_state != Player_State.ALIVE || target.player_state != Player_State.ALIVE {
+		return;
+	}
+	if game_state != Game_State.VOTING {
+		return;
+	}
+	
+	voter.voted_for = target;
+	target.votes_received += 1;
+	
+	voter->Notify(format_string("You voted for %", .{target.entity->get_name()}));
 }
 
 start_meeting :: proc() {
@@ -262,6 +286,23 @@ ao_update_voting :: proc(dt: float) {
 	ts.valign = .CENTER;
 	
 	UI.text(rect, ts, voting_text);
+
+	// Check if all alive players have voted - early end if so
+	alive_count := 0;
+	voted_count := 0;
+	for i: 0..players.elements.count-1 {
+		if players.elements[i].player_state == Player_State.ALIVE {
+			alive_count += 1;
+			if players.elements[i].voted_for != null {
+				voted_count += 1;
+			}
+		}
+	}
+	
+	if alive_count > 0 && voted_count == alive_count {
+		end_voting();
+		return;
+	}
 	
 	// After 1 minute, end voting and return to game
 	if elapsed >= 60.0 {
@@ -270,6 +311,51 @@ ao_update_voting :: proc(dt: float) {
 }
 
 end_voting :: proc() {
+	// Tally votes and find player with most votes
+	most_votes := 0;
+	voted_out: Player = null;
+	tie_detected := false;
+	
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p.player_state == Player_State.ALIVE && p.votes_received > most_votes {
+			most_votes = p.votes_received;
+			voted_out = p;
+			tie_detected = false;
+		} else if p.player_state == Player_State.ALIVE && p.votes_received == most_votes && most_votes > 0 {
+			tie_detected = true;
+		}
+	}
+	
+	// Execute the voted out player (if no tie and someone got votes)
+	if voted_out != null && !tie_detected && most_votes > 0 {
+		// Kill without spawning corpse
+		voted_out.player_state = Player_State.DEAD;
+		voted_out->add_ghost_reason("spectator");
+		
+		// Notify everyone
+		ejected_message := format_string("% has been ejected!", .{voted_out.entity->get_name()});
+		for i: 0..players.elements.count-1 {
+			players.elements[i]->Notify(ejected_message);
+		}
+	} else if tie_detected {
+		// Notify about tie
+		for i: 0..players.elements.count-1 {
+			players.elements[i]->Notify("It's a tie! No one was ejected.");
+		}
+	} else {
+		// No votes cast
+		for i: 0..players.elements.count-1 {
+			players.elements[i]->Notify("No votes were cast. No one was ejected.");
+		}
+	}
+	
+	// Reset votes
+	for i: 0..players.elements.count-1 {
+		players.elements[i].voted_for = null;
+		players.elements[i].votes_received = 0;
+	}
+	
 	game_state = Game_State.INGAME;
 	voting_start_time = 0.0;
 	open_all_doors();
