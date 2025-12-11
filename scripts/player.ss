@@ -13,6 +13,7 @@ Player :: class : Player_Base {
     active_ability: Ability_Base;
     last_aim_direction: v2;
 
+
     Notify :: proc(using this: Player, message: string) {
         if this->is_local_or_server() {
             Notifier.notify(message);
@@ -36,6 +37,7 @@ Player :: class : Player_Base {
         register_ability(this, Report_Ability);
         register_ability(this, Vote_Ability);
         register_ability(this, Shoot_Ability);
+        register_ability(this, Black_Flag_Ability);
     }
 
     ao_update :: proc(using this: Player, delta_time: float) {
@@ -52,10 +54,18 @@ Player :: class : Player_Base {
                 // During voting, only show the vote ability
                 draw_ability_button(this, Vote_Ability, abilityIndex);
             } else if game_state == Game_State.INGAME {
-                // During gameplay, show kill (for traitors) and report
+                // During gameplay, show abilities based on type and role
                 if player_type == Player_Type.TRAITOR {
                     draw_ability_button(this, Kill_Ability, abilityIndex);
                     abilityIndex += 1;
+                    
+                    // Pirate gets Shoot and Black Flag abilities
+                    if player_role == Player_Role.PIRATE {
+                        draw_ability_button(this, Shoot_Ability, abilityIndex);
+                        abilityIndex += 1;
+                        draw_ability_button(this, Black_Flag_Ability, abilityIndex);
+                        abilityIndex += 1;
+                    }
                 }
                 if player_type == Player_Type.CIVILIAN && player_role == Player_Role.SHERIFF {
                     draw_ability_button(this, Shoot_Ability, abilityIndex);
@@ -99,7 +109,9 @@ Player :: class : Player_Base {
     }
 
     set_trigger :: proc(using this: Player, trigger: string) {
-        this.animator.instance.state_machine->set_trigger(trigger);
+        if this.animator.instance != null {
+            this.animator.instance.state_machine->set_trigger(trigger);
+        }
     }
 }
 

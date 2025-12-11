@@ -311,3 +311,98 @@ Shoot_Ability :: class : Ability_Base {
         }
     }
 }
+
+// Black Flag - Pirate ability that creates a fog zone
+BLACK_FLAG_RADIUS :: 5.0;
+BLACK_FLAG_DURATION :: 30.0;
+
+Black_Flag :: class : Component {
+    owner_entity: Entity;
+    spawn_time: float;
+    
+    ao_start :: proc(using this: Black_Flag) {
+        spawn_time = get_time();
+    }
+    
+    ao_update :: proc(using this: Black_Flag, dt: float) {
+        time_alive := get_time() - spawn_time;
+        
+        // Destroy after duration
+        if time_alive >= BLACK_FLAG_DURATION {
+            destroy_entity(entity);
+            return;
+        }
+        
+        // Apply fog effect to nearby players (client-side rendering)
+        foreach player: component_iterator(Player) {
+            if player.player_state != Player_State.ALIVE continue;
+            if !player->is_local_or_server() continue;
+            
+            distance := length(player.entity.world_position - entity.world_position);
+            if distance < BLACK_FLAG_RADIUS {
+                // Check if this player is immune (the Pirate who placed it)
+                is_pirate_owner := alive(owner_entity) && owner_entity == player.entity;
+                
+                if !is_pirate_owner {
+                    // Draw fog overlay - obscures vision except small circle in center
+                    draw_fog_overlay(player);
+                }
+            }
+        }
+    }
+}
+
+draw_fog_overlay :: proc(player: Player) {
+    fog_texture := get_asset(Texture_Asset, "$AO/white.png");
+    
+    // Draw dark fog covering the entire screen
+    UI.push_layer(1000);
+    defer UI.pop_layer();
+    
+    // Draw fog in 4 rectangles around the center hole
+    fog_color := v4.{0, 0, 0, 0.99};
+    
+    screen := UI.get_screen_rect();
+    // Parameters: min_x, min_y, max_x, max_y
+    left_rect := screen->subrect(0, 0, 0.4, 1);
+    UI.quad(left_rect, fog_texture, fog_color);
+    right_rect := screen->subrect(0.6, 0, 1, 1);
+    UI.quad(right_rect, fog_texture, fog_color);
+    top_rect := screen->subrect(0, 0, 1, 0.4);
+    UI.quad(top_rect, fog_texture, fog_color);
+    bottom_rect := screen->subrect(0, 0.6, 1, 1);
+    UI.quad(bottom_rect, fog_texture, fog_color);
+}
+
+Black_Flag_Ability :: class : Ability_Base {
+    NAME :: "Black Flag";
+    
+    on_init :: proc(ability: Black_Flag_Ability) {
+        //ability.icon = get_asset(Texture_Asset, "sprites/icons/kill_ability.png"); // TODO: Replace with proper icon
+    }
+    
+    can_use :: proc(ability: Black_Flag_Ability, player: Player) -> bool {
+        return player.player_state == Player_State.ALIVE;
+    }
+    
+    on_update :: proc(ability: Black_Flag_Ability, player: Player, params: Ability_Update_Params) {
+        if params.clicked && params.can_use {
+            // Create the black flag at player's position
+            flag_entity := create_entity();
+            flag_entity->set_local_position(player.entity.local_position);
+            
+            // Add sprite for the flag
+            sprite := flag_entity->add_component(Sprite_Renderer);
+            sprite->set_texture(get_asset(Texture_Asset, "$AO/white.png")); // TODO: Replace with skull flag sprite
+            sprite.color = .{0.1, 0.1, 0.1, 1.0}; // Dark color for the flag
+            flag_entity->set_local_scale(.{100.0, 100.0});
+            
+            // Add the Black_Flag component
+            flag := flag_entity->add_component(Black_Flag);
+            flag.owner_entity = player.entity;
+            
+            player->Notify("Black Flag placed!");
+            ability.current_cooldown = 60.0;
+        }
+    }
+}

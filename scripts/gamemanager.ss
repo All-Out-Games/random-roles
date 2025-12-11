@@ -25,6 +25,8 @@ Player_Role :: enum {
     NONE;
 	//Civilian Roles
 	SHERIFF;
+	//Traitor Roles
+	PIRATE;
 }
 
 game_state: Game_State;
@@ -461,17 +463,26 @@ assign_players_to_types :: proc() {
 		}
 	}
 
-	// Assign roles - only one Sheriff among civilians, rest get NONE
+	// Assign roles - only one Sheriff among civilians, one Pirate among traitors
 	sheriff_assigned := false;
+	pirate_assigned := false;
 	for i: 0..players.elements.count-1 {
+		players.elements[i].player_role = Player_Role.NONE;
+		
 		if players.elements[i].player_type == Player_Type.CIVILIAN && !sheriff_assigned {
 			players.elements[i].player_role = Player_Role.SHERIFF;
 			sheriff_assigned = true;
 			if players.elements[i]->is_local_or_server() {
 				players.elements[i]->Notify("You are the Sheriff!");
 			}
-		} else {
-			players.elements[i].player_role = Player_Role.NONE;
+		}
+		
+		if players.elements[i].player_type == Player_Type.TRAITOR && !pirate_assigned {
+			players.elements[i].player_role = Player_Role.PIRATE;
+			pirate_assigned = true;
+			if players.elements[i]->is_local_or_server() {
+				players.elements[i]->Notify("You are the Pirate!");
+			}
 		}
 	}
 }
