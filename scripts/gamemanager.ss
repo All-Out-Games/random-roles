@@ -6,6 +6,7 @@ MIN_NUMBER_OF_PLAYERS: int : 4;
 
 Game_State :: enum {
     LOBBY;
+	ANIM_INTRO;
 	INGAME;
 	ANIM_BODY_FOUND;
 	ANIM_MEETING_CALLED;
@@ -145,6 +146,7 @@ start_meeting :: proc(from_body: bool) {
 
 body_found_popup: Body_Found_Popup;
 meeting_called_popup: Meeting_Called_Popup;
+intro_popup: Intro_Popup;
 
 ao_start :: proc() {
 	setup_lobby();
@@ -152,11 +154,15 @@ ao_start :: proc() {
 	body_found_popup->init();
 	meeting_called_popup = new();
 	meeting_called_popup->init();
+	intro_popup = new();
+	intro_popup->init();
   }
 
 ao_update :: proc(dt: float) {
 	if(game_state == Game_State.LOBBY) {
 		ao_update_lobby(dt);
+	} else if(game_state == Game_State.ANIM_INTRO) {
+		ao_update_intro(dt);
 	} else if(game_state == Game_State.INGAME) {
 		ao_update_ingame(dt);
 	} else if(game_state == Game_State.ANIM_BODY_FOUND) {
@@ -168,6 +174,7 @@ ao_update :: proc(dt: float) {
 	}
 	body_found_popup->update(dt);
 	meeting_called_popup->update(dt);
+	intro_popup->update(dt);
   }
 
 get_alive_player_count :: proc() -> int {
@@ -280,9 +287,8 @@ ao_update_lobby :: proc(dt: float) {
 		// Check if countdown has completed (10 seconds)
 		elapsed := current_time - countdown_start_time;
 		if elapsed >= 10.0 {
-			// Start the game
+			// Start the game - assign_players_to_types sets state to ANIM_INTRO
 			assign_players_to_types();
-			setup_ingame();
 		} else {
 			// Display countdown on screen
 			remaining := 10.0 - elapsed;
@@ -342,6 +348,14 @@ ao_update_meeting_called :: proc(dt: float) {
 	if meeting_called_popup->is_finished() {
 		meeting_called_popup->hide();
 		setup_voting();
+	}
+}
+
+ao_update_intro :: proc(dt: float) {
+	// Wait for intro popup animation to finish before starting gameplay
+	if intro_popup->is_finished() {
+		intro_popup->hide();
+		setup_ingame();
 	}
 }
 
@@ -530,11 +544,6 @@ assign_players_to_types :: proc() {
 			if type_list[i] == Player_Type.CIVILIAN {
 				players.elements[i].active_tasks = get_random_task_list(5, players.elements[i]);
 			}
-			
-			if(players.elements[i]->is_local_or_server()) {
-				message := format_string("Player type assigned: %", .{type_list[i]});
-				players.elements[i]->Notify(message);
-			}
 		}
 	}
 
@@ -547,17 +556,22 @@ assign_players_to_types :: proc() {
 		if players.elements[i].player_type == Player_Type.CIVILIAN && !sheriff_assigned {
 			players.elements[i].player_role = Player_Role.SHERIFF;
 			sheriff_assigned = true;
-			if players.elements[i]->is_local_or_server() {
-				players.elements[i]->Notify("You are the Sheriff!");
-			}
 		}
 		
 		if players.elements[i].player_type == Player_Type.TRAITOR && !pirate_assigned {
 			players.elements[i].player_role = Player_Role.PIRATE;
 			pirate_assigned = true;
-			if players.elements[i]->is_local_or_server() {
-				players.elements[i]->Notify("You are the Pirate!");
-			}
 		}
 	}
+	
+	// Show intro popup for local player
+	for i: 0..players.elements.count-1 {
+		if players.elements[i]->is_local() {
+			intro_popup->show(players.elements[i], players.elements[i].player_type, players.elements[i].player_role);
+			break;
+		}
+	}
+	
+	// Switch to intro animation state
+	game_state = Game_State.ANIM_INTRO;
 }
