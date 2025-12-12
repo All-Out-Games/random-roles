@@ -109,9 +109,7 @@ setup_voting :: proc() {
 	
 	// Teleport all alive players to voting area
 	for i: 0..players.elements.count-1 {
-		if players.elements[i].player_state == Player_State.ALIVE {
-			world_references->teleport_to_voting(players.elements[i]);
-		}
+		world_references->teleport_to_voting(players.elements[i]);
 	}
 }
 

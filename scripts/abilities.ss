@@ -94,6 +94,7 @@ Vote_Ability :: class : Ability_Base {
     }
 
     draw_voting_ui :: proc(instance: Vote_Ability, local_player: Player) {
+
         screen := UI.get_safe_screen_rect();
         
         // Dark background overlay
@@ -183,7 +184,7 @@ Vote_Ability :: class : Ability_Base {
             if target_player != local_player {
                 checkbox_rect := panel_rect->subrect(0.7, start_y - y_offset, 0.7, start_y - y_offset, -25, -25, -25, -25);
                 
-                UI.push_id("%", .{i});
+                UI.push_id("button_vote %", .{i});
                 defer UI.pop_id();
                 
                 if local_player.voted_for == target_player {
@@ -201,24 +202,30 @@ Vote_Ability :: class : Ability_Base {
             }
         }
         
-        // Show who voted for whom
+        // Show total vote count (X/Y format)
         voter_info_rect := panel_rect->subrect(0.5, 0.15, 0.5, 0.15, -250, -50, -250, -50);
         UI.quad(voter_info_rect, null, .{0.1, 0.1, 0.15, 0.9});
         
         info_ts := UI.default_text_settings();
-        info_ts.size = 24;
+        info_ts.size = 32;
         info_ts.color = .{0.8, 0.8, 0.8, 1};
         info_ts.halign = .CENTER;
         info_ts.valign = .CENTER;
         
-        // Build string showing who voted for whom
-        vote_info := "Votes: ";
+        // Count total votes cast and total alive players
+        total_votes := 0;
+        total_alive := 0;
         for i: 0..players.elements.count-1 {
             p := players.elements[i];
-            if p.voted_for != null && p.player_state == Player_State.ALIVE {
-                vote_info = format_string("% % -> %,", .{vote_info, p.entity->get_name(), p.voted_for.entity->get_name()});
+            if p.player_state == Player_State.ALIVE {
+                total_alive += 1;
+                if p.voted_for != null {
+                    total_votes += 1;
+                }
             }
         }
+        
+        vote_info := format_string("Votes: %/%", .{total_votes, total_alive});
         UI.text(voter_info_rect, info_ts, vote_info);
         
         // Close button

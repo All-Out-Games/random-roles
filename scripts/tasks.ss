@@ -56,8 +56,8 @@ update_tasks :: proc(player: Player) {
 	for i: 0..player.active_tasks.elements.count-1 {
 		//log("%", .{#object_type(player.active_tasks.elements[i])});
 		switch #object_type(player.active_tasks.elements[i]) {
-			case Task_Throw_Away_Garbage: player.active_tasks.elements[i].(Task_Throw_Away_Garbage)->update_task(player);
-			case Task_Calibrate_Teleporter: player.active_tasks.elements[i].(Task_Calibrate_Teleporter)->update_task(player);
+			case #unwrap_type(Task_Throw_Away_Garbage): player.active_tasks.elements[i].(Task_Throw_Away_Garbage)->update_task(player);
+			case #unwrap_type(Task_Calibrate_Teleporter): player.active_tasks.elements[i].(Task_Calibrate_Teleporter)->update_task(player);
 		}
 	}
 }
