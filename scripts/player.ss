@@ -125,7 +125,6 @@ Player :: class : Player_Base {
 
 Task_Interactable :: class : Component {
     interactable: Interactable @ao_serialize;
-    id : string @ao_serialize;
 
     ao_start :: proc(using this: Task_Interactable) {
         interactable.listener = this;
@@ -133,7 +132,7 @@ Task_Interactable :: class : Component {
 
     on_interact :: proc(using this: Task_Interactable, player: Player) {
         for i: 0..player.active_tasks.elements.count-1 {
-            if player.active_tasks.elements[i].id == this.id {
+            if player.active_tasks.elements[i].id == get_name(this.entity) {
                 player.active_tasks.elements[i]->start_attempt(player);
                 break;
             }
@@ -146,7 +145,7 @@ Task_Interactable :: class : Component {
             return false;
         }
         for i: 0..player.active_tasks.elements.count-1 {
-            if player.active_tasks.elements[i].id == this.id && !player.active_tasks.elements[i].started {
+            if player.active_tasks.elements[i].id == get_name(this.entity) && !player.active_tasks.elements[i].started {
                 return true;
             }
         }

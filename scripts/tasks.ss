@@ -1,7 +1,7 @@
 import "core:core.ss"
 import "gamemanager.ss"
 
-NUM_TASKS: int : 1;
+NUM_TASKS: int : 2;
 
 Task_Base :: class {
 	id: string;
@@ -16,14 +16,12 @@ Task_Base :: class {
 	}
 
 	complete_attempt :: proc(using this: Task_Base, player: Player, success: bool) {
+		log(format_string("Task % completed: %", .{this.id, success}));
+		if completed {
+			return;
+		}
 		if success {
-			//mark the first task found in active_tasks with matching id as completed
-			for i: 0..player.active_tasks.elements.count-1 {
-				if player.active_tasks.elements[i].id == this.id {
-					player.active_tasks.elements[i].completed = true;
-					break;
-				}
-			}
+			completed = true;
 			player->Notify("You completed the task!");
 		} else {
 			player->Notify("You failed the task!");
@@ -43,6 +41,12 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 					task.id = "throw_away_garbage";
 					append(&task_list, task);
 				}
+			case 1:
+				{
+					task := new(Task_Calibrate_Teleporter);
+					task.id = "calibrate_teleporter";
+					append(&task_list, task);
+				}
 		}
 	}
 	return task_list;
@@ -50,8 +54,10 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 
 update_tasks :: proc(player: Player) {
 	for i: 0..player.active_tasks.elements.count-1 {
+		//log("%", .{#object_type(player.active_tasks.elements[i])});
 		switch #object_type(player.active_tasks.elements[i]) {
 			case Task_Throw_Away_Garbage: player.active_tasks.elements[i].(Task_Throw_Away_Garbage)->update_task(player);
+			case Task_Calibrate_Teleporter: player.active_tasks.elements[i].(Task_Calibrate_Teleporter)->update_task(player);
 		}
 	}
 }
@@ -60,6 +66,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 	switch task_id {
 		case "throw_away_garbage":
 			return "Throw Away Garbage";
+		case "calibrate_teleporter":
+			return "Calibrate Teleporter";
 		case:
 			return task_id;
 	}
@@ -100,8 +108,6 @@ update_tasks_ui :: proc(player: Player) {
 	title_ts.halign = .CENTER;
 	title_ts.valign = .CENTER;
 	UI.text(title_rect, title_ts, "TASKS");
-
-	log(format_string("Tasks: %", .{player.active_tasks.elements.count}));
 	
 	// Draw each task - cut from top progressively
 	for i: 0..player.active_tasks.elements.count-1 {
@@ -118,8 +124,6 @@ update_tasks_ui :: proc(player: Player) {
 		} else {
 			UI.quad(entry_rect, null, .{0.3, 0.3, 0.3, 0.7});
 		}
-
-		log(format_string("Task ID: %", .{task_id}));
 		
 		// Task text
 		task_name := get_task_display_name(task_id);
@@ -148,6 +152,20 @@ update_tasks_ui :: proc(player: Player) {
 
 Task_Throw_Away_Garbage :: class : Task_Base {
 	update_task :: proc(using this: Task_Throw_Away_Garbage, player: Player) {
+		if !started {
+			return;
+		}
+		log(format_string("Throw Away Garbage Task Updated"));
+		//Instant success
+		complete_attempt(this, player, true);
+	}
+}
+
+Task_Calibrate_Teleporter :: class : Task_Base {
+	update_task :: proc(using this: Task_Calibrate_Teleporter, player: Player) {
+		if !started {
+			return;
+		}
 		//Instant success
 		complete_attempt(this, player, true);
 	}
