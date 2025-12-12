@@ -371,7 +371,7 @@ draw_fog_overlay :: proc(player: Player) {
     defer UI.pop_layer();
     
     // Draw fog in 4 rectangles around the center hole
-    fog_color := v4.{0, 0, 0, 0.99};
+    fog_color := v4.{0, 0, 0, 0.1};
     
     screen := UI.get_screen_rect();
     // Parameters: min_x, min_y, max_x, max_y
