@@ -45,6 +45,9 @@ Report_Ability :: class : Ability_Base {
     get_closest_corpse :: proc(instance: Report_Ability, player: Player) -> Corpse {
         finder := make_finder(Corpse, player.entity.world_position, 5.0);
         foreach corpse: component_iterator(Corpse) {
+            if corpse.has_been_reported {
+                continue;
+            }
             finder->check(corpse, corpse.entity.world_position);
         }
         return finder.closest;
@@ -58,6 +61,7 @@ Report_Ability :: class : Ability_Base {
         if params.clicked && params.can_use {
             closest_corpse := instance->get_closest_corpse(player);
             if closest_corpse != null {
+                closest_corpse.has_been_reported = true;
                 // Remove the corpse and start the meeting
                 destroy_entity(closest_corpse.entity);
                 start_meeting(true);

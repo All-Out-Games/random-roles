@@ -173,6 +173,19 @@ ao_update :: proc(dt: float) {
   }
 
 get_alive_player_count :: proc() -> int {
+	// Clean up null/invalid players by rebuilding the list with only valid players
+	valid_players: List(Player);
+	for i: 0..players.elements.count-1 {
+		player := players.elements[i];
+		// Only keep players that are not null and have alive entities
+		if player != null && alive(player.entity) {
+			append(&valid_players, player);
+		}
+	}
+	// Replace the old list with the cleaned list
+	players = valid_players;
+	
+	// Count alive players
 	alive_count := 0;
 	for i: 0..players.elements.count-1 {
 		if players.elements[i].player_state == Player_State.ALIVE {
@@ -192,6 +205,24 @@ get_player_count :: proc(type: Player_Type) -> int {
 	return count;
 }
 
+all_civilians_completed_tasks :: proc() -> bool {
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p.player_state == Player_State.ALIVE && p.player_type == Player_Type.CIVILIAN {
+			// Check if this civilian has completed all their tasks
+			if p.active_tasks.elements.count == 0 {
+				return false; // No tasks assigned means not completed
+			}
+			for j: 0..p.active_tasks.elements.count-1 {
+				if !p.active_tasks.elements[j].completed {
+					return false; // Found an incomplete task
+				}
+			}
+		}
+	}
+	return true;
+}
+
 end_game_with_victor :: proc(victor: Player_Type) {
 	// Notify everyone about the victor
 	victor_message := format_string("Victory! % wins the round!", .{victor});
@@ -202,6 +233,8 @@ end_game_with_victor :: proc(victor: Player_Type) {
 	// Set all players to passive
 	for i: 0..players.elements.count-1 {
 		players.elements[i].player_state = Player_State.PASSIVE;
+		// Clear tasks at end of round
+		players.elements[i].active_tasks = List(Task_Base).{};
 	}
 
 	round_number += 1;
@@ -290,6 +323,10 @@ ao_update_ingame :: proc(dt: float) {
 	}
 	// -- Civilian: Only civilians alive
 	if civilian_count > 0 && civilian_count == alive_count {
+		end_game_with_victor(Player_Type.CIVILIAN);
+	}
+	// -- Civilian: All civilians completed all their tasks
+	if civilian_count > 0 && all_civilians_completed_tasks() {
 		end_game_with_victor(Player_Type.CIVILIAN);
 	}
 }
@@ -489,6 +526,13 @@ assign_players_to_types :: proc() {
 		if i < type_list.count {
 			on_player_go_alive(players.elements[i]);
 			players.elements[i].player_type = type_list[i];
+			
+			// Clear old tasks and assign new tasks to civilians
+			players.elements[i].active_tasks = List(Task_Base).{};
+			if type_list[i] == Player_Type.CIVILIAN {
+				players.elements[i].active_tasks = get_random_task_list(5, players.elements[i]);
+			}
+			
 			if(players.elements[i]->is_local_or_server()) {
 				message := format_string("Player type assigned: %", .{type_list[i]});
 				players.elements[i]->Notify(message);

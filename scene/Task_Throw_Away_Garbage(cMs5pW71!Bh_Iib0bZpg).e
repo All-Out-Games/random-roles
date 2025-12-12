@@ -31,6 +31,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Task_Interactable",
   "data": {
-    "interactable": "124167840153735:1764885686530918200"
+    "interactable": "124167840153735:1764885686530918200",
+    "id": "throw_away_garbage"
   }
 }

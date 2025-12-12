@@ -1,6 +1,7 @@
 import "core:core.ss"
 import "gamemanager.ss"
 import "abilities.ss"
+import "tasks.ss"
 
 players: List(Player);
 
@@ -13,6 +14,7 @@ Player :: class : Player_Base {
     active_ability: Ability_Base;
     last_aim_direction: v2;
 
+    active_tasks : List(Task_Base);
 
     Notify :: proc(using this: Player, message: string) {
         if this->is_local_or_server() {
@@ -40,10 +42,16 @@ Player :: class : Player_Base {
         register_ability(this, Black_Flag_Ability);
     }
 
+    ao_end :: proc(using this: Player) {
+        unordered_remove_by_value(&players, this);
+    }
+
     ao_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
             this->setup_player_colors();
+            update_tasks_ui(this);
         }
+        update_tasks(this);
     }
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
@@ -117,17 +125,32 @@ Player :: class : Player_Base {
 
 Task_Interactable :: class : Component {
     interactable: Interactable @ao_serialize;
+    id : string @ao_serialize;
 
     ao_start :: proc(using this: Task_Interactable) {
         interactable.listener = this;
     }
 
     on_interact :: proc(using this: Task_Interactable, player: Player) {
-        player->Notify("You interacted with the task!");
+        for i: 0..player.active_tasks.elements.count-1 {
+            if player.active_tasks.elements[i].id == this.id {
+                player.active_tasks.elements[i]->start_attempt(player);
+                break;
+            }
+        }
     }
 
     can_use :: proc(using this: Task_Interactable, player: Player) -> bool {
-        return player.player_state == Player_State.ALIVE && player.player_type == Player_Type.CIVILIAN;
+        can_use_base := player.player_state == Player_State.ALIVE && player.player_type == Player_Type.CIVILIAN;
+        if !can_use_base {
+            return false;
+        }
+        for i: 0..player.active_tasks.elements.count-1 {
+            if player.active_tasks.elements[i].id == this.id && !player.active_tasks.elements[i].started {
+                return true;
+            }
+        }
+        return false;
     }
 }
 
@@ -148,4 +171,5 @@ Call_Meeting_Interactable :: class : Component {
 }
 
 Corpse :: class : Component {
+    has_been_reported: bool;
 }
