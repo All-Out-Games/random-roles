@@ -60,7 +60,7 @@ Report_Ability :: class : Ability_Base {
             if closest_corpse != null {
                 // Remove the corpse and start the meeting
                 destroy_entity(closest_corpse.entity);
-                start_meeting();
+                start_meeting(true);
             }
         }
     }
@@ -175,24 +175,25 @@ Vote_Ability :: class : Ability_Base {
             vote_text := format_string("Votes: %", .{target_player.votes_received});
             UI.text(vote_count_rect, vote_ts, vote_text);
             
-            // Vote button (only if we haven't voted yet)
-            if local_player.voted_for == null && target_player != local_player {
-                button_rect := panel_rect->subrect(0.7, start_y - y_offset, 0.7, start_y - y_offset, -50, -25, -50, -25);
-                btn_ts := UI.default_text_settings();
+            // Vote checkbox (only show for other players)
+            if target_player != local_player {
+                checkbox_rect := panel_rect->subrect(0.7, start_y - y_offset, 0.7, start_y - y_offset, -25, -25, -25, -25);
+                
                 UI.push_id("%", .{i});
                 defer UI.pop_id();
-                if UI.button(button_rect, bs, btn_ts, "Vote").clicked {
-                    cast_vote(local_player, target_player);
+                
+                if local_player.voted_for == target_player {
+                    // Show selected checkbox
+                    select_texture := get_asset(Texture_Asset, "sprites/icons/vote_select_icon.png");
+                    UI.quad(checkbox_rect, select_texture, .{1, 1, 1, 1});
+                } else if local_player.voted_for == null {
+                    // Show unselected checkbox (clickable)
+                    unselect_texture := get_asset(Texture_Asset, "sprites/icons/vote_unselect_icon.png");
+                    if UI.button(checkbox_rect, bs, .{}, "").clicked {
+                        cast_vote(local_player, target_player);
+                    }
+                    UI.quad(checkbox_rect, unselect_texture, .{1, 1, 1, 1});
                 }
-            } else if local_player.voted_for == target_player {
-                // Show checkmark for selected player
-                check_rect := panel_rect->subrect(0.7, start_y - y_offset, 0.7, start_y - y_offset, -30, -20, -30, -20);
-                check_ts := UI.default_text_settings();
-                check_ts.size = 40;
-                check_ts.color = .{0, 1, 0, 1};
-                check_ts.halign = .CENTER;
-                check_ts.valign = .CENTER;
-                UI.text(check_rect, check_ts, "[X]");
             }
         }
         
@@ -238,7 +239,7 @@ update_always_aiming_ability :: proc(player: Player, params: ref Ability_Update_
     }
 
     result: Always_Aiming_Ability_Data;
-    if params.held {
+    if params.active {
         if length(params.drag_offset) > 0.1 {
             result.aim = true;
             result.shoot = true;
@@ -296,8 +297,18 @@ Shoot_Ability :: class : Ability_Base {
         ability.is_aimed_ability = true;
     }
 
+    get_icon :: proc(ability: Shoot_Ability, player_role: Player_Role) -> Texture_Asset {
+        if player_role == Player_Role.PIRATE {
+            return get_asset(Texture_Asset, "sprites/icons/flintlock_pistol.png");
+        } else {
+            return get_asset(Texture_Asset, "sprites/icons/revolver.png");
+        }
+        return null;
+    }
+
     on_update :: proc(ability: Shoot_Ability, player: Player, params: Ability_Update_Params) {
         aiming := update_always_aiming_ability(player, &params);
+        ability.icon = ability->get_icon(player.player_role);
         if params.can_use {
             if aiming.shoot {
                 sfx := default_sfx_desc();
@@ -378,7 +389,7 @@ Black_Flag_Ability :: class : Ability_Base {
     NAME :: "Black Flag";
     
     on_init :: proc(ability: Black_Flag_Ability) {
-        //ability.icon = get_asset(Texture_Asset, "sprites/icons/kill_ability.png"); // TODO: Replace with proper icon
+        ability.icon = get_asset(Texture_Asset, "sprites/icons/black_flag.png");
     }
     
     can_use :: proc(ability: Black_Flag_Ability, player: Player) -> bool {

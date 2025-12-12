@@ -131,5 +131,21 @@ Task_Interactable :: class : Component {
     }
 }
 
+Call_Meeting_Interactable :: class : Component {
+    interactable: Interactable @ao_serialize;
+    
+    ao_start :: proc(using this: Call_Meeting_Interactable) {
+        interactable.listener = this;
+    }
+
+    on_interact :: proc(using this: Call_Meeting_Interactable, player: Player) {
+        start_meeting(false);
+    }
+
+    can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
+        return player.player_state == Player_State.ALIVE;
+    }
+}
+
 Corpse :: class : Component {
 }

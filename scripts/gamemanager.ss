@@ -1,11 +1,14 @@
 import "core:core.ss"
 import "player.ss"
+import "popups.ss"
 
 MIN_NUMBER_OF_PLAYERS: int : 4;
 
 Game_State :: enum {
     LOBBY;
 	INGAME;
+	ANIM_BODY_FOUND;
+	ANIM_MEETING_CALLED;
 	VOTING;
 }
 
@@ -110,11 +113,6 @@ setup_voting :: proc() {
 			world_references->teleport_to_voting(players.elements[i]);
 		}
 	}
-	
-	// Notify all players
-	for i: 0..players.elements.count-1 {
-		players.elements[i]->Notify("A body has been reported! Meeting in progress.");
-	}
 }
 
 cast_vote :: proc(voter: Player, target: Player) {
@@ -135,14 +133,27 @@ cast_vote :: proc(voter: Player, target: Player) {
 	voter->Notify(format_string("You voted for %", .{target.entity->get_name()}));
 }
 
-start_meeting :: proc() {
+start_meeting :: proc(from_body: bool) {
 	if game_state == Game_State.INGAME {
-		setup_voting();
+		if from_body {
+			game_state = Game_State.ANIM_BODY_FOUND;
+			body_found_popup->show();
+		} else {
+			game_state = Game_State.ANIM_MEETING_CALLED;
+			meeting_called_popup->show();
+		}
 	}
 }
 
+body_found_popup: Body_Found_Popup;
+meeting_called_popup: Meeting_Called_Popup;
+
 ao_start :: proc() {
 	setup_lobby();
+	body_found_popup = new();
+	body_found_popup->init();
+	meeting_called_popup = new();
+	meeting_called_popup->init();
   }
 
 ao_update :: proc(dt: float) {
@@ -150,9 +161,15 @@ ao_update :: proc(dt: float) {
 		ao_update_lobby(dt);
 	} else if(game_state == Game_State.INGAME) {
 		ao_update_ingame(dt);
+	} else if(game_state == Game_State.ANIM_BODY_FOUND) {
+		ao_update_body_found(dt);
+	} else if(game_state == Game_State.ANIM_MEETING_CALLED) {
+		ao_update_meeting_called(dt);
 	} else if(game_state == Game_State.VOTING) {
 		ao_update_voting(dt);
 	}
+	body_found_popup->update(dt);
+	meeting_called_popup->update(dt);
   }
 
 get_alive_player_count :: proc() -> int {
@@ -274,6 +291,22 @@ ao_update_ingame :: proc(dt: float) {
 	// -- Civilian: Only civilians alive
 	if civilian_count > 0 && civilian_count == alive_count {
 		end_game_with_victor(Player_Type.CIVILIAN);
+	}
+}
+
+ao_update_body_found :: proc(dt: float) {
+	// Wait for popup animation to finish before starting voting
+	if body_found_popup->is_finished() {
+		body_found_popup->hide();
+		setup_voting();
+	}
+}
+
+ao_update_meeting_called :: proc(dt: float) {
+	// Wait for popup animation to finish before starting voting
+	if meeting_called_popup->is_finished() {
+		meeting_called_popup->hide();
+		setup_voting();
 	}
 }
 

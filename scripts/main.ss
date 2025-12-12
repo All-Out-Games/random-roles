@@ -8,6 +8,9 @@ ao_on_interactable_used :: proc(interactable: Interactable, player: Player) {
     if listener_type == Task_Interactable {
         interactable.listener.(Task_Interactable)->on_interact(player);
     }
+    if listener_type == Call_Meeting_Interactable {
+        interactable.listener.(Call_Meeting_Interactable)->on_interact(player);
+    }
 }
 
 ao_can_use_interactable :: proc(interactable: Interactable, player: Player) -> bool {
@@ -15,7 +18,10 @@ ao_can_use_interactable :: proc(interactable: Interactable, player: Player) -> b
     if listener_type == Task_Interactable {
         return interactable.listener.(Task_Interactable)->can_use(player);
     }
-    return true;
+    if listener_type == Call_Meeting_Interactable {
+        return interactable.listener.(Call_Meeting_Interactable)->can_use(player);
+    }
+    return false;
 }
 
 Door :: class : Component {
