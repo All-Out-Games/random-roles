@@ -50,6 +50,10 @@ Player :: class : Player_Base {
         if this->is_local_or_server() {
             this->setup_player_colors();
             update_tasks_ui(this);
+            if game_state == Game_State.ANIM_INTRO {
+                intro_popup->set_local_player(this);
+                intro_popup->update(delta_time);
+            }
         }
         update_tasks(this);
     }

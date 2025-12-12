@@ -11,6 +11,7 @@ Game_State :: enum {
 	ANIM_BODY_FOUND;
 	ANIM_MEETING_CALLED;
 	VOTING;
+	ANIM_VICTORY;
 }
 
 Player_Type :: enum {
@@ -147,6 +148,7 @@ start_meeting :: proc(from_body: bool) {
 body_found_popup: Body_Found_Popup;
 meeting_called_popup: Meeting_Called_Popup;
 intro_popup: Intro_Popup;
+victory_popup: Victory_Popup;
 
 ao_start :: proc() {
 	setup_lobby();
@@ -156,6 +158,8 @@ ao_start :: proc() {
 	meeting_called_popup->init();
 	intro_popup = new();
 	intro_popup->init();
+	victory_popup = new();
+	victory_popup->init();
   }
 
 ao_update :: proc(dt: float) {
@@ -171,10 +175,12 @@ ao_update :: proc(dt: float) {
 		ao_update_meeting_called(dt);
 	} else if(game_state == Game_State.VOTING) {
 		ao_update_voting(dt);
+	} else if(game_state == Game_State.ANIM_VICTORY) {
+		ao_update_victory(dt);
 	}
 	body_found_popup->update(dt);
 	meeting_called_popup->update(dt);
-	intro_popup->update(dt);
+	victory_popup->update(dt);
   }
 
 get_alive_player_count :: proc() -> int {
@@ -229,11 +235,17 @@ all_civilians_completed_tasks :: proc() -> bool {
 }
 
 end_game_with_victor :: proc(victor: Player_Type) {
-	// Notify everyone about the victor
-	victor_message := format_string("Victory! % wins the round!", .{victor});
+	// Collect winning players
+	winners: List(Player);
 	for i: 0..players.elements.count-1 {
-		players.elements[i]->Notify(victor_message);
+		if players.elements[i].player_type == victor {
+			append(&winners, players.elements[i]);
+		}
 	}
+	
+	// Show victory popup with winning players
+	victory_popup->show(victor, winners);
+	game_state = Game_State.ANIM_VICTORY;
 	
 	// Set all players to passive
 	for i: 0..players.elements.count-1 {
@@ -243,9 +255,6 @@ end_game_with_victor :: proc(victor: Player_Type) {
 	}
 
 	round_number += 1;
-	
-	// Return to lobby and start wait timer
-	setup_lobby();
 }
 
 ao_update_lobby :: proc(dt: float) {
@@ -356,6 +365,14 @@ ao_update_intro :: proc(dt: float) {
 	if intro_popup->is_finished() {
 		intro_popup->hide();
 		setup_ingame();
+	}
+}
+
+ao_update_victory :: proc(dt: float) {
+	// Wait for victory popup animation to finish before returning to lobby
+	if victory_popup->is_finished() {
+		victory_popup->hide();
+		setup_lobby();
 	}
 }
 
@@ -565,12 +582,7 @@ assign_players_to_types :: proc() {
 	}
 	
 	// Show intro popup for local player
-	for i: 0..players.elements.count-1 {
-		if players.elements[i]->is_local() {
-			intro_popup->show(players.elements[i], players.elements[i].player_type, players.elements[i].player_role);
-			break;
-		}
-	}
+	intro_popup->show();
 	
 	// Switch to intro animation state
 	game_state = Game_State.ANIM_INTRO;

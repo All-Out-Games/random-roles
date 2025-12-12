@@ -32,7 +32,6 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Task_Interactable",
   "data": {
-    "interactable": "864680593534309:1765571462079770700",
-    "id": "calibrate_teleporter"
+    "interactable": "864680593534309:1765571462079770700"
   }
 }
