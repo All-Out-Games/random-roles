@@ -2,7 +2,7 @@
 420906795009
 1737907430250412 1765229033396023400
 {
-  "name": "Collider",
+  "name": "Collider_Entrance",
   "local_enabled": true,
   "local_position": {
 

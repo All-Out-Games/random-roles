@@ -1,7 +1,7 @@
 import "core:core.ss"
 import "gamemanager.ss"
 
-NUM_TASKS: int : 2;
+NUM_TASKS: int : 3;
 
 Task_Base :: class {
 	id: string;
@@ -30,21 +30,24 @@ Task_Base :: class {
 }
 
 get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) {
-	rng := rng_seed(player.entity.id);
 	task_list: List(Task_Base);
 	for i: 0..num_tasks-1 {
+		rng := rng_seed(player.entity.id+i.(u64));
 		task_to_add_index := rng_range_int(&rng, 0, NUM_TASKS-1);
 		switch task_to_add_index {
-			case 0:
-				{
+			case 0: {
 					task := new(Task_Throw_Away_Garbage);
 					task.id = "throw_away_garbage";
 					append(&task_list, task);
 				}
-			case 1:
-				{
+			case 1: {
 					task := new(Task_Calibrate_Teleporter);
 					task.id = "calibrate_teleporter";
+					append(&task_list, task);
+				}
+			case 2: {
+					task := new(Task_Cypher);
+					task.id = "cypher";
 					append(&task_list, task);
 				}
 		}
@@ -56,8 +59,9 @@ update_tasks :: proc(player: Player) {
 	for i: 0..player.active_tasks.elements.count-1 {
 		//log("%", .{#object_type(player.active_tasks.elements[i])});
 		switch #object_type(player.active_tasks.elements[i]) {
-			case #unwrap_type(Task_Throw_Away_Garbage): player.active_tasks.elements[i].(Task_Throw_Away_Garbage)->update_task(player);
-			case #unwrap_type(Task_Calibrate_Teleporter): player.active_tasks.elements[i].(Task_Calibrate_Teleporter)->update_task(player);
+			case Task_Throw_Away_Garbage: player.active_tasks.elements[i].(Task_Throw_Away_Garbage)->update_task(player);
+			case Task_Calibrate_Teleporter: player.active_tasks.elements[i].(Task_Calibrate_Teleporter)->update_task(player);
+			case Task_Cypher: player.active_tasks.elements[i].(Task_Cypher)->update_task(player);
 		}
 	}
 }
@@ -68,6 +72,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Throw Away Garbage";
 		case "calibrate_teleporter":
 			return "Calibrate Teleporter";
+		case "cypher":
+			return "Cypher";
 		case:
 			return task_id;
 	}
@@ -163,6 +169,16 @@ Task_Throw_Away_Garbage :: class : Task_Base {
 
 Task_Calibrate_Teleporter :: class : Task_Base {
 	update_task :: proc(using this: Task_Calibrate_Teleporter, player: Player) {
+		if !started {
+			return;
+		}
+		//Instant success
+		complete_attempt(this, player, true);
+	}
+}
+
+Task_Cypher :: class : Task_Base {
+	update_task :: proc(using this: Task_Cypher, player: Player) {
 		if !started {
 			return;
 		}

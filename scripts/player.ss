@@ -136,8 +136,9 @@ Task_Interactable :: class : Component {
 
     on_interact :: proc(using this: Task_Interactable, player: Player) {
         for i: 0..player.active_tasks.elements.count-1 {
-            if player.active_tasks.elements[i].id == get_name(this.entity) {
-                player.active_tasks.elements[i]->start_attempt(player);
+            task := player.active_tasks.elements[i];
+            if task.id == get_name(this.entity) && !task.started && !task.completed {
+                task->start_attempt(player);
                 break;
             }
         }
@@ -149,7 +150,8 @@ Task_Interactable :: class : Component {
             return false;
         }
         for i: 0..player.active_tasks.elements.count-1 {
-            if player.active_tasks.elements[i].id == get_name(this.entity) && !player.active_tasks.elements[i].started {
+            task := player.active_tasks.elements[i];
+            if task.id == get_name(this.entity) && !task.started && !task.completed {
                 return true;
             }
         }

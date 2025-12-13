@@ -14,7 +14,7 @@
     "Y": 1
   },
   "previous_sibling": "124018147815157:1764885654680738400",
-  "next_sibling": "1733824193010230:1765228164622910200",
+  "next_sibling": "38458162326309:1765635081079613600",
   "parent": "123968093968347:1764885644030734800"
 },
 {
@@ -23,7 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Interactable",
   "data": {
-    "text": "Throw Away Garbage"
+    "text": "Calibrate Teleporter"
   }
 },
 {

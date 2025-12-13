@@ -1,6 +1,7 @@
 import "core:core.ss"
 import "player.ss"
 import "popups.ss"
+import "tools.ss"
 
 MIN_NUMBER_OF_PLAYERS: int : 4;
 
@@ -45,7 +46,7 @@ round_number: int;
 on_player_go_dead :: proc(player: Player) {
 	player.player_state = Player_State.DEAD;
 	player->add_ghost_reason("spectator");
-	player->Notify("You are dead!");
+	player.agent->set_navmesh_to_lock_to(world_references.ghost_navmesh);
 }
 
 on_player_go_passive :: proc(player: Player) {
@@ -53,24 +54,29 @@ on_player_go_passive :: proc(player: Player) {
 	player.player_state = Player_State.PASSIVE;
 	world_references->teleport_near_lobby(player);
 	player->remove_ghost_reason("spectator");
+	player.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
 }
 
 on_player_go_alive :: proc(player: Player) {
 	player->revive();
 	player.player_state = Player_State.ALIVE;
 	player->remove_ghost_reason("spectator");
+	player.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
+	rebuild_game_world_navmesh();
 }
 
 close_all_doors :: proc() {
 	foreach door: component_iterator(Door) {
 		door->close_door();
 	}
+	rebuild_game_world_navmesh();
 }
 
 open_all_doors :: proc() {
 	foreach door: component_iterator(Door) {
 		door->open_door();
 	}
+	rebuild_game_world_navmesh();
 }
 
 setup_lobby :: proc() {
@@ -104,14 +110,10 @@ setup_voting :: proc() {
 	close_all_doors();
 	
 	// Reset all votes
-	for i: 0..players.elements.count-1 {
-		players.elements[i].voted_for = null;
-		players.elements[i].votes_received = 0;
-	}
-	
-	// Teleport all alive players to voting area
-	for i: 0..players.elements.count-1 {
-		world_references->teleport_to_voting(players.elements[i]);
+	foreach player: component_iterator(Player) {
+		player.voted_for = null;
+		player.votes_received = 0;
+		world_references->teleport_to_voting(player);
 	}
 }
 
@@ -439,9 +441,8 @@ end_voting :: proc() {
 	
 	// Execute the voted out player (if no tie and someone got votes)
 	if voted_out != null && !tie_detected && most_votes > 0 {
-		// Kill without spawning corpse
-		voted_out.player_state = Player_State.DEAD;
-		voted_out->add_ghost_reason("spectator");
+		// Kill
+		on_player_go_dead(voted_out);
 		
 		// Notify everyone
 		ejected_message := format_string("% has been ejected!", .{voted_out.entity->get_name()});

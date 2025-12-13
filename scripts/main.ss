@@ -30,24 +30,24 @@ Door :: class : Component {
 
     is_open: bool;
 
+    ao_start :: proc(using this: Door) {
+        collider_entity->set_local_enabled(force_locked);
+    }
+
     open_door :: proc(using this: Door) {
         force_locked = false;
+        collider_entity->set_local_enabled(force_locked);
     }
 
     close_door :: proc(using this: Door) {
         force_locked = true;
+        collider_entity->set_local_enabled(force_locked);
     }
 
     ao_update :: proc(using this: Door, delta_time: float) {
-        if force_locked {
-            collider_entity->set_local_enabled(true);
-            return;
-        }
-        
         found_player := false;
         foreach player: component_iterator(Player) {
             if length_squared(player.entity.world_position - collider_entity.world_position) < 1.0 {
-                collider_entity->set_local_enabled(false);
                 found_player = true;
                 break;
             }
@@ -55,15 +55,13 @@ Door :: class : Component {
 
         if !found_player {
             if is_open {
-                collider_entity->set_local_enabled(true);
+                //Play close animation
                 is_open = false;
-                rebuild_all_navmeshes();
             }
         } else {
             if !is_open {
-                collider_entity->set_local_enabled(false);
+                //Play open animation
                 is_open = true;
-                rebuild_all_navmeshes();
             }
         }
     }
@@ -75,6 +73,8 @@ World_References :: class : Component {
     lobby_spawn: Entity @ao_serialize;
     voting_spawn: Entity @ao_serialize;
     corpse_prefab: Prefab_Asset;
+    main_navmesh: Navmesh @ao_serialize;
+    ghost_navmesh: Navmesh @ao_serialize;
 
     ao_start :: proc(using this: World_References) {
         corpse_prefab = get_asset(Prefab_Asset, "prefabs/Corpse.prefab");

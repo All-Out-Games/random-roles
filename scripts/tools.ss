@@ -35,17 +35,11 @@ make_finder :: proc($T: typeid, position: v2, range := 999999999.0) -> Finder(T)
     return result;
 }
 
-rebuild_all_navmeshes :: proc() {
-    foreach navmesh: component_iterator(Navmesh) {
-        navmesh->rebuild_immediately();
-    }
+rebuild_game_world_navmesh :: proc() {
+    world_references.main_navmesh->rebuild_immediately();
+    world_references.ghost_navmesh->rebuild_immediately();
 }
 
 try_find_closest_point_on_navmesh :: proc(position: v2, point: ref v2) -> bool {
-    foreach navmesh: component_iterator(Navmesh) {
-        if navmesh->try_find_closest_point_on_navmesh(position, point) {
-            return true;
-        }
-    }
-    return false;
+    return world_references.main_navmesh->try_find_closest_point_on_navmesh(position, point);
 }
