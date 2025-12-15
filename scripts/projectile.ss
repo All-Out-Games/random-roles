@@ -11,6 +11,8 @@ RR_Projectile :: class : Component {
     owner: Entity;
     hit_radius: float;
 
+    triangle_hint: s64;
+
     ao_start :: proc(using this: RR_Projectile) {
         spawn_time = get_time();
         if hit_radius == 0 {
@@ -75,9 +77,7 @@ RR_Projectile :: class : Component {
 
         if !destroy_self {
             point: v2;
-            // todo(josh): this crashes!!!:
-            // if Game_Manager.bullet_navmesh->try_find_closest_point_on_navmesh(entity.world_position, &point) {
-            if try_find_closest_point_on_navmesh(entity.world_position, &point) {
+            if try_find_closest_point_on_navmesh(entity.world_position, &point, &triangle_hint) {
                 if !in_range(point - entity.world_position, 0.01) {
                     destroy_self = true;
                 }
