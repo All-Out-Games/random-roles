@@ -173,7 +173,6 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 	reticle_position: v2;  // Normalized position within targeting area (0-1 range)
 	target_position: v2;   // The random target spot to find (0-1 range)
 	rng_initialized: bool;
-	is_touching: bool;
 	success_time: float;   // Time when success was achieved
 	task_complete_displayed: bool;
 	
@@ -218,23 +217,19 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 			return;
 		}
 		
-		// Only render UI on local client
 		if !player->is_local_or_server() {
 			return;
 		}
 		
-		// Initialize textures and target if needed
 		if window_texture == null {
 			init_textures(this);
 		}
 		init_target(this, player);
 		
-		// Start UI if not active yet
 		if !ui_active {
 			ui_active = true;
 		}
 		
-		// Check if we already succeeded and waiting to close
 		if success_time > 0.0 {
 			elapsed := get_time() - success_time;
 			if elapsed >= SUCCESS_DISPLAY_TIME {
@@ -242,12 +237,10 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 				complete_attempt(this, player, true);
 				return;
 			}
-			// Draw success state UI
 			draw_calibrate_ui(this, player, true);
 			return;
 		}
 		
-		// Draw the main calibration UI
 		draw_calibrate_ui(this, player, false);
 	}
 }
@@ -255,7 +248,6 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player, success_state: bool) {
 	screen := UI.get_screen_rect();
 	
-	// Dark overlay behind everything
 	bg_texture := get_asset(Texture_Asset, "$AO/white.png");
 	UI.quad(screen, bg_texture, .{0.0, 0.0, 0.0, 0.85});
 	
@@ -265,25 +257,20 @@ draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player,
 	window_rect = window_rect->fit_aspect(task.window_texture.aspect, .KEEP_HEIGHT);
 	UI.quad(window_rect, task.window_texture, .{1, 1, 1, 1});
 	
-	// The targeting area - a rectangle toward the bottom of the window
-	// Inset from window edges and positioned lower
 	target_area := window_rect->inset_unscaled(window_rect->height() * 0.57, window_rect->width() * 0.242, window_rect->height() * 0.0365, window_rect->width() * 0.242);
 	schleem_rect := window_rect->center_rect()->grow(150)->offset(0, 220);
 	
-	// Draw target area background
+	// DEBUG: Draw target area background
 	//UI.quad(target_area, bg_texture, .{1, 0, 0, 0.6});
 	
 	if success_state {
 		// SUCCESS STATE - Show alive schleem with thumbs up
 		schleem_rect = schleem_rect->fit_aspect(task.schleem_alive.aspect, .KEEP_WIDTH);
-		
-		// Pulse animation
 		pulse := 1.0 + sin(get_time() * 8.0) * 0.05;
 		schleem_rect = schleem_rect->scale(pulse, pulse);
 		
 		UI.quad(schleem_rect, task.schleem_alive, .{1, 1, 1, 1});
 		
-		// Success text
 		success_rect := window_rect->cut_top(50)->offset(0, 20);
 		success_ts := UI.default_text_settings();
 		success_ts.size = 42;
@@ -293,16 +280,12 @@ draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player,
 		UI.text(success_rect, success_ts, "TELEPORTATION COMPLETE!");
 	} else {
 		// CALIBRATION STATE - Handle input and draw hologram pieces
-		
-		// Create invisible button over targeting area for touch detection
 		UI.push_id("calibrate_target_area");
 		defer UI.pop_id();
 		
 		interact := UI.button(target_area, .{}, .{}, "");
 		
 		if interact.active {
-			task.is_touching = true;
-			
 			// Calculate relative position within target area
 			input_area_size := target_area.max - target_area.min;
 			
@@ -312,8 +295,6 @@ draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player,
 				task.reticle_position.x = clamp(rel_x, 0.0, 1.0);
 				task.reticle_position.y = clamp(rel_y, 0.0, 1.0);
 			}
-		} else {
-			task.is_touching = false;
 		}
 		
 		// Calculate distance from target (0 = perfect, 1 = far)
@@ -334,22 +315,15 @@ draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player,
 		// Hologram opacity - more solid as alignment increases
 		hologram_alpha := 0.3 + alignment * 0.4;
 		solid_alpha := clamp(alignment * alignment - 0.5, 0.0, 0.5) * 2.0;  // Quadratic for dramatic reveal
-		
-		// Left hologram piece - offset left from center
 		left_rect := schleem_rect->offset(-split_amount*5, 0);
-		
-		// Right hologram piece - offset right from center  
 		right_rect := schleem_rect->offset(split_amount*5, 0);
-		
 		// Hologram tint (cyan/green glow)
 		hologram_tint := v4.{0.3, 1.0, 0.8, hologram_alpha};
-		
 		// Draw hologram pieces (back layer)
 		left_rect = left_rect->fit_aspect(task.schleem_hologram_L.aspect, .KEEP_WIDTH);
 		right_rect = right_rect->fit_aspect(task.schleem_hologram_R.aspect, .KEEP_WIDTH);
 		UI.quad(left_rect, task.schleem_hologram_L, hologram_tint);
 		UI.quad(right_rect, task.schleem_hologram_R, hologram_tint);
-		
 		// Draw solid pieces on top as they align (front layer)
 		if solid_alpha > 0.05 {
 			solid_tint := v4.{1.0, 1.0, 1.0, solid_alpha};
@@ -359,16 +333,12 @@ draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player,
 
 		// Draw the reticle/cursor
 		cursor_size := 50.0;
-
 		target_area = target_area->inset(25);
 		cursor_offset :v2= .{task.reticle_position.x * target_area->width(), task.reticle_position.y * target_area->height()};
 		cursor_rect := target_area->bottom_left_rect()->grow(cursor_size / 2.0)->offset_unscaled(cursor_offset.x, cursor_offset.y);
 		cursor_rect = cursor_rect->fit_aspect(task.cursor_texture.aspect, .KEEP_HEIGHT);
-		
-		// Pulse effect for cursor
 		cursor_pulse := 1.0 + sin(get_time() * 4.0) * 0.1;
 		cursor_rect = cursor_rect->scale(cursor_pulse, cursor_pulse);																			
-		
 		UI.quad(cursor_rect, task.cursor_texture, .{1, 1, 1, 0.9});
 	}
 }
