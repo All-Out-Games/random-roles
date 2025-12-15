@@ -267,11 +267,11 @@ draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player,
 	
 	// The targeting area - a rectangle toward the bottom of the window
 	// Inset from window edges and positioned lower
-	target_area := window_rect->inset_unscaled(window_rect->height() * 0.55, window_rect->width() * 0.242, window_rect->height() * 0.0365, window_rect->width() * 0.242);
+	target_area := window_rect->inset_unscaled(window_rect->height() * 0.57, window_rect->width() * 0.242, window_rect->height() * 0.0365, window_rect->width() * 0.242);
 	schleem_rect := window_rect->center_rect()->grow(150)->offset(0, 220);
 	
 	// Draw target area background
-	UI.quad(target_area, bg_texture, .{1, 0, 0, 0.6});
+	//UI.quad(target_area, bg_texture, .{1, 0, 0, 0.6});
 	
 	if success_state {
 		// SUCCESS STATE - Show alive schleem with thumbs up
@@ -329,7 +329,7 @@ draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player,
 		}
 		
 		// Calculate split offset based on distance (further = more split)
-		split_amount := (1.0 - alignment) * 100.0;
+		split_amount := (1.0 - alignment) * 75.0;
 		
 		// Hologram opacity - more solid as alignment increases
 		hologram_alpha := 0.3 + alignment * 0.4;
@@ -359,7 +359,10 @@ draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player,
 
 		// Draw the reticle/cursor
 		cursor_size := 50.0;
-		cursor_rect := target_area->bottom_left_rect()->grow(cursor_size / 2.0)->offset_unscaled(task.reticle_position.x * (target_area->width() - cursor_size), task.reticle_position.y * (target_area->height() - cursor_size));
+
+		target_area = target_area->inset(25);
+		cursor_offset :v2= .{task.reticle_position.x * target_area->width(), task.reticle_position.y * target_area->height()};
+		cursor_rect := target_area->bottom_left_rect()->grow(cursor_size / 2.0)->offset_unscaled(cursor_offset.x, cursor_offset.y);
 		cursor_rect = cursor_rect->fit_aspect(task.cursor_texture.aspect, .KEEP_HEIGHT);
 		
 		// Pulse effect for cursor
