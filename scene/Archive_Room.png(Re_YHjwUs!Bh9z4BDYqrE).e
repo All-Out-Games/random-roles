@@ -5,17 +5,17 @@
   "name": "Archive_Room.png",
   "local_enabled": true,
   "local_position": {
-    "X": -2.2573359012603760,
-    "Y": 10.7536363601684570
+    "X": 3.5336639881134033,
+    "Y": 0.1906337738037109
   },
   "local_rotation": 0,
   "local_scale": {
     "X": 1,
-    "Y": 1
+    "Y": 0.9999997615814209
   },
   "previous_sibling": "4921779529678548:1764794904590247700",
-  "next_sibling": "4921039907389374:1764794709542450700",
-  "parent": "5209500228540660:1764870780194850700"
+  "next_sibling": "4939461124699768:1765243000412650300",
+  "parent": "4831058770879334:1765217141830414600"
 },
 {
   "cid": 1,
@@ -24,6 +24,9 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Archives/Archive_Room.png",
+    "tint": {
+      "W": 0.5485475659370422
+    },
     "layer": -4
   }
 }

@@ -17,6 +17,7 @@
 {
   "cid": 1,
   "aoid": "145715264759084:1764890271196697900",
+  "enabled": false,
   "component_type": "Internal_Component",
   "internal_component_type": "Navmesh",
   "data": {
