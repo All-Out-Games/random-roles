@@ -1,7 +1,7 @@
 import "core:core.ss"
 import "gamemanager.ss"
 
-NUM_TASKS: int : 3;
+NUM_TASKS: int : 8;
 
 Task_Base :: class {
 	id: string;
@@ -31,9 +31,27 @@ Task_Base :: class {
 
 get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) {
 	task_list: List(Task_Base);
-	for i: 0..num_tasks-1 {
-		rng := rng_seed(player.entity.id+i.(u64));
-		task_to_add_index := rng_range_int(&rng, 0, NUM_TASKS-1);
+	
+	// Build a pool of available task indices
+	available_indices: List(int);
+	for i: 0..NUM_TASKS-1 {
+		append(&available_indices, i);
+	}
+	
+	// Select 5 unique tasks (or fewer if num_tasks < 5)
+	tasks_to_select := min(5, min(num_tasks, NUM_TASKS));
+	rng := rng_seed(player.entity.id);
+	
+	for i: 0..tasks_to_select-1 {
+		// Pick a random index from remaining available tasks
+		random_pick := rng_range_int(&rng, 0, available_indices.elements.count-1);
+		task_to_add_index := available_indices.elements[random_pick];
+		
+		// Remove the selected index from the pool (swap with last and pop)
+		last_idx := available_indices.elements.count - 1;
+		available_indices.elements[random_pick] = available_indices.elements[last_idx];
+		pop(&available_indices);
+		
 		switch task_to_add_index {
 			case 0: {
 					task := new(Task_Throw_Away_Garbage);
@@ -50,6 +68,31 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 					task.id = "cypher";
 					append(&task_list, task);
 				}
+			case 3: {
+					task := new(Task_Anagram_Puzzle);
+					task.id = "anagram_puzzle";
+					append(&task_list, task);
+				}
+			case 4: {
+					task := new(Task_Reroute_Power);
+					task.id = "reroute_power";
+					append(&task_list, task);
+				}
+			case 5: {
+					task := new(Task_Guide_The_Electron);
+					task.id = "guide_the_electron";
+					append(&task_list, task);
+				}
+			case 6: {
+					task := new(Task_Signal_Sync);
+					task.id = "signal_sync";
+					append(&task_list, task);
+				}
+			case 7: {
+					task := new(Task_Build_A_Robot);
+					task.id = "build_a_robot";
+					append(&task_list, task);
+				}
 		}
 	}
 	return task_list;
@@ -62,6 +105,11 @@ update_tasks :: proc(player: Player) {
 			case Task_Throw_Away_Garbage: player.active_tasks.elements[i].(Task_Throw_Away_Garbage)->update_task(player);
 			case Task_Calibrate_Teleporter: player.active_tasks.elements[i].(Task_Calibrate_Teleporter)->update_task(player);
 			case Task_Cypher: player.active_tasks.elements[i].(Task_Cypher)->update_task(player);
+			case Task_Anagram_Puzzle: player.active_tasks.elements[i].(Task_Anagram_Puzzle)->update_task(player);
+			case Task_Reroute_Power: player.active_tasks.elements[i].(Task_Reroute_Power)->update_task(player);
+			case Task_Guide_The_Electron: player.active_tasks.elements[i].(Task_Guide_The_Electron)->update_task(player);
+			case Task_Signal_Sync: player.active_tasks.elements[i].(Task_Signal_Sync)->update_task(player);
+			case Task_Build_A_Robot: player.active_tasks.elements[i].(Task_Build_A_Robot)->update_task(player);
 		}
 	}
 }
@@ -73,7 +121,17 @@ get_task_display_name :: proc(task_id: string) -> string {
 		case "calibrate_teleporter":
 			return "Calibrate Teleporter";
 		case "cypher":
-			return "Cypher";
+			return "Solve the Cypher";
+		case "anagram_puzzle":
+			return "Solve the Anagram";
+		case "reroute_power":
+			return "Reroute Power";
+		case "guide_the_electron":
+			return "Guide the Electron";
+		case "signal_sync":
+			return "Sync Signals";
+		case "build_a_robot":
+			return "Build a Robot";
 		case:
 			return task_id;
 	}
@@ -167,6 +225,61 @@ Task_Throw_Away_Garbage :: class : Task_Base {
 	}
 }
 
+Task_Reroute_Power :: class : Task_Base {
+	update_task :: proc(using this: Task_Reroute_Power, player: Player) {
+		if !started {
+			return;
+		}
+		log(format_string("Reroute Power Task Updated"));
+		//Instant success
+		complete_attempt(this, player, true);
+	}
+}
+
+Task_Guide_The_Electron :: class : Task_Base {
+	update_task :: proc(using this: Task_Guide_The_Electron, player: Player) {
+		if !started {
+			return;
+		}
+		log(format_string("Guide the Electron Task Updated"));
+		//Instant success
+		complete_attempt(this, player, true);
+	}
+}
+
+Task_Signal_Sync :: class : Task_Base {
+	update_task :: proc(using this: Task_Signal_Sync, player: Player) {
+		if !started {
+			return;
+		}
+		log(format_string("Signal Sync Task Updated"));
+		//Instant success
+		complete_attempt(this, player, true);
+	}
+}
+
+Task_Build_A_Robot :: class : Task_Base {
+	update_task :: proc(using this: Task_Build_A_Robot, player: Player) {
+		if !started {
+			return;
+		}
+		log(format_string("Build a Robot Task Updated"));
+		//Instant success
+		complete_attempt(this, player, true);
+	}
+}
+
+Task_Anagram_Puzzle :: class : Task_Base {
+	update_task :: proc(using this: Task_Anagram_Puzzle, player: Player) {
+		if !started {
+			return;
+		}
+		log(format_string("Anagram Puzzle Task Updated"));
+		//Instant success
+		complete_attempt(this, player, true);
+	}
+}
+
 Task_Calibrate_Teleporter :: class : Task_Base {
 	// Task state
 	ui_active: bool;
@@ -243,103 +356,103 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 		
 		draw_calibrate_ui(this, player, false);
 	}
-}
 
-draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player, success_state: bool) {
-	screen := UI.get_screen_rect();
-	
-	bg_texture := get_asset(Texture_Asset, "$AO/white.png");
-	UI.quad(screen, bg_texture, .{0.0, 0.0, 0.0, 0.85});
-	
-	// Window in center - make it appropriately sized
-	window_size := 800.0;
-	window_rect := screen->center_rect()->grow(window_size / 2.0);
-	window_rect = window_rect->fit_aspect(task.window_texture.aspect, .KEEP_HEIGHT);
-	UI.quad(window_rect, task.window_texture, .{1, 1, 1, 1});
-	
-	target_area := window_rect->inset_unscaled(window_rect->height() * 0.57, window_rect->width() * 0.242, window_rect->height() * 0.0365, window_rect->width() * 0.242);
-	schleem_rect := window_rect->center_rect()->grow(150)->offset(0, 220);
-	
-	// DEBUG: Draw target area background
-	//UI.quad(target_area, bg_texture, .{1, 0, 0, 0.6});
-	
-	if success_state {
-		// SUCCESS STATE - Show alive schleem with thumbs up
-		schleem_rect = schleem_rect->fit_aspect(task.schleem_alive.aspect, .KEEP_WIDTH);
-		pulse := 1.0 + sin(get_time() * 8.0) * 0.05;
-		schleem_rect = schleem_rect->scale(pulse, pulse);
+	draw_calibrate_ui :: proc(using task: Task_Calibrate_Teleporter, player: Player, success_state: bool) {
+		screen := UI.get_screen_rect();
 		
-		UI.quad(schleem_rect, task.schleem_alive, .{1, 1, 1, 1});
+		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
+		UI.quad(screen, bg_texture, .{0.0, 0.0, 0.0, 0.85});
 		
-		success_rect := window_rect->cut_top(50)->offset(0, 20);
-		success_ts := UI.default_text_settings();
-		success_ts.size = 42;
-		success_ts.color = .{0.3, 1.0, 0.4, 1.0};
-		success_ts.halign = .CENTER;
-		success_ts.valign = .CENTER;
-		UI.text(success_rect, success_ts, "TELEPORTATION COMPLETE!");
-	} else {
-		// CALIBRATION STATE - Handle input and draw hologram pieces
-		UI.push_id("calibrate_target_area");
-		defer UI.pop_id();
+		// Window in center - make it appropriately sized
+		window_size := 800.0;
+		window_rect := screen->center_rect()->grow(window_size / 2.0);
+		window_rect = window_rect->fit_aspect(task.window_texture.aspect, .KEEP_HEIGHT);
+		UI.quad(window_rect, task.window_texture, .{1, 1, 1, 1});
 		
-		interact := UI.button(target_area, .{}, .{}, "");
+		target_area := window_rect->inset_unscaled(window_rect->height() * 0.57, window_rect->width() * 0.242, window_rect->height() * 0.0365, window_rect->width() * 0.242);
+		schleem_rect := window_rect->center_rect()->grow(150)->offset(0, 220);
 		
-		if interact.active {
-			// Calculate relative position within target area
-			input_area_size := target_area.max - target_area.min;
+		// DEBUG: Draw target area background
+		//UI.quad(target_area, bg_texture, .{1, 0, 0, 0.6});
+		
+		if success_state {
+			// SUCCESS STATE - Show alive schleem with thumbs up
+			schleem_rect = schleem_rect->fit_aspect(task.schleem_alive.aspect, .KEEP_WIDTH);
+			pulse := 1.0 + sin(get_time() * 8.0) * 0.05;
+			schleem_rect = schleem_rect->scale(pulse, pulse);
 			
-			if input_area_size.x > 0.0 && input_area_size.y > 0.0 {
-				rel_x := (interact.mouse_position.x - target_area.min.x) / input_area_size.x;
-				rel_y := (interact.mouse_position.y - target_area.min.y) / input_area_size.y;
-				task.reticle_position.x = clamp(rel_x, 0.0, 1.0);
-				task.reticle_position.y = clamp(rel_y, 0.0, 1.0);
+			UI.quad(schleem_rect, task.schleem_alive, .{1, 1, 1, 1});
+			
+			success_rect := window_rect->cut_top(50)->offset(0, 20);
+			success_ts := UI.default_text_settings();
+			success_ts.size = 42;
+			success_ts.color = .{0.3, 1.0, 0.4, 1.0};
+			success_ts.halign = .CENTER;
+			success_ts.valign = .CENTER;
+			UI.text(success_rect, success_ts, "TELEPORTATION COMPLETE!");
+		} else {
+			// CALIBRATION STATE - Handle input and draw hologram pieces
+			UI.push_id("calibrate_target_area");
+			defer UI.pop_id();
+			
+			interact := UI.button(target_area, .{}, .{}, "");
+			
+			if interact.active {
+				// Calculate relative position within target area
+				input_area_size := target_area.max - target_area.min;
+				
+				if input_area_size.x > 0.0 && input_area_size.y > 0.0 {
+					rel_x := (interact.mouse_position.x - target_area.min.x) / input_area_size.x;
+					rel_y := (interact.mouse_position.y - target_area.min.y) / input_area_size.y;
+					task.reticle_position.x = clamp(rel_x, 0.0, 1.0);
+					task.reticle_position.y = clamp(rel_y, 0.0, 1.0);
+				}
 			}
+			
+			// Calculate distance from target (0 = perfect, 1 = far)
+			dx := task.reticle_position.x - task.target_position.x;
+			dy := task.reticle_position.y - task.target_position.y;
+			distance := sqrt(dx * dx + dy * dy);
+			max_distance := sqrt(2.0);  // Max possible distance in unit square
+			alignment := 1.0 - clamp(distance / max_distance, 0.0, 1.0);
+			
+			// Check for success
+			if distance < ALIGNMENT_THRESHOLD {
+				task.success_time = get_time();
+			}
+			
+			// Calculate split offset based on distance (further = more split)
+			split_amount := (1.0 - alignment) * 75.0;
+			
+			// Hologram opacity - more solid as alignment increases
+			hologram_alpha := 0.3 + alignment * 0.4;
+			solid_alpha := clamp(alignment * alignment - 0.5, 0.0, 0.5) * 2.0;  // Quadratic for dramatic reveal
+			left_rect := schleem_rect->offset(-split_amount*5, 0);
+			right_rect := schleem_rect->offset(split_amount*5, 0);
+			// Hologram tint (cyan/green glow)
+			hologram_tint := v4.{0.3, 1.0, 0.8, hologram_alpha};
+			// Draw hologram pieces (back layer)
+			left_rect = left_rect->fit_aspect(task.schleem_hologram_L.aspect, .KEEP_WIDTH);
+			right_rect = right_rect->fit_aspect(task.schleem_hologram_R.aspect, .KEEP_WIDTH);
+			UI.quad(left_rect, task.schleem_hologram_L, hologram_tint);
+			UI.quad(right_rect, task.schleem_hologram_R, hologram_tint);
+			// Draw solid pieces on top as they align (front layer)
+			if solid_alpha > 0.05 {
+				solid_tint := v4.{1.0, 1.0, 1.0, solid_alpha};
+				UI.quad(left_rect, task.schleem_piece_L, solid_tint);
+				UI.quad(right_rect, task.schleem_piece_R, solid_tint);
+			}
+	
+			// Draw the reticle/cursor
+			cursor_size := 50.0;
+			target_area = target_area->inset(25);
+			cursor_offset :v2= .{task.reticle_position.x * target_area->width(), task.reticle_position.y * target_area->height()};
+			cursor_rect := target_area->bottom_left_rect()->grow(cursor_size / 2.0)->offset_unscaled(cursor_offset.x, cursor_offset.y);
+			cursor_rect = cursor_rect->fit_aspect(task.cursor_texture.aspect, .KEEP_HEIGHT);
+			cursor_pulse := 1.0 + sin(get_time() * 4.0) * 0.1;
+			cursor_rect = cursor_rect->scale(cursor_pulse, cursor_pulse);																			
+			UI.quad(cursor_rect, task.cursor_texture, .{1, 1, 1, 0.9});
 		}
-		
-		// Calculate distance from target (0 = perfect, 1 = far)
-		dx := task.reticle_position.x - task.target_position.x;
-		dy := task.reticle_position.y - task.target_position.y;
-		distance := sqrt(dx * dx + dy * dy);
-		max_distance := sqrt(2.0);  // Max possible distance in unit square
-		alignment := 1.0 - clamp(distance / max_distance, 0.0, 1.0);
-		
-		// Check for success
-		if distance < ALIGNMENT_THRESHOLD {
-			task.success_time = get_time();
-		}
-		
-		// Calculate split offset based on distance (further = more split)
-		split_amount := (1.0 - alignment) * 75.0;
-		
-		// Hologram opacity - more solid as alignment increases
-		hologram_alpha := 0.3 + alignment * 0.4;
-		solid_alpha := clamp(alignment * alignment - 0.5, 0.0, 0.5) * 2.0;  // Quadratic for dramatic reveal
-		left_rect := schleem_rect->offset(-split_amount*5, 0);
-		right_rect := schleem_rect->offset(split_amount*5, 0);
-		// Hologram tint (cyan/green glow)
-		hologram_tint := v4.{0.3, 1.0, 0.8, hologram_alpha};
-		// Draw hologram pieces (back layer)
-		left_rect = left_rect->fit_aspect(task.schleem_hologram_L.aspect, .KEEP_WIDTH);
-		right_rect = right_rect->fit_aspect(task.schleem_hologram_R.aspect, .KEEP_WIDTH);
-		UI.quad(left_rect, task.schleem_hologram_L, hologram_tint);
-		UI.quad(right_rect, task.schleem_hologram_R, hologram_tint);
-		// Draw solid pieces on top as they align (front layer)
-		if solid_alpha > 0.05 {
-			solid_tint := v4.{1.0, 1.0, 1.0, solid_alpha};
-			UI.quad(left_rect, task.schleem_piece_L, solid_tint);
-			UI.quad(right_rect, task.schleem_piece_R, solid_tint);
-		}
-
-		// Draw the reticle/cursor
-		cursor_size := 50.0;
-		target_area = target_area->inset(25);
-		cursor_offset :v2= .{task.reticle_position.x * target_area->width(), task.reticle_position.y * target_area->height()};
-		cursor_rect := target_area->bottom_left_rect()->grow(cursor_size / 2.0)->offset_unscaled(cursor_offset.x, cursor_offset.y);
-		cursor_rect = cursor_rect->fit_aspect(task.cursor_texture.aspect, .KEEP_HEIGHT);
-		cursor_pulse := 1.0 + sin(get_time() * 4.0) * 0.1;
-		cursor_rect = cursor_rect->scale(cursor_pulse, cursor_pulse);																			
-		UI.quad(cursor_rect, task.cursor_texture, .{1, 1, 1, 0.9});
 	}
 }
 

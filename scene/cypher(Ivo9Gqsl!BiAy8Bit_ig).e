@@ -13,7 +13,7 @@
     "X": 1,
     "Y": 1
   },
-  "previous_sibling": "864680593348330:1765571462079731300",
+  "previous_sibling": "1382959773613846:1765921145244939500",
   "next_sibling": "1733824193010230:1765228164622910200",
   "parent": "123968093968347:1764885644030734800"
 },
@@ -23,7 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Interactable",
   "data": {
-    "text": "Cypher"
+    "text": "Solve the Cypher"
   }
 },
 {
