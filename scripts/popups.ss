@@ -5,19 +5,16 @@ SCROLL_DURATION: float : 2.0;
 
 Body_Found_Popup :: class {
 
-	banner_texture: Texture_Asset;
-	text_texture: Texture_Asset;
-	ground_texture: Texture_Asset;
-	body_texture: Texture_Asset;
+	spine_asset: Spine_Asset;
+	spine_instance: Spine_Instance;
 	
 	is_visible: bool;
 	show_start_time: float;
 	
 	init :: proc(using this: Body_Found_Popup) {
-		banner_texture = get_asset(Texture_Asset, "sprites/icons/Body Found/banner.png");
-		text_texture = get_asset(Texture_Asset, "sprites/icons/Body Found/text.png");
-		ground_texture = get_asset(Texture_Asset, "sprites/icons/Body Found/ground.png");
-		body_texture = get_asset(Texture_Asset, "sprites/icons/Body Found/schleem.png");
+		spine_asset = get_asset(Spine_Asset, "anims/Toast/RAND004_toast_text.spine");
+		spine_instance = Spine_Instance.create();
+		spine_instance->set_skeleton(spine_asset);
 		is_visible = false;
 		show_start_time = 0.0;
 	}
@@ -25,6 +22,7 @@ Body_Found_Popup :: class {
 	show :: proc(using this: Body_Found_Popup) {
 		is_visible = true;
 		show_start_time = get_time();
+		spine_instance->set_animation("body_found1b", false, 0);
 	}
 
 	hide :: proc(using this: Body_Found_Popup) {
@@ -47,69 +45,46 @@ Body_Found_Popup :: class {
 			is_visible = false;
 			return;
 		}
+
+		spine_instance->update(delta_time);
 		
 		render_popup(this, elapsed);
+	}
+
+	render_popup :: proc(using popup: Body_Found_Popup, elapsed: float) {
+		screen := UI.get_safe_screen_rect();
+		popup_rect := screen->cut_top(150);
+		UI.spine(popup_rect, spine_instance, .{50, 50}, 0.0);
 	}
 }
 
 // Separate function to render the popup with scroll effects
 render_popup :: proc(using popup: Body_Found_Popup, elapsed: float) {
-
-	banner_progress := clamp((elapsed - 0.0) / SCROLL_DURATION, 0.0, 1.0);
-	text_progress := clamp((elapsed - 0.2) / SCROLL_DURATION, 0.0, 1.0);
-	ground_progress := clamp((elapsed - 0.4) / SCROLL_DURATION, 0.0, 1.0);
-	body_progress := clamp((elapsed - 0.6) / SCROLL_DURATION, 0.0, 1.0);
-
-	banner_ease := Ease.out_back(banner_progress);
-	text_ease := Ease.out_cubic(text_progress);
-	ground_ease := Ease.out_back(ground_progress);
-	body_ease := Ease.out_elastic(body_progress);
-
 	screen := UI.get_safe_screen_rect();
-	top_center := screen->cut_top(200)->offset(0, -100);
-	top_center->cut_left(50);
-	top_center->cut_right(50);
-	banner_rect := top_center;
-	banner_rect = banner_rect->fit_aspect(banner_texture.aspect, .KEEP_HEIGHT);
-	banner_rect = banner_rect->offset(0, 300.0 * (1.0 - banner_ease));
-	UI.quad(banner_rect, banner_texture, .{1, 1, 1, 1});
-
-	height := banner_rect->height();
-	text_rect := banner_rect->inset_unscaled(height * 0.1, 0, height * 0.33, 0);
-	text_rect = text_rect->fit_aspect(text_texture.aspect, .KEEP_HEIGHT);
-	text_rect = text_rect->offset(-20.0 * (1.0 - text_ease), 0);
-	UI.quad(text_rect, text_texture, .{1, 1, 1, 1});
-
-	ground_rect := screen->cut_top(150)->offset(0, -150)->center_rect()->grow(150);
-	ground_rect = ground_rect->fit_aspect(ground_texture.aspect, .KEEP_HEIGHT);
-	ground_rect = ground_rect->offset(0, -200.0 * (1.0 - ground_ease));
-	UI.quad(ground_rect, ground_texture, .{1, 1, 1, 1});
-
-	body_rect := ground_rect->inset(0,0,25,0);
-	body_rect = body_rect->fit_aspect(body_texture.aspect, .KEEP_HEIGHT);
-	body_rect = body_rect->offset(0, 50.0 * (1.0 - body_ease));
-	UI.quad(body_rect, body_texture, .{1, 1, 1, 1});
+	popup_rect := screen->cut_top(200);
+	UI.spine(popup_rect, spine_instance, .{200, 200}, 0.0);
 }
 
 Meeting_Called_Popup :: class {
 
-	banner_texture: Texture_Asset;
-	text_texture: Texture_Asset;
-	body_texture: Texture_Asset;
+	spine_asset: Spine_Asset;
+	spine_instance: Spine_Instance;
 	
 	is_visible: bool;
 	show_start_time: float;
 	
 	init :: proc(using this: Meeting_Called_Popup) {
-		banner_texture = get_asset(Texture_Asset, "sprites/icons/Meeting Called/banner.png");
-		text_texture = get_asset(Texture_Asset, "sprites/icons/Meeting Called/text.png");
-		body_texture = get_asset(Texture_Asset, "sprites/icons/Meeting Called/schleem.png");
+		spine_asset = get_asset(Spine_Asset, "anims/Toast/RAND004_toast_text.spine");
+		spine_instance = Spine_Instance.create();
+		spine_instance->set_skeleton(spine_asset);
 		is_visible = false;
 		show_start_time = 0.0;
 	}
+
 	show :: proc(using this: Meeting_Called_Popup) {
 		is_visible = true;
 		show_start_time = get_time();
+		spine_instance->set_animation("meeting_called", false, 0);
 	}
 
 	hide :: proc(using this: Meeting_Called_Popup) {
@@ -132,6 +107,8 @@ Meeting_Called_Popup :: class {
 			is_visible = false;
 			return;
 		}
+
+		spine_instance->update(delta_time);
 		
 		render_popup(this, elapsed);
 	}
@@ -139,34 +116,9 @@ Meeting_Called_Popup :: class {
 
 // Separate function to render the popup with scroll effects
 render_popup :: proc(using popup: Meeting_Called_Popup, elapsed: float) {
-
-	banner_progress := clamp((elapsed - 0.0) / SCROLL_DURATION, 0.0, 1.0);
-	text_progress := clamp((elapsed - 0.2) / SCROLL_DURATION, 0.0, 1.0);
-	body_progress := clamp((elapsed - 0.4) / SCROLL_DURATION, 0.0, 1.0);
-
-	banner_ease := Ease.out_back(banner_progress);
-	text_ease := Ease.out_cubic(text_progress);
-	body_ease := Ease.out_back(body_progress);
-
 	screen := UI.get_safe_screen_rect();
-	top_center := screen->cut_top(200)->offset(0, -100);
-	top_center->cut_left(50);
-	top_center->cut_right(50);
-	banner_rect := top_center;
-	banner_rect = banner_rect->fit_aspect(banner_texture.aspect, .KEEP_HEIGHT);
-	banner_rect = banner_rect->offset(0, 300.0 * (1.0 - banner_ease));
-	UI.quad(banner_rect, banner_texture, .{1, 1, 1, 1});
-
-	height := banner_rect->height();
-	text_rect := banner_rect->inset_unscaled(height * 0.1, 0, height * 0.33, 0);
-	text_rect = text_rect->fit_aspect(text_texture.aspect, .KEEP_HEIGHT);
-	text_rect = text_rect->offset(-20.0 * (1.0 - text_ease), 0);
-	UI.quad(text_rect, text_texture, .{1, 1, 1, 1});
-
-	body_rect := screen->cut_top(150)->offset(0, -150)->center_rect()->grow(150);
-	body_rect = body_rect->fit_aspect(body_texture.aspect, .KEEP_HEIGHT);
-	body_rect = body_rect->offset(0, -200.0 * (1.0 - body_ease));
-	UI.quad(body_rect, body_texture, .{1, 1, 1, 1});
+	popup_rect := screen->cut_top(150);
+	UI.spine(popup_rect, spine_instance, .{50, 50}, 0.0);
 }
 
 Intro_Popup :: class {
