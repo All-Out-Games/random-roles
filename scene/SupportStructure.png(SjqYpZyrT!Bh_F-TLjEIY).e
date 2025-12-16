@@ -5,17 +5,16 @@
   "name": "SupportStructure.png",
   "local_enabled": true,
   "local_position": {
-    "X": -17.6342105865478516,
-    "Y": 7.8636360168457031
+    "X": 0.6280670166015625,
+    "Y": -0.8941822052001953
   },
   "local_rotation": 0,
   "local_scale": {
-    "X": 0.6610083580017090,
-    "Y": 0.6610083580017090
+    "X": 0.6610084772109985,
+    "Y": 0.6610084772109985
   },
-  "previous_sibling": "5223171042075602:1764874385362110300",
-  "next_sibling": "5224558491243759:1764874751250087400",
-  "parent": "5209500228540660:1764870780194850700"
+  "previous_sibling": "1029241434415753:1765919246280662700",
+  "parent": "1035861843743803:1765920825530963000"
 },
 {
   "cid": 1,
@@ -24,6 +23,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Background/bg/SupportStructure.png",
-    "layer": -7
+    "layer": -15
   }
 }
