@@ -24,11 +24,11 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/Shapes/square.png",
-    "depth_offset": -0.1216827332973480,
+    "depth_offset": -0.5243220329284668,
     "tint": {
-      "X": 0.0041803023777902,
-      "Y": 0.0043353331275284,
-      "Z": 0.0088312318548560
+      "X": 0.0039215683937073,
+      "Y": 0.0039215683937073,
+      "Z": 0.0196078438311815
     }
   }
 }
