@@ -306,7 +306,7 @@ Victory_Popup :: class {
 		for i: 0..winners.elements.count-1 {
 			if i >= MAX_WINNERS_DISPLAYED { break; }
 			p := winners.elements[i];
-			if p != null && alive(p.entity) {
+			if p != null && #alive(p.entity) {
 				append(&winner_spines, p.animator.instance);
 				append(&winner_names, p.entity->get_name());
 			}

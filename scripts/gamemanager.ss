@@ -191,7 +191,7 @@ get_alive_player_count :: proc() -> int {
 	for i: 0..players.elements.count-1 {
 		player := players.elements[i];
 		// Only keep players that are not null and have alive entities
-		if player != null && alive(player.entity) {
+		if player != null && #alive(player.entity) {
 			append(&valid_players, player);
 		}
 	}

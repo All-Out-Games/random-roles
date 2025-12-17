@@ -36,11 +36,11 @@ RR_Projectile :: class : Component {
         if !destroy_self {
             foreach player: component_iterator(Player) {
                 if player.player_state == Player_State.DEAD continue;
-                if alive(owner) && owner == player.entity continue;
+                if #alive(owner) && owner == player.entity continue;
                 if in_range(player.entity.world_position - entity.world_position, hit_radius) {
                     // False Fire: Sheriff shooting a civilian kills the Sheriff instead
                     player_to_kill: Player = player;
-                    if alive(owner) {
+                    if #alive(owner) {
                         owner_player := owner->get_component(Player);
                         if owner_player != null {
                             // Check if shooter is Sheriff (civilian with sheriff role)

@@ -363,7 +363,7 @@ Black_Flag :: class : Component {
             distance := length(player.entity.world_position - entity.world_position);
             if distance < BLACK_FLAG_RADIUS {
                 // Check if this player is immune (the Pirate who placed it)
-                is_pirate_owner := alive(owner_entity) && owner_entity == player.entity;
+                is_pirate_owner := #alive(owner_entity) && owner_entity == player.entity;
                 
                 if !is_pirate_owner {
                     // Draw fog overlay - obscures vision except small circle in center
