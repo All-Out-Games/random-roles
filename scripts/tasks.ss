@@ -40,11 +40,9 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 	
 	// Select 5 unique tasks (or fewer if num_tasks < 5)
 	tasks_to_select := min(5, min(num_tasks, NUM_TASKS));
-	rng := rng_seed(player.entity.id);
-	
 	for i: 0..tasks_to_select-1 {
 		// Pick a random index from remaining available tasks
-		random_pick := rng_range_int(&rng, 0, available_indices.elements.count-1);
+		random_pick := rng_range_int(&server_rng, 0, available_indices.elements.count-1);
 		task_to_add_index := available_indices.elements[random_pick];
 		
 		// Remove the selected index from the pool (swap with last and pop)
@@ -302,13 +300,13 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 	SUCCESS_DISPLAY_TIME :: 2.5;  // How long to show thumbs up before closing
 	
 	init_textures :: proc(using this: Task_Calibrate_Teleporter) {
-		window_texture = get_asset(Texture_Asset, "sprites/Calibrate Teleporter/window.png");
-		cursor_texture = get_asset(Texture_Asset, "sprites/Calibrate Teleporter/cursor.png");
-		schleem_hologram_L = get_asset(Texture_Asset, "sprites/Calibrate Teleporter/schleem_hologram_piece_L.png");
-		schleem_hologram_R = get_asset(Texture_Asset, "sprites/Calibrate Teleporter/schleem_hologram_piece_R.png");
-		schleem_piece_L = get_asset(Texture_Asset, "sprites/Calibrate Teleporter/schleem_piece_L.png");
-		schleem_piece_R = get_asset(Texture_Asset, "sprites/Calibrate Teleporter/schleem_piece_R.png");
-		schleem_alive = get_asset(Texture_Asset, "sprites/Calibrate Teleporter/schleem_ alive.png");
+		window_texture = get_asset(Texture_Asset, "sprites/tasks/calibrate_teleporter/window.png");
+		cursor_texture = get_asset(Texture_Asset, "sprites/tasks/calibrate_teleporter/cursor.png");
+		schleem_hologram_L = get_asset(Texture_Asset, "sprites/tasks/calibrate_teleporter/schleem_hologram_piece_L.png");
+		schleem_hologram_R = get_asset(Texture_Asset, "sprites/tasks/calibrate_teleporter/schleem_hologram_piece_R.png");
+		schleem_piece_L = get_asset(Texture_Asset, "sprites/tasks/calibrate_teleporter/schleem_piece_L.png");
+		schleem_piece_R = get_asset(Texture_Asset, "sprites/tasks/calibrate_teleporter/schleem_piece_R.png");
+		schleem_alive = get_asset(Texture_Asset, "sprites/tasks/calibrate_teleporter/schleem_alive.png");
 	}
 	
 	init_target :: proc(using this: Task_Calibrate_Teleporter, player: Player) {
@@ -316,9 +314,8 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 			return;
 		}
 		rng_initialized = true;
-		rng := rng_seed(player.entity.id + 12345);
-		target_position.x = rng_range_float(&rng, 0.2, 0.8);
-		target_position.y = rng_range_float(&rng, 0.2, 0.8);
+		target_position.x = rng_range_float(&server_rng, 0.2, 0.8);
+		target_position.y = rng_range_float(&server_rng, 0.2, 0.8);
 		reticle_position = .{0.5, 0.5};
 	}
 
@@ -457,11 +454,317 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 }
 
 Task_Cypher :: class : Task_Base {
-	update_task :: proc(using this: Task_Cypher, player: Player) {
-		if !started {																														
+	// Task state
+	ui_active: bool;
+	rng_initialized: bool;
+
+	code_icons: List(int);   // icon indices in correct order (len = 4)
+	input_icons: List(int);  // player's current input
+
+	success_time: float;
+	fail_time: float;
+
+	// Textures
+	frame_texture: Texture_Asset;
+	pass_card_texture: Texture_Asset;
+	button_texture: Texture_Asset;
+	button_pressed_texture: Texture_Asset;
+	lights_off_texture: Texture_Asset;
+	lights_on_texture: Texture_Asset;
+
+	icon_ssundee: Texture_Asset;
+	icon_sigils: Texture_Asset;
+	icon_garry: Texture_Asset;
+	icon_skull: Texture_Asset;
+	icon_schleem: Texture_Asset;
+	icon_foot: Texture_Asset;
+	icon_knife: Texture_Asset;
+	icon_apple: Texture_Asset;
+	icon_hand: Texture_Asset;
+
+	CODE_LEN :: 4;
+	FAIL_LOCK_TIME :: 0.75;
+	SUCCESS_DISPLAY_TIME :: 2.5;
+
+	start_attempt :: proc(using this: Task_Cypher, player: Player) {
+		if started {
 			return;
 		}
-		//Instant success
-		complete_attempt(this, player, true);
+		started = true;
+		// Reset any previous state (in case task is re-opened)
+		input_icons = List(int).{};
+		success_time = 0.0;
+		fail_time = 0.0;
+		ui_active = true;
+	}
+
+	init_textures :: proc(using this: Task_Cypher) {
+		frame_texture = get_asset(Texture_Asset, "sprites/tasks/cypher/keypad_frame.png");
+		pass_card_texture = get_asset(Texture_Asset, "sprites/tasks/cypher/pass_card.png");
+		button_texture = get_asset(Texture_Asset, "sprites/tasks/cypher/button_base.png");
+		button_pressed_texture = get_asset(Texture_Asset, "sprites/tasks/cypher/button_pressed_base.png");
+		lights_off_texture = get_asset(Texture_Asset, "sprites/tasks/cypher/light_red.png");
+		lights_on_texture = get_asset(Texture_Asset, "sprites/tasks/cypher/light_green.png");
+
+		icon_ssundee = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_ssundee.png");
+		icon_sigils = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_sigils.png");
+		icon_garry = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_garry.png");
+		icon_skull = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_skull.png");
+		icon_schleem = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_schleem.png");
+		icon_foot = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_foot.png");
+		icon_knife = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_knife.png");
+		icon_apple = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_apple.png");
+		icon_hand = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_hand.png");
+	}
+
+	get_icon_texture :: proc(using this: Task_Cypher, icon_idx: int) -> Texture_Asset {
+		switch icon_idx {
+			case 0: return icon_ssundee;
+			case 1: return icon_sigils;
+			case 2: return icon_garry;
+			case 3: return icon_skull;
+			case 4: return icon_schleem;
+			case 5: return icon_foot;
+			case 6: return icon_knife;
+			case 7: return icon_apple;
+			case 8: return icon_hand;
+			case: return null;
+		}
+	}
+
+	get_hint_text :: proc(icon_idx: int) -> string {
+		switch icon_idx {
+			case 0: return "Boss";
+			case 1: return "Books";
+			case 2: return "100 Channels";
+			case 3: return "Death";
+			case 4: return "All Out";
+			case 5: return "Dawgs";
+			case 6: return "Sharp";
+			case 7: return "Juice";
+			case 8: return "Wave";
+			case: return "???";
+		}
+	}
+
+	init_code :: proc(using this: Task_Cypher, player: Player) {
+		if rng_initialized {
+			return;
+		}
+		rng_initialized = true;
+
+		code_icons = List(int).{};
+		input_icons = List(int).{};
+
+		// Build a pool [0..8] and pick 4 unique hints/icons in order
+		available: List(int);
+		for i: 0..8 {
+			append(&available, i);
+		}
+
+		for i: 0..CODE_LEN-1 {
+			pick := rng_range_int(&server_rng, 0, available.elements.count-1);
+			val := available.elements[pick];
+
+			last_idx := available.elements.count - 1;
+			available.elements[pick] = available.elements[last_idx];
+			pop(&available);
+
+			append(&code_icons, val);
+		}
+	}
+
+	is_input_prefix_correct :: proc(using this: Task_Cypher) -> bool {
+		if input_icons.elements.count == 0 {
+			return true;
+		}
+		for i: 0..input_icons.elements.count-1 {
+			if input_icons.elements[i] != code_icons.elements[i] {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	handle_press :: proc(using this: Task_Cypher, icon_idx: int) {
+		if success_time > 0.0 {
+			return;
+		}
+		if fail_time > 0.0 {
+			if get_time() - fail_time < FAIL_LOCK_TIME {
+				return;
+			}
+			fail_time = 0.0;
+		}
+		if input_icons.elements.count >= CODE_LEN {
+			return;
+		}
+
+		append(&input_icons, icon_idx);
+
+		// Wrong input -> fail flash and reset
+		if !is_input_prefix_correct(this) {
+			fail_time = get_time();
+			input_icons = List(int).{};
+			return;
+		}
+
+		// Completed and correct
+		if input_icons.elements.count == CODE_LEN {
+			success_time = get_time();
+		}
+	}
+
+	update_task :: proc(using this: Task_Cypher, player: Player) {
+		if !started {
+			return;
+		}
+		if completed {
+			return;
+		}
+		if !player->is_local_or_server() {
+			return;
+		}
+
+		if frame_texture == null {
+			init_textures(this);
+		}
+		init_code(this, player);
+
+		if success_time > 0.0 {
+			elapsed := get_time() - success_time;
+			if elapsed >= SUCCESS_DISPLAY_TIME {
+				ui_active = false;
+				complete_attempt(this, player, true);
+				return;
+			}
+			draw_cypher_ui(this, true);
+			return;
+		}
+
+		draw_cypher_ui(this, false);
+	}
+
+	draw_cypher_ui :: proc(using task: Task_Cypher, success_state: bool) {
+		screen := UI.get_screen_rect();
+		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
+		UI.quad(screen, bg_texture, .{0.0, 0.0, 0.0, 0.85});
+
+		fail_active := false;
+		if task.fail_time > 0.0 {
+			fail_active = (get_time() - task.fail_time) < FAIL_LOCK_TIME;
+			if !fail_active {
+				task.fail_time = 0.0;
+			}
+		}
+
+		// Layout: keypad on left, note on right (matches reference screenshot)
+		window_size := 900.0;
+		keypad_rect := screen->center_rect()->grow(window_size / 2.0)->offset(-220, 0);
+		keypad_rect = keypad_rect->fit_aspect(task.frame_texture.aspect, .KEEP_HEIGHT);
+
+		// Slight shake when failing (for juice)
+		if fail_active {
+			shake := sin(get_time() * 40.0) * 6.0;
+			keypad_rect = keypad_rect->offset(shake, 0);
+		}
+
+		UI.quad(keypad_rect, task.frame_texture, .{1, 1, 1, 1});
+
+		note_rect := screen->center_rect()->grow(180)->offset(420, 60);
+		note_rect = note_rect->fit_aspect(task.pass_card_texture.aspect, .KEEP_WIDTH);
+		UI.quad(note_rect, task.pass_card_texture, .{1, 1, 1, 1});
+
+		// Note text (the "hints")
+		title_ts := UI.default_text_settings();
+		title_ts.size = 64;
+		title_ts.color = .{1, 1, 1, 1};
+		title_ts.halign = .CENTER;
+		title_ts.valign = .CENTER;
+		UI.text(note_rect->cut_top(80)->offset(0, -10), title_ts, "HINTS");
+
+		hint_ts := UI.default_text_settings();
+		hint_ts.size = 48;
+		hint_ts.color = .{0.5, 0.5, 0.5, 1};
+		hint_ts.halign = .LEFT;
+		hint_ts.valign = .CENTER;
+
+		hints_rect := note_rect->inset_unscaled(20, 20, 20, 20);
+		for i: 0..CODE_LEN-1 {
+			line := hints_rect->cut_top(55);
+			hint := get_hint_text(task.code_icons.elements[i]);
+			UI.text(line, hint_ts, format_string("%) %", .{i+1, hint}));
+		}
+
+		// Screen text feedback area (top green display)
+		display_rect := keypad_rect->inset_unscaled(keypad_rect->height() * 0.16, keypad_rect->width() * 0.15, keypad_rect->height() * 0.62, keypad_rect->width() * 0.15);
+		display_ts := UI.default_text_settings();
+		display_ts.size = 64;
+		display_ts.halign = .LEFT;
+		display_ts.valign = .CENTER;
+
+		if success_state {
+			display_ts.color = .{0.1, 0.35, 0.1, 1};
+			UI.text(display_rect, display_ts, "ACCESS GRANTED");
+		} else if fail_active {
+			display_ts.color = .{0.7, 0.1, 0.1, 1};
+			UI.text(display_rect, display_ts, "ACCESS DENIED");
+		} else {
+			display_ts.color = .{0.1, 0.25, 0.1, 1};
+			stars := "";
+			for i: 0..task.input_icons.elements.count-1 {
+				stars = format_string("% *", .{stars});
+			}
+			display_rect->offset_unscaled(0, -10);
+			display_ts.size = 128;
+			UI.text(display_rect, display_ts, stars);
+		}
+
+		// Top Lights
+		keypad_rect->cut_top_unscaled(keypad_rect->height() * 0.05);
+		lights_rect := keypad_rect->cut_top_unscaled(keypad_rect->height() * 0.075);
+		lights_rect = lights_rect->fit_aspect(task.lights_off_texture.aspect, .KEEP_HEIGHT);
+		if success_state {
+			UI.quad(lights_rect, task.lights_on_texture, .{1, 1, 1, 1});
+		} else {
+			UI.quad(lights_rect, task.lights_off_texture, .{1, 1, 1, 1});
+		}
+
+		// Keypad area (bottom blue panel) -> 3x3 icon buttons
+		k_height := keypad_rect->height();
+		k_width := keypad_rect->width();
+		keypad_area := keypad_rect->inset_unscaled(k_height * 0.35, k_width * 0.11, k_height * 0.09, k_width * 0.11);
+
+		// Ordering matches the icons in the hint table (indices 0..8)
+		for row: 0..2 {
+			for col: 0..2 {
+				idx := row * 3 + col;
+				cell := keypad_area->subrect(col.(f32) / 3.0, row.(f32) / 3.0, (col.(f32) + 1.0) / 3.0, (row.(f32) + 1.0) / 3.0);
+				cell = cell->grow(3);
+
+				UI.push_id("cypher_btn_%", .{idx});
+				defer UI.pop_id();
+
+				interact := UI.button(cell, .{}, .{}, "");
+
+				// Draw base/pressed
+				base_tex := task.button_texture;
+				if interact.active {
+					base_tex = task.button_pressed_texture;
+				}
+				btn_rect := cell->fit_aspect(base_tex.aspect, .KEEP_WIDTH);
+				UI.quad(btn_rect, base_tex, .{1, 1, 1, 1});
+
+				// Icon
+				icon := task->get_icon_texture(idx);
+				icon_rect := btn_rect->inset_unscaled(10, 10, 10, 10);
+				icon_rect = icon_rect->fit_aspect(icon.aspect, .KEEP_HEIGHT);
+				UI.quad(icon_rect, icon, .{1, 1, 1, 1});
+
+				if interact.clicked && !success_state && !fail_active {
+					task->handle_press(idx);
+				}
+			}
+		}
 	}
 }

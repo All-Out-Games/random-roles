@@ -3,6 +3,8 @@ import "player.ss"
 import "popups.ss"
 import "tools.ss"
 
+server_rng := rng_seed((get_real_time() * 1000000000).(u64));
+
 MIN_NUMBER_OF_PLAYERS: int : 4;
 
 Game_State :: enum {
