@@ -794,19 +794,15 @@ Task_Anagram_Puzzle :: class : Task_Base {
 	ui_active: bool;
 	rng_initialized: bool;
 
-	// Target + decoy words (actual strings)
+	// Target
 	target_word: string;
 	target_len: int;
-	decoy_word_1: string;
-	decoy_word_2: string;
-	decoy_word_3: string;
 
-	// Display strings (scrambled)
-	// NOTE: we render post-it note words per-letter to avoid '%' formatting issues in UI.text
-	note_1_chars: List(u8);
-	note_2_chars: List(u8);
-	note_3_chars: List(u8);
-	note_4_chars: List(u8);
+	// Display strings
+	note_1_word: string;
+	note_2_word: string;
+	note_3_word: string;
+	note_4_word: string;
 
 	// Note layout (normalized 0..1 within window_rect)
 	note_1_pos: v2;
@@ -841,14 +837,10 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		rng_initialized = false;
 		target_word = "";
 		target_len = 0;
-		decoy_word_1 = "";
-		decoy_word_2 = "";
-		decoy_word_3 = "";
-
-		note_1_chars = List(u8).{};
-		note_2_chars = List(u8).{};
-		note_3_chars = List(u8).{};
-		note_4_chars = List(u8).{};
+		note_1_word = "";
+		note_2_word = "";
+		note_3_word = "";
+		note_4_word = "";
 
 		input_chars = List(u8).{};
 		success_time = 0.0;
@@ -1050,15 +1042,10 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		decoy_2_idx := pick_random_word_of_length(lengths.elements[1], target_idx, decoy_1_idx, -1);
 		decoy_3_idx := pick_random_word_of_length(lengths.elements[2], target_idx, decoy_1_idx, decoy_2_idx);
 
-		decoy_word_1 = get_word(decoy_1_idx);
-		decoy_word_2 = get_word(decoy_2_idx);
-		decoy_word_3 = get_word(decoy_3_idx);
-
-		// Build scrambled chars for notes (rendered per-letter to avoid '%' formatting in UI.text)
-		note_1_chars = scramble_word_chars(this, target_word);
-		note_2_chars = scramble_word_chars(this, decoy_word_1);
-		note_3_chars = scramble_word_chars(this, decoy_word_2);
-		note_4_chars = scramble_word_chars(this, decoy_word_3);
+		note_1_word = scramble_string(this, target_word);
+		note_2_word = scramble_string(this, note_1_word);
+		note_3_word = scramble_string(this, note_2_word);
+		note_4_word = scramble_string(this, note_3_word);
 
 		// Default note positions/angles (randomized a bit so you can tweak later)
 		// These are normalized within the window_rect. (0,0) bottom-left of window_rect.
@@ -1089,7 +1076,7 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		return true;
 	}
 
-	draw_note_word :: proc(using task: Task_Anagram_Puzzle, window_rect: Rect, pos01: v2, angle: float, chars: List(u8)) {
+	draw_note_word :: proc(using task: Task_Anagram_Puzzle, window_rect: Rect, pos01: v2, angle: float, word: string) {
 		w := window_rect->width();
 		h := window_rect->height();
 
@@ -1104,23 +1091,10 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		ts.valign = .CENTER;
 
 		UI.push_matrix(task->rotate_about_point(center, angle));
-		// Draw each letter manually so UI.text never sees stray '%' tokens.
-		count := chars.elements.count;
-		if count <= 0 {
-			UI.pop_matrix();
-			return;
-		}
+		defer UI.pop_matrix();
 
 		// Simple monospace-ish layout inside rect
-		cell_w := rect->width() / (count.(float));
-		for i: 0..count-1 {
-			x0 := (i.(float)) / (count.(float));
-			x1 := ((i+1).(float)) / (count.(float));
-			cell := rect->subrect(x0, 0.0, x1, 1.0);
-			cell = cell->inset_unscaled(rect->height() * 0.08, cell_w * 0.05, rect->height() * 0.08, cell_w * 0.05);
-			UI.text(cell, ts, task->char_to_string(chars.elements[i]));
-		}
-		UI.pop_matrix();
+		UI.text(rect, ts, word);
 	}
 
 	draw_anagram_ui :: proc(using task: Task_Anagram_Puzzle, success_state: bool) {
@@ -1160,10 +1134,10 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		target_len := task.target_word.count;
 
 		// Draw the 4 scrambled note words (positions/angles are placeholders you can tweak)
-		task->draw_note_word(window_rect, task.note_1_pos, task.note_1_angle, task.note_1_chars);
-		task->draw_note_word(window_rect, task.note_2_pos, task.note_2_angle, task.note_2_chars);
-		task->draw_note_word(window_rect, task.note_3_pos, task.note_3_angle, task.note_3_chars);
-		task->draw_note_word(window_rect, task.note_4_pos, task.note_4_angle, task.note_4_chars);
+		task->draw_note_word(window_rect, task.note_1_pos, task.note_1_angle, task.note_1_word);
+		task->draw_note_word(window_rect, task.note_2_pos, task.note_2_angle, task.note_2_word);
+		task->draw_note_word(window_rect, task.note_3_pos, task.note_3_angle, task.note_3_word);
+		task->draw_note_word(window_rect, task.note_4_pos, task.note_4_angle, task.note_4_word);
 
 		// Monitor lines area (center)
 		lines_area := window_rect->center_rect()->grow_unscaled(h * 0.05, w * 0.18, h * 0.05, w * 0.18);
