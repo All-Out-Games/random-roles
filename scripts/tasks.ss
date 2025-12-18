@@ -935,53 +935,9 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		out := "";
 		for i: 0..indices.elements.count-1 {
 			ch := word[indices.elements[i]];
-			out = format_string("%%", .{out, task->char_to_string(ch)});
+			out = format_string("%0%", .{out, task->char_to_string(ch)});
 		}
 		return out;
-	}
-
-	// Returns scrambled chars (uppercased ASCII) for safe per-letter rendering.
-	scramble_word_chars :: proc(using task: Task_Anagram_Puzzle, word: string) -> List(u8) {
-		len := word.count;
-		out_chars: List(u8);
-		if len <= 0 {
-			return out_chars;
-		}
-
-		indices: List(int);
-		for i: 0..len-1 {
-			append(&indices, i);
-		}
-
-		// Shuffle indices, retry once if it ends up identical (common for short words).
-		// NOTE: nested procs don't capture locals in this language, so keep this inline.
-		for i: 0..indices.elements.count-1 {
-			j := rng_range_int(&server_rng, i, indices.elements.count-1);
-			tmp := indices.elements[i];
-			indices.elements[i] = indices.elements[j];
-			indices.elements[j] = tmp;
-		}
-		same := true;
-		for i: 0..indices.elements.count-1 {
-			if indices.elements[i] != i {
-				same = false;
-				break;
-			}
-		}
-		if same && indices.elements.count > 1 {
-			for i: 0..indices.elements.count-1 {
-				j := rng_range_int(&server_rng, i, indices.elements.count-1);
-				tmp := indices.elements[i];
-				indices.elements[i] = indices.elements[j];
-				indices.elements[j] = tmp;
-			}
-		}
-
-		for i: 0..indices.elements.count-1 {
-			ch := uppercase_ascii(word[indices.elements[i]]);
-			append(&out_chars, ch);
-		}
-		return out_chars;
 	}
 
 	pick_random_word_of_length :: proc(target_len: int, exclude_a: int, exclude_b: int, exclude_c: int) -> int {
@@ -1043,16 +999,16 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		decoy_3_idx := pick_random_word_of_length(lengths.elements[2], target_idx, decoy_1_idx, decoy_2_idx);
 
 		note_1_word = scramble_string(this, target_word);
-		note_2_word = scramble_string(this, note_1_word);
-		note_3_word = scramble_string(this, note_2_word);
-		note_4_word = scramble_string(this, note_3_word);
+		note_2_word = scramble_string(this, get_word(decoy_1_idx));
+		note_3_word = scramble_string(this, get_word(decoy_2_idx));
+		note_4_word = scramble_string(this, get_word(decoy_3_idx));
 
 		// Default note positions/angles (randomized a bit so you can tweak later)
 		// These are normalized within the window_rect. (0,0) bottom-left of window_rect.
-		note_1_pos = .{0.22 + rng_range_float(&server_rng, -0.03, 0.03), 0.86 + rng_range_float(&server_rng, -0.03, 0.03)};
-		note_2_pos = .{0.45 + rng_range_float(&server_rng, -0.03, 0.03), 0.90 + rng_range_float(&server_rng, -0.03, 0.03)};
-		note_3_pos = .{0.70 + rng_range_float(&server_rng, -0.03, 0.03), 0.85 + rng_range_float(&server_rng, -0.03, 0.03)};
-		note_4_pos = .{0.85 + rng_range_float(&server_rng, -0.03, 0.03), 0.70 + rng_range_float(&server_rng, -0.03, 0.03)};
+		note_1_pos = .{0.12 + rng_range_float(&server_rng, -0.03, 0.03), 0.8 + rng_range_float(&server_rng, -0.01, 0.01)};
+		note_2_pos = .{0.35 + rng_range_float(&server_rng, -0.03, 0.03), 0.80 + rng_range_float(&server_rng, -0.01, 0.01)};
+		note_3_pos = .{0.65 + rng_range_float(&server_rng, -0.03, 0.03), 0.8 + rng_range_float(&server_rng, -0.01, 0.01)};
+		note_4_pos = .{0.9 + rng_range_float(&server_rng, -0.03, 0.03), 0.78 + rng_range_float(&server_rng, -0.01, 0.01)};
 
 		note_1_angle = rng_range_float(&server_rng, -12.0, 12.0);
 		note_2_angle = rng_range_float(&server_rng, -12.0, 12.0);
@@ -1076,7 +1032,7 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		return true;
 	}
 
-	draw_note_word :: proc(using task: Task_Anagram_Puzzle, window_rect: Rect, pos01: v2, angle: float, word: string) {
+	draw_note_word :: proc(using task: Task_Anagram_Puzzle, window_rect: Rect, pos01: v2, angle: float, word: string, scale: float) {
 		w := window_rect->width();
 		h := window_rect->height();
 
@@ -1085,7 +1041,7 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		rect := window_rect->center_rect()->grow_unscaled(h * 0.06, w * 0.10, h * 0.06, w * 0.10)->offset_unscaled(center.x - (window_rect.min.x + w * 0.5), center.y - (window_rect.min.y + h * 0.5));
 
 		ts := UI.default_text_settings();
-		ts.size = 54;
+		ts.size = 54 * scale;
 		ts.color = .{0.05, 0.05, 0.05, 1.0};
 		ts.halign = .CENTER;
 		ts.valign = .CENTER;
@@ -1134,10 +1090,10 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		target_len := task.target_word.count;
 
 		// Draw the 4 scrambled note words (positions/angles are placeholders you can tweak)
-		task->draw_note_word(window_rect, task.note_1_pos, task.note_1_angle, task.note_1_word);
-		task->draw_note_word(window_rect, task.note_2_pos, task.note_2_angle, task.note_2_word);
-		task->draw_note_word(window_rect, task.note_3_pos, task.note_3_angle, task.note_3_word);
-		task->draw_note_word(window_rect, task.note_4_pos, task.note_4_angle, task.note_4_word);
+		task->draw_note_word(window_rect, task.note_1_pos, task.note_1_angle, task.note_1_word, 0.75);
+		task->draw_note_word(window_rect, task.note_2_pos, task.note_2_angle, task.note_2_word, 1);
+		task->draw_note_word(window_rect, task.note_3_pos, task.note_3_angle, task.note_3_word, 1);
+		task->draw_note_word(window_rect, task.note_4_pos, task.note_4_angle, task.note_4_word, 0.75);
 
 		// Monitor lines area (center)
 		lines_area := window_rect->center_rect()->grow_unscaled(h * 0.05, w * 0.18, h * 0.05, w * 0.18);
