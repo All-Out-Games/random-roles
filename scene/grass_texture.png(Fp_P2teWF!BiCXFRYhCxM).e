@@ -1,0 +1,35 @@
+13
+3345779523585
+1591972422083973 1766075521214721100
+{
+  "name": "grass_texture.png",
+  "local_enabled": true,
+  "local_position": {
+    "X": -7.5970087051391602,
+    "Y": -14.5715026855468750
+  },
+  "local_rotation": 0,
+  "local_scale": {
+    "X": 1.1083337068557739,
+    "Y": 0.5638890862464905
+  },
+  "previous_sibling": "1591995426988291:1766075526702373200",
+  "next_sibling": "1591947915275580:1766075515368801100",
+  "parent": "1399168867989090:1766029529334826700"
+},
+{
+  "cid": 1,
+  "aoid": "1591972422206067:1766075521214750000",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Sprite_Renderer",
+  "data": {
+    "texture": "sprites/phota/Floor/grass_texture.png",
+    "tint": {
+      "Y": 0.9568834900856018,
+      "Z": 0,
+      "W": 0.0196078438311815
+    },
+    "layer": -10,
+    "wrap": true
+  }
+}
