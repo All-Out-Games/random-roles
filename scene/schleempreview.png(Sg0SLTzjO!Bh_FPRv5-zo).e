@@ -5,8 +5,8 @@
   "name": "schleem preview.png",
   "local_enabled": true,
   "local_position": {
-    "X": -0.0816397368907928,
-    "Y": 7.8615021705627441
+    "X": -1.8530677556991577,
+    "Y": 9.1900730133056641
   },
   "local_rotation": 0,
   "local_scale": {

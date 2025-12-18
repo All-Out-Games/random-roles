@@ -5,8 +5,8 @@
   "name": "frame_octagon_righttop.png",
   "local_enabled": true,
   "local_position": {
-    "X": -42.8477554321289062,
-    "Y": -6.8228998184204102
+    "X": -3.2484588623046875,
+    "Y": -31.6982116699218750
   },
   "local_rotation": 0,
   "local_scale": {

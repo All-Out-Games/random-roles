@@ -5,8 +5,8 @@
   "name": "frame_octagon_lefbot.png",
   "local_enabled": true,
   "local_position": {
-    "X": -43.3644332885742188,
-    "Y": -7.3061485290527344
+    "X": -3.7651367187500000,
+    "Y": -32.1814575195312500
   },
   "local_rotation": 0,
   "local_scale": {

@@ -2,7 +2,7 @@
 420906795009
 4908788690847316 1765235683729707800
 {
-  "name": "Toilet",
+  "name": "TOILET",
   "local_enabled": true,
   "local_position": {
     "X": -11.9809999465942383,

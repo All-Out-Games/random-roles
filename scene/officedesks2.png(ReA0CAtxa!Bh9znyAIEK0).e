@@ -5,8 +5,8 @@
   "name": "officedesks2.png",
   "local_enabled": true,
   "local_position": {
-    "X": 1.5192477703094482,
-    "Y": 2.2357034683227539
+    "X": 8.8483486175537109,
+    "Y": -3.6258277893066406
   },
   "local_rotation": 0,
   "local_scale": {
@@ -15,7 +15,7 @@
   },
   "previous_sibling": "4917255328554724:1764793711500917200",
   "next_sibling": "4917010048994484:1764793646817580100",
-  "parent": "4917318531219963:1764793728168263600"
+  "parent": "1363153062845562:1766020938027512700"
 },
 {
   "cid": 1,
@@ -24,6 +24,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Security/officedesks2.png",
-    "depth_offset": 0.0838384628295898
+    "depth_offset": 0.2007493972778320
   }
 }

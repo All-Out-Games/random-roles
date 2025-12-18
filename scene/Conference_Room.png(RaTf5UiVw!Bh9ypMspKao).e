@@ -5,8 +5,8 @@
   "name": "Conference_Room.png",
   "local_enabled": true,
   "local_position": {
-    "X": -0.0908241271972656,
-    "Y": 0.1817712783813477
+    "X": -0.2178465127944946,
+    "Y": -0.4578834176063538
   },
   "local_rotation": 0,
   "local_scale": {
