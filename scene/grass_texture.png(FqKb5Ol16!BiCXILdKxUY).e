@@ -5,8 +5,8 @@
   "name": "grass_texture.png",
   "local_enabled": true,
   "local_position": {
-    "X": 0.9663429260253906,
-    "Y": -1.5556640625000000
+    "X": 0.8107880949974060,
+    "Y": -1.0164114236831665
   },
   "local_rotation": 0,
   "local_scale": {

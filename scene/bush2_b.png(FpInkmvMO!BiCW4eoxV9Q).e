@@ -5,8 +5,8 @@
   "name": "bush2_b.png",
   "local_enabled": true,
   "local_position": {
-    "X": -0.7470246553421021,
-    "Y": -14.9607486724853516
+    "X": -1.7565770149230957,
+    "Y": -14.8119716644287109
   },
   "local_rotation": 0,
   "local_scale": {
