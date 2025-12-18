@@ -3,7 +3,11 @@ import "player.ss"
 import "popups.ss"
 import "tools.ss"
 
-server_rng := rng_seed((get_real_time() * 1000000000).(u64));
+server_rng : u64;
+
+refresh_server_rng :: proc() {
+	server_rng = rng_seed((get_real_time() * 1000000000).(u64));
+}
 
 MIN_NUMBER_OF_PLAYERS: int : 4;
 
@@ -155,6 +159,7 @@ intro_popup: Intro_Popup;
 victory_popup: Victory_Popup;
 
 ao_start :: proc() {
+	refresh_server_rng();
 	setup_lobby();
 	body_found_popup = new();
 	body_found_popup->init();

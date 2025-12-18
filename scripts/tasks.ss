@@ -1,7 +1,7 @@
 import "core:core.ss"
 import "gamemanager.ss"
 
-NUM_TASKS: int : 8;
+NUM_TASKS: int : 9;
 
 Task_Base :: class {
 	id: string;
@@ -91,6 +91,11 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 					task.id = "build_a_robot";
 					append(&task_list, task);
 				}
+			case 8: {
+					task := new(Task_Catching_Butterflies);
+					task.id = "catching_butterflies";
+					append(&task_list, task);
+				}
 		}
 	}
 	return task_list;
@@ -108,6 +113,7 @@ update_tasks :: proc(player: Player) {
 			case Task_Guide_The_Electron: player.active_tasks.elements[i].(Task_Guide_The_Electron)->update_task(player);
 			case Task_Signal_Sync: player.active_tasks.elements[i].(Task_Signal_Sync)->update_task(player);
 			case Task_Build_A_Robot: player.active_tasks.elements[i].(Task_Build_A_Robot)->update_task(player);
+			case Task_Catching_Butterflies: player.active_tasks.elements[i].(Task_Catching_Butterflies)->update_task(player);
 		}
 	}
 }
@@ -130,6 +136,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Sync Signals";
 		case "build_a_robot":
 			return "Build a Robot";
+		case "catching_butterflies":
+			return "Catching Butterflies";
 		case:
 			return task_id;
 	}
@@ -240,6 +248,17 @@ Task_Guide_The_Electron :: class : Task_Base {
 			return;
 		}
 		log(format_string("Guide the Electron Task Updated"));
+		//Instant success
+		complete_attempt(this, player, true);
+	}
+}
+
+Task_Catching_Butterflies :: class : Task_Base {
+	update_task :: proc(using this: Task_Catching_Butterflies, player: Player) {
+		if !started {
+			return;
+		}
+		log(format_string("Catching Butterflies Task Updated"));
 		//Instant success
 		complete_attempt(this, player, true);
 	}
@@ -771,13 +790,570 @@ Task_Build_A_Robot :: class : Task_Base {
 }
 
 Task_Anagram_Puzzle :: class : Task_Base {
+	// Task state
+	ui_active: bool;
+	rng_initialized: bool;
+
+	// Target + decoy words (actual strings)
+	target_word: string;
+	target_len: int;
+	decoy_word_1: string;
+	decoy_word_2: string;
+	decoy_word_3: string;
+
+	// Display strings (scrambled)
+	// NOTE: we render post-it note words per-letter to avoid '%' formatting issues in UI.text
+	note_1_chars: List(u8);
+	note_2_chars: List(u8);
+	note_3_chars: List(u8);
+	note_4_chars: List(u8);
+
+	// Note layout (normalized 0..1 within window_rect)
+	note_1_pos: v2;
+	note_2_pos: v2;
+	note_3_pos: v2;
+	note_4_pos: v2;
+	note_1_angle: float;
+	note_2_angle: float;
+	note_3_angle: float;
+	note_4_angle: float;
+
+	// Player input (typed characters as ASCII bytes)
+	input_chars: List(u8);
+
+	success_time: float;
+	fail_time: float;
+
+	// Textures
+	anagram_bg_texture: Texture_Asset;
+	monitor_line_texture: Texture_Asset;
+
+	FAIL_LOCK_TIME :: 0.75;
+	SUCCESS_DISPLAY_TIME :: 2.5;
+
+	start_attempt :: proc(using this: Task_Anagram_Puzzle, player: Player) {
+		if started {
+			return;
+		}
+		started = true;
+		ui_active = true;
+
+		rng_initialized = false;
+		target_word = "";
+		target_len = 0;
+		decoy_word_1 = "";
+		decoy_word_2 = "";
+		decoy_word_3 = "";
+
+		note_1_chars = List(u8).{};
+		note_2_chars = List(u8).{};
+		note_3_chars = List(u8).{};
+		note_4_chars = List(u8).{};
+
+		input_chars = List(u8).{};
+		success_time = 0.0;
+		fail_time = 0.0;
+	}
+
+	init_textures :: proc(using this: Task_Anagram_Puzzle) {
+		anagram_bg_texture = get_asset(Texture_Asset, "sprites/tasks/anagram/anagram_bg.png");
+		monitor_line_texture = get_asset(Texture_Asset, "sprites/tasks/anagram/monitor_line.png");
+	}
+
+	get_word :: proc(word_idx: int) -> string {
+		// Keep these as actual strings (what you gave), but we display/compare as uppercase via byte normalization.
+		switch word_idx {
+			case 0: return "Allout";
+			case 1: return "Random";
+			case 2: return "Game";
+			case 3: return "Vote";
+			case 4: return "Water";
+			case 5: return "Hotdog";
+			case 6: return "Task";
+			case 7: return "Fish";
+			case 8: return "Six";
+			case 9: return "Seven";
+			case 10: return "Coffee";
+			case 11: return "Juice";
+			case 12: return "Foot";
+			case 13: return "Meme";
+			case: return "";
+		}
+	}
+
+	word_count :: proc() -> int { return 14; }
+
+	uppercase_ascii :: proc(ch: u8) -> u8 {
+		// 'a'..'z' => 'A'..'Z'
+		if ch >= 97 && ch <= 122 {
+			return ch - 32;
+		}
+		return ch;
+	}
+
+	char_to_string :: proc(using task: Task_Anagram_Puzzle, ch: u8) -> string {
+		// NOTE: keep this as a local lookup table; the compiler does not accept the array-of-strings
+		// literal as a class-scope constant expression.
+		table := ([26]string){
+			"A","B","C","D","E","F","G","H","I","J","K","L","M",
+			"N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
+		};
+
+		c := uppercase_ascii(ch);
+		// Be extremely defensive here: if idx ever goes negative it will wrap to a huge value
+		// and crash the VM on array indexing.
+		idx: int = (c.(int)) - 65;
+		if idx >= 0 && idx < 26 {
+			return table[idx];
+		}
+		return "?";
+	}
+
+	strings_equal_ascii :: proc(a: string, b: string) -> bool {
+		if a.count != b.count {
+			return false;
+		}
+		for i: 0..a.count-1 {
+			if uppercase_ascii(a[i]) != uppercase_ascii(b[i]) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	scramble_string :: proc(using task: Task_Anagram_Puzzle, word: string) -> string {
+		len := word.count;
+		if len <= 1 {
+			return word;
+		}
+
+		indices: List(int);
+		for i: 0..len-1 {
+			append(&indices, i);
+		}
+
+		// Fisher-Yates shuffle on indices
+		for i: 0..indices.elements.count-1 {
+			j := rng_range_int(&server_rng, i, indices.elements.count-1);
+			tmp := indices.elements[i];
+			indices.elements[i] = indices.elements[j];
+			indices.elements[j] = tmp;
+		}
+
+		out := "";
+		for i: 0..indices.elements.count-1 {
+			ch := word[indices.elements[i]];
+			out = format_string("%%", .{out, task->char_to_string(ch)});
+		}
+		return out;
+	}
+
+	// Returns scrambled chars (uppercased ASCII) for safe per-letter rendering.
+	scramble_word_chars :: proc(using task: Task_Anagram_Puzzle, word: string) -> List(u8) {
+		len := word.count;
+		out_chars: List(u8);
+		if len <= 0 {
+			return out_chars;
+		}
+
+		indices: List(int);
+		for i: 0..len-1 {
+			append(&indices, i);
+		}
+
+		// Shuffle indices, retry once if it ends up identical (common for short words).
+		// NOTE: nested procs don't capture locals in this language, so keep this inline.
+		for i: 0..indices.elements.count-1 {
+			j := rng_range_int(&server_rng, i, indices.elements.count-1);
+			tmp := indices.elements[i];
+			indices.elements[i] = indices.elements[j];
+			indices.elements[j] = tmp;
+		}
+		same := true;
+		for i: 0..indices.elements.count-1 {
+			if indices.elements[i] != i {
+				same = false;
+				break;
+			}
+		}
+		if same && indices.elements.count > 1 {
+			for i: 0..indices.elements.count-1 {
+				j := rng_range_int(&server_rng, i, indices.elements.count-1);
+				tmp := indices.elements[i];
+				indices.elements[i] = indices.elements[j];
+				indices.elements[j] = tmp;
+			}
+		}
+
+		for i: 0..indices.elements.count-1 {
+			ch := uppercase_ascii(word[indices.elements[i]]);
+			append(&out_chars, ch);
+		}
+		return out_chars;
+	}
+
+	pick_random_word_of_length :: proc(target_len: int, exclude_a: int, exclude_b: int, exclude_c: int) -> int {
+		candidates: List(int);
+		for i: 0..word_count()-1 {
+			if i == exclude_a || i == exclude_b || i == exclude_c {
+				continue;
+			}
+			if get_word(i).count == target_len {
+				append(&candidates, i);
+			}
+		}
+		if candidates.elements.count == 0 {
+			return 0;
+		}
+		pick := rng_range_int(&server_rng, 0, candidates.elements.count-1);
+		return candidates.elements[pick];
+	}
+
+	init_puzzle :: proc(using this: Task_Anagram_Puzzle) {
+		if rng_initialized {
+			return;
+		}
+		rng_initialized = true;
+		refresh_server_rng();
+
+		// Pick target word
+		target_idx := rng_range_int(&server_rng, 0, word_count()-1);
+		target_word = get_word(target_idx);
+		target_len = target_word.count;
+
+		// Pick 3 other lengths (all different, and different than target_len)
+		lengths: List(int);
+		append(&lengths, 3);
+		append(&lengths, 4);
+		append(&lengths, 5);
+		append(&lengths, 6);
+
+		// Remove target_len from lengths
+		for i: 0..lengths.elements.count-1 {
+			if lengths.elements[i] == target_len {
+				last := lengths.elements.count - 1;
+				lengths.elements[i] = lengths.elements[last];
+				pop(&lengths);
+				break;
+			}
+		}
+
+		// Shuffle remaining lengths
+		for i: 0..lengths.elements.count-1 {
+			j := rng_range_int(&server_rng, i, lengths.elements.count-1);
+			tmp := lengths.elements[i];
+			lengths.elements[i] = lengths.elements[j];
+			lengths.elements[j] = tmp;
+		}
+
+		decoy_1_idx := pick_random_word_of_length(lengths.elements[0], target_idx, -1, -1);
+		decoy_2_idx := pick_random_word_of_length(lengths.elements[1], target_idx, decoy_1_idx, -1);
+		decoy_3_idx := pick_random_word_of_length(lengths.elements[2], target_idx, decoy_1_idx, decoy_2_idx);
+
+		decoy_word_1 = get_word(decoy_1_idx);
+		decoy_word_2 = get_word(decoy_2_idx);
+		decoy_word_3 = get_word(decoy_3_idx);
+
+		// Build scrambled chars for notes (rendered per-letter to avoid '%' formatting in UI.text)
+		note_1_chars = scramble_word_chars(this, target_word);
+		note_2_chars = scramble_word_chars(this, decoy_word_1);
+		note_3_chars = scramble_word_chars(this, decoy_word_2);
+		note_4_chars = scramble_word_chars(this, decoy_word_3);
+
+		// Default note positions/angles (randomized a bit so you can tweak later)
+		// These are normalized within the window_rect. (0,0) bottom-left of window_rect.
+		note_1_pos = .{0.22 + rng_range_float(&server_rng, -0.03, 0.03), 0.86 + rng_range_float(&server_rng, -0.03, 0.03)};
+		note_2_pos = .{0.45 + rng_range_float(&server_rng, -0.03, 0.03), 0.90 + rng_range_float(&server_rng, -0.03, 0.03)};
+		note_3_pos = .{0.70 + rng_range_float(&server_rng, -0.03, 0.03), 0.85 + rng_range_float(&server_rng, -0.03, 0.03)};
+		note_4_pos = .{0.85 + rng_range_float(&server_rng, -0.03, 0.03), 0.70 + rng_range_float(&server_rng, -0.03, 0.03)};
+
+		note_1_angle = rng_range_float(&server_rng, -12.0, 12.0);
+		note_2_angle = rng_range_float(&server_rng, -12.0, 12.0);
+		note_3_angle = rng_range_float(&server_rng, -12.0, 12.0);
+		note_4_angle = rng_range_float(&server_rng, -12.0, 12.0);
+	}
+
+	rotate_about_point :: proc(using task: Task_Anagram_Puzzle, point: v2, degrees: float) -> Matrix4 {
+		return Matrix4.translate(point)->multiply(Matrix4.rotate(degrees, v3.{0.0, 0.0, 1.0})->multiply(Matrix4.translate(-point)));
+	}
+
+	is_input_correct :: proc(using this: Task_Anagram_Puzzle) -> bool {
+		if input_chars.elements.count != target_word.count {
+			return false;
+		}
+		for i: 0..input_chars.elements.count-1 {
+			if uppercase_ascii(input_chars.elements[i]) != uppercase_ascii(target_word[i]) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	draw_note_word :: proc(using task: Task_Anagram_Puzzle, window_rect: Rect, pos01: v2, angle: float, chars: List(u8)) {
+		w := window_rect->width();
+		h := window_rect->height();
+
+		// NOTE: these are just reasonable defaults; you can adjust after.
+		center := v2.{window_rect.min.x + w * pos01.x, window_rect.min.y + h * pos01.y};
+		rect := window_rect->center_rect()->grow_unscaled(h * 0.06, w * 0.10, h * 0.06, w * 0.10)->offset_unscaled(center.x - (window_rect.min.x + w * 0.5), center.y - (window_rect.min.y + h * 0.5));
+
+		ts := UI.default_text_settings();
+		ts.size = 54;
+		ts.color = .{0.05, 0.05, 0.05, 1.0};
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+
+		UI.push_matrix(task->rotate_about_point(center, angle));
+		// Draw each letter manually so UI.text never sees stray '%' tokens.
+		count := chars.elements.count;
+		if count <= 0 {
+			UI.pop_matrix();
+			return;
+		}
+
+		// Simple monospace-ish layout inside rect
+		cell_w := rect->width() / (count.(float));
+		for i: 0..count-1 {
+			x0 := (i.(float)) / (count.(float));
+			x1 := ((i+1).(float)) / (count.(float));
+			cell := rect->subrect(x0, 0.0, x1, 1.0);
+			cell = cell->inset_unscaled(rect->height() * 0.08, cell_w * 0.05, rect->height() * 0.08, cell_w * 0.05);
+			UI.text(cell, ts, task->char_to_string(chars.elements[i]));
+		}
+		UI.pop_matrix();
+	}
+
+	draw_anagram_ui :: proc(using task: Task_Anagram_Puzzle, success_state: bool) {
+		screen := UI.get_screen_rect();
+		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
+		UI.quad(screen, bg_texture, .{0.0, 0.0, 0.0, 0.85});
+
+		window_size := 1000.0;
+		window_rect := screen->center_rect()->grow(window_size / 2.0);
+
+		window_rect = window_rect->fit_aspect(task.anagram_bg_texture.aspect, .KEEP_HEIGHT);
+
+		w := window_rect->width();
+		h := window_rect->height();
+
+		// Key pad area (compute AFTER fit_aspect so it's consistent across screen sizes)
+		pad_rect := window_rect->cut_bottom_unscaled(h * 0.25);
+		pad_rect = pad_rect->inset_unscaled(-h * 0.08, w *  0.02, h *  0.02, w *  0.02);
+
+		//Rerun fit_aspect to ensure the window_rect is the correct shape
+		window_rect = window_rect->fit_aspect(task.anagram_bg_texture.aspect, .KEEP_HEIGHT);
+		UI.quad(window_rect, task.anagram_bg_texture, .{1, 1, 1, 1});
+
+		w = window_rect->width();
+		h = window_rect->height();
+
+		// Fail lock (brief)
+		fail_active := false;
+		if task.fail_time > 0.0 {
+			fail_active = (get_time() - task.fail_time) < FAIL_LOCK_TIME;
+			if !fail_active {
+				task.fail_time = 0.0;
+			}
+		}
+
+		// Always derive from the actual word so the number of monitor lines matches the solve word exactly.
+		target_len := task.target_word.count;
+
+		// Draw the 4 scrambled note words (positions/angles are placeholders you can tweak)
+		task->draw_note_word(window_rect, task.note_1_pos, task.note_1_angle, task.note_1_chars);
+		task->draw_note_word(window_rect, task.note_2_pos, task.note_2_angle, task.note_2_chars);
+		task->draw_note_word(window_rect, task.note_3_pos, task.note_3_angle, task.note_3_chars);
+		task->draw_note_word(window_rect, task.note_4_pos, task.note_4_angle, task.note_4_chars);
+
+		// Monitor lines area (center)
+		lines_area := window_rect->center_rect()->grow_unscaled(h * 0.05, w * 0.18, h * 0.05, w * 0.18);
+		lines_area = lines_area->offset_unscaled(0.0, -h * 0.10);
+
+		// Slight shake on fail for juice
+		if fail_active {
+			shake := sin(get_time() * 40.0) * 6.0;
+			lines_area = lines_area->offset(shake, 0);
+		}
+
+		// Lay out per-letter cells
+		n := target_len;
+		if n < 0 { n = 0; }
+		cell_w := lines_area->width() / (n.(float));
+		cell_h := lines_area->height();
+
+		typed_ts := UI.default_text_settings();
+		typed_ts.size = 78;
+		typed_ts.color = .{1, 1, 1, 1};
+		typed_ts.halign = .CENTER;
+		typed_ts.valign = .CENTER;
+
+		for i: 0..n-1 {
+			x0 := (i.(float)) / (n.(float));
+			x1 := ((i+1).(float)) / (n.(float));
+			cell := lines_area->subrect(x0, 0.0, x1, 1.0);
+			cell = cell->inset_unscaled(cell->height() * 0.15, cell->width() * 0.08, cell->height() * 0.15, cell->width() * 0.08);
+
+			line_rect := cell->bottom_rect()->offset(0,10)->fit_aspect(task.monitor_line_texture.aspect, .KEEP_WIDTH);
+			UI.quad(line_rect, task.monitor_line_texture, .{1, 1, 1, 1});
+
+			if task.input_chars.elements.count > i {
+				letter := task->char_to_string(task.input_chars.elements[i]);
+				UI.text(cell, typed_ts, letter);
+			}
+		}
+
+		// Feedback text
+		if success_state {
+			success_rect := window_rect->cut_top(70)->offset(0, 15);
+			success_ts := UI.default_text_settings();
+			success_ts.size = 56;
+			success_ts.color = .{0.3, 1.0, 0.4, 1.0};
+			success_ts.halign = .CENTER;
+			success_ts.valign = .CENTER;
+			UI.text(success_rect, success_ts, "ANAGRAM SOLVED!");
+			return;
+		}
+
+		if fail_active {
+			fail_rect := window_rect->cut_top(70)->offset(0, 15);
+			fail_ts := UI.default_text_settings();
+			fail_ts.size = 54;
+			fail_ts.color = .{1.0, 0.2, 0.2, 1.0};
+			fail_ts.halign = .CENTER;
+			fail_ts.valign = .CENTER;
+			UI.text(fail_rect, fail_ts, "WRONG! TRY AGAIN");
+		}
+
+		btn_bg := get_asset(Texture_Asset, "$AO/white.png");
+
+		cols := 7;
+		rows := 4;
+		cell_pad := 8.0;
+
+		key_w := pad_rect->width() / (cols.(float));
+		key_h := pad_rect->height() / (rows.(float));
+		btn_w := key_w - (cell_pad * 2.0);
+		btn_h := key_h - (cell_pad * 2.0);
+		if btn_w < 5.0 { btn_w = 5.0; }
+		if btn_h < 5.0 { btn_h = 5.0; }
+
+		btn_ts := UI.default_text_settings();
+		btn_ts.size = 44;
+		btn_ts.color = .{0.08, 0.08, 0.1, 1.0};
+		btn_ts.halign = .CENTER;
+		btn_ts.valign = .CENTER;
+
+		// Special buttons: 26 = backspace, 27 = clear
+		for r: 0..rows-1 {
+			for c: 0..cols-1 {
+				idx := r * cols + c;
+				if idx > 27 {
+					continue;
+				}
+
+				// IMPORTANT: don't use subrect here; derive in pixels from top-left for consistent sizing.
+				x := (c.(float) + 0.5) * key_w;
+				y := (r.(float) + 0.5) * key_h;
+				anchor := pad_rect->top_left_rect()->offset_unscaled(x, -y);
+				cell := anchor->grow_unscaled(btn_h * 0.5, btn_w * 0.5, btn_h * 0.5, btn_w * 0.5);
+
+				UI.push_id("anagram_btn_%", .{idx});
+				defer UI.pop_id();
+
+				interact := UI.button(cell, .{}, .{}, "");
+
+				// Visual
+				col: v4 = .{0.92, 0.92, 0.96, 0.95};
+				if interact.active {
+					col = .{0.75, 0.95, 0.75, 0.95};
+				}
+				if fail_active {
+					col = .{0.95, 0.75, 0.75, 0.95};
+				}
+				UI.quad(cell, btn_bg, col);
+
+				label := "";
+				if idx <= 25 {
+					label = task->char_to_string((65 + idx).(u8));
+				} else if idx == 26 {
+					// ASCII-only UI
+					label = "BKSP";
+				} else if idx == 27 {
+					label = "CLR";
+				}
+				UI.text(cell, btn_ts, label);
+
+				if interact.clicked && !fail_active {
+					// Backspace
+					if idx == 26 {
+						if task.input_chars.elements.count > 0 {
+							pop(&task.input_chars);
+						}
+					} else if idx == 27 {
+						task.input_chars = List(u8).{};
+					} else if idx <= 25 {
+						// Letter
+						if task.input_chars.elements.count < target_len {
+							append(&task.input_chars, (65 + idx).(u8));
+						}
+					}
+				}
+			}
+		}
+	}
+
 	update_task :: proc(using this: Task_Anagram_Puzzle, player: Player) {
 		if !started {
 			return;
 		}
-		log(format_string("Anagram Puzzle Task Updated"));
-		//Instant success
-		complete_attempt(this, player, true);
+		if completed {
+			return;
+		}
+		if !player->is_local_or_server() {
+			return;
+		}
+
+		if anagram_bg_texture == null {
+			init_textures(this);
+		}
+		init_puzzle(this);
+
+		// Success flow
+		if success_time > 0.0 {
+			elapsed := get_time() - success_time;
+			if elapsed >= SUCCESS_DISPLAY_TIME {
+				ui_active = false;
+				complete_attempt(this, player, true);
+				return;
+			}
+			draw_anagram_ui(this, true);
+			return;
+		}
+
+		// If failing, lock briefly and keep drawing
+		if fail_time > 0.0 {
+			if get_time() - fail_time < FAIL_LOCK_TIME {
+				draw_anagram_ui(this, false);
+				return;
+			}
+			fail_time = 0.0;
+		}
+
+		// If input complete, validate
+		if input_chars.elements.count == target_word.count && target_word.count > 0 {
+			if is_input_correct(this) {
+				success_time = get_time();
+				draw_anagram_ui(this, true);
+				return;
+			} else {
+				fail_time = get_time();
+				input_chars = List(u8).{};
+				draw_anagram_ui(this, false);
+				return;
+			}
+		}
+
+		draw_anagram_ui(this, false);
 	}
 }
 
@@ -817,6 +1393,7 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 			return;
 		}
 		rng_initialized = true;
+		refresh_server_rng();
 		target_position.x = rng_range_float(&server_rng, 0.2, 0.8);
 		target_position.y = rng_range_float(&server_rng, 0.2, 0.8);
 		reticle_position = .{0.5, 0.5};
@@ -1055,6 +1632,7 @@ Task_Cypher :: class : Task_Base {
 			return;
 		}
 		rng_initialized = true;
+		refresh_server_rng();
 
 		code_icons = List(int).{};
 		input_icons = List(int).{};
