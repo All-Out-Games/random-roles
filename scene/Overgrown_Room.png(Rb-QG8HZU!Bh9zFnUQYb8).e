@@ -5,8 +5,8 @@
   "name": "Overgrown_Room.png",
   "local_enabled": true,
   "local_position": {
-    "X": 0.6451182365417480,
-    "Y": 0.6884249448776245
+    "X": 0.6411573886871338,
+    "Y": 0.6838786602020264
   },
   "local_rotation": 0,
   "local_scale": {

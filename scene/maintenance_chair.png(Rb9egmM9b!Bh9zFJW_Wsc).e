@@ -5,16 +5,15 @@
   "name": "maintenance_chair.png",
   "local_enabled": true,
   "local_position": {
-    "X": -2.8864078521728516,
-    "Y": -0.8603451251983643
+    "X": -3.0911426544189453,
+    "Y": -0.3455674648284912
   },
   "local_rotation": 0,
   "local_scale": {
     "X": 1,
-    "Y": 1
+    "Y": 0.9999999403953552
   },
-  "previous_sibling": "4906996374388532:1764791006084331700",
-  "parent": "4939461124699768:1765243000412650300"
+  "parent": "1173232285471378:1765953594246698300"
 },
 {
   "cid": 1,
@@ -23,6 +22,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Maintenance/maintenance_chair.png",
-    "depth_offset": -0.2120521068572998
+    "depth_offset": -0.2856164276599884
   }
 }

@@ -23,6 +23,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/grassfloor/grass_color_square.png",
-    "layer": -7
+    "layer": -12
   }
 }

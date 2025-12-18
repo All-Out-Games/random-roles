@@ -5,7 +5,7 @@
   "name": "angle",
   "local_enabled": true,
   "local_position": {
-    "X": 3.9749116897583008,
+    "X": 3.9699673652648926,
     "Y": 0.4894094467163086
   },
   "local_rotation": 0,

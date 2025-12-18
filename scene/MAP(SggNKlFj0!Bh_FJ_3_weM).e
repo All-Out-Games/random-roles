@@ -2,7 +2,7 @@
 403726925825
 5209500228540660 1764870780194850700
 {
-  "name": "Whole Map",
+  "name": "MAP",
   "local_enabled": true,
   "local_position": {
 
