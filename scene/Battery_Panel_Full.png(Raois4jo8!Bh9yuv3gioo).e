@@ -22,6 +22,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Decontamination/Battery_Panel/Battery_Panel_Full.png"
+    "texture": "sprites/phota/Decontamination/Battery_Panel/Battery_Panel_Full.png",
+    "depth_offset": -0.5020014047622681
   }
 }

@@ -24,6 +24,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Teleporter_Room/teleporter_railing_bottom.png",
-    "depth_offset": -0.1686267852783203
+    "depth_offset": -0.1686268001794815
   }
 }

@@ -23,6 +23,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Teleporter_Room/teleporter_room.png",
-    "layer": -4
+    "depth_offset": 2.3516182899475098
   }
 }

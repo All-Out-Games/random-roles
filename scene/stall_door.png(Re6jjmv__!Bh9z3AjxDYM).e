@@ -23,6 +23,11 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Toilets/stall_door.png"
+    "texture": "sprites/phota/Toilets/stall_door.png",
+    "depth_offset": -0.3995895385742188,
+    "tint": {
+      "X": 0.7763844728469849,
+      "Y": 0.7807986140251160
+    }
   }
 }

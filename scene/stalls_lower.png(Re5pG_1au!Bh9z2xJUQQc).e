@@ -23,6 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Toilets/stalls_lower.png"
+    "texture": "sprites/phota/Toilets/stalls_lower.png",
+    "depth_offset": -0.2467971444129944
   }
 }

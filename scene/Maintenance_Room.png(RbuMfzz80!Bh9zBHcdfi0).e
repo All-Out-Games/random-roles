@@ -3,7 +3,7 @@
 4906996374388532 1764791006084331700
 {
   "name": "Maintenance_Room.png",
-  "local_enabled": true,
+  "local_enabled": false,
   "local_position": {
     "X": 0.0703001022338867,
     "Y": 0.0877342224121094
@@ -13,8 +13,7 @@
     "X": 1,
     "Y": 1
   },
-  "previous_sibling": "4907573643999588:1764791158317664100",
-  "next_sibling": "4908046507102043:1764791283017673500",
+  "previous_sibling": "1173232285377634:1765953594246676300",
   "parent": "4939461124699768:1765243000412650300"
 },
 {
@@ -24,6 +23,9 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Maintenance/Maintenance_Room.png",
+    "tint": {
+      "W": 0.6907858252525330
+    },
     "layer": -4
   }
 }

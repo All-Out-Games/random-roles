@@ -2,7 +2,7 @@
 184683593730
 4917318531219963 1764793728168263600
 {
-  "name": "Security",
+  "name": "SECURITY",
   "local_enabled": true,
   "local_position": {
     "X": 1.7038156986236572,
