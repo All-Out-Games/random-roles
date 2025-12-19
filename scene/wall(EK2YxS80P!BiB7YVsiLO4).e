@@ -22,12 +22,12 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Wall/wall_prisonphota.png",
+    "texture": "sprites/phota/Wall/wall_metalpanels.png",
     "depth_offset": -0.8522300720214844,
     "tint": {
-      "X": 0.1088200807571411,
-      "Y": 0.1594805866479874,
-      "Z": 0.1112412810325623
+      "X": 0.0761503502726555,
+      "Y": 0.1179221421480179,
+      "Z": 0.0781467333436012
     },
     "wrap": true
   }

@@ -14,6 +14,7 @@
     "Y": 0.5555555224418640
   },
   "previous_sibling": "1347756588271117:1766017265310935100",
+  "next_sibling": "1738175815176765:1766110396966502900",
   "parent": "1346911037376816:1766017063610943600"
 },
 {
@@ -22,7 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Wall/wall_prisonphota.png",
+    "texture": "sprites/phota/Wall/wall_metalpanels.png",
     "depth_offset": -0.8522300720214844,
     "tint": {
       "X": 0.0509803965687752,

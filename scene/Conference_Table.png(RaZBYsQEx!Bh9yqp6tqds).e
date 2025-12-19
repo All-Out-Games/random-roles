@@ -24,6 +24,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Conference/Conference_Table.png",
-    "depth_offset": 0.5094208717346191
+    "depth_offset": 1.2836912870407104
   }
 }
