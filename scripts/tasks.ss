@@ -254,13 +254,438 @@ Task_Guide_The_Electron :: class : Task_Base {
 }
 
 Task_Catching_Butterflies :: class : Task_Base {
+	// Task state
+	ui_active: bool;
+	layout_initialized: bool;
+	rng_initialized: bool;
+
+	last_update_time: float;
+	success_time: float;
+
+	// Textures
+	backing_texture: Texture_Asset;
+	butterfly_body_texture: Texture_Asset;
+	wing_blue_texture: Texture_Asset;
+	wing_pink_texture: Texture_Asset;
+	wing_orange_texture: Texture_Asset;
+	net_texture: Texture_Asset;
+	net_back_texture: Texture_Asset;
+
+	BUTTERFLY_COUNT :: 6;
+	SUCCESS_DISPLAY_TIME :: 2.5;
+
+	// Butterflies (screen-space within the task window)
+	butterfly_pos: [BUTTERFLY_COUNT]v2;
+	butterfly_vel: [BUTTERFLY_COUNT]v2;
+	butterfly_angle: [BUTTERFLY_COUNT]float;
+	butterfly_color: [BUTTERFLY_COUNT]int; // 0=blue, 1=pink, 2=orange
+	butterfly_phase: [BUTTERFLY_COUNT]float;
+	butterfly_caught: [BUTTERFLY_COUNT]bool;
+	butterfly_catch_time: [BUTTERFLY_COUNT]float;
+
+	// Net physics
+	net_handle_pos: v2;
+	net_handle_prev_pos: v2;
+	net_grab_offset: v2;
+	net_tip_pos: v2;
+	net_tip_vel: v2;
+	net_rest_len: float;
+	net_angle_offset: float; // degrees, 0 = straight up
+	net_angle_vel: float;    // degrees / second
+
+	start_attempt :: proc(using this: Task_Catching_Butterflies, player: Player) {
+		if started {
+			return;
+		}
+		started = true;
+		ui_active = true;
+		layout_initialized = false;
+		rng_initialized = false;
+		last_update_time = 0.0;
+		success_time = 0.0;
+	}
+
+	init_textures :: proc(using this: Task_Catching_Butterflies) {
+		backing_texture = get_asset(Texture_Asset, "sprites/tasks/catching_butterflies/backing.png");
+		butterfly_body_texture = get_asset(Texture_Asset, "sprites/tasks/catching_butterflies/butterfly.png");
+		wing_blue_texture = get_asset(Texture_Asset, "sprites/tasks/catching_butterflies/butterfly_wing_blue.png");
+		wing_pink_texture = get_asset(Texture_Asset, "sprites/tasks/catching_butterflies/butterfly_wing_pink.png");
+		wing_orange_texture = get_asset(Texture_Asset, "sprites/tasks/catching_butterflies/butterfly_wing_orange.png");
+		net_texture = get_asset(Texture_Asset, "sprites/tasks/catching_butterflies/net.png");
+		net_back_texture = get_asset(Texture_Asset, "sprites/tasks/catching_butterflies/net_back.png");
+	}
+
+	rotate_about_point :: proc(using this: Task_Catching_Butterflies, point: v2, degrees: float) -> Matrix4 {
+		return Matrix4.translate(point)->multiply(Matrix4.rotate(degrees, v3.{0.0, 0.0, 1.0})->multiply(Matrix4.translate(-point)));
+	}
+
+	rotate_point_about_pivot :: proc(using this: Task_Catching_Butterflies, point: v2, radians: float, pivot: v2) -> v2 {
+		p := point - pivot;
+		c := cos(radians);
+		s := sin(radians);
+		return pivot + v2.{p.x * c - p.y * s, p.x * s + p.y * c};
+	}
+
+	get_wing_texture :: proc(using this: Task_Catching_Butterflies, color_idx: int) -> Texture_Asset {
+		switch color_idx {
+			case 0: return wing_blue_texture;
+			case 1: return wing_pink_texture;
+			case 2: return wing_orange_texture;
+			case: return wing_blue_texture;
+		}
+	}
+
+	init_layout :: proc(using this: Task_Catching_Butterflies, window_rect: Rect) {
+		if layout_initialized {
+			return;
+		}
+		layout_initialized = true;
+
+		w := window_rect->width();
+		h := window_rect->height();
+
+		// Net starts on the left. IMPORTANT: net_handle_pos is the **bottom-right grab point**
+		// of the handle (anchor/pivot for rotation).
+		net_handle_pos = v2.{window_rect.min.x + w * 0.32, window_rect.min.y + h * 0.18};
+		net_handle_prev_pos = net_handle_pos;
+		net_grab_offset = v2.{0.0, 0.0};
+		net_rest_len = h * 0.3;
+		net_tip_pos = net_handle_pos + v2.{0.0, net_rest_len};
+		net_tip_vel = v2.{0.0, 0.0};
+		net_angle_offset = 0.0;
+		net_angle_vel = 0.0;
+
+		// Butterflies start in the center/right of the window.
+		if !rng_initialized {
+			rng_initialized = true;
+			refresh_server_rng();
+		}
+
+		for i: 0..BUTTERFLY_COUNT-1 {
+			px := window_rect.min.x + w * rng_range_float(&server_rng, 0.42, 0.92);
+			py := window_rect.min.y + h * rng_range_float(&server_rng, 0.18, 0.86);
+			butterfly_pos[i] = v2.{px, py};
+
+			speed := rng_range_float(&server_rng, h * 0.10, h * 0.18);
+			dir_a := rng_range_float(&server_rng, 0.0, 6.2831853);
+			butterfly_vel[i] = v2.{cos(dir_a) * speed, sin(dir_a) * speed};
+			butterfly_angle[i] = to_degrees(atan2(butterfly_vel[i].y, butterfly_vel[i].x));
+			butterfly_color[i] = rng_range_int(&server_rng, 0, 2);
+			butterfly_phase[i] = rng_range_float(&server_rng, 0.0, 10.0);
+			butterfly_caught[i] = false;
+			butterfly_catch_time[i] = 0.0;
+		}
+	}
+
+	draw_butterfly :: proc(
+		using this: Task_Catching_Butterflies,
+		window_rect: Rect,
+		pos: v2,
+		angle_degrees: float,
+		wing_texture: Texture_Asset,
+		flap_phase: float,
+		scale: float,
+		alpha: float
+	) {
+		w := window_rect->width();
+		h := window_rect->height();
+
+		body_h := h * 0.07 * scale;
+		body_w := body_h * butterfly_body_texture.aspect;
+
+		wing_h := body_h * 0.85;
+		wing_w := wing_h * wing_texture.aspect;
+
+		UI.push_matrix(this->rotate_about_point(pos, angle_degrees));
+		defer UI.pop_matrix();
+
+		// Wings (left/right) flap via X scale (imitates a simple 3D fold),
+		// and slide slightly toward the body as they "close".
+		flap01 := 0.5 + 0.5 * sin(get_time() * 30.0 + flap_phase); // 0..1
+		flap_x := 0.1 + 0.9 * flap01; // keep some visible area even when "edge-on"
+
+		base_offset := body_w * 0.55;
+		offset := base_offset * (0.35 + 0.65 * flap_x); // closer when flap_x is small
+
+		left_center := pos + v2.{-offset, 0.0};
+		right_center := pos + v2.{offset, 0.0};
+
+		left_rect := window_rect->bottom_left_rect()->offset_unscaled(left_center.x - window_rect.min.x, left_center.y - window_rect.min.y)->grow_unscaled(wing_h * 0.5, wing_w * 0.5, wing_h * 0.5, wing_w * 0.5);
+		right_rect := window_rect->bottom_left_rect()->offset_unscaled(right_center.x - window_rect.min.x, right_center.y - window_rect.min.y)->grow_unscaled(wing_h * 0.5, wing_w * 0.5, wing_h * 0.5, wing_w * 0.5);
+
+		// Mirror the left wing + apply flap X scaling.
+		// (Rect scaling is around its center; negative X scale flips horizontally.)
+		left_rect = left_rect->scale(-flap_x, 1.0);
+		UI.quad(left_rect, wing_texture, .{1, 1, 1, alpha});
+
+		// Right wing just scales in X (no mirror).
+		right_rect = right_rect->scale(flap_x, 1.0);
+		UI.quad(right_rect, wing_texture, .{1, 1, 1, alpha});
+
+		// Body on top
+		body_rect := window_rect->bottom_left_rect()->offset_unscaled(pos.x - window_rect.min.x, pos.y - window_rect.min.y)->grow_unscaled(body_h * 0.5, body_w * 0.5, body_h * 0.5, body_w * 0.5);
+		UI.quad(body_rect, butterfly_body_texture, .{1, 1, 1, alpha});
+	}
+
 	update_task :: proc(using this: Task_Catching_Butterflies, player: Player) {
 		if !started {
 			return;
 		}
-		log(format_string("Catching Butterflies Task Updated"));
-		//Instant success
-		complete_attempt(this, player, true);
+		if completed {
+			return;
+		}
+		if !player->is_local_or_server() {
+			return;
+		}
+
+		if backing_texture == null {
+			init_textures(this);
+		}
+
+		now := get_time();
+		dt := 0.0;
+		if last_update_time > 0.0 {
+			dt = now - last_update_time;
+			dt = clamp(dt, 0.0, 0.05);
+		}
+		last_update_time = now;
+
+		// Draw modal background + backing
+		screen := UI.get_screen_rect();
+		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
+		UI.quad(screen, bg_texture, .{0.0, 0.0, 0.0, 0.85});
+
+		window_size := 1000.0;
+		window_rect := screen->center_rect()->grow(window_size / 2.0);
+		window_rect = window_rect->fit_aspect(backing_texture.aspect, .KEEP_HEIGHT);
+		UI.quad(window_rect, backing_texture, .{1, 1, 1, 1});
+
+		init_layout(this, window_rect);
+
+		// Success flow
+		if success_time > 0.0 {
+			elapsed := now - success_time;
+			if elapsed >= SUCCESS_DISPLAY_TIME {
+				ui_active = false;
+				complete_attempt(this, player, true);
+				return;
+			}
+		}
+
+		w := window_rect->width();
+		h := window_rect->height();
+
+		// --- Net input (grab handle) ---
+		// Make this fairly generous so it's easy to grab on mobile / with fat fingers,
+		// and so it matches the visible handle even if the pivot isn't pixel-perfect.
+		grab_size := h * 0.2;
+		// net_handle_pos is bottom-right, so build a rect whose bottom-right is at that point.
+		handle_rect := window_rect->bottom_left_rect()
+			->offset_unscaled(net_handle_pos.x - window_rect.min.x, net_handle_pos.y - window_rect.min.y)
+			->grow_unscaled(grab_size/2.0, 0.0, 0.0, grab_size/2.0);
+
+		UI.push_id("catching_butterflies_net_handle");
+		defer UI.pop_id();
+		interact := UI.button(handle_rect, .{}, .{}, "");
+
+		if interact.clicked {
+			net_grab_offset = net_handle_pos - interact.mouse_position;
+		}
+
+		if interact.active {
+			// Clamp handle to a reasonable region inside the window (left-ish).
+			// Since this is the bottom-right anchor, keep it away from the far-left edge
+			// so the net (which extends left) doesn't go off-screen too easily.
+			min_x := window_rect.min.x + w * 0.15;
+			max_x := window_rect.max.x - w * 0.02;
+			min_y := window_rect.min.y + h * 0.02;
+			max_y := window_rect.min.y + h * 0.65;
+
+			desired := interact.mouse_position + net_grab_offset;
+			net_handle_pos.x = clamp(desired.x, min_x, max_x);
+			net_handle_pos.y = clamp(desired.y, min_y, max_y);
+		}
+
+		// --- Net fake physics (tip spring + inertia) ---
+		handle_vel := v2.{0.0, 0.0};
+		if dt > 0.0 {
+			handle_vel = (net_handle_pos - net_handle_prev_pos) * (1.0 / dt);
+		}
+		net_handle_prev_pos = net_handle_pos;
+
+		// Angle spring: ONLY driven by X movement so it feels consistent (no weird jumps from Y).
+		// This also avoids computing angle from a direction vector that can snap when handle/tip align.
+		drive_vx := handle_vel.x;
+		if drive_vx > 3000.0 { drive_vx = 3000.0; }
+		if drive_vx < -3000.0 { drive_vx = -3000.0; }
+
+		// Convert X velocity into a desired lean angle, then spring toward it.
+		// Move right => net leans left (tip lags), so invert sign.
+		desired_angle := -drive_vx * 0.02; // px/s -> degrees (tune feel)
+
+		angle_spring := 120.0; // stronger = snappier response
+		angle_damp := 18.0;    // higher = less oscillation
+
+		angle_acc := (desired_angle - net_angle_offset) * angle_spring - (net_angle_vel * angle_damp);
+		net_angle_vel = net_angle_vel + angle_acc * dt;
+		net_angle_offset = net_angle_offset + net_angle_vel * dt;
+
+		max_angle := 40.0;
+		if net_angle_offset > max_angle {
+			net_angle_offset = max_angle;
+			if net_angle_vel > 0.0 { net_angle_vel = 0.0; }
+		}
+		if net_angle_offset < -max_angle {
+			net_angle_offset = -max_angle;
+			if net_angle_vel < 0.0 { net_angle_vel = 0.0; }
+		}
+
+		// Derived net transform
+		net_angle := net_angle_offset; // degrees, 0 = straight up
+		rad := to_radians(net_angle);
+		// Rotate (0,1) by rad: (x', y') = (-sin(rad), cos(rad))
+		net_dir := v2.{-sin(rad), cos(rad)};
+
+		// IMPORTANT: The net should feel like a rigid tool. Use the springy tip ONLY for direction,
+		// not for changing the rendered size.
+		net_len := net_rest_len;
+		net_w := net_len * net_texture.aspect;
+		base := window_rect->bottom_left_rect()->offset_unscaled(net_handle_pos.x - window_rect.min.x, net_handle_pos.y - window_rect.min.y);
+		// net_handle_pos is bottom-right => net extends left from the anchor (and up from the anchor).
+		net_rect := base->grow_unscaled(net_len, 0.0, 0.0, net_w);
+
+		// Net opening for catching (near the top)
+		// IMPORTANT: catch position should match the visible mouth of the net.
+		// Since the net rect extends UP and LEFT from the bottom-right handle pivot, the "mouth"
+		// is near the top-left corner in local (unrotated) space, then rotated about the pivot.
+		mouth_local := net_handle_pos + v2.{0, net_len * 0.8};
+		hoop_center := this->rotate_point_about_pivot(mouth_local, rad, net_handle_pos);
+
+		// Only catch if the player is actually moving/sweeping the net a bit (X-only).
+		min_sweep_vx := h * 0.12; // px/s
+		net_sweeping := abs(handle_vel.x) >= min_sweep_vx;
+
+		hoop_radius := net_w * 0.18;
+		if hoop_radius < h * 0.05 {
+			hoop_radius = h * 0.05;
+		}
+
+		// Draw net back first (so butterflies appear "inside" when caught)
+		UI.push_matrix(this->rotate_about_point(net_handle_pos, net_angle));
+		{
+			//back net is only behind the top of the net (net img is net + handle, back is only net)
+			back_rect := net_rect->inset_unscaled(0, 0, net_rect->height() * 0.4, net_rect->width() * 0.4);
+			back_rect = back_rect->fit_aspect(net_back_texture.aspect, .KEEP_HEIGHT);
+			UI.quad(back_rect, net_back_texture, .{1, 1, 1, 1});
+		}
+		UI.pop_matrix();
+
+		// --- Butterflies update + draw ---
+		flight_min_x := window_rect.min.x + w * 0.38;
+		flight_max_x := window_rect.max.x - w * 0.06;
+		flight_min_y := window_rect.min.y + h * 0.14;
+		flight_max_y := window_rect.max.y - h * 0.12;
+
+		all_caught := true;
+		for i: 0..BUTTERFLY_COUNT-1 {
+			if !butterfly_caught[i] {
+				all_caught = false;
+			}
+		}
+
+		if success_time <= 0.0 {
+			// Only update physics while not in success display
+			for i: 0..BUTTERFLY_COUNT-1 {
+				if butterfly_caught[i] {
+					continue;
+				}
+
+				p := butterfly_pos[i];
+				v := butterfly_vel[i];
+
+				p = p + v * dt;
+
+				// Soft bounce with a little randomness so it doesn't look robotic.
+				if p.x < flight_min_x { p.x = flight_min_x; v.x = abs(v.x); }
+				if p.x > flight_max_x { p.x = flight_max_x; v.x = -abs(v.x); }
+				if p.y < flight_min_y { p.y = flight_min_y; v.y = abs(v.y); }
+				if p.y > flight_max_y { p.y = flight_max_y; v.y = -abs(v.y); }
+
+				// Keep speed in a pleasant range.
+				spd := sqrt(v.x * v.x + v.y * v.y);
+				min_spd := h * 0.08;
+				max_spd := h * 0.20;
+				if spd < min_spd && spd > 0.001 {
+					v = v * (min_spd / spd);
+				}
+				if spd > max_spd {
+					v = v * (max_spd / spd);
+				}
+
+				butterfly_pos[i] = p;
+				butterfly_vel[i] = v;
+				butterfly_angle[i] = 0;
+
+				// Catch check
+				cdx := p.x - hoop_center.x;
+				cdy := p.y - hoop_center.y;
+				if net_sweeping && (cdx * cdx + cdy * cdy) <= (hoop_radius * hoop_radius) {
+					butterfly_caught[i] = true;
+					butterfly_catch_time[i] = now;
+				}
+			}
+		}
+
+		// Draw butterflies (including a brief "caught inside net" moment)
+		for i: 0..BUTTERFLY_COUNT-1 {
+			wing_tex := get_wing_texture(this, butterfly_color[i]);
+			pos := butterfly_pos[i];
+			ang := butterfly_angle[i];
+			alpha := 1.0;
+
+			if butterfly_caught[i] {
+				elapsed := now - butterfly_catch_time[i];
+				if elapsed > 0.35 {
+					continue;
+				}
+				// Pull it just inside the hoop.
+				pos = hoop_center - net_dir * (hoop_radius * 0.35);
+				alpha = clamp(1.0 - (elapsed / 0.35), 0.0, 1.0);
+				ang = net_angle;
+			}
+
+			draw_butterfly(this, window_rect, pos, ang, wing_tex, butterfly_phase[i], 1.0, alpha);
+		}
+
+		// Net front on top
+		UI.push_matrix(this->rotate_about_point(net_handle_pos, net_angle));
+		{
+			UI.quad(net_rect, net_texture, .{1, 1, 1, 1});
+		}
+		UI.pop_matrix();
+
+		// Completion check + success text
+		if success_time <= 0.0 {
+			all_caught = true;
+			for i: 0..BUTTERFLY_COUNT-1 {
+				if !butterfly_caught[i] {
+					all_caught = false;
+				}
+			}
+			if all_caught {
+				success_time = now;
+			}
+		}
+
+		if success_time > 0.0 {
+			success_rect := window_rect->cut_top(60)->offset(0, 10);
+			success_ts := UI.default_text_settings();
+			success_ts.size = 54;
+			success_ts.color = .{0.3, 1.0, 0.4, 1.0};
+			success_ts.halign = .CENTER;
+			success_ts.valign = .CENTER;
+			UI.text(success_rect, success_ts, "ALL BUTTERFLIES CAUGHT!");
+		}
 	}
 }
 
