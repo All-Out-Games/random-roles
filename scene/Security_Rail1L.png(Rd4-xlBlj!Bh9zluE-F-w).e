@@ -14,6 +14,7 @@
     "Y": 1
   },
   "previous_sibling": "4916565310083196:1764793529534277400",
+  "next_sibling": "50672292345948:1766173137141371100",
   "parent": "1363153062845562:1766020938027512700"
 },
 {
@@ -31,6 +32,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Polygon_Collider",
   "data": {
+    "make_navmesh_loop": true,
     "points": [
       {
         "X": -0.6353011131286621,

@@ -25,4 +25,21 @@
     "texture": "sprites/phota/Props/sink_1.png",
     "depth_offset": -0.3145275115966797
   }
+},
+{
+  "cid": 2,
+  "aoid": "28363571263689:1766167815572109800",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Box_Collider",
+  "data": {
+    "make_navmesh_loop": true,
+    "size": {
+      "X": 0.3521976470947266,
+      "Y": 0.2969169616699219
+    },
+    "offset": {
+      "X": -0.0046052932739258,
+      "Y": -0.2625045776367188
+    }
+  }
 }

@@ -14,6 +14,7 @@
     "Y": 1
   },
   "previous_sibling": "1363153062773742:1766020938027495900",
+  "next_sibling": "29915794294052:1765633263510292500",
   "parent": "4917318531219963:1764793728168263600"
 },
 {
@@ -23,6 +24,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Security/Security.png",
-    "layer": -4
+    "depth_offset": 8.2359275817871094
   }
 }

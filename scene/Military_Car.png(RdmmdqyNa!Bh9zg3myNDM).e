@@ -5,7 +5,7 @@
   "name": "Military_Car.png",
   "local_enabled": true,
   "local_position": {
-    "X": 7.0223569869995117,
+    "X": 7.0223560333251953,
     "Y": 3.3762822151184082
   },
   "local_rotation": 0,
@@ -13,8 +13,8 @@
     "X": 1,
     "Y": 1
   },
-  "previous_sibling": "5222820848256718:1764874293011549700",
-  "parent": "4947959859966242:1765245027723285600"
+  "previous_sibling": "49783328975479:1766172925086178100",
+  "parent": "1399168867969350:1766029529334822000"
 },
 {
   "cid": 1,
@@ -29,6 +29,7 @@
 {
   "cid": 2,
   "aoid": "5253486139577073:1764882379838569000",
+  "enabled": false,
   "component_type": "Internal_Component",
   "internal_component_type": "Polygon_Collider",
   "data": {

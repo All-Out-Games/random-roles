@@ -5,8 +5,8 @@
   "name": "gradient_bottom.png",
   "local_enabled": true,
   "local_position": {
-    "X": -0.4036445617675781,
-    "Y": -2.8291997909545898
+    "X": -0.8230420351028442,
+    "Y": -2.7293434143066406
   },
   "local_rotation": 270,
   "local_scale": {

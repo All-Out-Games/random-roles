@@ -5,12 +5,12 @@
   "name": "frame_octagon_lefttop.png",
   "local_enabled": true,
   "local_position": {
-    "X": 0.0678851157426834,
+    "X": 0.1436020284891129,
     "Y": -18.4663562774658203
   },
   "local_rotation": 0,
   "local_scale": {
-    "X": 15.0155467987060547,
+    "X": 13.1455459594726562,
     "Y": 1.9305560588836670
   },
   "previous_sibling": "1323603332380926:1766011503728119900",
