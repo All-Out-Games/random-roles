@@ -13,9 +13,25 @@ Kill_Ability :: class : Ability_Base {
     get_closest_alive_player :: proc(instance: Kill_Ability, player: Player) -> Player {
         finder := make_finder(Player, player.entity.world_position, 5.0);
         for i: 0..players.elements.count-1 {
-            if(players.elements[i].player_state == Player_State.ALIVE && players.elements[i] != player) {
-                finder->check(players.elements[i], players.elements[i].entity.world_position);
+            target := players.elements[i];
+            if target == null {
+                continue;
             }
+            if !#alive(target.entity) {
+                continue;
+            }
+            if target == player {
+                continue;
+            }
+            if target.player_state != Player_State.ALIVE {
+                continue;
+            }
+
+            // Traitors shouldn't be able to melee-kill other traitors.
+            if player.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR {
+                continue;
+            }
+            finder->check(target, target.entity.world_position);
         }
         return finder.closest;
     }

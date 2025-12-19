@@ -1,6 +1,6 @@
 import "core:core.ss"
 
-POPUP_DURATION: float : 5.0;
+POPUP_DURATION: float : 2.0;
 SCROLL_DURATION: float : 2.0;
 
 Body_Found_Popup :: class {
@@ -271,7 +271,7 @@ render_popup :: proc(using popup: Intro_Popup, elapsed: float) {
 	UI.text(label_rect, label_ts, "You are a...");
 }
 
-VICTORY_POPUP_DURATION: float : 7.0;
+VICTORY_POPUP_DURATION: float : 2;
 MAX_WINNERS_DISPLAYED: int : 6;
 
 Victory_Popup :: class {

@@ -27,6 +27,18 @@ Task_Base :: class {
 			player->Notify("You failed the task!");
 		}
 	}
+
+	// Called when we need to forcibly close a task (e.g. voting starts, or player dies).
+	// Default behavior is to allow the task to be started again later.
+	cancel_attempt :: proc(using this: Task_Base, player: Player) {
+		if !started {
+			return;
+		}
+		if completed {
+			return;
+		}
+		started = false;
+	}
 }
 
 get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) {
@@ -102,6 +114,20 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 }
 
 update_tasks :: proc(player: Player) {
+	// Close any in-progress task UI when leaving gameplay (meeting/voting/etc),
+	// or when the player dies.
+	if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
+		if player->is_local_or_server() {
+			for i: 0..player.active_tasks.elements.count-1 {
+				task := player.active_tasks.elements[i];
+				if task.started && !task.completed {
+					task->cancel_attempt(player);
+				}
+			}
+		}
+		return;
+	}
+
 	for i: 0..player.active_tasks.elements.count-1 {
 		//log("%", .{#object_type(player.active_tasks.elements[i])});
 		switch #object_type(player.active_tasks.elements[i]) {
@@ -1732,6 +1758,22 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 	
 	ALIGNMENT_THRESHOLD :: 0.05;  // How close reticle needs to be to target
 	SUCCESS_DISPLAY_TIME :: 2.5;  // How long to show thumbs up before closing
+
+	cancel_attempt :: proc(using this: Task_Calibrate_Teleporter, player: Player) {
+		if !started {
+			return;
+		}
+		if completed {
+			return;
+		}
+
+		// Reset state so reopening behaves like a fresh attempt.
+		started = false;
+		ui_active = false;
+		rng_initialized = false;
+		success_time = 0.0;
+		task_complete_displayed = false;
+	}
 	
 	init_textures :: proc(using this: Task_Calibrate_Teleporter) {
 		window_texture = get_asset(Texture_Asset, "sprites/tasks/calibrate_teleporter/window.png");

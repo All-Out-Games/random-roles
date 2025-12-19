@@ -16,6 +16,44 @@ Player :: class : Player_Base {
 
     active_tasks : List(Task_Base);
 
+    update_freeze_reasons :: proc(using this: Player) {
+        // Prevent player movement while global popups are on-screen, and while the local
+        // player is actively working on a task.
+        //
+        // We use separate reasons so popups and tasks don't accidentally unfreeze each other.
+        should_freeze_for_popup :=
+            game_state == Game_State.ANIM_INTRO ||
+            game_state == Game_State.ANIM_VICTORY;
+
+        if should_freeze_for_popup {
+            this->add_disable_movement_input_reason("popup");
+        } else {
+            this->remove_disable_movement_input_reason("popup");
+        }
+
+        should_check_tasks :=
+            game_state == Game_State.INGAME &&
+            this.player_state == Player_State.ALIVE &&
+            this.player_type == Player_Type.CIVILIAN;
+
+        has_task_in_progress := false;
+        if should_check_tasks {
+            for i: 0..this.active_tasks.elements.count-1 {
+                task := this.active_tasks.elements[i];
+                if task.started && !task.completed {
+                    has_task_in_progress = true;
+                    break;
+                }
+            }
+        }
+
+        if has_task_in_progress {
+            this->add_disable_movement_input_reason("task");
+        } else {
+            this->remove_disable_movement_input_reason("task");
+        }
+    }
+
     Notify :: proc(using this: Player, message: string) {
         if this->is_local_or_server() {
             Notifier.notify(message);
@@ -48,6 +86,7 @@ Player :: class : Player_Base {
 
     ao_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
+            this->update_freeze_reasons();
             this->setup_player_colors();
             update_tasks_ui(this);
             if game_state == Game_State.ANIM_INTRO {
@@ -59,52 +98,109 @@ Player :: class : Player_Base {
     }
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
-        if this->is_local_or_server() && this.player_state == Player_State.ALIVE {
-            abilityIndex := 0;
-            
-            if game_state == Game_State.VOTING {
-                // During voting, only show the vote ability
-                draw_ability_button(this, Vote_Ability, abilityIndex);
-            } else if game_state == Game_State.INGAME {
-                // During gameplay, show abilities based on type and role
-                if player_type == Player_Type.TRAITOR {
-                    draw_ability_button(this, Kill_Ability, abilityIndex);
-                    abilityIndex += 1;
-                    
-                    // Pirate gets Shoot and Black Flag abilities
-                    if player_role == Player_Role.PIRATE {
+        if this->is_local_or_server() {
+            if this.player_state == Player_State.ALIVE {
+                abilityIndex := 0;
+                
+                if game_state == Game_State.VOTING {
+                    // During voting, only show the vote ability
+                    draw_ability_button(this, Vote_Ability, abilityIndex);
+                } else if game_state == Game_State.INGAME {
+                    // During gameplay, show abilities based on type and role
+                    if player_type == Player_Type.TRAITOR {
+                        draw_ability_button(this, Kill_Ability, abilityIndex);
+                        abilityIndex += 1;
+                        
+                        // Pirate gets Shoot and Black Flag abilities
+                        if player_role == Player_Role.PIRATE {
+                            draw_ability_button(this, Shoot_Ability, abilityIndex);
+                            abilityIndex += 1;
+                            draw_ability_button(this, Black_Flag_Ability, abilityIndex);
+                            abilityIndex += 1;
+                        }
+                    }
+                    if player_type == Player_Type.CIVILIAN && player_role == Player_Role.SHERIFF {
                         draw_ability_button(this, Shoot_Ability, abilityIndex);
                         abilityIndex += 1;
-                        draw_ability_button(this, Black_Flag_Ability, abilityIndex);
-                        abilityIndex += 1;
+                    }
+                    draw_ability_button(this, Report_Ability, abilityIndex);
+                }
+            } else if game_state == Game_State.LOBBY {
+                // Lobby-only UI must be driven from a player update.
+                // Offer a "Force Start" button when we don't have enough players yet.
+                if !waiting_for_restart && players.elements.count < MIN_NUMBER_OF_PLAYERS {
+                    screen := UI.get_safe_screen_rect();
+                    bg_texture := get_asset(Texture_Asset, "$AO/white.png");
+
+                    // Use the 4-arg `subrect` overload for a stable layout (no offset ordering ambiguity).
+                    // Bottom banner panel that stays inside SafeRect across aspect ratios.
+                    panel_rect := screen->subrect(0.15, 0.05, 0.85, 0.27);
+                    UI.quad(panel_rect, bg_texture, .{0, 0, 0, 0.7});
+
+                    content := panel_rect->inset(12, 12, 12, 12);
+
+                    title_rect := content->cut_top(38);
+                    title_ts := UI.default_text_settings();
+                    title_ts.size = 34;
+                    title_ts.color = .{1, 1, 1, 1};
+                    title_ts.halign = .CENTER;
+                    title_ts.valign = .CENTER;
+                    UI.text(title_rect, title_ts, "WAITING FOR PLAYERS");
+
+                    info_rect := content->cut_top(28);
+                    info_ts := UI.default_text_settings();
+                    info_ts.size = 28;
+                    info_ts.color = .{0.9, 0.9, 0.9, 1};
+                    info_ts.halign = .CENTER;
+                    info_ts.valign = .CENTER;
+                    info_text := format_string("Players: %/%", .{players.elements.count, MIN_NUMBER_OF_PLAYERS});
+                    UI.text(info_rect, info_ts, info_text);
+
+                    warn_rect := content->cut_top(22);
+                    warn_ts := UI.default_text_settings();
+                    warn_ts.size = 22;
+                    warn_ts.color = .{1, 0.8, 0.2, 1};
+                    warn_ts.halign = .CENTER;
+                    warn_ts.valign = .CENTER;
+                    UI.text(warn_rect, warn_ts, "Force Start will begin with fewer players");
+
+                    start_rect := content->cut_bottom(52)->inset(6, 20, 6, 20);
+                    bs := UI.default_button_settings();
+                    start_ts := UI.default_text_settings();
+                    start_ts.size = 36;
+                    start_ts.color = .{1, 1, 1, 1};
+                    start_ts.halign = .CENTER;
+                    start_ts.valign = .CENTER;
+
+                    UI.push_id("force_start_lobby");
+                    defer UI.pop_id();
+                    if UI.button(start_rect, bs, start_ts, "FORCE START").clicked {
+                        force_start_lobby_game();
                     }
                 }
-                if player_type == Player_Type.CIVILIAN && player_role == Player_Role.SHERIFF {
-                    draw_ability_button(this, Shoot_Ability, abilityIndex);
-                    abilityIndex += 1;
-                }
-                draw_ability_button(this, Report_Ability, abilityIndex);
             }
         }
     }
 
     setup_player_colors :: proc(using this: Player) {
-        if player_type != Player_Type.TRAITOR || player_state != Player_State.ALIVE {
-            //Non Traitors & dead / lobby / spectators don't know who is who, no colors to set!
-            foreach player: component_iterator(Player) {
-                player.do_name_color_override = false;
-            }
+        if player_state != Player_State.ALIVE {
+            clear_player_colors(this);
             return;
         }
+        isTraitor := player_type == Player_Type.TRAITOR;
         foreach player: component_iterator(Player) {
-            if player != this {
-                player.do_name_color_override = true;
-                if(this.player_type == player.player_type) {
-                    player.name_color_override = .{0, 1, 0, 1};
-                } else {
-                    player.name_color_override = .{1, 0, 0, 1};
-                }
+            player.do_name_color_override = true;
+            if(isTraitor && this.player_type == player.player_type) {
+                player.name_color_override = .{1, 0, 0, 1};
+            } else {
+                player.name_color_override = .{1, 1, 1, 1};
             }
+        }
+    }
+
+    clear_player_colors :: proc(using this: Player) {
+        foreach player: component_iterator(Player) {
+            player.do_name_color_override = false;
         }
     }
 

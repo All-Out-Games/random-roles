@@ -332,6 +332,18 @@ ao_update_lobby :: proc(dt: float) {
 	}
 }
 
+force_start_lobby_game :: proc() {
+	// Safety: don't start with zero players (assign logic assumes >= 1).
+	if players.elements.count <= 0 {
+		return;
+	}
+
+	// Reset any pending countdown state, then reuse the normal start flow.
+	countdown_active = false;
+	countdown_start_time = 0.0;
+	assign_players_to_types();
+}
+
 ao_update_ingame :: proc(dt: float) {
 	alive_count := get_alive_player_count();
 	civilian_count := get_player_count(Player_Type.CIVILIAN);

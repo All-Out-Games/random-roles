@@ -100,10 +100,12 @@ World_References :: class : Component {
         // Calculate position in circle around voting spawn
         total_players := players.elements.count.(f32);
         if total_players == 0.0 { total_players = 1.0; }
-        radius := 2.0;
+        radius := 3.0;
         angle := (player_index / total_players) * 2.0 * PI;
         offset := v2.{cos(angle) * radius, sin(angle) * radius};
         
+        nav_point: v2;
+        try_find_closest_point_on_navmesh(voting_spawn.world_position + offset, &nav_point, null);
         set_local_position(player.entity, voting_spawn.world_position + offset);
     }
 
