@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/Shapes/square.png",
-    "depth_offset": 0.1247978881001472,
+    "depth_offset": -0.3933243751525879,
     "tint": {
       "X": 0.0039215683937073,
       "Y": 0.0039215683937073,

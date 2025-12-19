@@ -2,7 +2,7 @@
 30064771073
 4900994895089259 1764789423417973300
 {
-  "name": "Conference",
+  "name": "CONFERENCE",
   "local_enabled": true,
   "local_position": {
     "X": 6.6673984527587891,

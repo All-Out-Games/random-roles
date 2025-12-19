@@ -5,8 +5,8 @@
   "name": "square",
   "local_enabled": true,
   "local_position": {
-    "X": -2.4844374656677246,
-    "Y": 5.3853640556335449
+    "X": -2.4791138172149658,
+    "Y": 5.3711686134338379
   },
   "local_rotation": 309.7329711914062500,
   "local_scale": {

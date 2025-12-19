@@ -24,6 +24,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Server_Room/Server_Stacks/server_3.png",
-    "depth_offset": -0.5046958923339844
+    "depth_offset": -0.5635800361633301
   }
 }

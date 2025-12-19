@@ -2,7 +2,7 @@
 25769803777
 4900841973529292 1764789383090614400
 {
-  "name": "Comms",
+  "name": "COMMS",
   "local_enabled": true,
   "local_position": {
     "X": 23.9119834899902344,

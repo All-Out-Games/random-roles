@@ -5,12 +5,12 @@
   "name": "square",
   "local_enabled": true,
   "local_position": {
-    "X": -3.4408943653106689,
+    "X": -3.4250233173370361,
     "Y": -9.6997442245483398
   },
   "local_rotation": 0.0000015367921833,
   "local_scale": {
-    "X": 2.6082463264465332,
+    "X": 2.6282467842102051,
     "Y": 3.8621220588684082
   },
   "previous_sibling": "1341587340315947:1766015793681886000",
@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/Shapes/square.png",
-    "depth_offset": -2.2801129817962646,
+    "depth_offset": -0.5564019680023193,
     "tint": {
       "X": 0.0039215683937073,
       "Y": 0.0039215683937073,

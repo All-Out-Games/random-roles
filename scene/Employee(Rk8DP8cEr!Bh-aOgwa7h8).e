@@ -2,7 +2,7 @@
 450971566081
 4947530935812395 1765244925406591100
 {
-  "name": "Employee",
+  "name": "EMPLOYEE",
   "local_enabled": true,
   "local_position": {
     "X": -6.9889268875122070,

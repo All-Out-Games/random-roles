@@ -23,6 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Server_Room/Server_objects.png"
+    "texture": "sprites/phota/Server_Room/Server_objects.png",
+    "depth_offset": -1.2660026550292969
   }
 }

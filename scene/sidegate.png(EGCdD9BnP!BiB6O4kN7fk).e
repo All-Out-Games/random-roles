@@ -22,6 +22,10 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Props/sidegate.png",
-    "depth_offset": -2.7857170104980469
+    "depth_offset": -2.7857170104980469,
+    "tint": {
+      "Y": 0.7521874904632568,
+      "Z": 0.4472311139106750
+    }
   }
 }

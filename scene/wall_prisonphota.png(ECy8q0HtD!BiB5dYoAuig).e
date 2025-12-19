@@ -13,6 +13,7 @@
     "X": 6.9855566024780273,
     "Y": 0.5555555820465088
   },
+  "next_sibling": "1723150657258410:1766106812824801600",
   "parent": "1119654245956923:1765940813596622400"
 },
 {
@@ -21,12 +22,12 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Wall/wall_prisonphota.png",
+    "texture": "sprites/phota/Wall/wall_metalpanels.png",
     "depth_offset": -0.8522300720214844,
     "tint": {
-      "X": 0,
-      "Y": 0.1023377254605293,
-      "Z": 0.0973936393857002
+      "X": 0.0261076018214226,
+      "Y": 0.0707806274294853,
+      "Z": 0.0867533087730408
     },
     "wrap": true
   }

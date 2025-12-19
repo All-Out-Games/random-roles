@@ -2,7 +2,7 @@
 433791696897
 4938466751872997 1765242763212344000
 {
-  "name": "Teleporter",
+  "name": "TELEPORTER",
   "local_enabled": true,
   "local_position": {
     "X": -24.8068199157714844,

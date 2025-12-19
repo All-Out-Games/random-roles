@@ -1,0 +1,28 @@
+13
+1821066133505
+1395883616063691 1766028745661970300
+{
+  "name": "conference_wall_R.png",
+  "local_enabled": true,
+  "local_position": {
+    "X": 2.6301558017730713,
+    "Y": -4.5071344375610352
+  },
+  "local_rotation": 0,
+  "local_scale": {
+    "X": 1,
+    "Y": 1
+  },
+  "previous_sibling": "1395865510247238:1766028741342960400",
+  "parent": "1394243168107425:1766028354345089700"
+},
+{
+  "cid": 1,
+  "aoid": "1395883616111697:1766028745661981700",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Sprite_Renderer",
+  "data": {
+    "texture": "sprites/phota/Conference/conference_wall_R.png",
+    "depth_offset": -0.5831066966056824
+  }
+}

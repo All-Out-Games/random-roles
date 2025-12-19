@@ -5,8 +5,8 @@
   "name": "frame_octagon_rightbot.png",
   "local_enabled": true,
   "local_position": {
-    "X": -42.8673744201660156,
-    "Y": -7.3166584968566895
+    "X": -3.2680816650390625,
+    "Y": -32.1919708251953125
   },
   "local_rotation": 0,
   "local_scale": {

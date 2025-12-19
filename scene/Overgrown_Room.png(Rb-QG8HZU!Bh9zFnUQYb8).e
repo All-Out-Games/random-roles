@@ -13,7 +13,7 @@
     "X": 1,
     "Y": 1
   },
-  "previous_sibling": "4913549591393918:1764792734250935000",
+  "previous_sibling": "1346911037502984:1766017063610973600",
   "parent": "4913672453501837:1764792766651234400"
 },
 {
@@ -23,6 +23,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Overgrown Room/Overgrown_Room.png",
-    "layer": -4
+    "layer": -5
   }
 }

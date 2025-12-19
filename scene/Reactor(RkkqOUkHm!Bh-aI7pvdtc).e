@@ -2,7 +2,7 @@
 446676598785
 4945923517071846 1765244541968702300
 {
-  "name": "Reactor",
+  "name": "REACTOR",
   "local_enabled": true,
   "local_position": {
     "X": 23.7789802551269531,

@@ -2,7 +2,7 @@
 455266533377
 4947959859966242 1765245027723285600
 {
-  "name": "Outside",
+  "name": "OUTSIDE",
   "local_enabled": true,
   "local_position": {
     "X": 10.9135828018188477,

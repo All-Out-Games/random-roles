@@ -2,7 +2,7 @@
 438086664193
 4938837055845497 1765242851545626400
 {
-  "name": "Server",
+  "name": "SERVER",
   "local_enabled": true,
   "local_position": {
     "X": 14.8479995727539062,
