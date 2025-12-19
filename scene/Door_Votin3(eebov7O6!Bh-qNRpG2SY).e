@@ -5,10 +5,10 @@
   "name": "Door_Votin3",
   "local_enabled": true,
   "local_position": {
-    "X": 47.5592536926269531,
-    "Y": -3.7522463798522949
+    "X": 47.4689979553222656,
+    "Y": -3.6920752525329590
   },
-  "local_rotation": 0,
+  "local_rotation": -6.7038717269897461,
   "local_scale": {
     "X": 1,
     "Y": 1
