@@ -2,7 +2,7 @@
 4011499454465
 1913268553327308 1766152164060585500
 {
-  "name": "New Entity",
+  "name": "---COLLIDER---",
   "local_enabled": true,
   "local_position": {
     "X": 11.5166673660278320,
@@ -13,8 +13,8 @@
     "X": 0.5555555820465088,
     "Y": 0.5555555820465088
   },
-  "previous_sibling": "4948009676268556:1765245039606597000",
-  "next_sibling": "5254001531922881:1764882515754079900",
+  "previous_sibling": "4885825189719322:1764785422973888800",
+  "next_sibling": "1331404259329211:1766013364582277800",
   "parent": "5209500228540660:1764870780194850700"
 },
 {
@@ -23,6 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
       {
@@ -1038,6 +1039,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
       {
@@ -1137,6 +1139,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
       {
@@ -1180,6 +1183,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
       {
@@ -1267,6 +1271,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
       {
@@ -1310,6 +1315,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
       {
@@ -1481,6 +1487,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
       {
@@ -1528,6 +1535,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
       {
