@@ -341,13 +341,32 @@ BLACK_FLAG_DURATION :: 30.0;
 Black_Flag :: class : Component {
     owner_entity: Entity;
     spawn_time: float;
+    switched_to_idle: bool;
     
     ao_start :: proc(using this: Black_Flag) {
         spawn_time = get_time();
+        switched_to_idle = false;
+
+        // Kick off the flag animation (if the entity has a spine animator)
+        spine_anim := entity->get_component(Spine_Animator);
+        if spine_anim != null {
+            // Start with appear, then we'll switch to idle shortly after.
+            spine_anim.instance->set_animation("appear", false, 0);
+        }
     }
     
     ao_update :: proc(using this: Black_Flag, dt: float) {
         time_alive := get_time() - spawn_time;
+
+        // Transition to idle after a short delay (the rig has "appear" and "idle").
+        // We don't have a clean way to query animation duration here, so keep it simple.
+        if !switched_to_idle && time_alive > 0.75 {
+            spine_anim := entity->get_component(Spine_Animator);
+            if spine_anim != null {
+                spine_anim.instance->set_animation("idle", true, 0);
+            }
+            switched_to_idle = true;
+        }
         
         // Destroy after duration
         if time_alive >= BLACK_FLAG_DURATION {
@@ -381,19 +400,10 @@ draw_fog_overlay :: proc(player: Player) {
     UI.push_layer(1000);
     defer UI.pop_layer();
     
-    // Draw fog in 4 rectangles around the center hole
-    fog_color := v4.{0, 0, 0, 0.1};
+    fog_color := v4.{0, 0, 0, 0.8};
     
     screen := UI.get_screen_rect();
-    // Parameters: min_x, min_y, max_x, max_y
-    left_rect := screen->subrect(0, 0, 0.4, 1);
-    UI.quad(left_rect, fog_texture, fog_color);
-    right_rect := screen->subrect(0.6, 0, 1, 1);
-    UI.quad(right_rect, fog_texture, fog_color);
-    top_rect := screen->subrect(0, 0, 1, 0.4);
-    UI.quad(top_rect, fog_texture, fog_color);
-    bottom_rect := screen->subrect(0, 0.6, 1, 1);
-    UI.quad(bottom_rect, fog_texture, fog_color);
+    UI.quad(screen, fog_texture, fog_color);
 }
 
 Black_Flag_Ability :: class : Ability_Base {
@@ -409,18 +419,17 @@ Black_Flag_Ability :: class : Ability_Base {
     
     on_update :: proc(ability: Black_Flag_Ability, player: Player, params: Ability_Update_Params) {
         if params.clicked && params.can_use {
-            // Create the black flag at player's position
-            flag_entity := create_entity();
+            // Spawn prefab (includes the spine setup already)
+            prefab := get_asset(Prefab_Asset, "prefabs/black_flag.prefab");
+            flag_entity := instantiate(prefab);
             flag_entity->set_local_position(player.entity.local_position);
-            
-            // Add sprite for the flag
-            sprite := flag_entity->add_component(Sprite_Renderer);
-            sprite->set_texture(get_asset(Texture_Asset, "$AO/white.png")); // TODO: Replace with skull flag sprite
-            sprite.color = .{0.1, 0.1, 0.1, 1.0}; // Dark color for the flag
-            flag_entity->set_local_scale(.{100.0, 100.0});
-            
-            // Add the Black_Flag component
-            flag := flag_entity->add_component(Black_Flag);
+
+            // Ensure gameplay component exists (drives fog + appear->idle)
+            flag: Black_Flag;
+            flag = flag_entity->get_component(Black_Flag);
+            if flag == null {
+                flag = flag_entity->add_component(Black_Flag);
+            }
             flag.owner_entity = player.entity;
             
             player->Notify("Black Flag placed!");

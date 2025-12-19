@@ -3,7 +3,7 @@
 4829216890165956 1765216702463350900
 {
   "name": "_Banned_BAN104_template.png",
-  "local_enabled": true,
+  "local_enabled": false,
   "local_position": {
     "X": 77.9434509277343750,
     "Y": 0.0896816253662109
