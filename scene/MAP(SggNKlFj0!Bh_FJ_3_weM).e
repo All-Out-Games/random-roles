@@ -12,16 +12,17 @@
     "X": 1.7999999523162842,
     "Y": 1.7999999523162842
   },
-  "next_sibling": "5251063043410966:1764881740837316900"
+  "previous_sibling": "5210879999031502:1764871144057863400",
+  "next_sibling": "29915794294052:1765633263510292500"
 },
 {
   "cid": 1,
   "aoid": "145715264759084:1764890271196697900",
-  "enabled": false,
   "component_type": "Internal_Component",
   "internal_component_type": "Navmesh",
   "data": {
-
+    "debug_enabled": true,
+    "debug_rebuild_every_frame": true
   }
 },
 {

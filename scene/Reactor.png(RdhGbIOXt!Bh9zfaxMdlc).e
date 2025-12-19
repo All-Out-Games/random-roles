@@ -24,6 +24,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Reactor/Reactor.png",
-    "depth_offset": -0.8538641929626465
+    "depth_offset": 0.4821363687515259
   }
 }

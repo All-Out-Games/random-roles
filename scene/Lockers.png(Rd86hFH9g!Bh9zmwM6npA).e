@@ -26,4 +26,20 @@
     "texture": "sprites/phota/Security/Lockers.png",
     "depth_offset": -0.1892986297607422
   }
+},
+{
+  "cid": 2,
+  "aoid": "1925909323825651:1766155179424079700",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Box_Collider",
+  "data": {
+    "size": {
+      "X": 1.6377395391464233,
+      "Y": 0.3178020715713501
+    },
+    "offset": {
+      "X": 0.0176261514425278,
+      "Y": -0.2737906873226166
+    }
+  }
 }
