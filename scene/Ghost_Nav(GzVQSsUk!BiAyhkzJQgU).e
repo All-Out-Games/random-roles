@@ -5,8 +5,8 @@
   "name": "Ghost_Nav",
   "local_enabled": true,
   "local_position": {
-    "X": 11.1377182006835938,
-    "Y": 2.4506859779357910
+    "X": 22.3278999328613281,
+    "Y": 5.0229153633117676
   },
   "local_rotation": 0,
   "local_scale": {
