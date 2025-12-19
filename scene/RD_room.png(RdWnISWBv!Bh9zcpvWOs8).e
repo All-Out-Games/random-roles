@@ -23,6 +23,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/R&D/R&D/R&D_room.png",
-    "layer": -4
+    "depth_offset": 3.0720441341400146
   }
 }

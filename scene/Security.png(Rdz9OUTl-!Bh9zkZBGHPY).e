@@ -23,6 +23,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Security/Security.png",
-    "layer": -4
+    "depth_offset": 8.2359275817871094
   }
 }

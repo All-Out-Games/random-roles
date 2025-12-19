@@ -1,0 +1,33 @@
+13
+1
+2971476335898951 1763875038019023300
+{
+  "name": "shape_circle_gradient.png",
+  "local_enabled": true,
+  "local_position": {
+    "X": -0.0037899017333984,
+    "Y": 0.5782337188720703
+  },
+  "local_rotation": 0,
+  "local_scale": {
+    "X": 4,
+    "Y": 4
+  },
+  "previous_sibling": "2944310720689935:1763868557872442300",
+  "parent": "2942629453969515:1763868156819319900"
+},
+{
+  "cid": 1,
+  "aoid": "2971476335927511:1763875038019029500",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Sprite_Renderer",
+  "data": {
+    "texture": "sprites/phota/Props/torch/shape_circle_gradient.png",
+    "tint": {
+      "Y": 0.6745098233222961,
+      "Z": 0,
+      "W": 0.0588235296308994
+    },
+    "layer": 1
+  }
+}

@@ -5,8 +5,8 @@
   "name": "anagram_puzzle",
   "local_enabled": true,
   "local_position": {
-    "X": -20.5219612121582031,
-    "Y": 12.6118965148925781
+    "X": -21.9781208038330078,
+    "Y": 12.5912418365478516
   },
   "local_rotation": 0,
   "local_scale": {

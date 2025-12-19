@@ -3,7 +3,7 @@
 5210879999031502 1764871144057863400
 {
   "name": "schleem preview.png",
-  "local_enabled": true,
+  "local_enabled": false,
   "local_position": {
     "X": -1.8530677556991577,
     "Y": 9.1900730133056641

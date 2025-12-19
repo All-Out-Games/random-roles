@@ -5,7 +5,7 @@
   "name": "cypher",
   "local_enabled": true,
   "local_position": {
-    "X": 29.8252048492431641,
+    "X": 29.8252067565917969,
     "Y": -25.2818508148193359
   },
   "local_rotation": 0,
