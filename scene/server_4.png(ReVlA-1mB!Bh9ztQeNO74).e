@@ -33,6 +33,7 @@
   "internal_component_type": "Box_Collider",
   "data": {
     "make_navmesh_loop": true,
+    "flip_navmesh_loop": true,
     "size": {
       "X": 1.1580343246459961,
       "Y": 0.3502149581909180

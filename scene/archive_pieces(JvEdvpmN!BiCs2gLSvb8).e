@@ -24,6 +24,7 @@
   "internal_component_type": "Polygon_Collider",
   "data": {
     "make_navmesh_loop": true,
+    "flip_navmesh_loop": true,
     "points": [
       {
         "X": -0.8492221832275391,
