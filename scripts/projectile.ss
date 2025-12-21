@@ -59,7 +59,7 @@ RR_Projectile :: class : Component {
                     player_to_kill->kill();
                     destroy_self = true;
                     {
-                        sfx := default_sfx_desc();
+                        sfx := SFX.default_sfx_desc();
                         sfx->set_position(player_to_kill.entity.world_position);
                         sfx.volume = 0.75;
                         sfx.volume_perturb = 0.1;

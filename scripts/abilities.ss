@@ -338,7 +338,7 @@ Shoot_Ability :: class : Ability_Base {
         ability.icon = ability->get_icon(player.player_role);
         if params.can_use {
             if aiming.shoot {
-                sfx := default_sfx_desc();
+                sfx := SFX.default_sfx_desc();
                 sfx->set_position(player.entity.local_position);
                 sfx.volume_perturb = 0.2;
                 sfx.speed_perturb = 0.1;
