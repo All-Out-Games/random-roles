@@ -1,6 +1,6 @@
 import "core:ao"
 
-NUM_TASKS: int : 9;
+NUM_TASKS: int : 10;
 
 Task_Base :: class {
 	id: string;
@@ -37,28 +37,6 @@ Task_Base :: class {
 			return;
 		}
 		started = false;
-	}
-}
-
-// --- Prankster objective ---
-Task_Prank_3_People :: class : Task_Base {
-	GOAL :: 3;
-
-	update_task :: proc(using this: Task_Prank_3_People, player: Player) {
-		// No interactive UI: just track progress and complete when met.
-		if completed return;
-		if player.prankster_prank_count >= GOAL {
-			complete_attempt(this, player, true);
-		}
-	}
-}
-
-Task_Call_Fake_Meeting :: class : Task_Base {
-	update_task :: proc(using this: Task_Call_Fake_Meeting, player: Player) {
-		if completed return;
-		if player.prankster_fake_meetings_called >= 1 {
-			complete_attempt(this, player, true);
-		}
 	}
 }
 
@@ -131,6 +109,11 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 					task.id = "catching_butterflies";
 					append(ref task_list, task);
 				}
+			case 9: {
+					task := new(Task_Call_Jail_Codes);
+					task.id = "jail_codes";
+					append(ref task_list, task);
+				}
 		}
 	}
 	return task_list;
@@ -165,6 +148,7 @@ update_tasks :: proc(player: Player) {
 			case Task_Catching_Butterflies: player.active_tasks.elements[i].(Task_Catching_Butterflies)->update_task(player);
 			case Task_Prank_3_People: player.active_tasks.elements[i].(Task_Prank_3_People)->update_task(player);
 			case Task_Call_Fake_Meeting: player.active_tasks.elements[i].(Task_Call_Fake_Meeting)->update_task(player);
+			case Task_Call_Jail_Codes: player.active_tasks.elements[i].(Task_Call_Jail_Codes)->update_task(player);
 		}
 	}
 }
@@ -193,6 +177,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Prank 3 people";
 		case "call_fake_meeting":
 			return "Call 1 fake meeting";
+		case "jail_codes":
+			return "Change jail codes";
 		case:
 			return task_id;
 	}
@@ -283,6 +269,41 @@ update_tasks_ui :: proc(player: Player) {
 		task_ts.halign = .LEFT;
 		task_ts.valign = .CENTER;
 		UI.text(text_rect, task_ts, task_name);
+	}
+}
+
+// --- Prankster objective ---
+Task_Prank_3_People :: class : Task_Base {
+	GOAL :: 3;
+
+	update_task :: proc(using this: Task_Prank_3_People, player: Player) {
+		// No interactive UI: just track progress and complete when met.
+		if completed return;
+		if player.prankster_prank_count >= GOAL {
+			complete_attempt(this, player, true);
+		}
+	}
+}
+
+Task_Call_Fake_Meeting :: class : Task_Base {
+	update_task :: proc(using this: Task_Call_Fake_Meeting, player: Player) {
+		if completed return;
+		if player.prankster_fake_meetings_called >= 1 {
+			complete_attempt(this, player, true);
+		}
+	}
+}
+
+// Normal tasks
+
+Task_Call_Jail_Codes :: class : Task_Base {
+	update_task :: proc(using this: Task_Call_Jail_Codes, player: Player) {
+		if !started {
+			return;
+		}
+		log(format_string("Reroute Power Task Updated"));
+		//Instant success
+		complete_attempt(this, player, true);
 	}
 }
 
