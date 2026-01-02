@@ -19,15 +19,6 @@
   "component_type": "Internal_Component",
   "internal_component_type": "RR_Projectile",
   "data": {
-    "sprite": "32431610409908:1765394388582526100"
-  }
-},
-{
-  "cid": 3,
-  "aoid": "32431610409908:1765394388582526100",
-  "component_type": "Internal_Component",
-  "internal_component_type": "Sprite_Renderer",
-  "data": {
-    "texture": "sprites/MachineGunBullet.png"
+    "sprite": "32386922310885:1767357296135043500"
   }
 }
