@@ -543,3 +543,61 @@ Fake_Meeting_Ability :: class : Ability_Base {
 		}
 	}
 }
+
+JESTER_WIN_DELAY_SECONDS :: 15.0;
+
+Jester_Win_Ability :: class : Ability_Base {
+	NAME :: "Jester Win";
+
+	on_init :: proc(instance: Jester_Win_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/trickster/jester.png");
+	}
+
+	can_use :: proc(instance: Jester_Win_Ability, player: Player) -> bool {
+		// Must be alive in-game
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+
+		// Locked until both objectives are complete (and unlock timer started)
+		if player.prankster_jester_unlocked_time <= 0.0 return false;
+
+		// Wait 15 seconds after unlocking
+		return get_time() >= (player.prankster_jester_unlocked_time + JESTER_WIN_DELAY_SECONDS);
+	}
+
+	on_update :: proc(instance: Jester_Win_Ability, player: Player, params: Ability_Update_Params) {
+		// Clicking early does nothing; button should be disabled by can_use.
+		if params.clicked && params.can_use {
+			// Win immediately: only this player is the winner.
+			winners: List(Player);
+			append(ref winners, player);
+			end_game_with_winners(Player_Type.ANARCHIST, winners);
+		}
+	}
+
+	on_draw_button :: proc(instance: Jester_Win_Ability, rect: Rect) {
+		// Draw countdown / lock state on top of the button.
+		ts := UI.default_text_settings();
+		ts.size = 20;
+		ts.halign = .CENTER;
+		ts.valign = .BOTTOM;
+
+		player := instance.player;
+		if player == null {
+			return;
+		}
+
+		label := "";
+		if player.prankster_jester_unlocked_time <= 0.0 {
+			label = "LOCKED";
+		} else {
+			remaining := (player.prankster_jester_unlocked_time + JESTER_WIN_DELAY_SECONDS) - get_time();
+			if remaining > 0.0 {
+				label = format_string("%{.0}s", .{remaining});
+			} else {
+				label = "READY";
+			}
+		}
+		UI.text(rect->inset(4), ts, label);
+	}
+}

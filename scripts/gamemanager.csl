@@ -75,6 +75,18 @@ start_fake_meeting :: proc(caller: Player) {
 	start_meeting(false);
 }
 
+prankster_check_unlock_jester_win :: proc(player: Player) {
+	if player == null return;
+	if player.player_role != Player_Role.PRANKSTER return;
+	// Requires BOTH objectives before unlocking
+	if player.prankster_prank_count >= 3 && player.prankster_fake_meetings_called >= 1 {
+		if player.prankster_jester_unlocked_time <= 0.0 {
+			player.prankster_jester_unlocked_time = get_time();
+			player->Notify("Jester Win unlocked! Survive 15s, then use it to win.");
+		}
+	}
+}
+
 on_player_go_dead :: proc(player: Player) {
 	player.player_state = Player_State.DEAD;
 	player->add_ghost_reason("spectator");
@@ -380,21 +392,14 @@ ao_update_ingame :: proc(dt: float) {
 	anarchist_count := get_player_count(Player_Type.ANARCHIST);
 
 	//Win Conditions
-	// -- Prankster: prank 3 people & call 1 fake meeting
-	prankster_winners: List(Player);
+	// -- Prankster: does NOT auto-win. They must unlock + use the Jester Win ability.
+	// Still, we need to detect when they complete prerequisites so we can start the 15s timer.
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
 		if p.player_state != Player_State.ALIVE continue;
 		if p.player_type != Player_Type.ANARCHIST continue;
-		if p.player_role != Player_Role.PRANKSTER continue;
-		if p.prankster_prank_count >= 3 && p.prankster_fake_meetings_called >= 1 {
-			append(ref prankster_winners, p);
-		}
-	}
-	if prankster_winners.elements.count > 0 {
-		end_game_with_winners(Player_Type.ANARCHIST, prankster_winners);
-		return;
+		prankster_check_unlock_jester_win(p);
 	}
 
 	// -- Traitor: Only traitors alive
@@ -685,6 +690,7 @@ assign_players_to_types :: proc() {
 			p.prankster_prank_count = 0;
 			p.prankster_pranked_ids = List(u64).{};
 			p.prankster_fake_meetings_called = 0;
+			p.prankster_jester_unlocked_time = 0.0;
 		}
 	}
 	
