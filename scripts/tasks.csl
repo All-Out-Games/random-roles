@@ -1,5 +1,4 @@
-import "core:core.csl"
-import "gamemanager.csl"
+import "core:ao"
 
 NUM_TASKS: int : 9;
 
@@ -41,72 +40,87 @@ Task_Base :: class {
 	}
 }
 
+// --- Prankster objective ---
+Task_Prank_3_People :: class : Task_Base {
+	GOAL :: 3;
+
+	update_task :: proc(using this: Task_Prank_3_People, player: Player) {
+		// No interactive UI: just track progress and complete when met.
+		if completed return;
+		if player.prankster_prank_count >= GOAL {
+			complete_attempt(this, player, true);
+		}
+	}
+}
+
 get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) {
 	task_list: List(Task_Base);
+	// Ensure our shared rng state exists/has been seeded before use.
+	rr_refresh_rng_state();
 	
 	// Build a pool of available task indices
 	available_indices: List(int);
 	for i: 0..NUM_TASKS-1 {
-		append(&available_indices, i);
+		append(ref available_indices, i);
 	}
 	
 	// Select 5 unique tasks (or fewer if num_tasks < 5)
 	tasks_to_select := min(5, min(num_tasks, NUM_TASKS));
 	for i: 0..tasks_to_select-1 {
 		// Pick a random index from remaining available tasks
-		random_pick := rng_range_int(&server_rng, 0, available_indices.elements.count-1);
+		random_pick := rng_range_int(ref rr_rng_state.value, 0, available_indices.elements.count-1);
 		task_to_add_index := available_indices.elements[random_pick];
 		
 		// Remove the selected index from the pool (swap with last and pop)
 		last_idx := available_indices.elements.count - 1;
 		available_indices.elements[random_pick] = available_indices.elements[last_idx];
-		pop(&available_indices);
+		pop(ref available_indices);
 		
 		switch task_to_add_index {
 			case 0: {
 					task := new(Task_Throw_Away_Garbage);
 					task.id = "throw_away_garbage";
-					append(&task_list, task);
+					append(ref task_list, task);
 				}
 			case 1: {
 					task := new(Task_Calibrate_Teleporter);
 					task.id = "calibrate_teleporter";
-					append(&task_list, task);
+					append(ref task_list, task);
 				}
 			case 2: {
 					task := new(Task_Cypher);
 					task.id = "cypher";
-					append(&task_list, task);
+					append(ref task_list, task);
 				}
 			case 3: {
 					task := new(Task_Anagram_Puzzle);
 					task.id = "anagram_puzzle";
-					append(&task_list, task);
+					append(ref task_list, task);
 				}
 			case 4: {
 					task := new(Task_Reroute_Power);
 					task.id = "reroute_power";
-					append(&task_list, task);
+					append(ref task_list, task);
 				}
 			case 5: {
 					task := new(Task_Guide_The_Electron);
 					task.id = "guide_the_electron";
-					append(&task_list, task);
+					append(ref task_list, task);
 				}
 			case 6: {
 					task := new(Task_Signal_Sync);
 					task.id = "signal_sync";
-					append(&task_list, task);
+					append(ref task_list, task);
 				}
 			case 7: {
 					task := new(Task_Build_A_Robot);
 					task.id = "build_a_robot";
-					append(&task_list, task);
+					append(ref task_list, task);
 				}
 			case 8: {
 					task := new(Task_Catching_Butterflies);
 					task.id = "catching_butterflies";
-					append(&task_list, task);
+					append(ref task_list, task);
 				}
 		}
 	}
@@ -140,6 +154,7 @@ update_tasks :: proc(player: Player) {
 			case Task_Signal_Sync: player.active_tasks.elements[i].(Task_Signal_Sync)->update_task(player);
 			case Task_Build_A_Robot: player.active_tasks.elements[i].(Task_Build_A_Robot)->update_task(player);
 			case Task_Catching_Butterflies: player.active_tasks.elements[i].(Task_Catching_Butterflies)->update_task(player);
+			case Task_Prank_3_People: player.active_tasks.elements[i].(Task_Prank_3_People)->update_task(player);
 		}
 	}
 }
@@ -164,6 +179,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Build a Robot";
 		case "catching_butterflies":
 			return "Catching Butterflies";
+		case "prank_3_people":
+			return "Prank 3 people";
 		case:
 			return task_id;
 	}
@@ -174,7 +191,8 @@ update_tasks_ui :: proc(player: Player) {
 	if !player->is_local_or_server() {
 		return;
 	}
-	if player.player_type != Player_Type.CIVILIAN {
+	// Civilians see their normal tasks; Prankster sees their objective.
+	if player.player_type != Player_Type.CIVILIAN && player.player_role != Player_Role.PRANKSTER {
 		return;
 	}
 	if player.player_state != Player_State.ALIVE {
@@ -207,9 +225,10 @@ update_tasks_ui :: proc(player: Player) {
 	
 	// Draw each task - cut from top progressively
 	for i: 0..player.active_tasks.elements.count-1 {
-		task_id := player.active_tasks.elements[i].id;
-		task_started := player.active_tasks.elements[i].started;
-		task_completed := player.active_tasks.elements[i].completed;
+		task := player.active_tasks.elements[i];
+		task_id := task.id;
+		task_started := task.started;
+		task_completed := task.completed;
 		
 		// Cut top for this task entry
 		entry_rect := panel_rect->cut_top(40);
@@ -223,6 +242,12 @@ update_tasks_ui :: proc(player: Player) {
 		
 		// Task text
 		task_name := get_task_display_name(task_id);
+		// Add progress text for Prankster objective
+		switch #object_type(task) {
+			case Task_Prank_3_People: {
+				task_name = format_string("% (%/3)", .{task_name, player.prankster_prank_count});
+			}
+		}
 		if task_completed {
 			task_name = format_string("[X] %", .{task_name});
 		} else if task_started {
@@ -384,20 +409,20 @@ Task_Catching_Butterflies :: class : Task_Base {
 		// Butterflies start in the center/right of the window.
 		if !rng_initialized {
 			rng_initialized = true;
-			refresh_server_rng();
+			rr_refresh_rng_state();
 		}
 
 		for i: 0..BUTTERFLY_COUNT-1 {
-			px := window_rect.min.x + w * rng_range_float(&server_rng, 0.42, 0.92);
-			py := window_rect.min.y + h * rng_range_float(&server_rng, 0.18, 0.86);
+			px := window_rect.min.x + w * rng_range_float(ref rr_rng_state.value, 0.42, 0.92);
+			py := window_rect.min.y + h * rng_range_float(ref rr_rng_state.value, 0.18, 0.86);
 			butterfly_pos[i] = v2.{px, py};
 
-			speed := rng_range_float(&server_rng, h * 0.10, h * 0.18);
-			dir_a := rng_range_float(&server_rng, 0.0, 6.2831853);
+			speed := rng_range_float(ref rr_rng_state.value, h * 0.10, h * 0.18);
+			dir_a := rng_range_float(ref rr_rng_state.value, 0.0, 6.2831853);
 			butterfly_vel[i] = v2.{cos(dir_a) * speed, sin(dir_a) * speed};
 			butterfly_angle[i] = to_degrees(atan2(butterfly_vel[i].y, butterfly_vel[i].x));
-			butterfly_color[i] = rng_range_int(&server_rng, 0, 2);
-			butterfly_phase[i] = rng_range_float(&server_rng, 0.0, 10.0);
+			butterfly_color[i] = rng_range_int(ref rr_rng_state.value, 0, 2);
+			butterfly_phase[i] = rng_range_float(ref rr_rng_state.value, 0.0, 10.0);
 			butterfly_caught[i] = false;
 			butterfly_catch_time[i] = 0.0;
 		}
@@ -1372,12 +1397,12 @@ Task_Anagram_Puzzle :: class : Task_Base {
 
 		indices: List(int);
 		for i: 0..len-1 {
-			append(&indices, i);
+			append(ref indices, i);
 		}
 
 		// Fisher-Yates shuffle on indices
 		for i: 0..indices.elements.count-1 {
-			j := rng_range_int(&server_rng, i, indices.elements.count-1);
+			j := rng_range_int(ref rr_rng_state.value, i, indices.elements.count-1);
 			tmp := indices.elements[i];
 			indices.elements[i] = indices.elements[j];
 			indices.elements[j] = tmp;
@@ -1398,13 +1423,13 @@ Task_Anagram_Puzzle :: class : Task_Base {
 				continue;
 			}
 			if get_word(i).count == target_len {
-				append(&candidates, i);
+				append(ref candidates, i);
 			}
 		}
 		if candidates.elements.count == 0 {
 			return 0;
 		}
-		pick := rng_range_int(&server_rng, 0, candidates.elements.count-1);
+		pick := rng_range_int(ref rr_rng_state.value, 0, candidates.elements.count-1);
 		return candidates.elements[pick];
 	}
 
@@ -1413,33 +1438,33 @@ Task_Anagram_Puzzle :: class : Task_Base {
 			return;
 		}
 		rng_initialized = true;
-		refresh_server_rng();
+		rr_refresh_rng_state();
 
 		// Pick target word
-		target_idx := rng_range_int(&server_rng, 0, word_count()-1);
+		target_idx := rng_range_int(ref rr_rng_state.value, 0, word_count()-1);
 		target_word = get_word(target_idx);
 		target_len = target_word.count;
 
 		// Pick 3 other lengths (all different, and different than target_len)
 		lengths: List(int);
-		append(&lengths, 3);
-		append(&lengths, 4);
-		append(&lengths, 5);
-		append(&lengths, 6);
+		append(ref lengths, 3);
+		append(ref lengths, 4);
+		append(ref lengths, 5);
+		append(ref lengths, 6);
 
 		// Remove target_len from lengths
 		for i: 0..lengths.elements.count-1 {
 			if lengths.elements[i] == target_len {
 				last := lengths.elements.count - 1;
 				lengths.elements[i] = lengths.elements[last];
-				pop(&lengths);
+				pop(ref lengths);
 				break;
 			}
 		}
 
 		// Shuffle remaining lengths
 		for i: 0..lengths.elements.count-1 {
-			j := rng_range_int(&server_rng, i, lengths.elements.count-1);
+			j := rng_range_int(ref rr_rng_state.value, i, lengths.elements.count-1);
 			tmp := lengths.elements[i];
 			lengths.elements[i] = lengths.elements[j];
 			lengths.elements[j] = tmp;
@@ -1456,15 +1481,15 @@ Task_Anagram_Puzzle :: class : Task_Base {
 
 		// Default note positions/angles (randomized a bit so you can tweak later)
 		// These are normalized within the window_rect. (0,0) bottom-left of window_rect.
-		note_1_pos = .{0.12 + rng_range_float(&server_rng, -0.03, 0.03), 0.8 + rng_range_float(&server_rng, -0.01, 0.01)};
-		note_2_pos = .{0.35 + rng_range_float(&server_rng, -0.03, 0.03), 0.80 + rng_range_float(&server_rng, -0.01, 0.01)};
-		note_3_pos = .{0.65 + rng_range_float(&server_rng, -0.03, 0.03), 0.8 + rng_range_float(&server_rng, -0.01, 0.01)};
-		note_4_pos = .{0.9 + rng_range_float(&server_rng, -0.03, 0.03), 0.78 + rng_range_float(&server_rng, -0.01, 0.01)};
+		note_1_pos = .{0.12 + rng_range_float(ref rr_rng_state.value, -0.03, 0.03), 0.8 + rng_range_float(ref rr_rng_state.value, -0.01, 0.01)};
+		note_2_pos = .{0.35 + rng_range_float(ref rr_rng_state.value, -0.03, 0.03), 0.80 + rng_range_float(ref rr_rng_state.value, -0.01, 0.01)};
+		note_3_pos = .{0.65 + rng_range_float(ref rr_rng_state.value, -0.03, 0.03), 0.8 + rng_range_float(ref rr_rng_state.value, -0.01, 0.01)};
+		note_4_pos = .{0.9 + rng_range_float(ref rr_rng_state.value, -0.03, 0.03), 0.78 + rng_range_float(ref rr_rng_state.value, -0.01, 0.01)};
 
-		note_1_angle = rng_range_float(&server_rng, -12.0, 12.0);
-		note_2_angle = rng_range_float(&server_rng, -12.0, 12.0);
-		note_3_angle = rng_range_float(&server_rng, -12.0, 12.0);
-		note_4_angle = rng_range_float(&server_rng, -12.0, 12.0);
+		note_1_angle = rng_range_float(ref rr_rng_state.value, -12.0, 12.0);
+		note_2_angle = rng_range_float(ref rr_rng_state.value, -12.0, 12.0);
+		note_3_angle = rng_range_float(ref rr_rng_state.value, -12.0, 12.0);
+		note_4_angle = rng_range_float(ref rr_rng_state.value, -12.0, 12.0);
 	}
 
 	rotate_about_point :: proc(using task: Task_Anagram_Puzzle, point: v2, degrees: float) -> Matrix4 {
@@ -1668,14 +1693,14 @@ Task_Anagram_Puzzle :: class : Task_Base {
 					// Backspace
 					if idx == 26 {
 						if task.input_chars.elements.count > 0 {
-							pop(&task.input_chars);
+							task.input_chars->pop();
 						}
 					} else if idx == 27 {
 						task.input_chars = List(u8).{};
 					} else if idx <= 25 {
 						// Letter
 						if task.input_chars.elements.count < target_len {
-							append(&task.input_chars, (65 + idx).(u8));
+							task.input_chars->append((65 + idx).(u8));
 						}
 					}
 				}
@@ -1790,9 +1815,9 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 			return;
 		}
 		rng_initialized = true;
-		refresh_server_rng();
-		target_position.x = rng_range_float(&server_rng, 0.2, 0.8);
-		target_position.y = rng_range_float(&server_rng, 0.2, 0.8);
+		rr_refresh_rng_state();
+		target_position.x = rng_range_float(ref rr_rng_state.value, 0.2, 0.8);
+		target_position.y = rng_range_float(ref rr_rng_state.value, 0.2, 0.8);
 		reticle_position = .{0.5, 0.5};
 	}
 
@@ -2029,7 +2054,7 @@ Task_Cypher :: class : Task_Base {
 			return;
 		}
 		rng_initialized = true;
-		refresh_server_rng();
+		rr_refresh_rng_state();
 
 		code_icons = List(int).{};
 		input_icons = List(int).{};
@@ -2037,18 +2062,18 @@ Task_Cypher :: class : Task_Base {
 		// Build a pool [0..8] and pick 4 unique hints/icons in order
 		available: List(int);
 		for i: 0..8 {
-			append(&available, i);
+			append(ref available, i);
 		}
 
 		for i: 0..CODE_LEN-1 {
-			pick := rng_range_int(&server_rng, 0, available.elements.count-1);
+			pick := rng_range_int(ref rr_rng_state.value, 0, available.elements.count-1);
 			val := available.elements[pick];
 
 			last_idx := available.elements.count - 1;
 			available.elements[pick] = available.elements[last_idx];
-			pop(&available);
+			pop(ref available);
 
-			append(&code_icons, val);
+			append(ref code_icons, val);
 		}
 	}
 
@@ -2078,7 +2103,7 @@ Task_Cypher :: class : Task_Base {
 			return;
 		}
 
-		append(&input_icons, icon_idx);
+		append(ref input_icons, icon_idx);
 
 		// Wrong input -> fail flash and reset
 		if !is_input_prefix_correct(this) {

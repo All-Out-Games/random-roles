@@ -1,7 +1,4 @@
-import "core:core.csl"
-import "gamemanager.csl"
-import "abilities.csl"
-import "tasks.csl"
+import "core:ao"
 
 players: List(Player);
 
@@ -13,6 +10,11 @@ Player :: class : Player_Base {
     votes_received: int;  // How many votes this player has received
 
     active_tasks : List(Task_Base);
+	
+	// Prankster progress (server-driven, shown locally via tasks UI)
+	prankster_prank_count: int;
+	prankster_pranked_ids: List(u64);
+	prank_anim_sm_inited: bool;
 
     update_freeze_reasons :: proc(using this: Player) {
         // Prevent player movement while global popups are on-screen, and while the local
@@ -60,7 +62,11 @@ Player :: class : Player_Base {
     
     //Server Only!
     ao_start :: proc(using this: Player) {
-        append(&players, this);
+        append(ref players, this);
+
+		// Ensure our custom prank animation is wired into the player's anim state machine.
+		// (This needs to exist before Pranked_Effect fires set_trigger.)
+		this->ensure_prank_anim_state_machine();
 
         if game_state == Game_State.LOBBY {
             world_references->teleport_near_lobby(this);
@@ -73,7 +79,7 @@ Player :: class : Player_Base {
     }
 
     ao_end :: proc(using this: Player) {
-        unordered_remove_by_value(&players, this);
+        unordered_remove_by_value(ref players, this);
     }
 
     ao_update :: proc(using this: Player, delta_time: float) {
@@ -115,6 +121,10 @@ Player :: class : Player_Base {
                         draw_ability_button(this, Shoot_Ability, abilityIndex);
                         abilityIndex += 1;
                     }
+					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PRANKSTER {
+						draw_ability_button(this, Prank_Ability, abilityIndex);
+						abilityIndex += 1;
+					}
                     draw_ability_button(this, Report_Ability, abilityIndex);
                 }
             } else if game_state == Game_State.LOBBY {
@@ -213,6 +223,36 @@ Player :: class : Player_Base {
             this.animator.instance.state_machine->set_trigger(trigger);
         }
     }
+
+	// Adds the prank_slip one-shot state + trigger to the player's animation state machine.
+	ensure_prank_anim_state_machine :: proc(using this: Player) {
+		if prank_anim_sm_inited {
+			return;
+		}
+		if this.animator.instance == null {
+            log_error("No animator instance found");
+			return;
+		}
+		sm := this.animator.instance.state_machine;
+		if sm == null {
+            log_error("No state machine found");
+			return;
+		}
+
+		layer := sm->create_layer("game_layer", 10);
+        clear_state := layer->create_state("__CLEAR_TRACK__", 0.1, true);
+
+		prank_slip_var := sm->create_variable("prank_slip", State_Machine_Variable.Kind.TRIGGER);
+		prank_slip_state := layer->create_state("004RAND_trickster/Slip_On_Banana", 2.0, false);
+		layer->create_global_transition(prank_slip_state, false)->create_trigger_condition(prank_slip_var);
+
+		// Auto-return to the layer's initial state after the one-shot completes.
+		layer->create_transition(prank_slip_state, clear_state, true);
+        layer->set_initial_state(clear_state);
+
+		prank_anim_sm_inited = true;
+        log_info("Prank anim state machine initialized");
+	}
 }
 
 Task_Interactable :: class : Component {

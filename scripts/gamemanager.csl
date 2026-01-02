@@ -1,12 +1,18 @@
-import "core:core.csl"
-import "player.csl"
-import "popups.csl"
-import "tools.csl"
+import "core:ao"
 
-server_rng : u64;
+// Random state used by tasks/roles. Keep this as a class instance (not a top-level u64)
+// to avoid collisions with engine-provided globals in some build configurations.
+RR_Rng_State :: class {
+	value: u64;
+}
 
-refresh_server_rng :: proc() {
-	server_rng = rng_seed((get_real_time() * 1000000000).(u64));
+rr_rng_state: RR_Rng_State;
+
+rr_refresh_rng_state :: proc() {
+	if rr_rng_state == null {
+		rr_rng_state = new(RR_Rng_State);
+	}
+	rr_rng_state.value = rng_seed((get_real_time() * 1000000000).(u64));
 }
 
 MIN_NUMBER_OF_PLAYERS: int : 4;
@@ -37,6 +43,8 @@ Player_Role :: enum {
     NONE;
 	//Civilian Roles
 	SHERIFF;
+	//Anarchist Roles
+	PRANKSTER;
 	//Traitor Roles
 	PIRATE;
 }
@@ -159,7 +167,7 @@ intro_popup: Intro_Popup;
 victory_popup: Victory_Popup;
 
 ao_start :: proc() {
-	refresh_server_rng();
+	rr_refresh_rng_state();
 	setup_lobby();
 	body_found_popup = new();
 	body_found_popup->init();
@@ -199,7 +207,7 @@ get_alive_player_count :: proc() -> int {
 		player := players.elements[i];
 		// Only keep players that are not null and have alive entities
 		if player != null && #alive(player.entity) {
-			append(&valid_players, player);
+			append(ref valid_players, player);
 		}
 	}
 	// Replace the old list with the cleaned list
@@ -243,15 +251,7 @@ all_civilians_completed_tasks :: proc() -> bool {
 	return true;
 }
 
-end_game_with_victor :: proc(victor: Player_Type) {
-	// Collect winning players
-	winners: List(Player);
-	for i: 0..players.elements.count-1 {
-		if players.elements[i].player_type == victor {
-			append(&winners, players.elements[i]);
-		}
-	}
-	
+end_game_with_winners :: proc(victor: Player_Type, winners: List(Player)) {
 	// Show victory popup with winning players
 	victory_popup->show(victor, winners);
 	game_state = Game_State.ANIM_VICTORY;
@@ -264,6 +264,17 @@ end_game_with_victor :: proc(victor: Player_Type) {
 	}
 
 	round_number += 1;
+}
+
+end_game_with_victor :: proc(victor: Player_Type) {
+	// Collect winning players
+	winners: List(Player);
+	for i: 0..players.elements.count-1 {
+		if players.elements[i].player_type == victor {
+			append(ref winners, players.elements[i]);
+		}
+	}
+	end_game_with_winners(victor, winners);
 }
 
 ao_update_lobby :: proc(dt: float) {
@@ -351,17 +362,37 @@ ao_update_ingame :: proc(dt: float) {
 	anarchist_count := get_player_count(Player_Type.ANARCHIST);
 
 	//Win Conditions
+	// -- Prankster: prank 3 people
+	prankster_winners: List(Player);
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.player_type != Player_Type.ANARCHIST continue;
+		if p.player_role != Player_Role.PRANKSTER continue;
+		if p.prankster_prank_count >= 3 {
+			append(ref prankster_winners, p);
+		}
+	}
+	if prankster_winners.elements.count > 0 {
+		end_game_with_winners(Player_Type.ANARCHIST, prankster_winners);
+		return;
+	}
+
 	// -- Traitor: Only traitors alive
 	if traitor_count > 0 && traitor_count == alive_count {
 		end_game_with_victor(Player_Type.TRAITOR);
+		return;
 	}
 	// -- Civilian: Only civilians alive
 	if civilian_count > 0 && civilian_count == alive_count {
 		end_game_with_victor(Player_Type.CIVILIAN);
+		return;
 	}
 	// -- Civilian: All civilians completed all their tasks
 	if civilian_count > 0 && all_civilians_completed_tasks() {
 		end_game_with_victor(Player_Type.CIVILIAN);
+		return;
 	}
 }
 
@@ -564,7 +595,7 @@ assign_players_to_types :: proc() {
 	// Shuffle the type list using Fisher-Yates algorithm
 	rng := rng_seed((player_count.(u64) + round_number.(u64)));
 	for i: 0..type_list.count-1 {
-		j := rng_range_int(&rng, i, type_list.count-1);
+		j := rng_range_int(ref rng, i, type_list.count-1);
 		temp := type_list[i];
 		type_list[i] = type_list[j];
 		type_list[j] = temp;
@@ -587,6 +618,7 @@ assign_players_to_types :: proc() {
 	// Assign roles - only one Sheriff among civilians, one Pirate among traitors
 	sheriff_assigned := false;
 	pirate_assigned := false;
+	prankster_assigned := false;
 	for i: 0..players.elements.count-1 {
 		players.elements[i].player_role = Player_Role.NONE;
 		
@@ -595,9 +627,31 @@ assign_players_to_types :: proc() {
 			sheriff_assigned = true;
 		}
 		
+		if players.elements[i].player_type == Player_Type.ANARCHIST && !prankster_assigned {
+			players.elements[i].player_role = Player_Role.PRANKSTER;
+			prankster_assigned = true;
+		}
+
 		if players.elements[i].player_type == Player_Type.TRAITOR && !pirate_assigned {
 			players.elements[i].player_role = Player_Role.PIRATE;
 			pirate_assigned = true;
+		}
+	}
+
+	// Assign role-specific tasks / objectives
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if p.player_role == Player_Role.PRANKSTER {
+			p.active_tasks = List(Task_Base).{};
+			task := new(Task_Prank_3_People);
+			task.id = "prank_3_people";
+			task.started = true; // Show as an active objective immediately
+			append(ref p.active_tasks, task);
+
+			// Reset prank progress at round start
+			p.prankster_prank_count = 0;
+			p.prankster_pranked_ids = List(u64).{};
 		}
 	}
 	

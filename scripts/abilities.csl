@@ -1,7 +1,4 @@
-import "core:core.csl"
-import "gamemanager.csl"
-import "tools.csl"
-import "projectile.csl"
+import "core:ao"
 
 Kill_Ability :: class : Ability_Base {
     NAME :: "Kill";
@@ -155,7 +152,7 @@ Vote_Ability :: class : Ability_Base {
         alive_players: List(Player);
         for i: 0..players.elements.count-1 {
             if players.elements[i].player_state == Player_State.ALIVE {
-                append(&alive_players, players.elements[i]);
+                append(ref alive_players, players.elements[i]);
             }
         }
         
@@ -277,7 +274,7 @@ Shoot_Ability :: class : Ability_Base {
 
     get_icon :: proc(ability: Shoot_Ability, player_role: Player_Role) -> Texture_Asset {
         if player_role == Player_Role.PIRATE {
-            return get_asset(Texture_Asset, "sprites/icons/flintlock_pistol.png");
+            return get_asset(Texture_Asset, "sprites/icons/pirate/flintlock_pistol.png");
         } else {
             return get_asset(Texture_Asset, "sprites/icons/revolver.png");
         }
@@ -377,7 +374,7 @@ Black_Flag_Ability :: class : Ability_Base {
     NAME :: "Black Flag";
     
     on_init :: proc(ability: Black_Flag_Ability) {
-        ability.icon = get_asset(Texture_Asset, "sprites/icons/black_flag.png");
+        ability.icon = get_asset(Texture_Asset, "sprites/icons/pirate/black_flag.png");
     }
     
     can_use :: proc(ability: Black_Flag_Ability, player: Player) -> bool {
@@ -403,4 +400,127 @@ Black_Flag_Ability :: class : Ability_Base {
             ability.current_cooldown = 60.0;
         }
     }
+}
+
+// --- Prankster ---
+PRANK_DELAY_SECONDS :: 10.0;
+PRANK_MELEE_RANGE :: 3.0;
+PRANK_STUN_SECONDS :: 2.0;
+PRANK_STUN_REASON :: "prank_slip";
+
+Pranked_Effect :: class : Component {
+	trigger_time: float;
+	stun_end_time: float;
+	phase: int; // 0 = waiting, 1 = stunning, 2 = done
+
+	ao_start :: proc(using this: Pranked_Effect) {
+		phase = 0;
+	}
+
+	arm :: proc(using this: Pranked_Effect, delay_seconds: float) {
+		trigger_time = get_time() + delay_seconds;
+		stun_end_time = 0.0;
+		phase = 0;
+	}
+
+	ao_update :: proc(using this: Pranked_Effect, dt: float) {
+		p := entity->get_component(Player);
+		if p == null {
+			return;
+		}
+
+		// Safety: if gameplay ended or player is dead, ensure we don't leave them frozen.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(PRANK_STUN_REASON);
+			phase = 2;
+			return;
+		}
+
+		if phase == 0 {
+			if get_time() < trigger_time {
+				return;
+			}
+
+			// Impact moment: notify, play anim (non-looping), and freeze movement for 2 seconds.
+			p->Notify("you've been pranked!");
+			p->set_trigger("prank_slip");
+			p->add_disable_movement_input_reason(PRANK_STUN_REASON);
+			stun_end_time = get_time() + PRANK_STUN_SECONDS;
+			phase = 1;
+			return;
+		}
+
+		if phase == 1 {
+			if get_time() >= stun_end_time {
+				p->remove_disable_movement_input_reason(PRANK_STUN_REASON);
+				// Return to the normal locomotion tree after the one-shot.
+				// NOTE: This assumes the player's anim state machine has a RESET trigger wired (it already does for revive).
+				p->set_trigger("RESET");
+				phase = 2;
+			}
+			return;
+		}
+	}
+}
+
+prankster_has_pranked :: proc(prankster: Player, target: Player) -> bool {
+	if prankster == null || target == null {
+		return false;
+	}
+	for i: 0..prankster.prankster_pranked_ids.elements.count-1 {
+		if prankster.prankster_pranked_ids.elements[i] == target.entity.id {
+			return true;
+		}
+	}
+	return false;
+}
+
+Prank_Ability :: class : Ability_Base {
+	NAME :: "Prank";
+
+	on_init :: proc(instance: Prank_Ability) {
+		// Reuse an existing icon (no prank icon in the repo).
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/trickster/prank.png");
+	}
+
+	get_closest_prankable_player :: proc(instance: Prank_Ability, player: Player) -> Player {
+		finder := make_finder(Player, player.entity.world_position, PRANK_MELEE_RANGE);
+		for i: 0..players.elements.count-1 {
+			target := players.elements[i];
+			if target == null continue;
+			if !#alive(target.entity) continue;
+			if target == player continue;
+			if target.player_state != Player_State.ALIVE continue;
+			if prankster_has_pranked(player, target) continue;
+			finder->check(target, target.entity.world_position);
+		}
+		return finder.closest;
+	}
+
+	can_use :: proc(instance: Prank_Ability, player: Player) -> bool {
+		return instance->get_closest_prankable_player(player) != null;
+	}
+
+	on_update :: proc(instance: Prank_Ability, player: Player, params: Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			target := instance->get_closest_prankable_player(player);
+			if target == null {
+				return;
+			}
+
+			// Count unique pranks toward the win condition
+			player.prankster_pranked_ids->append(target.entity.id);
+			player.prankster_prank_count += 1;
+
+			// Attach a delayed effect to the target so the message shows on THEIR client after 10s
+			eff := target.entity->get_component(Pranked_Effect);
+			if eff == null {
+				eff = target.entity->add_component(Pranked_Effect);
+			}
+			eff->arm(PRANK_DELAY_SECONDS);
+
+			player->Notify(format_string("Pranked %!", .{target.entity->get_name()}));
+			instance.current_cooldown = 15.0;
+		}
+	}
 }
