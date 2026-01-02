@@ -463,18 +463,6 @@ Pranked_Effect :: class : Component {
 	}
 }
 
-prankster_has_pranked :: proc(prankster: Player, target: Player) -> bool {
-	if prankster == null || target == null {
-		return false;
-	}
-	for i: 0..prankster.prankster_pranked_ids.elements.count-1 {
-		if prankster.prankster_pranked_ids.elements[i] == target.entity.id {
-			return true;
-		}
-	}
-	return false;
-}
-
 Prank_Ability :: class : Ability_Base {
 	NAME :: "Prank";
 
@@ -491,7 +479,6 @@ Prank_Ability :: class : Ability_Base {
 			if !#alive(target.entity) continue;
 			if target == player continue;
 			if target.player_state != Player_State.ALIVE continue;
-			if prankster_has_pranked(player, target) continue;
 			finder->check(target, target.entity.world_position);
 		}
 		return finder.closest;
@@ -509,7 +496,6 @@ Prank_Ability :: class : Ability_Base {
 			}
 
 			// Count unique pranks toward the win condition
-			player.prankster_pranked_ids->append(target.entity.id);
 			player.prankster_prank_count += 1;
 
 			// Attach a delayed effect to the target so the message shows on THEIR client after 10s
