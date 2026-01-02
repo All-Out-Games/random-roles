@@ -2,6 +2,12 @@ import "core:ao"
 
 players: List(Player);
 
+// --- Voice chat channels ---
+// Bitmask-based channels for voice routing.
+ALIVE_CHANNEL :: 1u64 << 0;
+DEAD_CHANNEL  :: 1u64 << 1;
+ALL_VOICE_CHANNELS :: ALIVE_CHANNEL | DEAD_CHANNEL;
+
 Player :: class : Player_Base {
     player_type: Player_Type;
     player_state: Player_State;
@@ -19,7 +25,9 @@ Player :: class : Player_Base {
 	// Jester Win (unlock + timer)
 	prankster_jester_unlocked_time: float; // 0 = locked, otherwise time it unlocked
 	prank_anim_sm_inited: bool;
+	jester_win_camera_override_active: bool;
 
+    is_frozen: bool;
     update_freeze_reasons :: proc(using this: Player) {
         // Prevent player movement while global popups are on-screen, and while the local
         // player is actively working on a task.
@@ -29,12 +37,6 @@ Player :: class : Player_Base {
             game_state == Game_State.ANIM_INTRO ||
 			game_state == Game_State.ANIM_JESTER_WIN ||
             game_state == Game_State.ANIM_VICTORY;
-
-        if should_freeze_for_popup {
-            this->add_disable_movement_input_reason("popup");
-        } else {
-            this->remove_disable_movement_input_reason("popup");
-        }
 
         should_check_tasks :=
             game_state == Game_State.INGAME &&
@@ -52,11 +54,19 @@ Player :: class : Player_Base {
             }
         }
 
-        if has_task_in_progress {
-            this->add_disable_movement_input_reason("task");
-        } else {
-            this->remove_disable_movement_input_reason("task");
+        should_be_frozen := should_freeze_for_popup || has_task_in_progress;
+
+        if(is_frozen == should_be_frozen) {
+            return;
         }
+
+        if should_be_frozen {
+            this->add_disable_movement_input_reason("frozen");
+        } else {
+            this->remove_disable_movement_input_reason("frozen");
+        }
+
+        is_frozen = should_be_frozen;
     }
 
     Notify :: proc(using this: Player, message: string) {
@@ -73,6 +83,9 @@ Player :: class : Player_Base {
 		// (This needs to exist before Pranked_Effect fires set_trigger.)
 		this->ensure_prank_anim_state_machine();
 
+		// Voice chat: ensure late-joiners get the correct routing immediately.
+		this->apply_voice_chat_masks_for_current_state();
+
         if game_state == Game_State.LOBBY {
             world_references->teleport_near_lobby(this);
         } else if game_state == Game_State.INGAME {
@@ -82,6 +95,38 @@ Player :: class : Player_Base {
             world_references->teleport_to_voting(this);
         }
     }
+
+	apply_voice_chat_masks_for_current_state :: proc(using this: Player) {
+		// In lobby: everyone can hear & speak to everyone.
+		if game_state == Game_State.LOBBY {
+			this->apply_voice_chat_masks_lobby();
+			return;
+		}
+
+		// In-match: alive speaks to alive; ghosts/spectators speak to dead.
+		if this.player_state == Player_State.ALIVE {
+			this->apply_voice_chat_masks_alive();
+		} else {
+			this->apply_voice_chat_masks_ghost();
+		}
+	}
+
+	apply_voice_chat_masks_lobby :: proc(using this: Player) {
+		voice_channel_listen_mask = ALL_VOICE_CHANNELS;
+		voice_channel_speak_mask  = ALL_VOICE_CHANNELS;
+	}
+
+	apply_voice_chat_masks_alive :: proc(using this: Player) {
+		// Alive can hear everyone, but only speak to other alive.
+		voice_channel_listen_mask = ALL_VOICE_CHANNELS;
+		voice_channel_speak_mask  = ALIVE_CHANNEL;
+	}
+
+	apply_voice_chat_masks_ghost :: proc(using this: Player) {
+		// Ghosts/spectators can hear everyone, but only speak to other ghosts.
+		voice_channel_listen_mask = ALL_VOICE_CHANNELS;
+		voice_channel_speak_mask  = DEAD_CHANNEL;
+	}
 
     ao_end :: proc(using this: Player) {
         unordered_remove_by_value(ref players, this);
@@ -105,9 +150,21 @@ Player :: class : Player_Base {
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
+			// If we were overriding the camera for the Jester Win cinematic and it ended,
+			// restore the normal follow behavior.
+			if jester_win_camera_override_active && game_state != Game_State.ANIM_JESTER_WIN {
+				this.camera.follow_player = true;
+				jester_win_camera_override_active = false;
+			}
+
 			// During the Jester Win cinematic, keep the camera locked to the jester every frame.
 			if game_state == Game_State.ANIM_JESTER_WIN {
-				this->try_focus_camera_on_jester();
+				// Turn off camera follow and set position ONCE to reduce per-frame camera work.
+				if !jester_win_camera_override_active {
+					if this->try_begin_jester_win_camera_override() {
+						jester_win_camera_override_active = true;
+					}
+				}
 				return;
 			}
             if this.player_state == Player_State.ALIVE {
@@ -305,18 +362,25 @@ Player :: class : Player_Base {
 	}
 
 	try_focus_camera_on_jester :: proc(using this: Player) {
+		// Deprecated: replaced by `try_begin_jester_win_camera_override` which avoids
+		// per-frame camera position writes.
+	}
+
+	try_begin_jester_win_camera_override :: proc(using this: Player) -> bool {
 		if jester_win_player_id == 0 {
-			return;
+			return false;
 		}
 		for i: 0..players.elements.count-1 {
 			p := players.elements[i];
 			if p != null && #alive(p.entity) && p.entity.id == jester_win_player_id {
-				// Force the cinematic actor to face right for the whole sequence.
+				// Force the cinematic actor to face right and lock the camera once.
 				p->set_facing_right(true);
+				this.camera.follow_player = false;
 				this.camera.position = p.entity.world_position;
-				return;
+				return true;
 			}
 		}
+		return false;
 	}
 }
 
