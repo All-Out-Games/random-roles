@@ -57,6 +57,24 @@ waiting_for_restart: bool;
 voting_start_time: float;
 round_number: int;
 
+// --- Fake meeting (Prankster) ---
+fake_meeting_active: bool;
+fake_meeting_caller_id: u64;
+
+start_fake_meeting :: proc(caller: Player) {
+	// Only allow during gameplay
+	if game_state != Game_State.INGAME return;
+	if caller == null return;
+	if caller.player_state != Player_State.ALIVE return;
+
+	fake_meeting_active = true;
+	fake_meeting_caller_id = caller.entity.id;
+	caller.prankster_fake_meetings_called += 1;
+
+	// Use the normal meeting flow (meeting called popup -> voting)
+	start_meeting(false);
+}
+
 on_player_go_dead :: proc(player: Player) {
 	player.player_state = Player_State.DEAD;
 	player->add_ghost_reason("spectator");
@@ -362,7 +380,7 @@ ao_update_ingame :: proc(dt: float) {
 	anarchist_count := get_player_count(Player_Type.ANARCHIST);
 
 	//Win Conditions
-	// -- Prankster: prank 3 people
+	// -- Prankster: prank 3 people & call 1 fake meeting
 	prankster_winners: List(Player);
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
@@ -370,7 +388,7 @@ ao_update_ingame :: proc(dt: float) {
 		if p.player_state != Player_State.ALIVE continue;
 		if p.player_type != Player_Type.ANARCHIST continue;
 		if p.player_role != Player_Role.PRANKSTER continue;
-		if p.prankster_prank_count >= 3 {
+		if p.prankster_prank_count >= 3 && p.prankster_fake_meetings_called >= 1 {
 			append(ref prankster_winners, p);
 		}
 	}
@@ -473,6 +491,14 @@ ao_update_voting :: proc(dt: float) {
 }
 
 end_voting :: proc() {
+	// If this was a fake meeting, skip ejection entirely.
+	if fake_meeting_active {
+		for i: 0..players.elements.count-1 {
+			players.elements[i]->Notify("It was a fake meeting!");
+		}
+		fake_meeting_active = false;
+		fake_meeting_caller_id = 0;
+	} else {
 	// Tally votes and find player with most votes
 	most_votes := 0;
 	voted_out: Player = null;
@@ -509,6 +535,7 @@ end_voting :: proc() {
 		for i: 0..players.elements.count-1 {
 			players.elements[i]->Notify("No votes were cast. No one was ejected.");
 		}
+	}
 	}
 	
 	// Reset votes
@@ -649,9 +676,15 @@ assign_players_to_types :: proc() {
 			task.started = true; // Show as an active objective immediately
 			append(ref p.active_tasks, task);
 
+			fake_task := new(Task_Call_Fake_Meeting);
+			fake_task.id = "call_fake_meeting";
+			fake_task.started = true;
+			append(ref p.active_tasks, fake_task);
+
 			// Reset prank progress at round start
 			p.prankster_prank_count = 0;
 			p.prankster_pranked_ids = List(u64).{};
+			p.prankster_fake_meetings_called = 0;
 		}
 	}
 	

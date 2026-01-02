@@ -53,6 +53,15 @@ Task_Prank_3_People :: class : Task_Base {
 	}
 }
 
+Task_Call_Fake_Meeting :: class : Task_Base {
+	update_task :: proc(using this: Task_Call_Fake_Meeting, player: Player) {
+		if completed return;
+		if player.prankster_fake_meetings_called >= 1 {
+			complete_attempt(this, player, true);
+		}
+	}
+}
+
 get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) {
 	task_list: List(Task_Base);
 	// Ensure our shared rng state exists/has been seeded before use.
@@ -155,6 +164,7 @@ update_tasks :: proc(player: Player) {
 			case Task_Build_A_Robot: player.active_tasks.elements[i].(Task_Build_A_Robot)->update_task(player);
 			case Task_Catching_Butterflies: player.active_tasks.elements[i].(Task_Catching_Butterflies)->update_task(player);
 			case Task_Prank_3_People: player.active_tasks.elements[i].(Task_Prank_3_People)->update_task(player);
+			case Task_Call_Fake_Meeting: player.active_tasks.elements[i].(Task_Call_Fake_Meeting)->update_task(player);
 		}
 	}
 }
@@ -181,6 +191,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Catching Butterflies";
 		case "prank_3_people":
 			return "Prank 3 people";
+		case "call_fake_meeting":
+			return "Call 1 fake meeting";
 		case:
 			return task_id;
 	}
@@ -246,6 +258,9 @@ update_tasks_ui :: proc(player: Player) {
 		switch #object_type(task) {
 			case Task_Prank_3_People: {
 				task_name = format_string("% (%/3)", .{task_name, player.prankster_prank_count});
+			}
+			case Task_Call_Fake_Meeting: {
+				task_name = format_string("% (%/1)", .{task_name, player.prankster_fake_meetings_called});
 			}
 		}
 		if task_completed {
