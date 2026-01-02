@@ -27,6 +27,7 @@ Player :: class : Player_Base {
         // We use separate reasons so popups and tasks don't accidentally unfreeze each other.
         should_freeze_for_popup :=
             game_state == Game_State.ANIM_INTRO ||
+			game_state == Game_State.ANIM_JESTER_WIN ||
             game_state == Game_State.ANIM_VICTORY;
 
         if should_freeze_for_popup {
@@ -91,6 +92,9 @@ Player :: class : Player_Base {
             this->update_freeze_reasons();
             this->setup_player_colors();
             update_tasks_ui(this);
+			if game_state == Game_State.ANIM_JESTER_WIN {
+				this->draw_letterbox_bars();
+			}
             if game_state == Game_State.ANIM_INTRO {
                 intro_popup->set_local_player(this);
                 intro_popup->update(delta_time);
@@ -101,6 +105,11 @@ Player :: class : Player_Base {
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
+			// During the Jester Win cinematic, keep the camera locked to the jester every frame.
+			if game_state == Game_State.ANIM_JESTER_WIN {
+				this->try_focus_camera_on_jester();
+				return;
+			}
             if this.player_state == Player_State.ALIVE {
                 abilityIndex := 0;
                 
@@ -248,16 +257,66 @@ Player :: class : Player_Base {
 		}
 
 		layer := sm->try_get_layer("main");
-        idle_state := layer->try_get_state("idle");
+		if layer == null {
+			log_error("No 'main' state machine layer found");
+			return;
+		}
+        idle_state := layer->try_get_state("Idle");
+		if idle_state == null {
+			log_error("No 'Idle' state found on 'main' layer");
+			return;
+		}
 
-		prank_slip_var := sm->create_variable("prank_slip", State_Machine_Variable.Kind.TRIGGER);
-		prank_slip_state := layer->create_state("004RAND_trickster/Slip_On_Banana", 2.0, false);
+		// prank_slip (trigger var -> one-shot anim state -> back to Idle)
+		prank_slip_var := sm->try_get_variable("prank_slip");
+		if prank_slip_var == null {
+			prank_slip_var = sm->create_variable("prank_slip", State_Machine_Variable.Kind.TRIGGER);
+		}
+		prank_slip_state := layer->try_get_state("004RAND_trickster/Slip_On_Banana");
+		if prank_slip_state == null {
+			prank_slip_state = layer->create_state("004RAND_trickster/Slip_On_Banana", 2.0, false);
+		}
 		layer->create_global_transition(prank_slip_state, false)->create_trigger_condition(prank_slip_var);
-
 		layer->create_transition(prank_slip_state, idle_state, true);
+
+		// jester_win (trigger var -> end-game anim state -> back to Idle)
+		jester_win_var := sm->try_get_variable("jester_win");
+		if jester_win_var == null {
+			jester_win_var = sm->create_variable("jester_win", State_Machine_Variable.Kind.TRIGGER);
+		}
+		jester_win_state := layer->try_get_state("004RAND_trickster/Trickster_End_Game");
+		if jester_win_state == null {
+			jester_win_state = layer->create_state("004RAND_trickster/Trickster_End_Game", 5.0, false);
+		}
+		layer->create_global_transition(jester_win_state, false)->create_trigger_condition(jester_win_var);
+		layer->create_transition(jester_win_state, idle_state, true);
 
 		prank_anim_sm_inited = true;
         log_info("Prank anim state machine initialized");
+	}
+
+	draw_letterbox_bars :: proc(using this: Player) {
+		screen := UI.get_screen_rect();
+		bg := get_asset(Texture_Asset, "$AO/white.png");
+		UI.push_layer(2000);
+		defer UI.pop_layer();
+		UI.quad(screen->subrect(0.0, 0.90, 1.0, 1.0), bg, .{0, 0, 0, 1});
+		UI.quad(screen->subrect(0.0, 0.0, 1.0, 0.10), bg, .{0, 0, 0, 1});
+	}
+
+	try_focus_camera_on_jester :: proc(using this: Player) {
+		if jester_win_player_id == 0 {
+			return;
+		}
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p != null && #alive(p.entity) && p.entity.id == jester_win_player_id {
+				// Force the cinematic actor to face right for the whole sequence.
+				p->set_facing_right(true);
+				this.camera.position = p.entity.world_position;
+				return;
+			}
+		}
 	}
 }
 

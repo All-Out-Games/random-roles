@@ -24,6 +24,7 @@ Game_State :: enum {
 	ANIM_BODY_FOUND;
 	ANIM_MEETING_CALLED;
 	VOTING;
+	ANIM_JESTER_WIN;
 	ANIM_VICTORY;
 }
 
@@ -61,6 +62,12 @@ round_number: int;
 fake_meeting_active: bool;
 fake_meeting_caller_id: u64;
 
+// --- Jester Win cinematic (Prankster) ---
+JESTER_WIN_CINEMATIC_TIME :: 5.0;
+jester_win_active: bool;
+jester_win_start_time: float;
+jester_win_player_id: u64;
+
 start_fake_meeting :: proc(caller: Player) {
 	// Only allow during gameplay
 	if game_state != Game_State.INGAME return;
@@ -85,6 +92,25 @@ prankster_check_unlock_jester_win :: proc(player: Player) {
 			player->Notify("Jester Win unlocked! Survive 15s, then use it to win.");
 		}
 	}
+}
+
+start_jester_win_cinematic :: proc(caller: Player) {
+	if caller == null return;
+	if caller.player_state != Player_State.ALIVE return;
+	if caller.player_role != Player_Role.PRANKSTER return;
+	if game_state != Game_State.INGAME return;
+
+	jester_win_active = true;
+	jester_win_start_time = get_time();
+	jester_win_player_id = caller.entity.id;
+
+	// Freeze game flow + show cinematic
+	game_state = Game_State.ANIM_JESTER_WIN;
+	close_all_doors();
+
+	// Play the trickster end animation (must be wired into the player's anim state machine)
+	caller->set_facing_right(true);
+	caller->set_trigger("jester_win");
 }
 
 on_player_go_dead :: proc(player: Player) {
@@ -146,6 +172,9 @@ setup_ingame :: proc() {
 	waiting_for_restart = false;
 	voting_start_time = 0.0;
 	open_all_doors();
+	jester_win_active = false;
+	jester_win_player_id = 0;
+	jester_win_start_time = 0.0;
 }
 
 setup_voting :: proc() {
@@ -222,6 +251,8 @@ ao_update :: proc(dt: float) {
 		ao_update_meeting_called(dt);
 	} else if(game_state == Game_State.VOTING) {
 		ao_update_voting(dt);
+	} else if(game_state == Game_State.ANIM_JESTER_WIN) {
+		ao_update_jester_win(dt);
 	} else if(game_state == Game_State.ANIM_VICTORY) {
 		ao_update_victory(dt);
 	}
@@ -448,6 +479,33 @@ ao_update_victory :: proc(dt: float) {
 	if victory_popup->is_finished() {
 		victory_popup->hide();
 		setup_lobby();
+	}
+}
+
+ao_update_jester_win :: proc(dt: float) {
+	elapsed := get_time() - jester_win_start_time;
+	if elapsed < JESTER_WIN_CINEMATIC_TIME {
+		return;
+	}
+
+	// After the cinematic, end the game with only the jester as winner.
+	winners: List(Player);
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p != null && #alive(p.entity) && p.entity.id == jester_win_player_id {
+			append(ref winners, p);
+			break;
+		}
+	}
+
+	jester_win_active = false;
+	jester_win_player_id = 0;
+	jester_win_start_time = 0.0;
+
+	if winners.elements.count > 0 {
+		end_game_with_winners(Player_Type.ANARCHIST, winners);
+	} else {
+		end_game_with_victor(Player_Type.ANARCHIST);
 	}
 }
 
