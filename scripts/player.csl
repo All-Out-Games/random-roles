@@ -97,32 +97,23 @@ Player :: class : Player_Base {
     }
 
 	apply_voice_chat_masks_for_current_state :: proc(using this: Player) {
-		// In lobby: everyone can hear & speak to everyone.
-		if game_state == Game_State.LOBBY {
-			this->apply_voice_chat_masks_lobby();
-			return;
-		}
-
-		// In-match: alive speaks to alive; ghosts/spectators speak to dead.
+		// In-match: alive speaks to alive; ghosts/spectators speak to dead (but listen to all)
 		if this.player_state == Player_State.ALIVE {
 			this->apply_voice_chat_masks_alive();
 		} else {
-			this->apply_voice_chat_masks_ghost();
+			this->apply_voice_chat_masks_ghost_or_passive();
 		}
 	}
 
-	apply_voice_chat_masks_lobby :: proc(using this: Player) {
-		voice_channel_listen_mask = ALL_VOICE_CHANNELS;
-		voice_channel_speak_mask  = ALL_VOICE_CHANNELS;
-	}
-
 	apply_voice_chat_masks_alive :: proc(using this: Player) {
-		// Alive can hear everyone, but only speak to other alive.
-		voice_channel_listen_mask = ALL_VOICE_CHANNELS;
+        log_info("apply_voice_chat_masks_alive");
+		// Alive can hear & speak on alive channel.
+		voice_channel_listen_mask = ALIVE_CHANNEL;
 		voice_channel_speak_mask  = ALIVE_CHANNEL;
 	}
 
-	apply_voice_chat_masks_ghost :: proc(using this: Player) {
+	apply_voice_chat_masks_ghost_or_passive :: proc(using this: Player) {
+        log_info("apply_voice_chat_masks_ghost_or_passive");
 		// Ghosts/spectators can hear everyone, but only speak to other ghosts.
 		voice_channel_listen_mask = ALL_VOICE_CHANNELS;
 		voice_channel_speak_mask  = DEAD_CHANNEL;
