@@ -15,6 +15,77 @@ rr_refresh_rng_state :: proc() {
 	rr_rng_state.value = rng_seed((get_real_time() * 1000000000).(u64));
 }
 
+// --- Role variety (no duplicates per round, maximize variety across rounds) ---
+civilian_role_bag: List(Player_Role);
+anarchist_role_bag: List(Player_Role);
+traitor_role_bag: List(Player_Role);
+
+shuffle_role_list :: proc(list: ref List(Player_Role)) {
+	if list.elements.count <= 1 return;
+	rr_refresh_rng_state();
+	for i: 0..list.elements.count-1 {
+		j := rng_range_int(ref rr_rng_state.value, i, list.elements.count-1);
+		tmp := list.elements[i];
+		list.elements[i] = list.elements[j];
+		list.elements[j] = tmp;
+	}
+}
+
+shuffle_player_list :: proc(list: ref List(Player)) {
+	if list.elements.count <= 1 return;
+	rr_refresh_rng_state();
+	for i: 0..list.elements.count-1 {
+		j := rng_range_int(ref rr_rng_state.value, i, list.elements.count-1);
+		tmp := list.elements[i];
+		list.elements[i] = list.elements[j];
+		list.elements[j] = tmp;
+	}
+}
+
+role_list_contains :: proc(list: List(Player_Role), role: Player_Role) -> bool {
+	for i: 0..list.elements.count-1 {
+		if list.elements[i] == role return true;
+	}
+	return false;
+}
+
+ensure_role_bag_valid :: proc(bag: ref List(Player_Role), master: List(Player_Role)) {
+	// If master changed (new roles added/removed) invalidate the bag so we refill cleanly.
+	for i: 0..bag.elements.count-1 {
+		if !role_list_contains(master, bag.elements[i]) {
+			bag = List(Player_Role).{};
+			return;
+		}
+	}
+}
+
+refill_role_bag_if_needed :: proc(bag: ref List(Player_Role), master: List(Player_Role)) {
+	ensure_role_bag_valid(ref bag, master);
+	if bag.elements.count > 0 return;
+	bag = List(Player_Role).{};
+	for i: 0..master.elements.count-1 {
+		append(ref bag, master.elements[i]);
+	}
+	shuffle_role_list(ref bag);
+}
+
+draw_roles_from_bag :: proc(bag: ref List(Player_Role), master: List(Player_Role), count: int) -> List(Player_Role) {
+	drawn: List(Player_Role);
+	if count <= 0 return drawn;
+	if master.elements.count <= 0 return drawn;
+
+	// Never draw more than the number of distinct roles available (no duplicates per round).
+	to_draw := min(count, master.elements.count);
+	for i: 0..to_draw-1 {
+		refill_role_bag_if_needed(ref bag, master);
+		// Bag is guaranteed non-empty here if master non-empty.
+		role := bag.elements[bag.elements.count - 1];
+		pop(ref bag);
+		append(ref drawn, role);
+	}
+	return drawn;
+}
+
 MIN_NUMBER_OF_PLAYERS: int : 4;
 
 Game_State :: enum {
@@ -44,6 +115,8 @@ Player_Role :: enum {
     NONE;
 	//Civilian Roles
 	SHERIFF;
+	DOCTOR;
+	PRESIDENT;
 	//Anarchist Roles
 	PRANKSTER;
 	//Traitor Roles
@@ -115,6 +188,9 @@ start_jester_win_cinematic :: proc(caller: Player) {
 
 on_player_go_dead :: proc(player: Player) {
 	player.player_state = Player_State.DEAD;
+	// Safety: temporary resurrection should always end when dead.
+	player.is_temporarily_resurrected = false;
+	player.temporarily_resurrected_until = 0.0;
 	player->add_ghost_reason("spectator");
 	player.agent->set_navmesh_to_lock_to(world_references.ghost_navmesh);
 	player->apply_voice_chat_masks_for_current_state();
@@ -123,6 +199,9 @@ on_player_go_dead :: proc(player: Player) {
 on_player_go_passive :: proc(player: Player) {
 	player->revive();
 	player.player_state = Player_State.PASSIVE;
+	// Safety: passive/lobby players should never remain in temporary-resurrect state.
+	player.is_temporarily_resurrected = false;
+	player.temporarily_resurrected_until = 0.0;
 	world_references->teleport_near_lobby(player);
 	player->remove_ghost_reason("spectator");
 	player.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
@@ -190,13 +269,15 @@ setup_voting :: proc() {
 	// Reset all votes
 	foreach player: component_iterator(Player) {
 		player.voted_for = null;
+		player.has_voted = false;
+		player.voted_skip = false;
 		player.votes_received = 0;
 		world_references->teleport_to_voting(player);
 	}
 }
 
 cast_vote :: proc(voter: Player, target: Player) {
-	if voter.voted_for != null {
+	if voter.has_voted {
 		// Already voted, can't change vote
 		return;
 	}
@@ -208,9 +289,46 @@ cast_vote :: proc(voter: Player, target: Player) {
 	}
 	
 	voter.voted_for = target;
-	target.votes_received += 1;
+	voter.has_voted = true;
+	voter.voted_skip = false;
+	vote_weight := 1;
+	if voter.player_role == Player_Role.PRESIDENT {
+		vote_weight = 2;
+	}
+	target.votes_received += vote_weight;
 	
-	voter->Notify(format_string("You voted for %", .{target.entity->get_name()}));
+	if vote_weight == 2 {
+		voter->Notify(format_string("You voted for % (2x)", .{target.entity->get_name()}));
+	} else {
+		voter->Notify(format_string("You voted for %", .{target.entity->get_name()}));
+	}
+}
+
+cast_skip_vote :: proc(voter: Player) {
+	if voter.has_voted {
+		return;
+	}
+	if voter.player_state != Player_State.ALIVE {
+		return;
+	}
+	if game_state != Game_State.VOTING {
+		return;
+	}
+
+	voter.voted_for = null;
+	voter.has_voted = true;
+	voter.voted_skip = true;
+
+	vote_weight := 1;
+	if voter.player_role == Player_Role.PRESIDENT {
+		vote_weight = 2;
+	}
+
+	if vote_weight == 2 {
+		voter->Notify("You voted to skip (2x)");
+	} else {
+		voter->Notify("You voted to skip");
+	}
 }
 
 start_meeting :: proc(from_body: bool) {
@@ -422,6 +540,7 @@ force_start_lobby_game :: proc() {
 }
 
 ao_update_ingame :: proc(dt: float) {
+	update_temporary_resurrections();
 	alive_count := get_alive_player_count();
 	civilian_count := get_player_count(Player_Type.CIVILIAN);
 	traitor_count := get_player_count(Player_Type.TRAITOR);
@@ -452,6 +571,22 @@ ao_update_ingame :: proc(dt: float) {
 	if civilian_count > 0 && all_civilians_completed_tasks() {
 		end_game_with_victor(Player_Type.CIVILIAN);
 		return;
+	}
+}
+
+update_temporary_resurrections :: proc() {
+	now := get_time();
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if !p.is_temporarily_resurrected continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.temporarily_resurrected_until <= 0.0 continue;
+		if now < p.temporarily_resurrected_until continue;
+
+		// Time's up: return them to dead state and spawn a new corpse at their current position.
+		p->kill();
 	}
 }
 
@@ -541,7 +676,7 @@ ao_update_voting :: proc(dt: float) {
 	for i: 0..players.elements.count-1 {
 		if players.elements[i].player_state == Player_State.ALIVE {
 			alive_count += 1;
-			if players.elements[i].voted_for != null {
+			if players.elements[i].has_voted {
 				voted_count += 1;
 			}
 		}
@@ -567,48 +702,83 @@ end_voting :: proc() {
 		fake_meeting_active = false;
 		fake_meeting_caller_id = 0;
 	} else {
-	// Tally votes and find player with most votes
-	most_votes := 0;
-	voted_out: Player = null;
-	tie_detected := false;
-	
-	for i: 0..players.elements.count-1 {
-		p := players.elements[i];
-		if p.player_state == Player_State.ALIVE && p.votes_received > most_votes {
-			most_votes = p.votes_received;
-			voted_out = p;
+		// Tally skip votes (weighted)
+		skip_votes := 0;
+		for i: 0..players.elements.count-1 {
+			v := players.elements[i];
+			if v == null continue;
+			if v.player_state != Player_State.ALIVE continue;
+			if !v.has_voted continue;
+			if !v.voted_skip continue;
+			if v.player_role == Player_Role.PRESIDENT {
+				skip_votes += 2;
+			} else {
+				skip_votes += 1;
+			}
+		}
+
+		// Tally votes and find player with most votes
+		most_votes := 0;
+		voted_out: Player = null;
+		tie_detected := false;
+		
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+			if p.player_state != Player_State.ALIVE continue;
+
+			if p.votes_received > most_votes {
+				most_votes = p.votes_received;
+				voted_out = p;
+				tie_detected = false;
+			} else if p.votes_received == most_votes && most_votes > 0 {
+				tie_detected = true;
+			}
+		}
+
+		// Include skip in "winner" comparison
+		if skip_votes > most_votes {
+			voted_out = null;
 			tie_detected = false;
-		} else if p.player_state == Player_State.ALIVE && p.votes_received == most_votes && most_votes > 0 {
+			most_votes = skip_votes;
+		} else if skip_votes == most_votes && most_votes > 0 {
+			// Skip ties with top player vote count -> tie, no ejection
 			tie_detected = true;
 		}
-	}
-	
-	// Execute the voted out player (if no tie and someone got votes)
-	if voted_out != null && !tie_detected && most_votes > 0 {
-		// Kill
-		on_player_go_dead(voted_out);
 		
-		// Notify everyone
-		ejected_message := format_string("% has been ejected!", .{voted_out.entity->get_name()});
-		for i: 0..players.elements.count-1 {
-			players.elements[i]->Notify(ejected_message);
+		// Execute the voted out player (if no tie and someone got votes and skip didn't win)
+		if voted_out != null && !tie_detected && most_votes > 0 && voted_out.votes_received == most_votes {
+			// Kill
+			on_player_go_dead(voted_out);
+			
+			// Notify everyone
+			ejected_message := format_string("% has been ejected!", .{voted_out.entity->get_name()});
+			for i: 0..players.elements.count-1 {
+				players.elements[i]->Notify(ejected_message);
+			}
+		} else if tie_detected {
+			// Notify about tie
+			for i: 0..players.elements.count-1 {
+				players.elements[i]->Notify("It's a tie! No one was ejected.");
+			}
+		} else if most_votes > 0 && skip_votes == most_votes {
+			// Skip won outright
+			for i: 0..players.elements.count-1 {
+				players.elements[i]->Notify("Vote skipped. No one was ejected.");
+			}
+		} else {
+			// No votes cast
+			for i: 0..players.elements.count-1 {
+				players.elements[i]->Notify("No votes were cast. No one was ejected.");
+			}
 		}
-	} else if tie_detected {
-		// Notify about tie
-		for i: 0..players.elements.count-1 {
-			players.elements[i]->Notify("It's a tie! No one was ejected.");
-		}
-	} else {
-		// No votes cast
-		for i: 0..players.elements.count-1 {
-			players.elements[i]->Notify("No votes were cast. No one was ejected.");
-		}
-	}
 	}
 	
 	// Reset votes
 	for i: 0..players.elements.count-1 {
 		players.elements[i].voted_for = null;
+		players.elements[i].has_voted = false;
+		players.elements[i].voted_skip = false;
 		players.elements[i].votes_received = 0;
 	}
 	
@@ -710,33 +880,61 @@ assign_players_to_types :: proc() {
 		}
 	}
 
-	// Assign roles - only one Sheriff among civilians, one Pirate among traitors
-	sheriff_assigned := false;
-	pirate_assigned := false;
-	prankster_assigned := false;
-	for i: 0..players.elements.count-1 {
-		players.elements[i].player_role = Player_Role.NONE;
-		
-		if players.elements[i].player_type == Player_Type.CIVILIAN && !sheriff_assigned {
-			players.elements[i].player_role = Player_Role.SHERIFF;
-			sheriff_assigned = true;
-		}
-		
-		if players.elements[i].player_type == Player_Type.ANARCHIST && !prankster_assigned {
-			players.elements[i].player_role = Player_Role.PRANKSTER;
-			prankster_assigned = true;
-		}
+	// Assign roles
+	civilian_roles_master: List(Player_Role);
+	anarchist_roles_master: List(Player_Role);
+	traitor_roles_master: List(Player_Role);
 
-		if players.elements[i].player_type == Player_Type.TRAITOR && !pirate_assigned {
-			players.elements[i].player_role = Player_Role.PIRATE;
-			pirate_assigned = true;
+	append(ref civilian_roles_master, Player_Role.SHERIFF);
+	append(ref civilian_roles_master, Player_Role.DOCTOR);
+	append(ref civilian_roles_master, Player_Role.PRESIDENT);
+	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
+	append(ref traitor_roles_master, Player_Role.PIRATE);
+
+	civ_players: List(Player);
+	an_players: List(Player);
+	tr_players: List(Player);
+
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		p.player_role = Player_Role.NONE;
+		if p.player_type == Player_Type.CIVILIAN {
+			append(ref civ_players, p);
+		} else if p.player_type == Player_Type.ANARCHIST {
+			append(ref an_players, p);
+		} else if p.player_type == Player_Type.TRAITOR {
+			append(ref tr_players, p);
 		}
+	}
+
+	// Shuffle who receives roles within each type for extra randomness.
+	shuffle_player_list(ref civ_players);
+	shuffle_player_list(ref an_players);
+	shuffle_player_list(ref tr_players);
+
+	civ_roles := draw_roles_from_bag(ref civilian_role_bag, civilian_roles_master, civ_players.elements.count);
+	an_roles := draw_roles_from_bag(ref anarchist_role_bag, anarchist_roles_master, an_players.elements.count);
+	tr_roles := draw_roles_from_bag(ref traitor_role_bag, traitor_roles_master, tr_players.elements.count);
+
+	for i: 0..civ_roles.elements.count-1 {
+		civ_players.elements[i].player_role = civ_roles.elements[i];
+	}
+	for i: 0..an_roles.elements.count-1 {
+		an_players.elements[i].player_role = an_roles.elements[i];
+	}
+	for i: 0..tr_roles.elements.count-1 {
+		tr_players.elements[i].player_role = tr_roles.elements[i];
 	}
 
 	// Assign role-specific tasks / objectives
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
+		
+		// Per-round resets
+		p.doctor_resurrects_used = 0;
+
 		if p.player_role == Player_Role.PRANKSTER {
 			p.active_tasks = List(Task_Base).{};
 			task := new(Task_Prank_3_People);
