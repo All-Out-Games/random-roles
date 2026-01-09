@@ -48,16 +48,15 @@ Kill_Ability :: class : Ability_Base {
         return finder.closest;
     }
 
-    can_use :: proc(instance: Kill_Ability, player: Player) -> bool {
-        return instance->get_closest_alive_player(player) != null;
+    can_use :: method() -> bool {
+        return get_closest_alive_player(this, player) != null;
     }
 
-    on_update :: proc(instance: Kill_Ability, player: Player, params: ref Ability_Update_Params) {
+    on_update :: method(params: ref Ability_Update_Params) {
         if params.clicked && params.can_use {
-            closest_alive_player := instance->get_closest_alive_player(player);
+            closest_alive_player := get_closest_alive_player(this, player);
             if closest_alive_player != null {
                 closest_alive_player->kill();
-                //Need to add corpse on floor!
             }
         }
     }
@@ -82,18 +81,18 @@ Resurrect_Ability :: class : Ability_Base {
         return finder.closest;
     }
 
-    can_use :: proc(instance: Resurrect_Ability, player: Player) -> bool {
+    can_use :: method() -> bool {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
         if player.player_type != Player_Type.CIVILIAN return false;
         if player.player_role != Player_Role.DOCTOR return false;
         if player.doctor_resurrects_used >= DOCTOR_RESURRECTS_PER_ROUND return false;
-        return instance->get_closest_resurrectable_corpse(player) != null;
+        return get_closest_resurrectable_corpse(this, player) != null;
     }
 
-    on_update :: proc(instance: Resurrect_Ability, player: Player, params: ref Ability_Update_Params) {
+    on_update :: proc(instance: Resurrect_Ability, params: ref Ability_Update_Params) {
         if params.clicked && params.can_use {
-            corpse := instance->get_closest_resurrectable_corpse(player);
+            corpse := instance->get_closest_resurrectable_corpse(instance.player);
             if corpse == null return;
 
             target := get_player_by_entity_id(corpse.owner_player_entity_id);
@@ -103,7 +102,7 @@ Resurrect_Ability :: class : Ability_Base {
             revive_pos := corpse.entity.world_position;
 
             // Consume a use.
-            player.doctor_resurrects_used += 1;
+           instance.player.doctor_resurrects_used += 1;
 
             // Remove the body (they "stand up").
             if #alive(corpse.entity) {
@@ -118,10 +117,10 @@ Resurrect_Ability :: class : Ability_Base {
             target.temporarily_resurrected_until = get_time() + DOCTOR_RESURRECT_DURATION_SECONDS;
 
             // Feedback
-            player->Notify(format_string("Resurrected % for %{.0}s (%/% used)", .{
+            instance.player->Notify(format_string("Resurrected % for %{.0}s (%/% used)", .{
                 target.entity->get_name(),
                 DOCTOR_RESURRECT_DURATION_SECONDS,
-                player.doctor_resurrects_used,
+                instance.player.doctor_resurrects_used,
                 DOCTOR_RESURRECTS_PER_ROUND
             }));
             target->Notify(format_string("You were resurrected for %{.0}s (no tasks).", .{DOCTOR_RESURRECT_DURATION_SECONDS}));
@@ -164,13 +163,13 @@ Report_Ability :: class : Ability_Base {
         return finder.closest;
     }
 
-    can_use :: proc(instance: Report_Ability, player: Player) -> bool {
-        return instance->get_closest_corpse(player) != null;
+    can_use :: proc(instance: Report_Ability) -> bool {
+        return instance->get_closest_corpse(instance.player) != null;
     }
 
-    on_update :: proc(instance: Report_Ability, player: Player, params: ref Ability_Update_Params) {
+    on_update :: proc(instance: Report_Ability, params: ref Ability_Update_Params) {
         if params.clicked && params.can_use {
-            closest_corpse := instance->get_closest_corpse(player);
+            closest_corpse := instance->get_closest_corpse(instance.player);
             if closest_corpse != null {
                 closest_corpse.has_been_reported = true;
                 // Start the meeting (corpse persists; cleaned up on disconnect / round end)
@@ -189,17 +188,17 @@ Vote_Ability :: class : Ability_Base {
         instance.voting_ui_open = false;
     }
 
-    can_use :: proc(instance: Vote_Ability, player: Player) -> bool {
+    can_use :: method() -> bool {
         return game_state == Game_State.VOTING && player.player_state == Player_State.ALIVE;
     }
 
-    on_update :: proc(instance: Vote_Ability, player: Player, params: ref Ability_Update_Params) {
+    on_update :: method(params: ref Ability_Update_Params) {
         if params.clicked && params.can_use {
-            instance.voting_ui_open = !instance.voting_ui_open;
+            voting_ui_open = !voting_ui_open;
         }
         
-        if instance.voting_ui_open && player->is_local_or_server() {
-            instance->draw_voting_ui(player);
+        if voting_ui_open && player->is_local_or_server() {
+            draw_voting_ui(this, player);
         }
     }
 
@@ -453,7 +452,7 @@ Vote_Ability :: class : Ability_Base {
 
 shoot_projectile :: proc(spawn_position: v2, velocity: v2, damage: int, lifetime: float, owner: Entity) -> Entity {
     prefab := get_asset(Prefab_Asset, "prefabs/RR_Projectile.prefab");
-    entity := instantiate(prefab);
+    entity := Scene.instantiate(prefab);
     entity->set_local_position(spawn_position);
 
     projectile := entity->get_component(RR_Projectile);
@@ -480,9 +479,9 @@ Shoot_Ability :: class : Ability_Base {
         return null;
     }
 
-    on_update :: proc(ability: Shoot_Ability, player: Player, params: ref Ability_Update_Params) {
+    on_update :: method(params: ref Ability_Update_Params) {
         activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
-        ability.icon = ability->get_icon(player.player_role);
+        icon = get_icon(this, player.player_role);
         if params.can_use {
             if activation.activate {
                 sfx := SFX.default_sfx_desc();
@@ -491,7 +490,7 @@ Shoot_Ability :: class : Ability_Base {
                 sfx.speed_perturb = 0.1;
                 shoot_projectile(player.entity.world_position, activation.direction * 10.0, 1, 0.75, player.entity);
                 SFX.play(get_asset(SFX_Asset, "sfx/shoot.wav"), sfx);
-                ability.current_cooldown = 30.0;
+                current_cooldown = 30.0;
             }
         }
     }
@@ -576,15 +575,15 @@ Black_Flag_Ability :: class : Ability_Base {
         ability.icon = get_asset(Texture_Asset, "sprites/icons/pirate/black_flag.png");
     }
     
-    can_use :: proc(ability: Black_Flag_Ability, player: Player) -> bool {
+    can_use :: method() -> bool {
         return player.player_state == Player_State.ALIVE;
     }
     
-    on_update :: proc(ability: Black_Flag_Ability, player: Player, params: ref Ability_Update_Params) {
+    on_update :: method(params: ref Ability_Update_Params) {
         if params.clicked && params.can_use {
             // Spawn prefab (includes the spine setup already)
             prefab := get_asset(Prefab_Asset, "prefabs/black_flag.prefab");
-            flag_entity := instantiate(prefab);
+            flag_entity := Scene.instantiate(prefab);
             flag_entity->set_local_position(player.entity.local_position);
 
             // Ensure gameplay component exists (drives fog + appear->idle)
@@ -596,7 +595,7 @@ Black_Flag_Ability :: class : Ability_Base {
             flag.owner_entity = player.entity;
             
             player->Notify("Black Flag placed!");
-            ability.current_cooldown = 60.0;
+            current_cooldown = 60.0;
         }
     }
 }
@@ -622,7 +621,7 @@ Pranked_Effect :: class : Component {
 		phase = 0;
 	}
 
-	ao_update :: proc(using this: Pranked_Effect, dt: float) {
+	ao_update :: method(dt: float) {
 		p := entity->get_component(Player);
 		if p == null {
 			return;
@@ -683,19 +682,19 @@ Prank_Ability :: class : Ability_Base {
 		return finder.closest;
 	}
 
-	can_use :: proc(instance: Prank_Ability, player: Player) -> bool {
-		return instance->get_closest_prankable_player(player) != null;
+	can_use :: proc(instance: Prank_Ability) -> bool {
+		return instance->get_closest_prankable_player(instance.player) != null;
 	}
 
-	on_update :: proc(instance: Prank_Ability, player: Player, params: ref Ability_Update_Params) {
+	on_update :: proc(instance: Prank_Ability, params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
-			target := instance->get_closest_prankable_player(player);
+			target := instance->get_closest_prankable_player(instance.player);
 			if target == null {
 				return;
 			}
 
 			// Count unique pranks toward the win condition
-			player.prankster_prank_count += 1;
+			instance.player.prankster_prank_count += 1;
 
 			// Attach a delayed effect to the target so the message shows on THEIR client after 10s
 			eff := target.entity->get_component(Pranked_Effect);
@@ -704,7 +703,7 @@ Prank_Ability :: class : Ability_Base {
 			}
 			eff->arm(PRANK_DELAY_SECONDS);
 
-			player->Notify(format_string("Pranked %!", .{target.entity->get_name()}));
+			instance.player->Notify(format_string("Pranked %!", .{target.entity->get_name()}));
 			instance.current_cooldown = 15.0;
 		}
 	}
@@ -717,13 +716,13 @@ Fake_Meeting_Ability :: class : Ability_Base {
 		instance.icon = get_asset(Texture_Asset, "sprites/icons/trickster/call_fake.png");
 	}
 
-	can_use :: proc(instance: Fake_Meeting_Ability, player: Player) -> bool {
-		return game_state == Game_State.INGAME && player.player_state == Player_State.ALIVE;
+	can_use :: proc(instance: Fake_Meeting_Ability) -> bool {
+		return game_state == Game_State.INGAME && instance.player.player_state == Player_State.ALIVE;
 	}
 
-	on_update :: proc(instance: Fake_Meeting_Ability, player: Player, params: ref Ability_Update_Params) {
+	on_update :: proc(instance: Fake_Meeting_Ability, params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
-			start_fake_meeting(player);
+			start_fake_meeting(instance.player);
 			instance.current_cooldown = 60.0;
 		}
 	}
@@ -739,7 +738,7 @@ Jester_Win_Ability :: class : Ability_Base {
 		instance.icon = get_asset(Texture_Asset, "sprites/icons/trickster/jester.png");
 	}
 
-	can_use :: proc(instance: Jester_Win_Ability, player: Player) -> bool {
+	can_use :: method() -> bool {
 		// Must be alive in-game
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
@@ -751,13 +750,13 @@ Jester_Win_Ability :: class : Ability_Base {
 		return get_time() >= (player.prankster_jester_unlocked_time + JESTER_WIN_DELAY_SECONDS);
 	}
 
-	on_update :: proc(instance: Jester_Win_Ability, player: Player, params: ref Ability_Update_Params) {
+	on_update :: method(params: ref Ability_Update_Params) {
 		// Clicking early does nothing; button should be disabled by can_use.
 		if params.clicked && params.can_use {
 			// Start the cinematic; game will end after 5 seconds.
 			start_jester_win_cinematic(player);
 			// Put the ability on cooldown so it can't be spammed during the cinematic.
-			instance.current_cooldown = 9999.0;
+			current_cooldown = 9999.0;
 		}
 	}
 
