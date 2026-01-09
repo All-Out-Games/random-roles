@@ -3,6 +3,8 @@ import "core:ao"
 DOCTOR_RESURRECT_DURATION_SECONDS :: 10.0;
 DOCTOR_RESURRECTS_PER_ROUND :: 2;
 
+KILL_COOLDOWN_SECONDS :: 30.0;
+
 get_player_by_entity_id :: proc(entity_id: u64) -> Player {
     for i: 0..players.elements.count-1 {
         p := players.elements[i];
@@ -49,6 +51,9 @@ Kill_Ability :: class : Ability_Base {
     }
 
     can_use :: method() -> bool {
+        if game_state != Game_State.INGAME return false;
+        if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
         return get_closest_alive_player(this, player) != null;
     }
 
@@ -57,6 +62,7 @@ Kill_Ability :: class : Ability_Base {
             closest_alive_player := get_closest_alive_player(this, player);
             if closest_alive_player != null {
                 closest_alive_player->kill();
+                current_cooldown = KILL_COOLDOWN_SECONDS;
             }
         }
     }
@@ -84,6 +90,7 @@ Resurrect_Ability :: class : Ability_Base {
     can_use :: method() -> bool {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
         if player.player_type != Player_Type.CIVILIAN return false;
         if player.player_role != Player_Role.DOCTOR return false;
         if player.doctor_resurrects_used >= DOCTOR_RESURRECTS_PER_ROUND return false;
@@ -173,7 +180,7 @@ Report_Ability :: class : Ability_Base {
             if closest_corpse != null {
                 closest_corpse.has_been_reported = true;
                 // Start the meeting (corpse persists; cleaned up on disconnect / round end)
-                start_meeting(true);
+                start_meeting(true, instance.player);
             }
         }
     }
@@ -470,6 +477,13 @@ Shoot_Ability :: class : Ability_Base {
         ability.is_aimed_ability = true;
     }
 
+    can_use :: method() -> bool {
+        if game_state != Game_State.INGAME return false;
+        if player.player_state != Player_State.ALIVE return false;
+        if player->has_task_in_progress() return false;
+        return true;
+    }
+
     get_icon :: proc(ability: Shoot_Ability, player_role: Player_Role) -> Texture_Asset {
         if player_role == Player_Role.PIRATE {
             return get_asset(Texture_Asset, "sprites/icons/pirate/flintlock_pistol.png");
@@ -576,7 +590,11 @@ Black_Flag_Ability :: class : Ability_Base {
     }
     
     can_use :: method() -> bool {
-        return player.player_state == Player_State.ALIVE;
+        if game_state != Game_State.INGAME return false;
+        if player.player_state != Player_State.ALIVE return false;
+        if player->has_task_in_progress() return false;
+        if player.player_role != Player_Role.PIRATE return false;
+        return true;
     }
     
     on_update :: method(params: ref Ability_Update_Params) {
@@ -683,6 +701,9 @@ Prank_Ability :: class : Ability_Base {
 	}
 
 	can_use :: proc(instance: Prank_Ability) -> bool {
+		if game_state != Game_State.INGAME return false;
+		if instance.player.player_state != Player_State.ALIVE return false;
+		if instance.player->has_task_in_progress() return false;
 		return instance->get_closest_prankable_player(instance.player) != null;
 	}
 
@@ -717,13 +738,20 @@ Fake_Meeting_Ability :: class : Ability_Base {
 	}
 
 	can_use :: proc(instance: Fake_Meeting_Ability) -> bool {
-		return game_state == Game_State.INGAME && instance.player.player_state == Player_State.ALIVE;
+		if game_state != Game_State.INGAME return false;
+		if instance.player.player_state != Player_State.ALIVE return false;
+		if instance.player->has_task_in_progress() return false;
+		return true;
 	}
 
 	on_update :: proc(instance: Fake_Meeting_Ability, params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
+			// Only consume cooldown if the meeting actually started (i.e., not blocked by meeting cooldown).
+			prev_state := game_state;
 			start_fake_meeting(instance.player);
-			instance.current_cooldown = 60.0;
+			if prev_state != game_state {
+				instance.current_cooldown = 60.0;
+			}
 		}
 	}
 }
@@ -742,6 +770,7 @@ Jester_Win_Ability :: class : Ability_Base {
 		// Must be alive in-game
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
 
 		// Locked until both objectives are complete (and unlock timer started)
 		if player.prankster_jester_unlocked_time <= 0.0 return false;

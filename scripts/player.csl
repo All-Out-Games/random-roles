@@ -18,6 +18,9 @@ Player :: class : Player_Base {
     votes_received: int;  // How many votes this player has received
 
     active_tasks : List(Task_Base);
+
+	// Local UI state
+	show_minimap: bool;
 	
 	// Prankster progress (server-driven, shown locally via tasks UI)
 	prankster_prank_count: int;
@@ -34,6 +37,20 @@ Player :: class : Player_Base {
 	temporarily_resurrected_until: float;
 
     is_frozen: bool;
+
+	// True when the local player has any task attempt currently open/in progress.
+	// Used to suppress ability input while interacting with task UI.
+	has_task_in_progress :: proc(using this: Player) -> bool {
+		for i: 0..this.active_tasks.elements.count-1 {
+			task := this.active_tasks.elements[i];
+			if task == null continue;
+			if task.started && !task.completed {
+				return true;
+			}
+		}
+		return false;
+	}
+
     update_freeze_reasons :: proc(using this: Player) {
         // Prevent player movement while global popups are on-screen, and while the local
         // player is actively working on a task.
@@ -51,13 +68,7 @@ Player :: class : Player_Base {
 
         has_task_in_progress := false;
         if should_check_tasks {
-            for i: 0..this.active_tasks.elements.count-1 {
-                task := this.active_tasks.elements[i];
-                if task.started && !task.completed {
-                    has_task_in_progress = true;
-                    break;
-                }
-            }
+			has_task_in_progress = this->has_task_in_progress();
         }
 
         should_be_frozen := should_freeze_for_popup || has_task_in_progress;
@@ -136,6 +147,7 @@ Player :: class : Player_Base {
             this->update_freeze_reasons();
             this->setup_player_colors();
             update_tasks_ui(this);
+			update_minimap_ui(this);
 			if game_state == Game_State.ANIM_JESTER_WIN {
 				this->draw_letterbox_bars();
 			}
@@ -395,6 +407,10 @@ Task_Interactable :: class : Component {
 
     ao_start :: proc(using this: Task_Interactable) {
         interactable->set_listener(this);
+
+		// Register this interactable's world position as a destination for its task id.
+		// Task id convention: entity name matches Task_Base.id (see `on_interact`).
+		rr_register_task_destination(get_name(this.entity), this.entity.world_position);
     }
 
     on_interact :: proc(using this: Task_Interactable, player: Player) {
@@ -434,7 +450,7 @@ Call_Meeting_Interactable :: class : Component {
     }
 
     on_interact :: proc(using this: Call_Meeting_Interactable, player: Player) {
-        start_meeting(false);
+        start_meeting(false, player);
     }
 
     can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
@@ -461,4 +477,97 @@ destroy_corpses_for_player :: proc(player_entity_id: u64) {
 Corpse :: class : Component {
     has_been_reported: bool;
     owner_player_entity_id: u64;
+}
+
+draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
+	// Size scales with the window so it stays readable across resolutions.
+	size := window_rect->height() * 0.06;
+	if size < 28.0 { size = 28.0; }
+	if size > 64.0 { size = 64.0; }
+	pad := size * 0.45;
+
+	anchor := window_rect->top_right_rect()->offset_unscaled(-pad, -pad);
+	btn := anchor->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
+
+	UI.push_id("minimap_close");
+	defer UI.pop_id();
+
+	interact := UI.button(btn, .{}, .{}, "");
+
+	bg := get_asset(Texture_Asset, "$AO/white.png");
+	col := v4.{0.12, 0.12, 0.16, 0.75};
+	if interact.active {
+		col = v4.{0.18, 0.18, 0.25, 0.85};
+	}
+	UI.quad(btn, bg, col);
+
+	ts := UI.default_text_settings();
+	ts.size = size * 0.8;
+	ts.color = v4.{1, 1, 1, 1};
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 2;
+	ts.outline_color = v4.{0, 0, 0, 1};
+	UI.text(btn, ts, "X");
+
+	return interact.clicked;
+}
+
+update_minimap_ui :: proc(player: Player) {
+	if !player->is_local_or_server() {
+		return;
+	}
+	if game_state != Game_State.INGAME {
+		player.show_minimap = false;
+		return;
+	}
+	if player.player_state != Player_State.ALIVE {
+		player.show_minimap = false;
+		return;
+	}
+	if player->has_task_in_progress() {
+		player.show_minimap = false;
+		return;
+	}
+
+	safe := UI.get_safe_screen_rect();
+
+	// Top-left "MAP" button
+	UI.push_layer(2900);
+	defer UI.pop_layer();
+
+	btn_rect := safe->top_left_rect()->grow(0.0, 120.0, 52.0, 0.0)->offset(12.0, -12.0);
+	bs := UI.default_button_settings();
+	ts := UI.default_text_settings();
+	ts.size = 30;
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+
+	UI.push_id("minimap_toggle");
+	defer UI.pop_id();
+	if UI.button(btn_rect, bs, ts, "MAP").clicked {
+		player.show_minimap = !player.show_minimap;
+	}
+
+	if !player.show_minimap {
+		return;
+	}
+
+	// Fullscreen modal with the map image
+	UI.push_layer(3000);
+	defer UI.pop_layer();
+
+	screen := UI.get_screen_rect();
+	bg := get_asset(Texture_Asset, "$AO/white.png");
+	UI.quad(screen, bg, v4.{0.0, 0.0, 0.0, 0.75});
+
+	map_tex := get_asset(Texture_Asset, "sprites/map.png");
+	content := screen->inset(80.0);
+	map_rect := content->fit_aspect(map_tex.aspect);
+	UI.quad(map_rect, map_tex, v4.{1, 1, 1, 1});
+
+	if draw_minimap_close_button(map_rect) {
+		player.show_minimap = false;
+	}
 }

@@ -2,10 +2,65 @@ import "core:ao"
 
 NUM_TASKS: int : 10;
 
+// --- Task destinations (registered by Task_Interactable in `scripts/player.csl`) ---
+Task_Destination_Entry :: class {
+	task_id: string;
+	pos: v2;
+}
+
+rr_task_destination_entries: List(Task_Destination_Entry);
+rr_task_destination_version: int;
+
+rr_register_task_destination :: proc(task_id: string, pos: v2) {
+	if task_id.count == 0 {
+		return;
+	}
+
+	// De-dupe: same task id + (almost) same position.
+	for i: 0..rr_task_destination_entries.elements.count-1 {
+		e := rr_task_destination_entries.elements[i];
+		if e == null {
+			continue;
+		}
+		if e.task_id == task_id && length_squared(e.pos - pos) < 0.0001 {
+			return;
+		}
+	}
+
+	entry := new(Task_Destination_Entry);
+	entry.task_id = task_id;
+	entry.pos = pos;
+	append(ref rr_task_destination_entries, entry);
+	rr_task_destination_version += 1;
+}
+
+rr_refresh_task_destinations_for_task :: proc(task: Task_Base) {
+	if task == null {
+		return;
+	}
+	if task.destinations_version == rr_task_destination_version {
+		return;
+	}
+
+	task.destinations = List(v2).{};
+	for i: 0..rr_task_destination_entries.elements.count-1 {
+		e := rr_task_destination_entries.elements[i];
+		if e == null {
+			continue;
+		}
+		if e.task_id == task.id {
+			append(ref task.destinations, e.pos);
+		}
+	}
+	task.destinations_version = rr_task_destination_version;
+}
+
 Task_Base :: class {
 	id: string;
 	started: bool;
 	completed: bool;
+	destinations: List(v2);
+	destinations_version: int;
 
 	start_attempt :: proc(using this: Task_Base, player: Player) {
 		if started {
@@ -184,6 +239,47 @@ get_task_display_name :: proc(task_id: string) -> string {
 	}
 }
 
+// Standard close button for task minigames.
+// Returns true if the task was closed/cancelled this frame.
+draw_task_close_button :: proc(window_rect: Rect, player: Player, task: Task_Base) -> bool {
+	// Size scales with the task window so it stays readable across resolutions.
+	size := window_rect->height() * 0.06;
+	if size < 28.0 { size = 28.0; }
+	if size > 64.0 { size = 64.0; }
+	pad := size * 0.45;
+
+	anchor := window_rect->top_right_rect()->offset_unscaled(-pad, -pad);
+	btn := anchor->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
+
+	UI.push_id("task_close_%", .{task.id});
+	defer UI.pop_id();
+
+	interact := UI.button(btn, .{}, .{}, "");
+
+	bg := get_asset(Texture_Asset, "$AO/white.png");
+	col := v4.{0.12, 0.12, 0.16, 0.75};
+	if interact.active {
+		col = v4.{0.18, 0.18, 0.25, 0.85};
+	}
+	UI.quad(btn, bg, col);
+
+	ts := UI.default_text_settings();
+	ts.size = size * 0.8;
+	ts.color = v4.{1, 1, 1, 1};
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 2;
+	ts.outline_color = v4.{0, 0, 0, 1};
+	UI.text(btn, ts, "X");
+
+	if interact.clicked {
+		task->cancel_attempt(player);
+		return true;
+	}
+	return false;
+}
+
 update_tasks_ui :: proc(player: Player) {
 	// Only show tasks for alive civilians during gameplay
 	if !player->is_local_or_server() {
@@ -204,6 +300,33 @@ update_tasks_ui :: proc(player: Player) {
 	}
 	if player.active_tasks.elements.count == 0 {
 		return;
+	}
+
+	if(player->is_local()) {
+		tutorial_arrow_options := Tutorial_Arrow.default_options();
+		// Show objective arrows both near and far, and keep them readable.
+		tutorial_arrow_options.alpha = 1.0;
+		tutorial_arrow_options.far = true;
+		tutorial_arrow_options.near = true;
+		tutorial_arrow_options.bob_scale = 0.5;
+		tutorial_arrow_options.bob_bias = 1.5;
+
+		// Draw objective arrows toward each task's destination(s).
+		for t: 0..player.active_tasks.elements.count-1 {
+			task := player.active_tasks.elements[t];
+			if task == null {
+				continue;
+			}
+			if task.completed || task.started {
+				continue;
+			}
+
+			rr_refresh_task_destinations_for_task(task);
+
+			for d: 0..task.destinations.elements.count-1 {
+				Tutorial_Arrow.draw(player, task.destinations.elements[d], tutorial_arrow_options);
+			}
+		}
 	}
 	
 	screen := UI.get_safe_screen_rect();
@@ -549,6 +672,13 @@ Task_Catching_Butterflies :: class : Task_Base {
 		window_rect := screen->center_rect()->grow(window_size / 2.0);
 		window_rect = window_rect->fit_aspect(backing_texture.aspect, .KEEP_HEIGHT);
 		UI.quad(window_rect, backing_texture, .{1, 1, 1, 1});
+
+		// Close (top-right)
+		if draw_task_close_button(window_rect, player, this) {
+			ui_active = false;
+			layout_initialized = false;
+			return;
+		}
 
 		init_layout(this, window_rect);
 
@@ -930,11 +1060,11 @@ Task_Signal_Sync :: class : Task_Base {
 				complete_attempt(this, player, true);
 				return;
 			}
-			draw_signal_sync_ui(this, true, 0.0);
+			draw_signal_sync_ui(this, player, true, 0.0);
 			return;
 		}
 
-		draw_signal_sync_ui(this, false, dt);
+		draw_signal_sync_ui(this, player, false, dt);
 	}
 
 	rotate_about_point :: proc(point: v2, degrees: float) -> Matrix4 {
@@ -996,7 +1126,7 @@ Task_Signal_Sync :: class : Task_Base {
 		return best;
 	}
 
-	draw_signal_sync_ui :: proc(using task: Task_Signal_Sync, success_state: bool, delta_time: float) {
+	draw_signal_sync_ui :: proc(using task: Task_Signal_Sync, player: Player, success_state: bool, delta_time: float) {
 		screen := UI.get_screen_rect();
 		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
 		UI.quad(screen, bg_texture, .{0.0, 0.0, 0.0, 0.85});
@@ -1005,6 +1135,12 @@ Task_Signal_Sync :: class : Task_Base {
 		window_rect := screen->center_rect()->grow(window_size / 2.0);
 		window_rect = window_rect->fit_aspect(task.backing_texture.aspect, .KEEP_HEIGHT);
 		UI.quad(window_rect, task.backing_texture, .{1, 1, 1, 1});
+
+		// Close (top-right)
+		if draw_task_close_button(window_rect, player, task) {
+			task.ui_active = false;
+			return;
+		}
 
 		w := window_rect->width();
 		h := window_rect->height();
@@ -1568,7 +1704,7 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		UI.text(rect, ts, word);
 	}
 
-	draw_anagram_ui :: proc(using task: Task_Anagram_Puzzle, success_state: bool) {
+	draw_anagram_ui :: proc(using task: Task_Anagram_Puzzle, player: Player, success_state: bool) {
 		screen := UI.get_screen_rect();
 		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
 		UI.quad(screen, bg_texture, .{0.0, 0.0, 0.0, 0.85});
@@ -1588,6 +1724,12 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		//Rerun fit_aspect to ensure the window_rect is the correct shape
 		window_rect = window_rect->fit_aspect(task.anagram_bg_texture.aspect, .KEEP_HEIGHT);
 		UI.quad(window_rect, task.anagram_bg_texture, .{1, 1, 1, 1});
+
+		// Close (top-right)
+		if draw_task_close_button(window_rect, player, task) {
+			task.ui_active = false;
+			return;
+		}
 
 		w = window_rect->width();
 		h = window_rect->height();
@@ -1771,14 +1913,14 @@ Task_Anagram_Puzzle :: class : Task_Base {
 				complete_attempt(this, player, true);
 				return;
 			}
-			draw_anagram_ui(this, true);
+			draw_anagram_ui(this, player, true);
 			return;
 		}
 
 		// If failing, lock briefly and keep drawing
 		if fail_time > 0.0 {
 			if get_time() - fail_time < FAIL_LOCK_TIME {
-				draw_anagram_ui(this, false);
+				draw_anagram_ui(this, player, false);
 				return;
 			}
 			fail_time = 0.0;
@@ -1788,17 +1930,17 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		if input_chars.elements.count == target_word.count && target_word.count > 0 {
 			if is_input_correct(this) {
 				success_time = get_time();
-				draw_anagram_ui(this, true);
+				draw_anagram_ui(this, player, true);
 				return;
 			} else {
 				fail_time = get_time();
 				input_chars = List(u8).{};
-				draw_anagram_ui(this, false);
+				draw_anagram_ui(this, player, false);
 				return;
 			}
 		}
 
-		draw_anagram_ui(this, false);
+		draw_anagram_ui(this, player, false);
 	}
 }
 
@@ -1906,6 +2048,12 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 		window_rect := screen->center_rect()->grow(window_size / 2.0);
 		window_rect = window_rect->fit_aspect(task.window_texture.aspect, .KEEP_HEIGHT);
 		UI.quad(window_rect, task.window_texture, .{1, 1, 1, 1});
+
+		// Close (top-right)
+		if draw_task_close_button(window_rect, player, task) {
+			task.ui_active = false;
+			return;
+		}
 		
 		target_area := window_rect->inset_unscaled(window_rect->height() * 0.57, window_rect->width() * 0.242, window_rect->height() * 0.0365, window_rect->width() * 0.242);
 		schleem_rect := window_rect->center_rect()->grow(150)->offset(0, 220);
@@ -2180,14 +2328,14 @@ Task_Cypher :: class : Task_Base {
 				complete_attempt(this, player, true);
 				return;
 			}
-			draw_cypher_ui(this, true);
+			draw_cypher_ui(this, player, true);
 			return;
 		}
 
-		draw_cypher_ui(this, false);
+		draw_cypher_ui(this, player, false);
 	}
 
-	draw_cypher_ui :: proc(using task: Task_Cypher, success_state: bool) {
+	draw_cypher_ui :: proc(using task: Task_Cypher, player: Player, success_state: bool) {
 		screen := UI.get_screen_rect();
 		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
 		UI.quad(screen, bg_texture, .{0.0, 0.0, 0.0, 0.85});
@@ -2212,6 +2360,12 @@ Task_Cypher :: class : Task_Base {
 		}
 
 		UI.quad(keypad_rect, task.frame_texture, .{1, 1, 1, 1});
+
+		// Close (top-right of keypad panel)
+		if draw_task_close_button(keypad_rect, player, task) {
+			task.ui_active = false;
+			return;
+		}
 
 		note_rect := screen->center_rect()->grow(180)->offset(420, 60);
 		note_rect = note_rect->fit_aspect(task.pass_card_texture.aspect, .KEEP_WIDTH);

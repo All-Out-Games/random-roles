@@ -88,6 +88,9 @@ draw_roles_from_bag :: proc(bag: ref List(Player_Role), master: List(Player_Role
 
 MIN_NUMBER_OF_PLAYERS: int : 4;
 
+// Non-body-report meetings (button/fake meetings) cooldown to prevent spam.
+MEETING_COOLDOWN_SECONDS :: 30.0;
+
 Game_State :: enum {
     LOBBY;
 	ANIM_INTRO;
@@ -130,6 +133,13 @@ game_end_time: float;
 waiting_for_restart: bool;
 voting_start_time: float;
 round_number: int;
+meeting_cooldown_ends_at: float;
+
+// --- Single-player test mode ---
+// If a round is started with only one player (via force start), we disable all end-game win triggers.
+// This is useful for local testing without being kicked back to lobby by "only X alive" conditions.
+rr_started_solo_test_mode: bool;
+rr_round_start_player_count: int;
 
 // --- Fake meeting (Prankster) ---
 fake_meeting_active: bool;
@@ -147,12 +157,15 @@ start_fake_meeting :: proc(caller: Player) {
 	if caller == null return;
 	if caller.player_state != Player_State.ALIVE return;
 
+	// Use the normal meeting flow (meeting called popup -> voting).
+	// Respect meeting cooldown (only applies to non-body meetings).
+	if !start_meeting(false, caller) {
+		return;
+	}
+
 	fake_meeting_active = true;
 	fake_meeting_caller_id = caller.entity.id;
 	caller.prankster_fake_meetings_called += 1;
-
-	// Use the normal meeting flow (meeting called popup -> voting)
-	start_meeting(false);
 }
 
 prankster_check_unlock_jester_win :: proc(player: Player) {
@@ -237,6 +250,9 @@ setup_lobby :: proc() {
 	countdown_start_time = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
+	meeting_cooldown_ends_at = 0.0;
+	rr_started_solo_test_mode = false;
+	rr_round_start_player_count = 0;
 	close_all_doors();
 	foreach player: component_iterator(Player) {
 		on_player_go_passive(player);
@@ -255,6 +271,7 @@ setup_ingame :: proc() {
 	game_end_time = 0.0;
 	waiting_for_restart = false;
 	voting_start_time = 0.0;
+	meeting_cooldown_ends_at = 0.0;
 	open_all_doors();
 	jester_win_active = false;
 	jester_win_player_id = 0;
@@ -331,16 +348,37 @@ cast_skip_vote :: proc(voter: Player) {
 	}
 }
 
-start_meeting :: proc(from_body: bool) {
-	if game_state == Game_State.INGAME {
-		if from_body {
-			game_state = Game_State.ANIM_BODY_FOUND;
-			body_found_popup->show();
-		} else {
-			game_state = Game_State.ANIM_MEETING_CALLED;
-			meeting_called_popup->show();
+start_meeting :: proc(from_body: bool, caller: Player) -> bool {
+	// Can only start meetings during gameplay.
+	if game_state != Game_State.INGAME {
+		if !from_body && caller != null {
+			caller->Notify("Can't call a meeting right now.");
 		}
+		return false;
 	}
+
+	// Cooldown only for non-body meetings.
+	if !from_body {
+		now := get_time();
+		if now < meeting_cooldown_ends_at {
+			if caller != null {
+				remaining := meeting_cooldown_ends_at - now;
+				caller->Notify(format_string("Meeting on cooldown: %{.0}s", .{remaining}));
+			}
+			return false;
+		}
+		meeting_cooldown_ends_at = now + MEETING_COOLDOWN_SECONDS;
+	}
+
+	if from_body {
+		game_state = Game_State.ANIM_BODY_FOUND;
+		body_found_popup->show();
+	} else {
+		game_state = Game_State.ANIM_MEETING_CALLED;
+		meeting_called_popup->show();
+	}
+
+	return true;
 }
 
 body_found_popup: Body_Found_Popup;
@@ -546,6 +584,10 @@ ao_update_ingame :: proc(dt: float) {
 	traitor_count := get_player_count(Player_Type.TRAITOR);
 	anarchist_count := get_player_count(Player_Type.ANARCHIST);
 
+	if rr_started_solo_test_mode {
+		return;
+	}
+
 	//Win Conditions
 	// -- Prankster: does NOT auto-win. They must unlock + use the Jester Win ability.
 	// Still, we need to detect when they complete prerequisites so we can start the 15s timer.
@@ -717,59 +759,53 @@ end_voting :: proc() {
 			}
 		}
 
-		// Tally votes and find player with most votes
-		most_votes := 0;
-		voted_out: Player = null;
-		tie_detected := false;
-		
+		// Tally player votes and detect ties robustly.
+		max_player_votes := 0;
+		max_player: Player = null;
+		max_player_count := 0;
+
 		for i: 0..players.elements.count-1 {
 			p := players.elements[i];
 			if p == null continue;
 			if p.player_state != Player_State.ALIVE continue;
 
-			if p.votes_received > most_votes {
-				most_votes = p.votes_received;
-				voted_out = p;
-				tie_detected = false;
-			} else if p.votes_received == most_votes && most_votes > 0 {
-				tie_detected = true;
+			if p.votes_received > max_player_votes {
+				max_player_votes = p.votes_received;
+				max_player = p;
+				max_player_count = 1;
+			} else if p.votes_received == max_player_votes && max_player_votes > 0 {
+				max_player_count += 1;
 			}
 		}
 
-		// Include skip in "winner" comparison
-		if skip_votes > most_votes {
-			voted_out = null;
-			tie_detected = false;
-			most_votes = skip_votes;
-		} else if skip_votes == most_votes && most_votes > 0 {
-			// Skip ties with top player vote count -> tie, no ejection
-			tie_detected = true;
-		}
-		
-		// Execute the voted out player (if no tie and someone got votes and skip didn't win)
-		if voted_out != null && !tie_detected && most_votes > 0 && voted_out.votes_received == most_votes {
-			// Kill
-			on_player_go_dead(voted_out);
-			
-			// Notify everyone
-			ejected_message := format_string("% has been ejected!", .{voted_out.entity->get_name()});
-			for i: 0..players.elements.count-1 {
-				players.elements[i]->Notify(ejected_message);
-			}
-		} else if tie_detected {
-			// Notify about tie
-			for i: 0..players.elements.count-1 {
-				players.elements[i]->Notify("It's a tie! No one was ejected.");
-			}
-		} else if most_votes > 0 && skip_votes == most_votes {
-			// Skip won outright
+		// Resolution:
+		// - Skip beats player max => no ejection.
+		// - Skip ties player max (and > 0) => tie, no ejection.
+		// - Player tie (>1 with max, and max > 0) => tie, no ejection.
+		// - Single player max (>0) and skip lower => eject that player.
+		if skip_votes > max_player_votes {
 			for i: 0..players.elements.count-1 {
 				players.elements[i]->Notify("Vote skipped. No one was ejected.");
 			}
-		} else {
-			// No votes cast
+		} else if skip_votes == max_player_votes && max_player_votes > 0 {
+			for i: 0..players.elements.count-1 {
+				players.elements[i]->Notify("It's a tie! No one was ejected.");
+			}
+		} else if max_player_votes <= 0 {
 			for i: 0..players.elements.count-1 {
 				players.elements[i]->Notify("No votes were cast. No one was ejected.");
+			}
+		} else if max_player_count > 1 || max_player == null {
+			for i: 0..players.elements.count-1 {
+				players.elements[i]->Notify("It's a tie! No one was ejected.");
+			}
+		} else {
+			// Eject the unique top-voted player.
+			on_player_go_dead(max_player);
+
+			ejected_message := format_string("% has been ejected!", .{max_player.entity->get_name()});
+			for i: 0..players.elements.count-1 {
+				players.elements[i]->Notify(ejected_message);
 			}
 		}
 	}
@@ -802,13 +838,29 @@ end_voting :: proc() {
 //at 10: 6 CIV, 2 AN, 2 TR
 assign_players_to_types :: proc() {
 	player_count := players.elements.count;
+
+	// Capture round start count for special-case behaviors.
+	rr_round_start_player_count = player_count;
+	rr_started_solo_test_mode = (player_count == 1);
+	if rr_started_solo_test_mode {
+		for i: 0..players.elements.count-1 {
+			if players.elements[i] != null {
+				players.elements[i]->Notify("Solo test mode: game will not end automatically.");
+			}
+		}
+	}
 	
 	// Determine counts for each type based on player count
 	civ_count: int;
 	an_count: int;
 	tr_count: int;
 
-	if player_count < 5 {
+	if player_count == 1 {
+		// Special case: solo testing should always be civilian.
+		civ_count = 1;
+		an_count = 0;
+		tr_count = 0;
+	} else if player_count < 5 {
 		civ_count = player_count - 1;
 		an_count = 0;
 		tr_count = 1;
