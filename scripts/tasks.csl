@@ -208,6 +208,30 @@ update_tasks :: proc(player: Player) {
 	}
 }
 
+// Computes the total/remaining tasks for the civilian win condition:
+// only counts tasks for ALIVE civilians (matches `all_civilians_completed_tasks()`).
+rr_get_alive_civilian_task_counts :: proc(total: ref int, remaining: ref int) {
+	total = 0;
+	remaining = 0;
+
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.player_type != Player_Type.CIVILIAN continue;
+
+		for j: 0..p.active_tasks.elements.count-1 {
+			t := p.active_tasks.elements[j];
+			if t == null continue;
+			total += 1;
+			if !t.completed {
+				remaining += 1;
+			}
+		}
+	}
+}
+
 get_task_display_name :: proc(task_id: string) -> string {
 	switch task_id {
 		case "throw_away_garbage":
@@ -346,6 +370,10 @@ update_tasks_ui :: proc(player: Player) {
 	title_ts.halign = .CENTER;
 	title_ts.valign = .CENTER;
 	UI.text(title_rect, title_ts, "TASKS");
+
+	// Footer: overall civilian task progress (alive civilians only).
+	footer_h := 75.0;
+	footer_rect := panel_rect->cut_bottom(footer_h);
 	
 	// Draw each task - cut from top progressively
 	for i: 0..player.active_tasks.elements.count-1 {
@@ -396,6 +424,45 @@ update_tasks_ui :: proc(player: Player) {
 		task_ts.valign = .CENTER;
 		UI.text(text_rect, task_ts, task_name);
 	}
+
+	// --- Civilian win progress bar (bottom of task UI) ---
+	total_tasks := 0;
+	remaining_tasks := 0;
+	rr_get_alive_civilian_task_counts(ref total_tasks, ref remaining_tasks);
+
+	completed_tasks := total_tasks - remaining_tasks;
+	if completed_tasks < 0 { completed_tasks = 0; }
+
+	fill01 := 0.0;
+	if total_tasks > 0 {
+		fill01 = (completed_tasks.(float)) / (total_tasks.(float));
+	}
+	fill01 = clamp(fill01, 0.0, 1.0);
+
+	// Footer background + layout
+	UI.quad(footer_rect, bg_texture, .{0.08, 0.08, 0.12, 0.92});
+	footer := footer_rect->inset(8, 10, 8, 10);
+
+	line1 := footer->cut_top(22);
+	line2 := footer->cut_bottom(20);
+	bar := footer->inset(2, 0, 2, 0);
+
+	info_ts := UI.default_text_settings();
+	info_ts.size = 18;
+	info_ts.color = .{0.95, 0.95, 0.95, 1};
+	info_ts.halign = .CENTER;
+	info_ts.valign = .CENTER;
+	UI.text(line1, info_ts, "CIV TASKS: %/%", .{completed_tasks, total_tasks});
+
+	left_ts := info_ts;
+	left_ts.size = 16;
+	left_ts.color = .{0.85, 0.85, 0.90, 1};
+	UI.text(line2, left_ts, "% LEFT FOR CIVILIANS TO WIN", .{remaining_tasks});
+
+	// Bar background + fill
+	UI.quad(bar, bg_texture, .{0.18, 0.18, 0.22, 0.95});
+	fill_rect := bar->subrect(0.0, 0.0, fill01, 1.0);
+	UI.quad(fill_rect, bg_texture, .{0.25, 0.85, 0.35, 0.95});
 }
 
 // --- Prankster objective ---
