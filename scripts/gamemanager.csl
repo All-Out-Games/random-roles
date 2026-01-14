@@ -120,10 +120,87 @@ Player_Role :: enum {
 	SHERIFF;
 	DOCTOR;
 	PRESIDENT;
+	MOVIE_STAR;
 	//Anarchist Roles
 	PRANKSTER;
 	//Traitor Roles
 	PIRATE;
+}
+
+// --- Movie Star: Autograph trap ---
+MOVIE_STAR_AUTOGRAPH_STUN_SECONDS :: 15.0;
+MOVIE_STAR_AUTOGRAPH_TRAP_LIFETIME_SECONDS :: 45.0;
+MOVIE_STAR_AUTOGRAPH_TRIGGER_RADIUS :: 0.8;
+
+Autograph_Trap_Entry :: class {
+	pos: v2;
+	owner_entity_id: u64;
+	expires_at: float;
+}
+
+autograph_traps: List(Autograph_Trap_Entry);
+
+rr_add_autograph_trap :: proc(owner: Player, pos: v2) {
+	if owner == null return;
+	entry := new(Autograph_Trap_Entry);
+	entry.pos = pos;
+	entry.owner_entity_id = owner.entity.id;
+	entry.expires_at = get_time() + MOVIE_STAR_AUTOGRAPH_TRAP_LIFETIME_SECONDS;
+	append(ref autograph_traps, entry);
+}
+
+update_autograph_traps :: proc() {
+	if autograph_traps.elements.count <= 0 return;
+	now := get_time();
+
+	i := 0;
+	while i < autograph_traps.elements.count {
+		trap := autograph_traps.elements[i];
+		if trap == null {
+			last := autograph_traps.elements.count - 1;
+			autograph_traps.elements[i] = autograph_traps.elements[last];
+			pop(ref autograph_traps);
+			continue;
+		}
+
+		// Expire
+		if now >= trap.expires_at {
+			last := autograph_traps.elements.count - 1;
+			autograph_traps.elements[i] = autograph_traps.elements[last];
+			pop(ref autograph_traps);
+			continue;
+		}
+
+		// Trigger: first alive player (not owner) who walks over it.
+		triggered := false;
+		for p_i: 0..players.elements.count-1 {
+			p := players.elements[p_i];
+			if p == null continue;
+			if !#alive(p.entity) continue;
+			if p.player_state != Player_State.ALIVE continue;
+			if p.entity.id == trap.owner_entity_id continue;
+
+			if in_range(p.entity.world_position - trap.pos, MOVIE_STAR_AUTOGRAPH_TRIGGER_RADIUS) {
+				// Apply stun effect
+				eff := p.entity->get_component(Stunned_By_Autograph_Effect);
+				if eff == null {
+					eff = p.entity->add_component(Stunned_By_Autograph_Effect);
+				}
+				eff->arm(MOVIE_STAR_AUTOGRAPH_STUN_SECONDS);
+				triggered = true;
+				break;
+			}
+		}
+
+		if triggered {
+			last := autograph_traps.elements.count - 1;
+			autograph_traps.elements[i] = autograph_traps.elements[last];
+			pop(ref autograph_traps);
+			continue;
+		}
+
+		i += 1;
+	}
 }
 
 game_state: Game_State;
@@ -579,6 +656,7 @@ force_start_lobby_game :: proc() {
 
 ao_update_ingame :: proc(dt: float) {
 	update_temporary_resurrections();
+	update_autograph_traps();
 	alive_count := get_alive_player_count();
 	civilian_count := get_player_count(Player_Type.CIVILIAN);
 	traitor_count := get_player_count(Player_Type.TRAITOR);
@@ -940,6 +1018,7 @@ assign_players_to_types :: proc() {
 	append(ref civilian_roles_master, Player_Role.SHERIFF);
 	append(ref civilian_roles_master, Player_Role.DOCTOR);
 	append(ref civilian_roles_master, Player_Role.PRESIDENT);
+	append(ref civilian_roles_master, Player_Role.MOVIE_STAR);
 	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 

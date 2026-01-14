@@ -815,3 +815,133 @@ Jester_Win_Ability :: class : Ability_Base {
 		UI.text(rect->inset(4), ts, label);
 	}
 }
+
+// --- Movie Star ---
+MOVIE_STAR_AUTOGRAPH_PLACE_TIME_SECONDS :: 2.2;
+MOVIE_STAR_AUTOGRAPH_COOLDOWN_SECONDS :: 30.0;
+MOVIE_STAR_AUTOGRAPH_WRITE_REASON :: "movie_star_autograph_write";
+
+Movie_Star_Write_Autograph :: class : Component {
+	end_time: float;
+	placed: bool;
+	done: bool;
+
+	ao_start :: proc(using this: Movie_Star_Write_Autograph) {
+		p := entity->get_component(Player);
+		if p == null {
+			// Defensive: should never happen on non-player entities.
+			done = true;
+			return;
+		}
+		placed = false;
+		done = false;
+		end_time = get_time() + MOVIE_STAR_AUTOGRAPH_PLACE_TIME_SECONDS;
+
+		// Lock movement during the signing animation
+		p->add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
+		p->set_trigger("write_place_autograph");
+	}
+
+	ao_update :: proc(using this: Movie_Star_Write_Autograph, dt: float) {
+		if done {
+			return;
+		}
+		p := entity->get_component(Player);
+		if p == null {
+			done = true;
+			return;
+		}
+
+		// Safety: if game left gameplay or player died, stop freezing them.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
+			p->set_trigger("RESET");
+			done = true;
+			return;
+		}
+
+		if !placed && get_time() >= end_time {
+			placed = true;
+			rr_add_autograph_trap(p, p.entity.world_position);
+			p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
+			p->set_trigger("RESET");
+			done = true;
+		}
+	}
+}
+
+MOVIE_STAR_AUTOGRAPH_STUN_REASON :: "movie_star_autograph_stun";
+
+Stunned_By_Autograph_Effect :: class : Component {
+	stun_end_time: float;
+	active: bool;
+
+	arm :: proc(using this: Stunned_By_Autograph_Effect, seconds: float) {
+		if seconds <= 0.0 {
+			seconds = 0.1;
+		}
+		stun_end_time = get_time() + seconds;
+		active = true;
+
+		p := entity->get_component(Player);
+		if p != null {
+			p->add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+			p->set_trigger("stunned_by_autograph_loop");
+		}
+	}
+
+	ao_update :: proc(using this: Stunned_By_Autograph_Effect, dt: float) {
+		if !active {
+			return;
+		}
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Safety: exit if gameplay ended or player died.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+			p->set_trigger("RESET");
+			active = false;
+			return;
+		}
+
+		if get_time() >= stun_end_time {
+			p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+			p->set_trigger("RESET");
+			active = false;
+		}
+	}
+}
+
+Autograph_Ability :: class : Ability_Base {
+	NAME :: "Autograph";
+
+	on_init :: proc(instance: Autograph_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/movie_star/write_signature.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.CIVILIAN return false;
+		if player.player_role != Player_Role.MOVIE_STAR return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			// Prevent double-clicks from stacking multiple writers/traps.
+			current_cooldown = MOVIE_STAR_AUTOGRAPH_COOLDOWN_SECONDS;
+
+			// Start the signing animation; trap is placed when it ends (~1.8s).
+			writer := player.entity->get_component(Movie_Star_Write_Autograph);
+			if writer == null {
+				writer = player.entity->add_component(Movie_Star_Write_Autograph);
+			}
+		}
+	}
+}
