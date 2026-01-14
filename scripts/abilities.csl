@@ -618,6 +618,335 @@ Black_Flag_Ability :: class : Ability_Base {
     }
 }
 
+// --- Pirate: Powder Keg ---
+POWDER_KEG_COOLDOWN_SECONDS :: 90.0;
+POWDER_KEG_CAMERA_ZOOMED_OUT_SIZE :: 18.0;
+POWDER_KEG_THROW_TRAVEL_TIME :: 0.75;
+POWDER_KEG_EXPLOSION_RADIUS :: 4.5;
+POWDER_KEG_KNOCKBACK_SECONDS :: 0.55;
+POWDER_KEG_KNOCKBACK_SPEED :: 14.0;
+POWDER_KEG_CRATER_LIFETIME_SECONDS :: 18.0;
+
+POWDER_KEG_KNOCKBACK_REASON :: "powder_keg_knockback";
+
+Powder_Keg_Knockback :: class : Component {
+	end_time: float;
+	active: bool;
+	dir: v2;
+
+	arm :: proc(using this: Powder_Keg_Knockback, seconds: float, direction: v2, speed: float) {
+		if seconds <= 0.0 {
+			seconds = 0.1;
+		}
+		end_time = get_time() + seconds;
+		active = true;
+		dir = direction;
+
+		p := entity->get_component(Player);
+		if p != null {
+			p->add_disable_movement_input_reason(POWDER_KEG_KNOCKBACK_REASON);
+			// Initial impulse; movement can resume after the short disable window.
+			p.agent.velocity = dir * speed;
+		}
+	}
+
+	ao_update :: proc(using this: Powder_Keg_Knockback, dt: float) {
+		if !active {
+			return;
+		}
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Safety: exit if gameplay ended or player died.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(POWDER_KEG_KNOCKBACK_REASON);
+			active = false;
+			return;
+		}
+
+		if get_time() >= end_time {
+			p->remove_disable_movement_input_reason(POWDER_KEG_KNOCKBACK_REASON);
+			active = false;
+			return;
+		}
+	}
+}
+
+Powder_Keg_Crater :: class : Component {
+	spawn_time: float;
+	switched_to_idle: bool;
+
+	ao_start :: proc(using this: Powder_Keg_Crater) {
+		spawn_time = get_time();
+		switched_to_idle = false;
+
+		spine_anim := entity->add_component(Spine_Animator);
+		spine_anim->awaken();
+		spine_anim.depth_offset = 10.0;
+		spine_anim.instance->set_skeleton(get_asset(Spine_Asset, "anims/crater/BAT003_meteor_crash_crator.spine"));
+		spine_anim.instance->set_animation("appear", false, 0);
+	}
+
+	ao_update :: proc(using this: Powder_Keg_Crater, dt: float) {
+		time_alive := get_time() - spawn_time;
+
+		// Switch to idle after the appear animation.
+		if !switched_to_idle && time_alive > 0.75 {
+			spine_anim := entity->get_component(Spine_Animator);
+			if spine_anim != null {
+				spine_anim.instance->set_animation("idle", true, 0);
+			}
+			switched_to_idle = true;
+		}
+
+		if time_alive >= POWDER_KEG_CRATER_LIFETIME_SECONDS {
+			// Optional: play disappear briefly before destroying.
+			spine_anim := entity->get_component(Spine_Animator);
+			if spine_anim != null {
+				spine_anim.instance->set_animation("disappear", false, 0);
+			}
+			entity->queue_for_destruction(0.6);
+		}
+	}
+}
+
+powder_keg_explode_at :: proc(owner: Entity, position: v2) {
+	// Spawn crater visual
+	crater_e := Scene.create_entity();
+	crater_e->set_local_position(position);
+	crater_e->add_component(Powder_Keg_Crater);
+
+	// Find all players in range and track nearest.
+	nearest: Player = null;
+	nearest_dist_sq := 0.0;
+
+	// First pass: determine the nearest victim in the blast.
+	foreach p: component_iterator(Player) {
+		if p.player_state != Player_State.ALIVE continue;
+		d := p.entity.world_position - position;
+		dist_sq := length_squared(d);
+		if dist_sq > POWDER_KEG_EXPLOSION_RADIUS * POWDER_KEG_EXPLOSION_RADIUS continue;
+
+		if nearest == null || dist_sq < nearest_dist_sq {
+			nearest = p;
+			nearest_dist_sq = dist_sq;
+		}
+	}
+
+	// Kill the nearest victim.
+	if nearest != null {
+		nearest->kill();
+		{
+			sfx := SFX.default_sfx_desc();
+			sfx->set_position(nearest.entity.world_position);
+			sfx.volume = 0.8;
+			SFX.play(get_asset(SFX_Asset, "sfx/death.wav"), sfx);
+		}
+	}
+
+	// Second pass: knock back everyone else in the blast.
+	foreach p: component_iterator(Player) {
+		if p.player_state != Player_State.ALIVE continue;
+		if nearest != null && p == nearest continue;
+
+		d := p.entity.world_position - position;
+		dist_sq := length_squared(d);
+		if dist_sq > POWDER_KEG_EXPLOSION_RADIUS * POWDER_KEG_EXPLOSION_RADIUS continue;
+
+		dir := d;
+		if length_squared(dir) < 0.001 {
+			dir = v2.{1, 0};
+		} else {
+			dir = normalize(dir);
+		}
+
+		knock := p.entity->get_component(Powder_Keg_Knockback);
+		if knock == null {
+			knock = p.entity->add_component(Powder_Keg_Knockback);
+		}
+		knock->arm(POWDER_KEG_KNOCKBACK_SECONDS, dir, POWDER_KEG_KNOCKBACK_SPEED);
+	}
+}
+
+Powder_Keg_Thrown :: class : Component {
+	owner: Entity;
+	start_pos: v2;
+	target_pos: v2;
+	start_time: float;
+	travel_time: float;
+	exploded: bool;
+	triangle_hint: s64;
+
+	ao_start :: proc(using this: Powder_Keg_Thrown) {
+		start_time = get_time();
+		if travel_time <= 0 {
+			travel_time = POWDER_KEG_THROW_TRAVEL_TIME;
+		}
+
+		spine_anim := entity->add_component(Spine_Animator);
+		spine_anim->awaken();
+		spine_anim.instance->set_skeleton(get_asset(Spine_Asset, "anims/powder_keg/004RAND_powder_keg.spine"));
+		spine_anim.instance->set_animation("Flying_Through_Air", true, 0);
+	}
+
+	ao_update :: proc(using this: Powder_Keg_Thrown, dt: float) {
+		if exploded {
+			return;
+		}
+
+		// Clamp target to navmesh (keeps explosions on walkable areas).
+		clamped_target := target_pos;
+		point: v2;
+		if try_find_closest_point_on_navmesh(target_pos, ref point, ref triangle_hint) {
+			clamped_target = point;
+		}
+
+		t := (get_time() - start_time) / travel_time;
+		if t < 0 { t = 0; }
+		if t > 1 { t = 1; }
+
+		// Simple parabolic arc for readability.
+		height := 1.0;
+		arc := 4.0 * t * (1.0 - t) * height;
+		pos := lerp(start_pos, clamped_target, t);
+		entity->set_local_position(pos + v2.{0, arc});
+
+		if t >= 1.0 {
+			// Snap to ground at target and explode.
+			entity->set_local_position(clamped_target);
+			spine_anim := entity->get_component(Spine_Animator);
+			if spine_anim != null {
+				spine_anim.instance->set_animation("Explode", false, 0);
+			}
+
+			powder_keg_explode_at(owner, clamped_target);
+
+			// Cleanup projectile entity shortly after explode anim starts.
+			exploded = true;
+			entity->queue_for_destruction(0.8);
+		}
+	}
+}
+
+Powder_Keg_Ability :: class : Ability_Base {
+	NAME :: "Powder Keg";
+
+	camera_zoom_active: bool;
+	camera_original_size: float;
+	was_targeting: bool;
+	activated_this_session: bool;
+
+	on_init :: proc(ability: Powder_Keg_Ability) {
+		ability.icon = get_asset(Texture_Asset, "sprites/icons/pirate/powder_keg.png");
+		ability.is_aimed_ability = true;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_role != Player_Role.PIRATE return false;
+		return true;
+	}
+
+	set_camera_zoom :: proc(using this: Powder_Keg_Ability, active: bool) {
+		if active {
+			if !camera_zoom_active {
+				camera_original_size = player.camera.size;
+				player.camera.size = POWDER_KEG_CAMERA_ZOOMED_OUT_SIZE;
+				camera_zoom_active = true;
+			}
+		}
+		else {
+			if camera_zoom_active {
+				player.camera.size = camera_original_size;
+				camera_zoom_active = false;
+			}
+		}
+	}
+
+	cleanup_targeting :: proc(using this: Powder_Keg_Ability) {
+		this->set_camera_zoom(false);
+		was_targeting = false;
+		activated_this_session = false;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		// Drive enter/exit targeting via standard helper.
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		targeting := targeted.targeting;
+
+		// Prevent aiming mode while on cooldown / otherwise unusable.
+		if targeting && !params.can_use {
+			player.active_ability = null;
+			this->cleanup_targeting();
+			return;
+		}
+
+		// Handle targeting transitions (for cleanup + per-session activation gating).
+		if targeting && !was_targeting {
+			activated_this_session = false;
+			was_targeting = true;
+		}
+		if !targeting {
+			if was_targeting {
+				this->cleanup_targeting();
+			}
+			return;
+		}
+
+		this->set_camera_zoom(true);
+
+		aiming := Ability_Utilities.update_aiming_ability(player, ref params);
+		if aiming.cancel {
+			player.active_ability = null;
+			this->cleanup_targeting();
+			return;
+		}
+
+		// Preview target (world-space).
+		target_pos := get_mouse_world_position();
+		draw_aiming_line(player.entity.world_position, aiming.aim_direction, 1.0 / player.camera.size * 4);
+
+		// Optional: show a subtle circle at the target.
+		if player->is_local() {
+			UI.push_world_draw_context();
+			defer UI.pop_draw_context();
+			UI.push_z(target_pos.y);
+			defer UI.pop_z();
+			UI.quad(Rect{target_pos, target_pos}->grow(0.08, 0.08, 0.08, 0.08), core_globals.white_sprite, v4.{1, 0.6, 0.1, 0.9});
+		}
+
+		// Only allow one throw per targeting session (guards against odd input edge cases).
+		if activated_this_session {
+			return;
+		}
+
+		if aiming.activate && params.can_use {
+			activated_this_session = true;
+
+			// Start cooldown immediately to prevent double activates.
+			current_cooldown = POWDER_KEG_COOLDOWN_SECONDS;
+
+			// Throw keg toward clicked point.
+			throw_entity := Scene.create_entity();
+			throw_entity->set_local_position(player.entity.world_position);
+			throw_comp := throw_entity->add_component(Powder_Keg_Thrown);
+			throw_comp.owner = player.entity;
+			throw_comp.start_pos = player.entity.world_position;
+			throw_comp.target_pos = target_pos;
+			throw_comp.travel_time = POWDER_KEG_THROW_TRAVEL_TIME;
+
+			// Consume targeting mode.
+			player.active_ability = null;
+			this->cleanup_targeting();
+		}
+	}
+}
+
 // --- Prankster ---
 PRANK_DELAY_SECONDS :: 10.0;
 PRANK_MELEE_RANGE :: 3.0;
