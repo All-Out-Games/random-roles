@@ -91,6 +91,43 @@ MIN_NUMBER_OF_PLAYERS: int : 4;
 // Non-body-report meetings (button/fake meetings) cooldown to prevent spam.
 MEETING_COOLDOWN_SECONDS :: 30.0;
 
+// --- Sabotage: Power Outage ---
+rr_power_outage_active: bool;
+rr_power_outage_started_at: float;
+rr_power_outage_triggered_by_id: u64;
+rr_power_outage_cooldown_ends_at: float;
+rr_power_outage_generator_entity: Entity;
+
+rr_power_outage_add_generator_task_to_player :: proc(player: Player) {
+	if player == null return;
+	// Don't add duplicates
+	for i: 0..player.active_tasks.elements.count-1 {
+		t := player.active_tasks.elements[i];
+		if t == null continue;
+		if t.id == RR_RESTART_GENERATOR_TASK_ID {
+			return;
+		}
+	}
+	task := new(Task_Restart_Generator);
+	task.id = RR_RESTART_GENERATOR_TASK_ID;
+	append(ref player.active_tasks, task);
+}
+
+rr_power_outage_remove_generator_task_from_player :: proc(player: Player) {
+	if player == null return;
+	i := 0;
+	while i < player.active_tasks.elements.count {
+		t := player.active_tasks.elements[i];
+		if t != null && t.id == RR_RESTART_GENERATOR_TASK_ID {
+			last := player.active_tasks.elements.count - 1;
+			player.active_tasks.elements[i] = player.active_tasks.elements[last];
+			pop(ref player.active_tasks);
+			continue;
+		}
+		i += 1;
+	}
+}
+
 Game_State :: enum {
     LOBBY;
 	ANIM_INTRO;
@@ -227,6 +264,77 @@ JESTER_WIN_CINEMATIC_TIME :: 5.0;
 jester_win_active: bool;
 jester_win_start_time: float;
 jester_win_player_id: u64;
+
+rr_try_start_power_outage :: proc(caller: Player) {
+	// Server authoritative
+	if !Game.is_server() return;
+	// Only allow during gameplay
+	if game_state != Game_State.INGAME return;
+	if caller == null return;
+	if caller.player_state != Player_State.ALIVE return;
+	if caller.player_type != Player_Type.TRAITOR return;
+
+	if rr_power_outage_active return;
+	if get_time() < rr_power_outage_cooldown_ends_at return;
+
+	rr_power_outage_active = true;
+	rr_power_outage_started_at = get_time();
+	rr_power_outage_triggered_by_id = caller.entity.id;
+	rr_power_outage_cooldown_ends_at = get_time() + POWER_OUTAGE_SABOTAGE_COOLDOWN_SECONDS;
+
+	// Inject the generator task for all alive players (anyone can fix it).
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.is_temporarily_resurrected continue;
+		rr_power_outage_add_generator_task_to_player(p);
+	}
+
+	// Notify everyone (traitors also need to know it started, but they won't get the overlay).
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		p->Notify("Sabotage: Power Outage!");
+	}
+}
+
+rr_end_power_outage :: proc(fixer: Player) {
+	// Server authoritative
+	if !Game.is_server() return;
+	if !rr_power_outage_active return;
+
+	rr_power_outage_active = false;
+	rr_power_outage_triggered_by_id = 0;
+	rr_power_outage_started_at = 0.0;
+
+	if rr_power_outage_generator_entity != null && #alive(rr_power_outage_generator_entity) {
+		destroy_entity(rr_power_outage_generator_entity);
+	}
+	rr_power_outage_generator_entity = null;
+
+	// Remove generator task so task UI returns to normal.
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		rr_power_outage_remove_generator_task_from_player(p);
+	}
+
+	// Notify everyone
+	msg := "Power restored!";
+	if fixer != null {
+		msg = format_string("Power restored by %!", .{fixer.entity->get_name()});
+	}
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		p->Notify(msg);
+	}
+}
 
 start_fake_meeting :: proc(caller: Player) {
 	// Only allow during gameplay

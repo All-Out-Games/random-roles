@@ -144,6 +144,8 @@ Player :: class : Player_Base {
         if this->is_local_or_server() {
             this->update_freeze_reasons();
             this->setup_player_colors();
+			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
+			rr_draw_power_outage_overlay_if_needed(this);
             update_tasks_ui(this);
 			update_minimap_ui(this);
 			if game_state == Game_State.ANIM_JESTER_WIN {
@@ -409,19 +411,32 @@ Player :: class : Player_Base {
 
 Task_Interactable :: class : Component {
     interactable: Interactable @ao_serialize;
+	// Optional override so runtime-spawned interactables can use the task system
+	// without relying on the entity name.
+	task_id_override: string @ao_serialize;
+
+	get_task_id :: proc(using this: Task_Interactable) -> string {
+		if task_id_override.count > 0 {
+			return task_id_override;
+		}
+		return get_name(this.entity);
+	}
 
     ao_start :: proc(using this: Task_Interactable) {
+		if interactable == null {
+			return;
+		}
         interactable->set_listener(this);
 
 		// Register this interactable's world position as a destination for its task id.
-		// Task id convention: entity name matches Task_Base.id (see `on_interact`).
-		rr_register_task_destination(get_name(this.entity), this.entity.world_position);
+		rr_register_task_destination(this->get_task_id(), this.entity.world_position);
     }
 
     on_interact :: proc(using this: Task_Interactable, player: Player) {
+		task_id := this->get_task_id();
         for i: 0..player.active_tasks.elements.count-1 {
             task := player.active_tasks.elements[i];
-            if task.id == get_name(this.entity) && !task.started && !task.completed {
+            if task.id == task_id && !task.started && !task.completed {
                 task->start_attempt(player);
                 break;
             }
@@ -429,6 +444,26 @@ Task_Interactable :: class : Component {
     }
 
     can_use :: proc(using this: Task_Interactable, player: Player) -> bool {
+		task_id := this->get_task_id();
+
+		// During power outage, allow everyone to complete the generator task.
+		if task_id == RR_RESTART_GENERATOR_TASK_ID {
+			if game_state != Game_State.INGAME return false;
+			if !rr_power_outage_active return false;
+			if player == null return false;
+			if player.player_state != Player_State.ALIVE return false;
+			// Temporarily resurrected players can move/talk, but cannot do tasks.
+			if player.is_temporarily_resurrected return false;
+
+			for i: 0..player.active_tasks.elements.count-1 {
+				task := player.active_tasks.elements[i];
+				if task.id == task_id && !task.started && !task.completed {
+					return true;
+				}
+			}
+			return false;
+		}
+
         can_use_base := player.player_state == Player_State.ALIVE && player.player_type == Player_Type.CIVILIAN;
         if !can_use_base {
             return false;
@@ -439,7 +474,7 @@ Task_Interactable :: class : Component {
 		}
         for i: 0..player.active_tasks.elements.count-1 {
             task := player.active_tasks.elements[i];
-            if task.id == get_name(this.entity) && !task.started && !task.completed {
+            if task.id == task_id && !task.started && !task.completed {
                 return true;
             }
         }
@@ -568,6 +603,21 @@ update_minimap_ui :: proc(player: Player) {
 	content := screen->inset(80.0);
 	map_rect := content->fit_aspect(map_tex->get_aspect());
 	UI.quad(map_rect, map_tex, v4.{1, 1, 1, 1});
+
+	// Local player marker
+	{
+		p_ui := rr_minimap_world_to_ui(map_rect, player.entity.world_position);
+		dot_size := map_rect->height() * 0.018;
+		if dot_size < 10.0 { dot_size = 10.0; }
+		if dot_size > 22.0 { dot_size = 22.0; }
+		dot := Rect{p_ui, p_ui}->grow_unscaled(dot_size, dot_size, dot_size, dot_size);
+		UI.quad(dot, core_globals.white_sprite, v4.{0.2, 0.9, 0.3, 0.95});
+	}
+
+	// --- Sabotage hotspot (traitors only): Power Outage ---
+	if rr_draw_power_outage_sabotage_on_minimap(player, map_rect) {
+		rr_try_start_power_outage(player);
+	}
 
 	if draw_minimap_close_button(map_rect) {
 		player.show_minimap = false;
