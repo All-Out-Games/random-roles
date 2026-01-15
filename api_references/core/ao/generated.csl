@@ -1,10 +1,29 @@
 Entity :: class {
-    set_local_enabled          :: method(enabled: bool)        #foreign "entity_set_local_enabled";
-    get_local_enabled          :: method() -> bool             #foreign "entity_get_local_enabled";
-    get_world_enabled          :: method() -> bool             #foreign "entity_get_world_enabled";
-    queue_for_destruction      :: method(after_seconds: float) #foreign "entity_queue_for_destruction";
-    calculate_visual_position  :: method() -> v2               #foreign "entity_calculate_visual_position";
-    calculate_predictive_error :: method() -> v2               #foreign "entity_calculate_predictive_error";
+    set_local_enabled          :: method(enabled: bool)                                                                                                                 #foreign "entity_set_local_enabled";
+    get_local_enabled          :: method() -> bool                                                                                                                      #foreign "entity_get_local_enabled";
+    get_world_enabled          :: method() -> bool                                                                                                                      #foreign "entity_get_world_enabled";
+    queue_for_destruction      :: method(after_seconds: float)                                                                                                          #foreign "entity_queue_for_destruction";
+    calculate_visual_position  :: method() -> v2                                                                                                                        #foreign "entity_calculate_visual_position";
+    calculate_predictive_error :: method() -> v2                                                                                                                        #foreign "entity_calculate_predictive_error";
+    get_name                   :: method() -> string                                                                                                                    #foreign "entity_get_name";
+    set_parent                 :: method(new_parent: Entity, keep_world_position: bool)                                                                                 #foreign "entity_set_parent";
+    set_local_position         :: method(p: v2)                                                                                                                         #foreign "entity_set_local_position";
+    lerp_local_position        :: method(target: v2, t: float)                                                                                                          #foreign "entity_lerp_local_position";
+    add_local_position         :: method(delta: v2)                                                                                                                     #foreign "entity_add_local_position";
+    set_local_scale            :: method(scale: v2)                                                                                                                     #foreign "entity_set_local_scale";
+    lerp_local_scale           :: method(target: v2, t: float)                                                                                                          #foreign "entity_lerp_local_scale";
+    set_local_rotation         :: method(degrees: float)                                                                                                                #foreign "entity_set_local_rotation";
+    lerp_local_rotation        :: method(target: float, t: float)                                                                                                       #foreign "entity_lerp_local_rotation";
+    add_local_rotation         :: method(delta: float)                                                                                                                  #foreign "entity_add_local_rotation";
+    destroy                    :: method()                                                                                                                              #foreign "entity_destroy";
+    add_component_raw          :: method(t: typeid, userdata: Object = {}, on_before_start: proc(component: Component, userdata: Object) = {}) -> Component             #foreign "entity_add_component";
+    get_component_raw          :: method(t: typeid) -> Component                                                                                                        #foreign "entity_get_component";
+    add_component :: proc(entity: Entity, $T: typeid, userdata: Object = {}, on_before_start: proc(component: Component, userdata: Object) = {}) -> T {
+        return add_component_raw(entity, T, userdata, on_before_start).(T);
+    }
+    get_component :: proc(entity: Entity, $T: typeid) -> T {
+        return get_component_raw(entity, T).(T);
+    }
     id:                   u64                 #read_only #offset 8;
     local_position:       v2                  #read_only #offset 32;
     world_position:       v2                  #read_only #offset 40;
@@ -148,7 +167,7 @@ AO_Player :: class : Component {
     device_kind:            Device_Kind         #read_only #offset 1144;
     do_name_color_override: bool                           #offset 27520;
     name_color_override:    v4                             #offset 27524;
-    color_replace_color:    Color_Replace_Color #read_only #offset 152;
+    avatar_color:           Color_Replace_Color #read_only #offset 152;
     default_inventory:      Inventory           #read_only #offset 28336 #gc_root;
     voice_channel_listen_mask: u64                         #offset 1272;
     voice_channel_speak_mask:  u64                         #offset 1280;

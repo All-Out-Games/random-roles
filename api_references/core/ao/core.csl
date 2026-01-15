@@ -1,60 +1,40 @@
 Game :: struct {
+    get_local_player :: proc() -> Player, bool #foreign "game_get_local_player";
+
+    #deprecate_soft "Use Game.get_local_player()"
     try_get_local_player :: proc() -> Player #foreign "try_get_local_player";
+
+    is_editor :: proc() -> bool #foreign "is_editor";
     is_launched_from_editor :: proc() -> bool #foreign "is_launched_from_editor";
     is_server :: proc() -> bool #foreign "game_is_server";
     is_predicted_frame :: proc() -> bool #foreign "game_is_predicted_frame";
 }
 
-debug_breakpoint :: proc(data: u64) #foreign;
+Server :: struct {
+    kick_player :: proc(player: Player, reason: string = "Kicked.") #foreign "server_kick_player";
 
-get_name :: proc(entity: Entity) -> string #foreign "entity_get_name";
+    // Queue management for custom matchmaking
+    queue_add_player           :: proc(queue: string, player: Player)    #foreign "server_queue_add_player";
+    queue_remove_player        :: proc(queue: string, player: Player)    #foreign "server_queue_remove_player";
+    queue_set_server_available :: proc(queue: string, available: bool)   #foreign "server_queue_set_server_available";
 
-set_parent :: proc(entity: Entity, new_parent: Entity, keep_world_position: bool) #foreign "entity_set_parent";
-
-set_local_position :: proc(entity: Entity, p: v2) #foreign "entity_set_local_position";
-lerp_local_position :: proc(entity: Entity, target: v2, t: float) #foreign "entity_lerp_local_position";
-add_local_position :: proc(entity: Entity, delta: v2) #foreign "entity_add_local_position";
-
-set_local_scale :: proc(entity: Entity, scale: v2) #foreign "entity_set_local_scale";
-lerp_local_scale :: proc(entity: Entity, target: v2, t: float) #foreign "entity_lerp_local_scale";
-
-set_local_rotation :: proc(entity: Entity, degrees: float) #foreign "entity_set_local_rotation";
-lerp_local_rotation :: proc(entity: Entity, target: float, t: float) #foreign "entity_lerp_local_rotation";
-add_local_rotation :: proc(entity: Entity, delta: float) #foreign "entity_add_local_rotation";
-
-destroy_entity :: proc(entity: Entity) #foreign;
-
-add_component_raw :: proc(entity: Entity, t: typeid, userdata: Object = {}, on_before_start: proc(component: Component, userdata: Object) = {}) -> Component #foreign "entity_add_component";
-get_component_raw :: proc(entity: Entity, t: typeid) -> Component #foreign "entity_get_component";
-
-add_component :: proc(entity: Entity, $T: typeid, userdata: Object = {}, on_before_start: proc(component: Component, userdata: Object) = {}) -> T {
-    return add_component_raw(entity, T, userdata, on_before_start).(T);
+    // Transfer a player to a different game instance
+    transfer_player_to_game    :: proc(player: Player, game_id: string)  #foreign "server_transfer_player_to_game";
 }
 
-get_component :: proc(entity: Entity, $T: typeid) -> T {
-    return get_component_raw(entity, T).(T);
+Editor :: struct {
+    is_entity_selected :: proc(entity: Entity) -> bool #foreign "editor_is_entity_selected";
 }
 
-debug_asset :: proc(asset: Asset) #foreign;
-
-#deprecate_hard "Use Scene.instantiate()."
-instantiate :: 1;
-
-#deprecate_hard "Use Scene.create_entity()."
-create_entity :: 1;
-
-#deprecate_hard "Use Scene.get_all_components_in_range()."
-get_all_components_in_range :: 1;
-
-#deprecate_hard "Use Scene.get_closest_component_in_range()."
-get_closest_component_in_range :: 1;
+#deprecate_soft "Use entity->destroy()."
+destroy_entity :: proc(entity: Entity) #foreign "entity_destroy";
 
 Scene :: struct {
     get_entity_by_name :: proc(name: string) -> Entity #foreign "scene_get_entity_by_name";
 
     get_all_components_in_range_raw :: proc(position: v2, range: float, results: ref [..]Component, component_type: typeid) #foreign;
 
-    get_closest_component_in_range_raw :: proc(position: v2, range: float, component_type: typeid) -> Component #foreign;
+    get_closest_component_in_range_raw :: proc(position: v2, range: float, component_type: typeid) -> Component, bool #foreign;
 
     create_entity :: proc() -> Entity #foreign;
     instantiate :: proc(prefab: Prefab_Asset, position: v2 = {}, userdata: Object = {}, on_before_start: proc(entity: Entity, userdata: Object) = {}) -> Entity #foreign "prefab_instantiate";
@@ -63,8 +43,9 @@ Scene :: struct {
         Scene.get_all_components_in_range_raw(position, range, ref (&results).(*[..]Component).*, T);
     }
 
-    get_closest_component_in_range :: proc(position: v2, range: float, $T: typeid) -> T {
-        return Scene.get_closest_component_in_range_raw(position, range, T).(T);
+    get_closest_component_in_range :: proc(position: v2, range: float, $T: typeid) -> T, bool {
+        v, ok := Scene.get_closest_component_in_range_raw(position, range, T);
+        return v.(T), ok;
     }
 }
 
@@ -771,6 +752,104 @@ UI :: struct {
         }
         return ts;
     }
+
+    Grid_Layout :: struct {
+        element_width: float;
+        element_height: float;
+
+        index: int;
+        cur_x: int;
+        cur_y: int;
+        elements_per_row: int;
+        elements_per_column: int;
+
+        root_entry_rect: Rect;
+
+        half_padding: float;
+
+        Size_Source :: enum {
+            ELEMENT_COUNT;
+            ELEMENT_SIZE;
+        }
+
+        next :: method() -> Rect {
+            index += 1;
+            cur_x = (cur_x + 1) % elements_per_row;
+            if cur_x == 0 {
+                cur_y += 1;
+            }
+            result := root_entry_rect->offset_unscaled(cur_x.(float) * element_width, -cur_y.(float) * element_height)->inset(half_padding);
+            UI.expand_current_scroll_view(result);
+            return result;
+        }
+    }
+
+    make_grid_layout :: proc(rect: Rect, width: int, height: int, size_source: Grid_Layout.Size_Source, padding: float = 0) -> Grid_Layout {
+        grid: Grid_Layout;
+        grid.index = -1;
+        grid.cur_x = -1;
+        grid.cur_y = -1;
+
+        grid.half_padding = padding * 0.5;
+        fake_inflated_rect := rect->inset(grid.half_padding);
+        if size_source == .ELEMENT_SIZE {
+            sf := UI.get_current_scale_factor();
+            grid.element_width      = width.(float)  * sf;
+            grid.element_height     = height.(float) * sf;
+            if grid.element_width  < 0 grid.element_width  = fake_inflated_rect->width();
+            if grid.element_height < 0 grid.element_height = fake_inflated_rect->height();
+            grid.elements_per_row    = max(1, (fake_inflated_rect->width()  / grid.element_width).(int));
+            grid.elements_per_column = max(1, (fake_inflated_rect->height() / grid.element_height).(int));
+        }
+        else {
+            grid.element_width      = fake_inflated_rect->width()  / width.(float);
+            grid.element_height     = fake_inflated_rect->height() / height.(float);
+            grid.elements_per_row    = max(1, width);
+            grid.elements_per_column = max(1, height);
+        }
+
+        grid.root_entry_rect = fake_inflated_rect->top_left_rect()->grow_unscaled(0, grid.element_width, grid.element_height, 0);
+        return grid;
+    }
+
+    Directional_Layout :: struct {
+        cut: Rect;
+        direction: Direction;
+
+        Direction :: enum {
+            LEFT;
+            RIGHT;
+            UP;
+            DOWN;
+        }
+
+        next :: method(size: float) -> Rect {
+            switch direction {
+                case .LEFT:  return cut->cut_right(size);
+                case .RIGHT: return cut->cut_left(size);
+                case .UP:    return cut->cut_bottom(size);
+                case .DOWN:  return cut->cut_top(size);
+            }
+            return cut;
+        }
+
+        next_unscaled :: method(size: float) -> Rect {
+            switch direction {
+                case .LEFT:  return cut->cut_right_unscaled(size);
+                case .RIGHT: return cut->cut_left_unscaled(size);
+                case .UP:    return cut->cut_bottom_unscaled(size);
+                case .DOWN:  return cut->cut_top_unscaled(size);
+            }
+            return cut;
+        }
+    }
+
+    make_directional_layout :: proc(rect: Rect, direction: Directional_Layout.Direction) -> Directional_Layout {
+        layout: Directional_Layout;
+        layout.cut = rect;
+        layout.direction = direction;
+        return layout;
+    }
 }
 
 world_to_screen :: proc(world: v2) -> v2 #foreign;
@@ -1116,7 +1195,24 @@ Economy :: struct {
     withdraw_currency     :: proc(player: Player, currency: string, amount: s64)         #foreign "economy_withdraw_currency";
 }
 
+Ordered_Save_Entry :: struct {
+    key: string;
+    value: f64;
+    position: s64;
+}
+
+Save_Game_String :: struct {
+    key: string;
+    value: string;
+}
+
+Save_Game_Int :: struct {
+    key: string;
+    value: s64;
+}
+
 Save :: struct {
+    // Player-specific save functions
     set_string :: proc(player: Player, key: string, value: string)             #foreign "save_set_string";
     get_string :: proc(player: Player, key: string, default: string) -> string #foreign "save_get_string";
     set_int    :: proc(player: Player, key: string, value: s64)                #foreign "save_set_int";
@@ -1124,6 +1220,19 @@ Save :: struct {
     set_f64    :: proc(player: Player, key: string, value: f64)                #foreign "save_set_f64";
     get_f64    :: proc(player: Player, key: string, default: f64) -> f64       #foreign "save_get_f64";
     delete_key :: proc(player: Player, key: string)                            #foreign "save_delete_key";
+
+    // Game-wide save functions (not player-specific)
+    set_game_string       :: proc(key: string, value: string)                                      #foreign "save_set_game_string";
+    get_game_string       :: proc(key: string, default: string) -> string                          #foreign "save_get_game_string";
+    increment_game_int    :: proc(key: string, amount: s64, optimistic_update: bool = true)        #foreign "save_increment_game_int";
+    get_game_int          :: proc(key: string, default: s64) -> s64                                #foreign "save_get_game_int";
+    get_all_game_strings  :: proc() -> []Save_Game_String                                          #foreign "save_get_all_game_strings";
+    get_all_game_ints     :: proc() -> []Save_Game_Int                                             #foreign "save_get_all_game_ints";
+
+    // Ordered/sorted document functions (for leaderboards, etc.)
+    ordered_set     :: proc(document: string, key: string, value: f64) #foreign "save_ordered_set";
+    ordered_get     :: proc(document: string, key: string, default: f64, userdata: Object, callback: proc(entry: Ordered_Save_Entry, userdata: Object)) #foreign "save_ordered_get";
+    ordered_get_all :: proc(document: string, offset: s64, limit: s64, userdata: Object, callback: proc(entries: []Ordered_Save_Entry, userdata: Object)) #foreign "save_ordered_get_all";
 }
 
 Items :: struct {
@@ -1267,9 +1376,9 @@ Ease :: struct {
 }
 
 Keybinds :: struct {
-    register                   :: proc(name: string, default: Input)              -> Keybind       #foreign "keybinds_register";
-    try_get_sprite_for_keybind :: proc(player: Player, keybind: Keybind) -> Texture_Asset #foreign "keybinds_try_get_sprite_for_keybind";
-    get_keybind_string         :: proc(player: Player, keybind: Keybind) -> string        #foreign "keybinds_get_keybind_string";
+    register                   :: proc(name: string, default: Input)              -> Keybind    #foreign "keybinds_register";
+    get_sprite_for_keybind     :: proc(player: Player, keybind: Keybind) -> Texture_Asset, bool #foreign "keybinds_get_sprite_for_keybind";
+    get_keybind_string         :: proc(player: Player, keybind: Keybind) -> string              #foreign "keybinds_get_keybind_string";
 
     get_keybind_down :: proc(player: Player, keybind: Keybind) -> bool #foreign "keybinds_get_keybind_down";
     get_keybind_held :: proc(player: Player, keybind: Keybind) -> bool #foreign "keybinds_get_keybind_held";
@@ -1381,6 +1490,11 @@ Player_Base :: class : AO_Player {
 
     is_local_or_server :: method() -> bool #foreign "player_is_local_or_server";
     is_local           :: method() -> bool #foreign "player_is_local";
+
+    is_admin           :: method() -> bool #foreign "player_is_admin";
+    is_vip             :: method() -> bool #foreign "player_is_vip";
+    is_moderator       :: method() -> bool #foreign "player_is_moderator";
+    is_youtuber        :: method() -> bool #foreign "player_is_youtuber";
 
     set_facing_right :: method(facing_right: bool) #foreign "player_set_facing_right";
 
@@ -1628,8 +1742,9 @@ try_get_effect_dynamic :: proc(entity: Entity, type: typeid, mode := Try_Get_Eff
     return null;
 }
 
-try_get_effect :: proc(entity: Entity, $T: typeid, mode := Try_Get_Effect_Mode.EXACT_MATCH) -> T {
-    return try_get_effect_dynamic(entity, T, mode).(T);
+get_effect :: proc(entity: Entity, $T: typeid, mode := Try_Get_Effect_Mode.EXACT_MATCH) -> T, bool {
+    effect := try_get_effect_dynamic(entity, T, mode).(T);
+    return effect, effect != null;
 }
 
 has_effect :: proc(entity: Entity, $T: typeid, mode := Try_Get_Effect_Mode.EXACT_MATCH) -> bool {
@@ -1914,9 +2029,9 @@ draw_ability_button :: proc(player: Player, $T: typeid, index: int) {
             }
 
             if should_draw_keybind {
-                keybind_sprite := Keybinds.try_get_sprite_for_keybind(player, keybind);
                 keybind_rect := interact.rect->top_left_rect()->grow(35)->offset(10, -10);
-                if keybind_sprite != null {
+                keybind_sprite, found_keybind := Keybinds.get_sprite_for_keybind(player, keybind);
+                if found_keybind {
                     UI.quad(keybind_rect->fit_aspect(keybind_sprite->get_aspect(), .KEEP_BIGGER), keybind_sprite);
                 }
                 else {
