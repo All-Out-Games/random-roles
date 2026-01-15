@@ -1,5 +1,9 @@
 import "core:ao"
 
+// --- Global task ids (non-random, injected by game state) ---
+RR_RESTART_GENERATOR_TASK_ID :: "restart_generator";
+RR_ENABLE_COMMUNICATIONS_TASK_ID :: "enable_communications";
+
 // Random state used by tasks/roles. Keep this as a class instance (not a top-level u64)
 // to avoid collisions with engine-provided globals in some build configurations.
 RR_Rng_State :: class {
@@ -98,6 +102,15 @@ rr_power_outage_triggered_by_id: u64;
 rr_power_outage_cooldown_ends_at: float;
 rr_power_outage_generator_entity: Entity;
 
+// --- Sabotage: Comms Outage ---
+rr_comms_outage_active: bool;
+rr_comms_outage_started_at: float;
+rr_comms_outage_triggered_by_id: u64;
+rr_comms_outage_cooldown_ends_at: float;
+
+// Scene lever entity for fixing comms (named `enable_communications`)
+rr_comms_lever_entity: Entity;
+
 rr_power_outage_add_generator_task_to_player :: proc(player: Player) {
 	if player == null return;
 	// Don't add duplicates
@@ -119,6 +132,36 @@ rr_power_outage_remove_generator_task_from_player :: proc(player: Player) {
 	while i < player.active_tasks.elements.count {
 		t := player.active_tasks.elements[i];
 		if t != null && t.id == RR_RESTART_GENERATOR_TASK_ID {
+			last := player.active_tasks.elements.count - 1;
+			player.active_tasks.elements[i] = player.active_tasks.elements[last];
+			pop(ref player.active_tasks);
+			continue;
+		}
+		i += 1;
+	}
+}
+
+rr_comms_outage_add_enable_comms_task_to_player :: proc(player: Player) {
+	if player == null return;
+	// Don't add duplicates
+	for i: 0..player.active_tasks.elements.count-1 {
+		t := player.active_tasks.elements[i];
+		if t == null continue;
+		if t.id == RR_ENABLE_COMMUNICATIONS_TASK_ID {
+			return;
+		}
+	}
+	task := new(Task_Enable_Communications);
+	task.id = RR_ENABLE_COMMUNICATIONS_TASK_ID;
+	append(ref player.active_tasks, task);
+}
+
+rr_comms_outage_remove_enable_comms_task_from_player :: proc(player: Player) {
+	if player == null return;
+	i := 0;
+	while i < player.active_tasks.elements.count {
+		t := player.active_tasks.elements[i];
+		if t != null && t.id == RR_ENABLE_COMMUNICATIONS_TASK_ID {
 			last := player.active_tasks.elements.count - 1;
 			player.active_tasks.elements[i] = player.active_tasks.elements[last];
 			pop(ref player.active_tasks);
@@ -301,6 +344,131 @@ rr_try_start_power_outage :: proc(caller: Player) {
 	}
 }
 
+rr_find_entity_named :: proc(name: string) -> Entity {
+	if name.count == 0 return null;
+	foreach e: entity_iterator() {
+		if e == null continue;
+		if !#alive(e) continue;
+		if e->get_name() == name {
+			return e;
+		}
+	}
+	return null;
+}
+
+rr_get_comms_lever_entity :: proc() -> Entity {
+	if rr_comms_lever_entity != null && #alive(rr_comms_lever_entity) {
+		return rr_comms_lever_entity;
+	}
+	rr_comms_lever_entity = rr_find_entity_named(RR_ENABLE_COMMUNICATIONS_TASK_ID);
+	return rr_comms_lever_entity;
+}
+
+rr_get_comms_lever_pos :: proc() -> v2 {
+	e := rr_get_comms_lever_entity();
+	if e != null && #alive(e) {
+		return e.world_position;
+	}
+	return v2.{0.0, 0.0};
+}
+
+rr_update_comms_lever_visuals :: proc() {
+	// Server authoritative visual state
+	if !Game.is_server() return;
+
+	e := rr_get_comms_lever_entity();
+	if e == null return;
+	if !#alive(e) return;
+
+	sprite := e->get_component(Sprite_Renderer);
+	if sprite == null return;
+
+	lever_on := get_asset(Texture_Asset, "sprites/lever_on.png");
+	lever_off := get_asset(Texture_Asset, "sprites/lever_off.png");
+	if lever_on == null || lever_off == null return;
+
+	// Green when comms are functional, off otherwise.
+	if rr_comms_outage_active {
+		sprite->set_texture(lever_off);
+	} else {
+		sprite->set_texture(lever_on);
+	}
+}
+
+rr_try_start_comms_outage :: proc(caller: Player) {
+	// Server authoritative
+	if !Game.is_server() return;
+	// Only allow during gameplay
+	if game_state != Game_State.INGAME return;
+	if caller == null return;
+	if caller.player_state != Player_State.ALIVE return;
+	if caller.player_type != Player_Type.TRAITOR return;
+
+	if rr_comms_outage_active return;
+	if get_time() < rr_comms_outage_cooldown_ends_at return;
+
+	rr_comms_outage_active = true;
+	rr_comms_outage_started_at = get_time();
+	rr_comms_outage_triggered_by_id = caller.entity.id;
+	rr_comms_outage_cooldown_ends_at = get_time() + COMMS_OUTAGE_SABOTAGE_COOLDOWN_SECONDS;
+
+	// Inject the fix task for all alive players (anyone can fix it).
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.is_temporarily_resurrected continue;
+		rr_comms_outage_add_enable_comms_task_to_player(p);
+		// Apply voice routing immediately (server-state will sync to clients).
+		p->apply_voice_chat_masks_for_current_state();
+	}
+
+	rr_update_comms_lever_visuals();
+
+	// Notify everyone
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		p->Notify("Sabotage: Comms Down!");
+	}
+}
+
+rr_end_comms_outage :: proc(fixer: Player) {
+	// Server authoritative
+	if !Game.is_server() return;
+	if !rr_comms_outage_active return;
+
+	rr_comms_outage_active = false;
+	rr_comms_outage_triggered_by_id = 0;
+	rr_comms_outage_started_at = 0.0;
+
+	// Remove fix task so task UI returns to normal.
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		rr_comms_outage_remove_enable_comms_task_from_player(p);
+		// Restore voice routing.
+		p->apply_voice_chat_masks_for_current_state();
+	}
+
+	rr_update_comms_lever_visuals();
+
+	// Notify everyone
+	msg := "Communications restored!";
+	if fixer != null {
+		msg = format_string("Communications restored by %!", .{fixer.entity->get_name()});
+	}
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		p->Notify(msg);
+	}
+}
+
 rr_end_power_outage :: proc(fixer: Player) {
 	// Server authoritative
 	if !Game.is_server() return;
@@ -439,6 +607,9 @@ setup_lobby :: proc() {
 	rr_started_solo_test_mode = false;
 	rr_round_start_player_count = 0;
 	close_all_doors();
+	// Reset sabotages
+	rr_power_outage_active = false;
+	rr_comms_outage_active = false;
 	foreach player: component_iterator(Player) {
 		on_player_go_passive(player);
 		// Lobby reset: everyone can hear & speak to everyone.
@@ -458,6 +629,9 @@ setup_ingame :: proc() {
 	voting_start_time = 0.0;
 	meeting_cooldown_ends_at = 0.0;
 	open_all_doors();
+	// Start-of-round: comms are functional.
+	rr_comms_outage_active = false;
+	rr_update_comms_lever_visuals();
 	jester_win_active = false;
 	jester_win_player_id = 0;
 	jester_win_start_time = 0.0;
@@ -548,7 +722,7 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 		if now < meeting_cooldown_ends_at {
 			if caller != null {
 				remaining := meeting_cooldown_ends_at - now;
-				caller->Notify(format_string("Meeting on cooldown: %{.0}s", .{remaining}));
+				caller->Notify(format_string("Meeting on cooldown: %s", .{format_float(remaining, decimals=0)}));
 			}
 			return false;
 		}
@@ -697,7 +871,7 @@ ao_update_lobby :: proc(dt: float) {
 		} else {
 			// Display wait timer
 			remaining := 60.0 - elapsed;
-			wait_text := format_string("Next round in: %{.2} seconds", .{remaining});
+			wait_text := format_string("Next round in: % seconds", .{format_float(remaining, decimals=2)});
 			
 			screen := UI.get_safe_screen_rect();
 			rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -150, -25, -150, -25);
@@ -728,7 +902,7 @@ ao_update_lobby :: proc(dt: float) {
 		} else {
 			// Display countdown on screen
 			remaining := 10.0 - elapsed;
-			countdown_text := format_string("Game starting in: %{.2}", .{remaining});
+			countdown_text := format_string("Game starting in: %", .{format_float(remaining, decimals=2)});
 			
 			screen := UI.get_safe_screen_rect();
 			rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -100, -25, -100, -25);
@@ -765,6 +939,7 @@ force_start_lobby_game :: proc() {
 ao_update_ingame :: proc(dt: float) {
 	update_temporary_resurrections();
 	update_autograph_traps();
+	rr_update_comms_lever_visuals();
 	alive_count := get_alive_player_count();
 	civilian_count := get_player_count(Player_Type.CIVILIAN);
 	traitor_count := get_player_count(Player_Type.TRAITOR);
@@ -885,7 +1060,7 @@ ao_update_voting :: proc(dt: float) {
 	remaining := 60.0 - elapsed;
 	if remaining < 0.0 { remaining = 0.0; }
 	
-	voting_text := format_string("Voting ends in: %{.0} seconds", .{remaining});
+voting_text := format_string("Voting ends in: % seconds", .{format_float(remaining, decimals=0)});
 	
 	screen := UI.get_safe_screen_rect();
 	rect := screen->subrect(0.5, 0.1, 0.5, 0.1, -150, -25, -150, -25);

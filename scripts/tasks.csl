@@ -2,9 +2,6 @@ import "core:ao"
 
 NUM_TASKS: int : 10;
 
-// --- Global task ids (non-random, injected by game state) ---
-RR_RESTART_GENERATOR_TASK_ID :: "restart_generator";
-
 // --- Task destinations (registered by Task_Interactable in `scripts/player.csl`) ---
 Task_Destination_Entry :: class {
 	task_id: string;
@@ -123,51 +120,46 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 		
 		switch task_to_add_index {
 			case 0: {
-					task := new(Task_Throw_Away_Garbage);
-					task.id = "throw_away_garbage";
-					append(ref task_list, task);
-				}
-			case 1: {
 					task := new(Task_Calibrate_Teleporter);
 					task.id = "calibrate_teleporter";
 					append(ref task_list, task);
 				}
-			case 2: {
+			case 1: {
 					task := new(Task_Cypher);
 					task.id = "cypher";
 					append(ref task_list, task);
 				}
-			case 3: {
+			case 2: {
 					task := new(Task_Anagram_Puzzle);
 					task.id = "anagram_puzzle";
 					append(ref task_list, task);
 				}
-			case 4: {
+			case 3: {
 					task := new(Task_Reroute_Power);
 					task.id = "reroute_power";
 					append(ref task_list, task);
 				}
-			case 5: {
+			case 4: {
 					task := new(Task_Guide_The_Electron);
 					task.id = "guide_the_electron";
 					append(ref task_list, task);
 				}
-			case 6: {
+			case 5: {
 					task := new(Task_Signal_Sync);
 					task.id = "signal_sync";
 					append(ref task_list, task);
 				}
-			case 7: {
+			case 6: {
 					task := new(Task_Build_A_Robot);
 					task.id = "build_a_robot";
 					append(ref task_list, task);
 				}
-			case 8: {
+			case 7: {
 					task := new(Task_Catching_Butterflies);
 					task.id = "catching_butterflies";
 					append(ref task_list, task);
 				}
-			case 9: {
+			case 8: {
 					task := new(Task_Call_Jail_Codes);
 					task.id = "jail_codes";
 					append(ref task_list, task);
@@ -195,7 +187,6 @@ update_tasks :: proc(player: Player) {
 	for i: 0..player.active_tasks.elements.count-1 {
 		//log("%", .{player.active_tasks.elements[i].#type});
 		switch player.active_tasks.elements[i].#type {
-			case Task_Throw_Away_Garbage: player.active_tasks.elements[i].(Task_Throw_Away_Garbage)->update_task(player);
 			case Task_Calibrate_Teleporter: player.active_tasks.elements[i].(Task_Calibrate_Teleporter)->update_task(player);
 			case Task_Cypher: player.active_tasks.elements[i].(Task_Cypher)->update_task(player);
 			case Task_Anagram_Puzzle: player.active_tasks.elements[i].(Task_Anagram_Puzzle)->update_task(player);
@@ -208,6 +199,7 @@ update_tasks :: proc(player: Player) {
 			case Task_Call_Fake_Meeting: player.active_tasks.elements[i].(Task_Call_Fake_Meeting)->update_task(player);
 			case Task_Call_Jail_Codes: player.active_tasks.elements[i].(Task_Call_Jail_Codes)->update_task(player);
 			case Task_Restart_Generator: player.active_tasks.elements[i].(Task_Restart_Generator)->update_task(player);
+			case Task_Enable_Communications: player.active_tasks.elements[i].(Task_Enable_Communications)->update_task(player);
 		}
 	}
 }
@@ -238,8 +230,6 @@ rr_get_alive_civilian_task_counts :: proc(total: ref int, remaining: ref int) {
 
 get_task_display_name :: proc(task_id: string) -> string {
 	switch task_id {
-		case "throw_away_garbage":
-			return "Throw Away Garbage";
 		case "calibrate_teleporter":
 			return "Calibrate Teleporter";
 		case "cypher":
@@ -264,6 +254,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Change jail codes";
 		case RR_RESTART_GENERATOR_TASK_ID:
 			return "Restart Generator";
+		case RR_ENABLE_COMMUNICATIONS_TASK_ID:
+			return "Enable Communications";
 		case:
 			return task_id;
 	}
@@ -414,6 +406,87 @@ update_tasks_ui :: proc(player: Player) {
 		help_ts.valign = .TOP;
 		help_ts.word_wrap = true;
 		UI.text(help_rect, help_ts, "Find the generator and interact to restore power.");
+
+		return;
+	}
+
+	// --- Comms outage override: show ONLY the comms restore task for ALL players ---
+	if rr_comms_outage_active {
+		// Draw objective arrow to the comms lever for local player.
+		if player->is_local() {
+			tutorial_arrow_options := Tutorial_Arrow.default_options();
+			tutorial_arrow_options.alpha = 1.0;
+			tutorial_arrow_options.far = true;
+			tutorial_arrow_options.near = true;
+			tutorial_arrow_options.bob_scale = 0.5;
+			tutorial_arrow_options.bob_bias = 1.5;
+			Tutorial_Arrow.draw(player, rr_get_comms_lever_pos(), tutorial_arrow_options);
+		}
+
+		// Find comms task state (should be injected for everyone by the server).
+		comms_task: Task_Base;
+		for i: 0..player.active_tasks.elements.count-1 {
+			t := player.active_tasks.elements[i];
+			if t == null continue;
+			if t.id == RR_ENABLE_COMMUNICATIONS_TASK_ID {
+				comms_task = t;
+				break;
+			}
+		}
+
+		task_started := false;
+		task_completed := false;
+		if comms_task != null {
+			task_started = comms_task.started;
+			task_completed = comms_task.completed;
+		}
+
+		screen := UI.get_safe_screen_rect();
+		panel_rect := screen->cut_left(320)->inset(250, 0, 250, 10);
+
+		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
+		UI.quad(panel_rect, bg_texture, .{0.1, 0.1, 0.15, 0.92});
+
+		title_rect := panel_rect->cut_top(50);
+		title_ts := UI.default_text_settings();
+		title_ts.size = 32;
+		title_ts.color = .{1, 1, 1, 1};
+		title_ts.halign = .CENTER;
+		title_ts.valign = .CENTER;
+		UI.text(title_rect, title_ts, "SABOTAGE");
+
+		entry_rect := panel_rect->cut_top(48);
+		if task_completed {
+			UI.quad(entry_rect, null, .{0.2, 0.6, 0.2, 0.7});
+		} else {
+			UI.quad(entry_rect, null, .{0.55, 0.25, 0.25, 0.75});
+		}
+
+		task_name := get_task_display_name(RR_ENABLE_COMMUNICATIONS_TASK_ID);
+		if task_completed {
+			task_name = format_string("[X] %", .{task_name});
+		} else if task_started {
+			task_name = format_string("[...] %", .{task_name});
+		} else {
+			task_name = format_string("[ ] %", .{task_name});
+		}
+
+		text_rect := entry_rect->inset(5, 10, 5, 10);
+		task_ts := UI.default_text_settings();
+		task_ts.size = 24;
+		task_ts.color = .{1, 1, 1, 1};
+		task_ts.halign = .LEFT;
+		task_ts.valign = .CENTER;
+		UI.text(text_rect, task_ts, task_name);
+
+		help_rect := panel_rect->cut_top(70)->inset(10);
+		help_ts := UI.default_text_settings();
+		help_ts.size = 18;
+		help_ts.color = .{0.9, 0.9, 0.95, 0.9};
+		help_ts.halign = .LEFT;
+		help_ts.valign = .TOP;
+		help_ts.word_wrap = true;
+		UI.text(help_rect, help_ts, "Go to Comms (Phota) and flip the lever to restore proximity chat.");
 
 		return;
 	}
@@ -594,6 +667,32 @@ Task_Call_Jail_Codes :: class : Task_Base {
 		log(format_string("Reroute Power Task Updated"));
 		//Instant success
 		complete_attempt(this, player, true);
+	}
+}
+
+// --- Sabotage fix: Enable Communications (injected during Comms Outage) ---
+Task_Enable_Communications :: class : Task_Base {
+	update_task :: proc(using this: Task_Enable_Communications, player: Player) {
+		// Only relevant while comms sabotage is active.
+		if !rr_comms_outage_active {
+			started = false;
+			return;
+		}
+		if !started {
+			return;
+		}
+		if completed {
+			return;
+		}
+		if !player->is_local_or_server() {
+			return;
+		}
+
+		// Instant success on interact; server ends sabotage globally.
+		complete_attempt(this, player, true);
+		if Game.is_server() && rr_comms_outage_active {
+			rr_end_comms_outage(player);
+		}
 	}
 }
 
@@ -873,17 +972,6 @@ Task_Restart_Generator :: class : Task_Base {
 		init_layout(this, window_rect);
 
 		draw_generator_ui(this, player, false);
-	}
-}
-
-Task_Throw_Away_Garbage :: class : Task_Base {
-	update_task :: proc(using this: Task_Throw_Away_Garbage, player: Player) {
-		if !started {
-			return;
-		}
-		log(format_string("Throw Away Garbage Task Updated"));
-		//Instant success
-		complete_attempt(this, player, true);
 	}
 }
 

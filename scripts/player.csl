@@ -122,6 +122,13 @@ Player :: class : Player_Base {
 
 	apply_voice_chat_masks_alive :: proc(using this: Player) {
         log_info("apply_voice_chat_masks_alive");
+		// Comms sabotage: alive players cannot hear/speak.
+		if rr_comms_outage_active {
+			voice_channel_listen_mask = 0;
+			voice_channel_speak_mask  = 0;
+			return;
+		}
+
 		// Alive can hear & speak on alive channel.
 		voice_channel_listen_mask = ALIVE_CHANNEL;
 		voice_channel_speak_mask  = ALIVE_CHANNEL;
@@ -148,6 +155,7 @@ Player :: class : Player_Base {
 			rr_draw_power_outage_overlay_if_needed(this);
             update_tasks_ui(this);
 			update_minimap_ui(this);
+			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			if game_state == Game_State.ANIM_JESTER_WIN {
 				this->draw_letterbox_bars();
 			}
@@ -464,6 +472,24 @@ Task_Interactable :: class : Component {
 			return false;
 		}
 
+		// During comms outage, allow everyone to complete the comms restore task.
+		if task_id == RR_ENABLE_COMMUNICATIONS_TASK_ID {
+			if game_state != Game_State.INGAME return false;
+			if !rr_comms_outage_active return false;
+			if player == null return false;
+			if player.player_state != Player_State.ALIVE return false;
+			// Temporarily resurrected players can move/talk, but cannot do tasks.
+			if player.is_temporarily_resurrected return false;
+
+			for i: 0..player.active_tasks.elements.count-1 {
+				task := player.active_tasks.elements[i];
+				if task.id == task_id && !task.started && !task.completed {
+					return true;
+				}
+			}
+			return false;
+		}
+
         can_use_base := player.player_state == Player_State.ALIVE && player.player_type == Player_Type.CIVILIAN;
         if !can_use_base {
             return false;
@@ -614,9 +640,15 @@ update_minimap_ui :: proc(player: Player) {
 		UI.quad(dot, core_globals.white_sprite, v4.{0.2, 0.9, 0.3, 0.95});
 	}
 
-	// --- Sabotage hotspot (traitors only): Power Outage ---
-	if rr_draw_power_outage_sabotage_on_minimap(player, map_rect) {
+	// --- Sabotage buttons (traitors only): to the right of the minimap ---
+	power_clicked := false;
+	comms_clicked := false;
+	rr_draw_sabotages_next_to_minimap(player, map_rect, ref power_clicked, ref comms_clicked, rr_comms_outage_active, rr_comms_outage_cooldown_ends_at);
+	if power_clicked {
 		rr_try_start_power_outage(player);
+	}
+	if comms_clicked {
+		rr_try_start_comms_outage(player);
 	}
 
 	if draw_minimap_close_button(map_rect) {

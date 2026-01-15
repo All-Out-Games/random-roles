@@ -864,6 +864,34 @@ log :: log_info;
 
 format_string :: proc(fmt: string, args: [^]any = {}) -> string #foreign;
 
+Format_Int :: struct {
+    // :CSLFormatInt
+    v: s64;
+    leading_zeroes: s64;
+}
+
+format_int :: proc(v: int, leading_zeroes: int = 0) -> Format_Int {
+    result: Format_Int;
+    result.v              = v;
+    result.leading_zeroes = leading_zeroes;
+    return result;
+}
+
+Format_Float :: struct {
+    // :CSLFormatFloat
+    v: f32;
+    leading_zeroes: s64;
+    decimals: s64;
+}
+
+format_float :: proc(v: f32, decimals: int = 6, leading_zeroes: int = 0) -> Format_Float {
+    result: Format_Float;
+    result.v              = v;
+    result.leading_zeroes = leading_zeroes;
+    result.decimals       = decimals;
+    return result;
+}
+
 assert :: proc(condition: bool, fmt: string, args: [^]any = {}) #foreign "csl_assert";
 
 Rect :: struct {
@@ -2050,7 +2078,7 @@ draw_ability_button :: proc(player: Player, $T: typeid, index: int) {
         if ability.current_cooldown > 0 {
             #static cooldown_ts := UI.default_text_settings();
             cooldown_ts.size = ability_button_rect->height() / UI.get_current_scale_factor() * 0.5;
-            UI.text(ability_button_rect, cooldown_ts, "%{.1}", {ability.current_cooldown});
+            UI.text(ability_button_rect, cooldown_ts, "%", {format_float(ability.current_cooldown, decimals=1)});
         }
     }
 
