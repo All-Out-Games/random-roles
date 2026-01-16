@@ -871,7 +871,11 @@ ao_update_lobby :: proc(dt: float) {
 		} else {
 			// Display wait timer
 			remaining := 60.0 - elapsed;
-			wait_text := format_string("Next round in: % seconds", .{format_float(remaining, decimals=2)});
+			// Format as mm:ss with leading zeroes (e.g. 00:09)
+			remaining_i := (remaining + 0.999).(int);
+			if remaining_i < 0 { remaining_i = 0; }
+			minutes := remaining_i / 60;
+			seconds := remaining_i - minutes * 60;
 			
 			screen := UI.get_safe_screen_rect();
 			rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -150, -25, -150, -25);
@@ -882,7 +886,7 @@ ao_update_lobby :: proc(dt: float) {
 			ts.halign = .CENTER;
 			ts.valign = .CENTER;
 			
-			UI.text(rect, ts, wait_text);
+			UI.text(rect, ts, "Next round in: %:%", {format_int(minutes, leading_zeroes=2), format_int(seconds, leading_zeroes=2)});
 			return;
 		}
 	}
@@ -902,7 +906,11 @@ ao_update_lobby :: proc(dt: float) {
 		} else {
 			// Display countdown on screen
 			remaining := 10.0 - elapsed;
-			countdown_text := format_string("Game starting in: %", .{format_float(remaining, decimals=2)});
+			// Format as mm:ss with leading zeroes (e.g. 00:04)
+			remaining_i := (remaining + 0.999).(int);
+			if remaining_i < 0 { remaining_i = 0; }
+			minutes := remaining_i / 60;
+			seconds := remaining_i - minutes * 60;
 			
 			screen := UI.get_safe_screen_rect();
 			rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -100, -25, -100, -25);
@@ -913,7 +921,7 @@ ao_update_lobby :: proc(dt: float) {
 			ts.halign = .CENTER;
 			ts.valign = .CENTER;
 			
-			UI.text(rect, ts, countdown_text);
+			UI.text(rect, ts, "Game starting in: %:%", {format_int(minutes, leading_zeroes=2), format_int(seconds, leading_zeroes=2)});
 		}
 	} else {
 		// Player count dropped below threshold, reset countdown

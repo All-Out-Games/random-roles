@@ -660,13 +660,326 @@ Task_Call_Fake_Meeting :: class : Task_Base {
 // Normal tasks
 
 Task_Call_Jail_Codes :: class : Task_Base {
-	update_task :: proc(using this: Task_Call_Jail_Codes, player: Player) {
-		if !started {
+	// UI/task state
+	rng_initialized: bool;
+	code_digits: List(int);   // len = CODE_LEN
+	input_digits: List(int);  // player's current input
+	success_time: float;
+	fail_time: float;
+
+	// Textures
+	numpad_texture: Texture_Asset;
+	button_texture: Texture_Asset;
+	button_pressed_texture: Texture_Asset;
+	cancel_texture: Texture_Asset;
+	cancel_pressed_texture: Texture_Asset;
+	enter_texture: Texture_Asset;
+	enter_pressed_texture: Texture_Asset;
+	post_it_texture: Texture_Asset;
+	number_button_textures: [10]Texture_Asset;
+	number_hand_textures: [10]Texture_Asset;
+
+	CODE_LEN :: 7;
+	FAIL_LOCK_TIME :: 0.75;
+	SUCCESS_DISPLAY_TIME :: 1.5;
+
+	start_attempt :: proc(using this: Task_Call_Jail_Codes, player: Player) {
+		if started {
 			return;
 		}
-		log(format_string("Reroute Power Task Updated"));
-		//Instant success
-		complete_attempt(this, player, true);
+		started = true;
+		rng_initialized = false;
+		code_digits = List(int).{};
+		input_digits = List(int).{};
+		success_time = 0.0;
+		fail_time = 0.0;
+	}
+
+	cancel_attempt :: proc(using this: Task_Call_Jail_Codes, player: Player) {
+		if !started return;
+		if completed return;
+		started = false;
+		rng_initialized = false;
+		code_digits = List(int).{};
+		input_digits = List(int).{};
+		success_time = 0.0;
+		fail_time = 0.0;
+	}
+
+	init_textures :: proc(using this: Task_Call_Jail_Codes) {
+		numpad_texture = get_asset(Texture_Asset, "sprites/tasks/jail_codes/numpad.png");
+		button_texture = get_asset(Texture_Asset, "sprites/tasks/jail_codes/button.png");
+		button_pressed_texture = get_asset(Texture_Asset, "sprites/tasks/jail_codes/button_pressed.png");
+		cancel_texture = get_asset(Texture_Asset, "sprites/tasks/jail_codes/cancel_button.png");
+		cancel_pressed_texture = get_asset(Texture_Asset, "sprites/tasks/jail_codes/cancel_button_pressed.png");
+		enter_texture = get_asset(Texture_Asset, "sprites/tasks/jail_codes/enter_button.png");
+		enter_pressed_texture = get_asset(Texture_Asset, "sprites/tasks/jail_codes/enter_button_pressed.png");
+		post_it_texture = get_asset(Texture_Asset, "sprites/tasks/jail_codes/post_it.png");
+
+		for d: 0..9 {
+			number_button_textures[d] = get_asset(Texture_Asset, format_string("sprites/tasks/jail_codes/button_numbers/%.png", .{d}));
+			number_hand_textures[d] = get_asset(Texture_Asset, format_string("sprites/tasks/jail_codes/hand_drawn_numbers/%.png", .{d}));
+		}
+	}
+
+	is_fail_locked :: proc(using this: Task_Call_Jail_Codes) -> bool {
+		if fail_time <= 0.0 {
+			return false;
+		}
+		return (get_time() - fail_time) < FAIL_LOCK_TIME;
+	}
+
+	init_code :: proc(using this: Task_Call_Jail_Codes) {
+		if rng_initialized {
+			return;
+		}
+		rng_initialized = true;
+		rr_refresh_rng_state();
+		code_digits = List(int).{};
+		for i: 0..CODE_LEN-1 {
+			append(ref code_digits, rng_range_int(ref rr_rng_state.value, 0, 9));
+		}
+	}
+
+	clear_input :: proc(using this: Task_Call_Jail_Codes) {
+		input_digits = List(int).{};
+	}
+
+	is_input_correct :: proc(using this: Task_Call_Jail_Codes) -> bool {
+		if code_digits.elements.count != CODE_LEN return false;
+		if input_digits.elements.count != CODE_LEN return false;
+		for i: 0..CODE_LEN-1 {
+			if input_digits.elements[i] != code_digits.elements[i] {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	handle_digit_press :: proc(using this: Task_Call_Jail_Codes, digit: int) {
+		if success_time > 0.0 return;
+		if is_fail_locked(this) return;
+		if input_digits.elements.count >= CODE_LEN return;
+		append(ref input_digits, digit);
+	}
+
+	handle_cancel_press :: proc(using this: Task_Call_Jail_Codes) {
+		if success_time > 0.0 return;
+		if is_fail_locked(this) return;
+		clear_input(this);
+	}
+
+	handle_enter_press :: proc(using this: Task_Call_Jail_Codes) {
+		if success_time > 0.0 return;
+		if is_fail_locked(this) return;
+
+		// Require full input length.
+		if input_digits.elements.count != CODE_LEN {
+			return;
+		}
+
+		if is_input_correct(this) {
+			success_time = get_time();
+		} else {
+			fail_time = get_time();
+			clear_input(this);
+		}
+	}
+
+	draw_code_post_it :: proc(using task: Task_Call_Jail_Codes, safe_screen: Rect, window_rect: Rect) {
+		if task.post_it_texture == null {
+			return;
+		}
+
+		// Sticky note anchored to the bottom-right of the device.
+		note_w := window_rect->width() * 0.40;
+		// Keep it "attached" but inside the screen.
+		note_anchor := window_rect->bottom_right_rect()->offset_unscaled(-window_rect->width() * 0.02, -window_rect->height() * 0.10);
+		note_rect := note_anchor->grow_unscaled(note_w * 0.55, note_w * 0.55, note_w * 0.45, note_w * 0.65);
+		note_rect = note_rect->fit_aspect(task.post_it_texture->get_aspect(), .KEEP_WIDTH);
+
+		// Clamp to safe screen so it never clips out.
+		margin := 10.0;
+		dx := 0.0;
+		dy := 0.0;
+		if note_rect.max.x > safe_screen.max.x - margin {
+			dx = (safe_screen.max.x - margin) - note_rect.max.x;
+		}
+		if note_rect.min.x < safe_screen.min.x + margin {
+			dx = (safe_screen.min.x + margin) - note_rect.min.x;
+		}
+		if note_rect.max.y > safe_screen.max.y - margin {
+			dy = (safe_screen.max.y - margin) - note_rect.max.y;
+		}
+		if note_rect.min.y < safe_screen.min.y + margin {
+			dy = (safe_screen.min.y + margin) - note_rect.min.y;
+		}
+		note_rect = note_rect->offset_unscaled(dx, dy);
+
+		UI.quad(note_rect, task.post_it_texture, .{1, 1, 1, 1});
+
+		// Code digits on the note (hand-drawn).
+		if task.code_digits.elements.count != CODE_LEN {
+			return;
+		}
+
+		digits_rect := note_rect->inset_unscaled(note_rect->height() * 0.4, note_rect->width() * 0.12, note_rect->height() * 0.4, note_rect->width() * 0.12);
+		for i: 0..CODE_LEN-1 {
+			d := task.code_digits.elements[i];
+			if d < 0 || d > 9 continue;
+			tex := task.number_hand_textures[d];
+			if tex == null continue;
+			cell := digits_rect->subrect(i.(f32) / CODE_LEN.(f32), 0.0, (i.(f32) + 1.0) / CODE_LEN.(f32), 1.0);
+			cell = cell->inset_unscaled(6, 2, 6, 2);
+			cell = cell->fit_aspect(tex->get_aspect(), .KEEP_HEIGHT);
+			UI.quad(cell, tex, .{1, 1, 1, 1});
+		}
+	}
+
+	draw_jail_codes_ui :: proc(using task: Task_Call_Jail_Codes, player: Player, success_state: bool) {
+		screen := UI.get_safe_screen_rect();
+		bg := get_asset(Texture_Asset, "$AO/white.png");
+		UI.quad(screen, bg, .{0.0, 0.0, 0.0, 0.85});
+
+		// Center the device.
+		// Match the scale of other tasks (e.g. Task_Cypher uses ~900).
+		window_size := 820.0;
+		// Nudge up a bit to leave room for the post-it.
+		window_rect := screen->center_rect()->offset_unscaled(0.0, 30.0)->grow(window_size / 2.0);
+		window_rect = window_rect->fit_aspect(task.numpad_texture->get_aspect(), .KEEP_HEIGHT);
+
+		// Fail shake for feedback.
+		if task->is_fail_locked() && !success_state {
+			shake := sin(get_time() * 42.0) * 6.0;
+			window_rect = window_rect->offset(shake, 0.0);
+		}
+
+		UI.quad(window_rect, task.numpad_texture, success_state ? .{0.15, 0.8, 0.25, 1.0} : task->is_fail_locked() ? .{0.9, 0.15, 0.15, 1.0} : .{1, 1, 1, 1});
+
+		// Close (top-right)
+		if draw_task_close_button(window_rect, player, task) {
+			return;
+		}
+
+		// Sticky note with the code.
+		task->draw_code_post_it(screen, window_rect);
+
+		ready := task.code_digits.elements.count == CODE_LEN;
+		input_count := task.input_digits.elements.count;
+		base_disabled := (!ready) || success_state || task->is_fail_locked();
+
+		// Key grid area (12 slots, 3 cols x 4 rows) inside the device face.
+		key_grid := window_rect->subrect(0.12, 0.17, 0.88, 0.9);
+		pad_x := key_grid->width() * 0.03;
+		pad_y := key_grid->height() * 0.035;
+
+		for row: 0..3 {
+			for col: 0..2 {
+				// y from top
+				y1 := 1.0 - ((row.(f32) + 1.0) / 4.0);
+				y2 := 1.0 - (row.(f32) / 4.0);
+				x1 := col.(f32) / 3.0;
+				x2 := (col.(f32) + 1.0) / 3.0;
+
+				cell := key_grid->subrect(x1, y1, x2, y2);
+				cell = cell->inset_unscaled(pad_y, pad_x, pad_y, pad_x);
+
+				is_cancel := (row == 3 && col == 0);
+				is_zero := (row == 3 && col == 1);
+				is_enter := (row == 3 && col == 2);
+
+				// Determine what we're drawing/handling.
+				btn_tex := task.button_texture;
+				btn_pressed := task.button_pressed_texture;
+				btn_is_digit := true;
+				digit := 0;
+
+				if is_cancel {
+					btn_tex = task.cancel_texture;
+					btn_pressed = task.cancel_pressed_texture;
+					btn_is_digit = false;
+				} else if is_enter {
+					btn_tex = task.enter_texture;
+					btn_pressed = task.enter_pressed_texture;
+					btn_is_digit = false;
+				} else {
+					if row < 3 {
+						digit = row * 3 + col + 1;
+					} else {
+						digit = 0;
+					}
+				}
+
+				UI.push_id("jail_codes_key_%_%", .{row, col});
+				defer UI.pop_id();
+
+				// Per-button disabled rules:
+				// - Digits: disabled when full (can't enter more), or base disabled
+				// - Enter: disabled until exact number of digits entered, or base disabled
+				// - Cancel: clears the full input; keep enabled unless base disabled
+				disabled := base_disabled;
+				if !is_cancel && !is_enter {
+					disabled = disabled || (input_count >= CODE_LEN);
+				}
+				if is_enter {
+					disabled = disabled || (input_count != CODE_LEN);
+				}
+
+				UI.push_disabled(disabled);
+				defer UI.pop_disabled();
+
+				interact := UI.button(cell, .{}, .{}, "");
+
+				base := btn_tex;
+				if interact.active {
+					base = btn_pressed;
+				}
+				btn_rect := cell->fit_aspect(base->get_aspect(), .KEEP_WIDTH);
+				UI.quad(btn_rect, base, .{1, 1, 1, 1});
+
+				// Digit overlay.
+				if btn_is_digit {
+					num_tex := task.number_button_textures[digit];
+					if num_tex != null {
+						num_rect := btn_rect->inset_unscaled(btn_rect->height() * 0.18, btn_rect->width() * 0.18, btn_rect->height() * 0.18, btn_rect->width() * 0.18);
+						num_rect = num_rect->fit_aspect(num_tex->get_aspect(), .KEEP_HEIGHT);
+						UI.quad(num_rect, num_tex, .{1, 1, 1, 1});
+					}
+				}
+
+				if interact.clicked && !disabled {
+					if is_cancel {
+						task->handle_cancel_press();
+					} else if is_enter {
+						task->handle_enter_press();
+					} else {
+						task->handle_digit_press(digit);
+					}
+				}
+			}
+		}
+	}
+
+	update_task :: proc(using this: Task_Call_Jail_Codes, player: Player) {
+		if !started return;
+		if completed return;
+		if !player->is_local_or_server() return;
+
+		if numpad_texture == null {
+			init_textures(this);
+		}
+		init_code(this);
+
+		if success_time > 0.0 {
+			if (get_time() - success_time) >= SUCCESS_DISPLAY_TIME {
+				complete_attempt(this, player, true);
+				return;
+			}
+			draw_jail_codes_ui(this, player, true);
+			return;
+		}
+
+		draw_jail_codes_ui(this, player, false);
 	}
 }
 
