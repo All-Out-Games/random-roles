@@ -1,0 +1,234 @@
+import "core:ao"
+
+// --- Traitor sabotage: Power Outage ---
+
+POWER_OUTAGE_SABOTAGE_COOLDOWN_SECONDS :: 60.0;
+POWER_OUTAGE_OVERLAY_ALPHA :: 0.88;
+
+// --- Traitor sabotage: Comms Outage ---
+COMMS_OUTAGE_SABOTAGE_COOLDOWN_SECONDS :: 60.0;
+
+// World-space placeholder position for the generator interactable.
+// (You can move this later; for now it's centered-ish.)
+POWER_OUTAGE_GENERATOR_POS_X :: 0.0;
+POWER_OUTAGE_GENERATOR_POS_Y :: 0.0;
+
+rr_get_map_world_min :: proc() -> v2 {
+	if world_references != null && world_references.map_min != null && #alive(world_references.map_min) {
+		return world_references.map_min.world_position;
+	}
+	return v2.{0.0, 0.0};
+}
+
+rr_get_map_world_max :: proc() -> v2 {
+	if world_references != null && world_references.map_max != null && #alive(world_references.map_max) {
+		return world_references.map_max.world_position;
+	}
+	return v2.{1.0, 1.0};
+}
+
+rr_minimap_world_to_ui :: proc(map_rect: Rect, world_pos: v2) -> v2 {
+	wmin := rr_get_map_world_min();
+	wmax := rr_get_map_world_max();
+
+	// Defensive ordering (editor could place min/max swapped)
+	min_x := min(wmin.x, wmax.x);
+	max_x := max(wmin.x, wmax.x);
+	min_y := min(wmin.y, wmax.y);
+	max_y := max(wmin.y, wmax.y);
+
+	dx := max_x - min_x;
+	dy := max_y - min_y;
+	if abs(dx) < 0.0001 { dx = 1.0; }
+	if abs(dy) < 0.0001 { dy = 1.0; }
+
+	u := (world_pos.x - min_x) / dx;
+	v := (world_pos.y - min_y) / dy;
+	u = clamp(u, 0.0, 1.0);
+	v = clamp(v, 0.0, 1.0);
+
+	return v2.{
+		lerp(map_rect.min.x, map_rect.max.x, u),
+		lerp(map_rect.min.y, map_rect.max.y, v),
+	};
+}
+
+rr_power_outage_affects_player :: proc(player: Player) -> bool {
+	if player == null return false;
+	// Spec: civilians + anarchists affected; traitors see normally.
+	return player.player_type != Player_Type.TRAITOR;
+}
+
+rr_should_draw_power_outage_overlay :: proc(player: Player) -> bool {
+	if player == null return false;
+	if game_state != Game_State.INGAME return false;
+	if player.player_state != Player_State.ALIVE return false;
+	if !player->is_local() return false;
+	if !rr_power_outage_active return false;
+	if !rr_power_outage_affects_player(player) return false;
+	return true;
+}
+
+rr_draw_power_outage_overlay_if_needed :: proc(player: Player) {
+	if !rr_should_draw_power_outage_overlay(player) {
+		return;
+	}
+
+	screen := UI.get_screen_rect();
+	bg := get_asset(Texture_Asset, "$AO/white.png");
+	UI.quad(screen, bg, v4.{0.0, 0.0, 0.0, POWER_OUTAGE_OVERLAY_ALPHA});
+
+	// Minimal label (only for affected players).
+	ts := UI.default_text_settings();
+	ts.size = 54;
+	ts.color = v4.{1, 1, 1, 0.9};
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 3;
+	ts.outline_color = v4.{0, 0, 0, 1};
+	UI.text(screen->top_center_rect()->offset(0, -90), ts, "POWER OUTAGE");
+}
+
+rr_should_draw_comms_deaf_icon :: proc(player: Player, comms_down: bool) -> bool {
+	if player == null return false;
+	if game_state != Game_State.INGAME return false;
+	if !comms_down return false;
+	if player.player_state != Player_State.ALIVE return false;
+	return true;
+}
+
+// Cosmetic: draw a small "deaf" icon next to each alive player's head while comms are down.
+// This is drawn only on the local client.
+rr_draw_comms_deaf_icons_if_needed :: proc(local_player: Player, comms_down: bool) {
+	if local_player == null return;
+	if !local_player->is_local() return;
+	if !comms_down return;
+	if game_state != Game_State.INGAME return;
+
+	icon := get_asset(Texture_Asset, "sprites/icons/communication_outage_icon.png");
+	if icon == null return;
+
+	// Screen-space size in pixels (tuned for readability). We keep it stable across zoom.
+	icon_size := 34.0;
+	x_offset := 22.0;
+	y_offset := 80.0;
+
+	UI.push_layer(5200);
+	defer UI.pop_layer();
+
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if !rr_should_draw_comms_deaf_icon(p, comms_down) continue;
+
+		// Start at head-ish screen position and nudge right a bit.
+		screen_pos := world_to_screen(p.entity.world_position);
+		screen_pos.x += x_offset;
+		screen_pos.y += y_offset;
+
+		r := Rect{screen_pos, screen_pos}->grow_unscaled(icon_size * 0.5, icon_size * 0.5, icon_size * 0.5, icon_size * 0.5);
+		r = r->fit_aspect(icon->get_aspect(), .KEEP_HEIGHT);
+		UI.quad(r, icon, v4.{1, 1, 1, 0.95});
+	}
+}
+
+rr_get_power_outage_generator_pos :: proc() -> v2 {
+	// Preferred: a scene-authored interactable reference (so placement matches map)
+	if world_references != null && world_references.sabotage_generator_interactable != null {
+		gen_e := world_references.sabotage_generator_interactable.entity;
+		if gen_e != null && #alive(gen_e) {
+			return gen_e.world_position;
+		}
+	}
+	return v2.{POWER_OUTAGE_GENERATOR_POS_X, POWER_OUTAGE_GENERATOR_POS_Y};
+}
+
+rr_draw_sabotage_button :: proc(
+	btn: Rect,
+	id: string,
+	label: string,
+	active: bool,
+	cooldown_ends_at: float
+) -> bool {
+	UI.push_id(id);
+	defer UI.pop_id();
+
+	on_cooldown := get_time() < cooldown_ends_at;
+	disabled := active || on_cooldown;
+	UI.push_disabled(disabled);
+	defer UI.pop_disabled();
+
+	interact := UI.button(btn, .{}, .{}, "");
+
+	bg := get_asset(Texture_Asset, "$AO/white.png");
+	col := v4.{0.75, 0.15, 0.15, 0.85};
+	if active {
+		col = v4.{0.25, 0.25, 0.25, 0.85};
+	} else if on_cooldown {
+		col = v4.{0.45, 0.2, 0.2, 0.75};
+	} else if interact.active {
+		col = v4.{0.9, 0.25, 0.25, 0.95};
+	}
+	UI.quad(btn, bg, col);
+
+	ts := UI.default_text_settings();
+	ts.size = btn->height() * 0.22;
+	ts.color = v4.{1, 1, 1, 1};
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 2;
+	ts.outline_color = v4.{0, 0, 0, 1};
+
+	disp := label;
+	if active {
+		disp = "ACTIVE";
+	}
+	UI.text(btn, ts, disp);
+
+	if on_cooldown && !active {
+		remaining := cooldown_ends_at - get_time();
+		if remaining < 0.0 { remaining = 0.0; }
+		small := ts;
+		small.size = btn->height() * 0.16;
+		UI.text(btn->offset(0, -btn->height() * 0.28), small, "%.0fs", .{remaining});
+	}
+
+	return interact.clicked && !disabled;
+}
+
+// Draw sabotage buttons to the RIGHT of the minimap (traitors only).
+// Returns true for each button when clicked this frame.
+rr_draw_sabotages_next_to_minimap :: proc(
+	player: Player,
+	map_rect: Rect,
+	power_clicked: ref bool,
+	comms_clicked: ref bool,
+	comms_down: bool,
+	comms_cooldown_ends_at: float
+) {
+	power_clicked = false;
+	comms_clicked = false;
+	if player == null return;
+	if player.player_type != Player_Type.TRAITOR return;
+
+	// Button size based on minimap height.
+	size := map_rect->height() * 0.10;
+	if size < 74.0 { size = 74.0; }
+	if size > 130.0 { size = 130.0; }
+
+	pad := size * 0.18;
+	x := map_rect.max.x + size * 0.5;
+	y_top := map_rect.max.y - (map_rect->height() * 0.5) + size;
+
+	// Two stacked buttons.
+	btn1_center := v2.{x, y_top};
+	btn2_center := v2.{x, y_top - (size + pad)};
+	btn1 := Rect{btn1_center, btn1_center}->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
+	btn2 := Rect{btn2_center, btn2_center}->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
+
+	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", "POWER", rr_power_outage_active, rr_power_outage_cooldown_ends_at);
+	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", "COMMS", comms_down, comms_cooldown_ends_at);
+}

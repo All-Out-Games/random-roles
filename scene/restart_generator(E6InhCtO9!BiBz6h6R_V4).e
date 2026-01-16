@@ -2,11 +2,11 @@
 335007449089
 1381578790589373 1765920851418932600
 {
-  "name": "reroute_power",
+  "name": "restart_generator",
   "local_enabled": true,
   "local_position": {
-    "X": 51.5186576843261719,
-    "Y": 0.5626792907714844
+    "X": 45.7044334411621094,
+    "Y": -4.6777734756469727
   },
   "local_rotation": 0,
   "local_scale": {
@@ -23,7 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Interactable",
   "data": {
-    "text": "Reroute Power"
+    "text": "Restart Generator"
   }
 },
 {
