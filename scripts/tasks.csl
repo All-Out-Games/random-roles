@@ -302,18 +302,34 @@ draw_task_close_button :: proc(window_rect: Rect, player: Player, task: Task_Bas
 	return false;
 }
 
+rr_cancel_all_task_attempts :: proc(player: Player) {
+	if player == null return;
+	for i: 0..player.active_tasks.elements.count-1 {
+		task := player.active_tasks.elements[i];
+		if task == null continue;
+		if task.started && !task.completed {
+			task->cancel_attempt(player);
+		}
+	}
+}
+
 update_tasks_ui :: proc(player: Player) {
 	// Only show tasks for alive civilians during gameplay
 	if !player->is_local_or_server() {
 		return;
 	}
 	if game_state != Game_State.INGAME {
+		// If a task attempt UI is open and we leave gameplay (meeting/voting/death),
+		// cancel it so the player can see global animations (death, popups, etc.).
+		rr_cancel_all_task_attempts(player);
 		return;
 	}
 	if player.player_state != Player_State.ALIVE {
+		rr_cancel_all_task_attempts(player);
 		return;
 	}
 	if player.is_temporarily_resurrected {
+		rr_cancel_all_task_attempts(player);
 		return;
 	}
 	if player.active_tasks.elements.count == 0 {
@@ -333,7 +349,8 @@ update_tasks_ui :: proc(player: Player) {
 		// Draw objective arrow to the generator for local player.
 		if player->is_local() {
 			tutorial_arrow_options := Tutorial_Arrow.default_options();
-			tutorial_arrow_options.alpha = 1.0;
+			dist := length(player.entity.world_position - rr_get_power_outage_generator_pos());
+			tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
 			tutorial_arrow_options.far = true;
 			tutorial_arrow_options.near = true;
 			tutorial_arrow_options.bob_scale = 0.5;
@@ -415,7 +432,8 @@ update_tasks_ui :: proc(player: Player) {
 		// Draw objective arrow to the comms lever for local player.
 		if player->is_local() {
 			tutorial_arrow_options := Tutorial_Arrow.default_options();
-			tutorial_arrow_options.alpha = 1.0;
+			dist := length(player.entity.world_position - rr_get_comms_lever_pos());
+			tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
 			tutorial_arrow_options.far = true;
 			tutorial_arrow_options.near = true;
 			tutorial_arrow_options.bob_scale = 0.5;
@@ -499,7 +517,6 @@ update_tasks_ui :: proc(player: Player) {
 	if(player->is_local()) {
 		tutorial_arrow_options := Tutorial_Arrow.default_options();
 		// Show objective arrows both near and far, and keep them readable.
-		tutorial_arrow_options.alpha = 1.0;
 		tutorial_arrow_options.far = true;
 		tutorial_arrow_options.near = true;
 		tutorial_arrow_options.bob_scale = 0.5;
@@ -518,6 +535,8 @@ update_tasks_ui :: proc(player: Player) {
 			rr_refresh_task_destinations_for_task(task);
 
 			for d: 0..task.destinations.elements.count-1 {
+				dist := length(player.entity.world_position - task.destinations.elements[d]);
+				tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
 				Tutorial_Arrow.draw(player, task.destinations.elements[d], tutorial_arrow_options);
 			}
 		}

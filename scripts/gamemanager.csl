@@ -94,6 +94,7 @@ MIN_NUMBER_OF_PLAYERS: int : 4;
 
 // Non-body-report meetings (button/fake meetings) cooldown to prevent spam.
 MEETING_COOLDOWN_SECONDS :: 30.0;
+FAKE_MEETING_COOLDOWN_SECONDS :: 120.0;
 
 // --- Sabotage: Power Outage ---
 rr_power_outage_active: bool;
@@ -301,6 +302,29 @@ rr_round_start_player_count: int;
 // --- Fake meeting (Prankster) ---
 fake_meeting_active: bool;
 fake_meeting_caller_id: u64;
+fake_meeting_cooldown_ends_at: float;
+
+// --- Meeting metadata (used by voting UI) ---
+meeting_initiator_id: u64;          // 0 = none / hidden (e.g. fake meeting)
+meeting_initiator_from_body: bool;  // true when triggered via Report
+rr_suppress_meeting_initiator: bool;
+
+// Player entity ids that died since the previous meeting ended.
+deaths_since_last_meeting: List(u64);
+
+u64_list_contains :: proc(list: List(u64), value: u64) -> bool {
+	for i: 0..list.elements.count-1 {
+		if list.elements[i] == value return true;
+	}
+	return false;
+}
+
+rr_register_player_death :: proc(player_entity_id: u64) {
+	if player_entity_id == 0 return;
+	// Avoid duplicates (e.g. multiple damage sources calling kill defensively).
+	if u64_list_contains(deaths_since_last_meeting, player_entity_id) return;
+	append(ref deaths_since_last_meeting, player_entity_id);
+}
 
 // --- Jester Win cinematic (Prankster) ---
 JESTER_WIN_CINEMATIC_TIME :: 5.0;
@@ -510,15 +534,24 @@ start_fake_meeting :: proc(caller: Player) {
 	if caller == null return;
 	if caller.player_state != Player_State.ALIVE return;
 
-	// Use the normal meeting flow (meeting called popup -> voting).
-	// Respect meeting cooldown (only applies to non-body meetings).
-	if !start_meeting(false, caller) {
+	now := get_time();
+	if now < fake_meeting_cooldown_ends_at {
+		remaining := fake_meeting_cooldown_ends_at - now;
+		caller->Notify(format_string("Fake meeting on cooldown: %s", .{format_float(remaining, decimals=0)}));
 		return;
 	}
+
+	// Use the normal meeting flow (meeting called popup -> voting).
+	// Respect meeting cooldown (only applies to non-body meetings).
+	rr_suppress_meeting_initiator = true;
+	started := start_meeting(false, caller);
+	rr_suppress_meeting_initiator = false;
+	if !started return;
 
 	fake_meeting_active = true;
 	fake_meeting_caller_id = caller.entity.id;
 	caller.prankster_fake_meetings_called += 1;
+	fake_meeting_cooldown_ends_at = now + FAKE_MEETING_COOLDOWN_SECONDS;
 }
 
 prankster_check_unlock_jester_win :: proc(player: Player) {
@@ -604,12 +637,16 @@ setup_lobby :: proc() {
 	game_end_time = 0.0;
 	waiting_for_restart = false;
 	meeting_cooldown_ends_at = 0.0;
+	meeting_initiator_id = 0;
+	meeting_initiator_from_body = false;
+	deaths_since_last_meeting = List(u64).{};
 	rr_started_solo_test_mode = false;
 	rr_round_start_player_count = 0;
 	close_all_doors();
 	// Reset sabotages
 	rr_power_outage_active = false;
 	rr_comms_outage_active = false;
+	fake_meeting_cooldown_ends_at = 0.0;
 	foreach player: component_iterator(Player) {
 		on_player_go_passive(player);
 		// Lobby reset: everyone can hear & speak to everyone.
@@ -628,6 +665,9 @@ setup_ingame :: proc() {
 	waiting_for_restart = false;
 	voting_start_time = 0.0;
 	meeting_cooldown_ends_at = 0.0;
+	meeting_initiator_id = 0;
+	meeting_initiator_from_body = false;
+	deaths_since_last_meeting = List(u64).{};
 	open_all_doors();
 	// Start-of-round: comms are functional.
 	rr_comms_outage_active = false;
@@ -635,6 +675,7 @@ setup_ingame :: proc() {
 	jester_win_active = false;
 	jester_win_player_id = 0;
 	jester_win_start_time = 0.0;
+	fake_meeting_cooldown_ends_at = 0.0;
 }
 
 setup_voting :: proc() {
@@ -714,6 +755,15 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 			caller->Notify("Can't call a meeting right now.");
 		}
 		return false;
+	}
+
+	// Capture meeting metadata for the upcoming voting UI.
+	// (Fake meetings suppress this capture and will leave initiator_id = 0.)
+	meeting_initiator_id = 0;
+	meeting_initiator_from_body = false;
+	if caller != null && !rr_suppress_meeting_initiator {
+		meeting_initiator_id = caller.entity.id;
+		meeting_initiator_from_body = from_body;
 	}
 
 	// Cooldown only for non-body meetings.
@@ -1170,6 +1220,7 @@ end_voting :: proc() {
 			}
 		} else {
 			// Eject the unique top-voted player.
+			rr_register_player_death(max_player.entity.id);
 			on_player_go_dead(max_player);
 
 			ejected_message := format_string("% has been ejected!", .{max_player.entity->get_name()});
@@ -1189,6 +1240,10 @@ end_voting :: proc() {
 	
 	game_state = Game_State.INGAME;
 	voting_start_time = 0.0;
+	// Next meeting should only show deaths that occur after this one ends.
+	deaths_since_last_meeting = List(u64).{};
+	meeting_initiator_id = 0;
+	meeting_initiator_from_body = false;
 	open_all_doors();
 	
 	// Notify all players

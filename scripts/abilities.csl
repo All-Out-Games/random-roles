@@ -17,6 +17,44 @@ get_player_by_entity_id :: proc(entity_id: u64) -> Player {
     return null;
 }
 
+build_voted_list :: proc() -> string {
+	names := "";
+	for i: 0..players.elements.count-1 {
+		v := players.elements[i];
+		if v == null continue;
+		if v.player_state != Player_State.ALIVE continue;
+		if !v.has_voted continue;
+
+		n := v.entity->get_name();
+		if names.count > 0 {
+			names = format_string("%, %", .{names, n});
+		} else {
+			names = n;
+		}
+	}
+	return names;
+}
+
+draw_ability_name_label :: proc(button_rect: Rect, label: string) {
+	if label.count <= 0 return;
+
+	bg := get_asset(Texture_Asset, "$AO/white.png");
+
+	// Draw a small strip at the bottom of the button for readability.
+	label_rect := button_rect->inset(8)->cut_bottom(30);
+	UI.quad(label_rect, bg, v4.{0, 0, 0, 0.55});
+
+	ts := UI.default_text_settings();
+	ts.size = 22;
+	ts.color = v4.{1, 1, 1, 1};
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 2;
+	ts.outline_color = v4.{0, 0, 0, 1};
+	UI.text(label_rect, ts, label);
+}
+
 Kill_Ability :: class : Ability_Base {
     NAME :: "Kill";
 
@@ -66,6 +104,10 @@ Kill_Ability :: class : Ability_Base {
             }
         }
     }
+
+	on_draw_button :: proc(instance: Kill_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Kill_Ability.NAME);
+	}
 }
 
 Resurrect_Ability :: class : Ability_Base {
@@ -142,13 +184,15 @@ Resurrect_Ability :: class : Ability_Base {
         if player == null return;
         if player.player_role != Player_Role.DOCTOR return;
 
+		draw_ability_name_label(rect, Resurrect_Ability.NAME);
+
         ts := UI.default_text_settings();
         ts.size = 18;
         ts.halign = .CENTER;
-        ts.valign = .BOTTOM;
+        ts.valign = .TOP;
         remaining := DOCTOR_RESURRECTS_PER_ROUND - player.doctor_resurrects_used;
         if remaining < 0 { remaining = 0; }
-        UI.text(rect->inset(2), ts, format_string("%/%", .{remaining, DOCTOR_RESURRECTS_PER_ROUND}));
+        UI.text(rect->inset(2)->cut_top(20), ts, format_string("%/%", .{remaining, DOCTOR_RESURRECTS_PER_ROUND}));
     }
 }
 
@@ -179,20 +223,34 @@ Report_Ability :: class : Ability_Base {
             closest_corpse := instance->get_closest_corpse(instance.player);
             if closest_corpse != null {
                 closest_corpse.has_been_reported = true;
-                // Start the meeting (corpse persists; cleaned up on disconnect / round end)
+                // Once a body has been reported, delete it.
+                if #alive(closest_corpse.entity) {
+                    closest_corpse.entity->destroy();
+                }
+                // Start the meeting.
                 start_meeting(true, instance.player);
             }
         }
     }
+
+	on_draw_button :: proc(instance: Report_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Report_Ability.NAME);
+	}
 }
 
 Vote_Ability :: class : Ability_Base {
     NAME :: "Vote";
     voting_ui_open: bool;
+    show_recent_deaths: bool;
+    last_voting_start_time_seen: float;
+	recent_deaths_open_time: float;
 
     on_init :: proc(instance: Vote_Ability) {
         instance.icon = get_asset(Texture_Asset, "sprites/icons/report_ability.png");
         instance.voting_ui_open = false;
+        instance.show_recent_deaths = false;
+        instance.last_voting_start_time_seen = 0.0;
+		instance.recent_deaths_open_time = 0.0;
     }
 
     can_use :: method() -> bool {
@@ -200,12 +258,135 @@ Vote_Ability :: class : Ability_Base {
     }
 
     on_update :: method(params: ref Ability_Update_Params) {
-        if params.clicked && params.can_use {
+        // Leave voting: close any meeting UI state.
+        if game_state != Game_State.VOTING {
+            voting_ui_open = false;
+            show_recent_deaths = false;
+            last_voting_start_time_seen = 0.0;
+            return;
+        }
+
+        // Auto-open vote UI when entering voting (once per voting session).
+        if voting_start_time > 0.0 && voting_start_time != last_voting_start_time_seen {
+            last_voting_start_time_seen = voting_start_time;
+            voting_ui_open = true;
+            show_recent_deaths = true;
+			recent_deaths_open_time = get_time();
+        }
+
+        // Only allow closing after the player has voted or skipped.
+        if params.clicked && params.can_use && player.has_voted {
             voting_ui_open = !voting_ui_open;
         }
-        
+
         if voting_ui_open && player->is_local_or_server() {
-            draw_voting_ui(this, player);
+            if show_recent_deaths {
+				// Auto-advance after a short recap.
+				if recent_deaths_open_time > 0.0 && (get_time() - recent_deaths_open_time) >= 5.0 {
+					show_recent_deaths = false;
+				}
+                draw_recent_deaths_ui(this, player);
+            } else {
+                draw_voting_ui(this, player);
+            }
+        }
+    }
+
+    draw_recent_deaths_ui :: proc(instance: Vote_Ability, local_player: Player) {
+        screen := UI.get_safe_screen_rect();
+
+        white := get_asset(Texture_Asset, "$AO/white.png");
+		// Slide-in animation (left -> center)
+		now := get_time();
+		t := 1.0;
+		if instance.recent_deaths_open_time > 0.0 {
+			elapsed := now - instance.recent_deaths_open_time;
+			t = clamp(elapsed / 0.35, 0.0, 1.0);
+		}
+		x_off := lerp(-520.0, 0.0, t);
+		overlay_alpha := lerp(0.0, 0.82, t);
+
+        UI.quad(screen, white, v4.{0, 0, 0, overlay_alpha});
+
+        panel_rect := screen->center_rect()->grow(380, 560, 380, 560)->offset(x_off, 0);
+        UI.quad(panel_rect, white, v4.{0.05, 0.06, 0.08, lerp(0.0, 0.92, t)});
+
+        content := panel_rect->inset(24);
+        header := content->cut_top(70);
+        footer := content->cut_bottom(72);
+
+        title_ts := UI.default_text_settings();
+        title_ts.size = 44;
+        title_ts.color = v4.{0.95, 0.97, 1.0, 1};
+        title_ts.halign = .CENTER;
+        title_ts.valign = .CENTER;
+        title_ts.do_outline = true;
+        title_ts.outline_thickness = 3;
+        title_ts.outline_color = v4.{0, 0, 0, 1};
+        UI.text(header, title_ts, "RECENT DEATHS");
+
+        // Scrollable list of deaths since last meeting.
+        scroll_area := content;
+        scroll_bar_area := scroll_area->cut_right(10)->inset(2);
+
+        svs: Scroll_View_Settings;
+        svs.vertical = true;
+        svs.horizontal = false;
+        svs.clip_padding = v4.{10, 10, 10, 10};
+
+        sv := UI.push_scroll_view(scroll_area, "recent_deaths", svs); {
+            defer UI.pop_scroll_view();
+
+            list_rect := sv.content_rect;
+            row_ts := UI.default_text_settings();
+            row_ts.size = 34;
+            row_ts.color = v4.{0.9, 0.92, 0.98, 1};
+            row_ts.halign = .LEFT;
+            row_ts.valign = .CENTER;
+            row_ts.do_drop_shadow = true;
+            row_ts.drop_shadow_offset = v2.{1, -1};
+            row_ts.drop_shadow_color = v4.{0, 0, 0, 1};
+
+            if deaths_since_last_meeting.elements.count <= 0 {
+                none_rect := list_rect->cut_top(64);
+                row_ts.halign = .CENTER;
+                UI.text(none_rect, row_ts, "None");
+            } else {
+                for i: 0..deaths_since_last_meeting.elements.count-1 {
+                    id := deaths_since_last_meeting.elements[i];
+                    p := get_player_by_entity_id(id);
+                    name := "Unknown";
+                    if p != null {
+                        name = p.entity->get_name();
+                    }
+
+                    row := list_rect->cut_top(64);
+                    UI.quad(row->inset(2), white, v4.{0.08, 0.1, 0.14, 0.65});
+                    UI.text(row->inset(14, 14, 14, 14), row_ts, name);
+
+                    list_rect->cut_top(8);
+                }
+            }
+        }
+
+        // Manual scroll bar
+        scroll_bar_rect := sv->compute_scroll_bar_rect(scroll_bar_area);
+        UI.quad(scroll_bar_area, white, v4.{0.025, 0.025, 0.025, 1});
+        UI.quad(scroll_bar_rect, white, v4.{0.12, 0.12, 0.12, 1});
+
+        // Continue button
+        btn_rect := footer->center_rect()->grow(18, 170, 18, 170);
+        bs := UI.default_button_settings();
+        bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_2.png"); // green
+        bs.press_scaling = 0.96;
+        ts := UI.default_text_settings();
+        ts.size = 30;
+        ts.color = v4.{1, 1, 1, 1};
+        ts.halign = .CENTER;
+        ts.valign = .CENTER;
+
+        if UI.button(btn_rect, bs, ts, "CONTINUE").clicked {
+            instance.show_recent_deaths = false;
         }
     }
 
@@ -299,6 +480,26 @@ Vote_Ability :: class : Ability_Base {
         }
         UI.text(info_rect->inset(10, 12, 10, 12), info_ts, format_string("President: %  (President votes are worth 2x)", .{pres_name}));
 
+        // Meeting initiator (do not show for prankster fake meetings).
+        if meeting_initiator_id != 0 {
+            caller := get_player_by_entity_id(meeting_initiator_id);
+            caller_name := "Unknown";
+            if caller != null {
+                caller_name = caller.entity->get_name();
+            }
+
+            kind := "MEETING";
+            if meeting_initiator_from_body {
+                kind = "REPORT";
+            }
+
+            called_rect := header->cut_top(32);
+            UI.quad(called_rect, white, v4.{0.08, 0.1, 0.14, 0.6});
+            info_ts.size = 20;
+            info_ts.halign = .LEFT;
+            UI.text(called_rect->inset(10, 12, 10, 12), info_ts, format_string("Called by: %  (%)", .{caller_name, kind}));
+        }
+
         // Calculate layout for player list
         alive_players: List(Player);
         for i: 0..players.elements.count-1 {
@@ -366,6 +567,13 @@ Vote_Ability :: class : Ability_Base {
 
                 // Name
                 name_rect := inner;
+				// Megaphone for meeting initiator (report/call-meeting). Not shown for fake meetings.
+				if meeting_initiator_id != 0 && target_player.entity.id == meeting_initiator_id {
+					meg := get_asset(Texture_Asset, "sprites/icons/call_meeting_icon.png");
+					meg_rect := name_rect->cut_left(34)->inset(2);
+					UI.quad(meg_rect->fit_aspect(meg->get_aspect()), meg, v4.{1, 1, 1, 1});
+					name_rect->cut_left(8);
+				}
                 UI.text(name_rect, row_ts, target_player.entity->get_name());
 
                 // Vote count pill
@@ -403,7 +611,9 @@ Vote_Ability :: class : Ability_Base {
         footer_inner := footer->inset(14);
         buttons_rect := footer_inner->cut_bottom(44.0);
         stats_rect := footer_inner;
-        left := stats_rect->cut_left(260);
+        line1 := stats_rect->cut_top(26);
+		line2 := stats_rect->cut_top(24);
+        left := line1->cut_left(260);
 
         foot_ts := UI.default_text_settings();
         foot_ts.size = 22;
@@ -412,9 +622,19 @@ Vote_Ability :: class : Ability_Base {
         foot_ts.valign = .CENTER;
         UI.text(left, foot_ts, format_string("Ballots cast: %/%", .{total_cast, total_alive}));
 
-        right := stats_rect;
+        right := line1;
         foot_ts.halign = .RIGHT;
         UI.text(right, foot_ts, format_string("Total vote weight: %", .{total_weight_cast}));
+
+		voted := build_voted_list();
+		if voted.count <= 0 { voted = "-"; }
+		foot_ts.size = 18;
+		foot_ts.halign = .LEFT;
+		foot_ts.word_wrap = true;
+		foot_ts.do_autofit = true;
+		foot_ts.autofit_min_size = 12;
+		foot_ts.autofit_max_size = 18;
+		UI.text(line2, foot_ts, format_string("Voted: %", .{voted}));
 
         // Buttons row: SKIP + CLOSE (centered)
         button_row := buttons_rect->center_rect()->grow(20.0, 200.0, 20.0, 200.0); // 40h, 400w
@@ -451,10 +671,16 @@ Vote_Ability :: class : Ability_Base {
         close_ts.color = v4.{1, 1, 1, 1};
         close_ts.halign = .CENTER;
         close_ts.valign = .CENTER;
+        UI.push_disabled(!local_player.has_voted);
         if UI.button(close_rect, close_bs, close_ts, "CLOSE").clicked {
             instance.voting_ui_open = false;
         }
+        UI.pop_disabled();
     }
+
+	on_draw_button :: proc(instance: Vote_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Vote_Ability.NAME);
+	}
 }
 
 shoot_projectile :: proc(spawn_position: v2, velocity: v2, damage: int, lifetime: float, owner: Entity) -> Entity {
@@ -508,6 +734,10 @@ Shoot_Ability :: class : Ability_Base {
             }
         }
     }
+
+	on_draw_button :: proc(instance: Shoot_Ability, rect: Rect) {
+		draw_ability_name_label(rect, instance.name);
+	}
 }
 
 // Black Flag - Pirate ability that creates a fog zone
@@ -616,6 +846,10 @@ Black_Flag_Ability :: class : Ability_Base {
             current_cooldown = 60.0;
         }
     }
+
+	on_draw_button :: proc(instance: Black_Flag_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Black_Flag_Ability.NAME);
+	}
 }
 
 // --- Pirate: Powder Keg ---
@@ -945,6 +1179,10 @@ Powder_Keg_Ability :: class : Ability_Base {
 			this->cleanup_targeting();
 		}
 	}
+
+	on_draw_button :: proc(instance: Powder_Keg_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Powder_Keg_Ability.NAME);
+	}
 }
 
 // --- Prankster ---
@@ -1057,6 +1295,10 @@ Prank_Ability :: class : Ability_Base {
 			instance.current_cooldown = 15.0;
 		}
 	}
+
+	on_draw_button :: proc(instance: Prank_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Prank_Ability.NAME);
+	}
 }
 
 Fake_Meeting_Ability :: class : Ability_Base {
@@ -1082,6 +1324,10 @@ Fake_Meeting_Ability :: class : Ability_Base {
 				instance.current_cooldown = 60.0;
 			}
 		}
+	}
+
+	on_draw_button :: proc(instance: Fake_Meeting_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Fake_Meeting_Ability.NAME);
 	}
 }
 
@@ -1119,11 +1365,13 @@ Jester_Win_Ability :: class : Ability_Base {
 	}
 
 	on_draw_button :: proc(instance: Jester_Win_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Jester_Win_Ability.NAME);
+
 		// Draw countdown / lock state on top of the button.
 		ts := UI.default_text_settings();
 		ts.size = 20;
 		ts.halign = .CENTER;
-		ts.valign = .BOTTOM;
+		ts.valign = .TOP;
 
 		player := instance.player;
 		if player == null {
@@ -1141,7 +1389,7 @@ Jester_Win_Ability :: class : Ability_Base {
 				label = "READY";
 			}
 		}
-		UI.text(rect->inset(4), ts, label);
+		UI.text(rect->inset(4)->cut_top(24), ts, label);
 	}
 }
 
@@ -1272,5 +1520,9 @@ Autograph_Ability :: class : Ability_Base {
 				writer = player.entity->add_component(Movie_Star_Write_Autograph);
 			}
 		}
+	}
+
+	on_draw_button :: proc(instance: Autograph_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Autograph_Ability.NAME);
 	}
 }
