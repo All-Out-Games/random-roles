@@ -5,47 +5,102 @@ Door :: class : Component {
     collider_entity: Entity @ao_serialize;
     spine_animator: Spine_Animator @ao_serialize;
 
+    spacing: float @ao_serialize;
+
     is_open: bool;
 
     ao_start :: proc(using this: Door) {
         collider_entity->set_local_enabled(force_locked);
+        this->setup_spine_animator();
     }
 
     setup_spine_animator :: method() {
-        //setup animator for: closing -> closed_idle
-        //Setup animator for: opening -> open_idle
-        //add triggers for open_door does opening
-        //add triggers for close_door does closing
+        // Animations in the door rigs:
+        // - closed_idle (loop)
+        // - opening (oneshot) -> open_idle (loop)
+        // - closing (oneshot) -> closed_idle (loop)
+        //
+        // Triggers:
+        // - open_door  => opening
+        // - close_door => closing
+        if spine_animator == null {
+            return;
+        }
+
+        spine_animator->awaken();
+        if spine_animator.instance == null {
+            return;
+        }
+
+        if(spacing > 0) {
+            left_bone := spine_animator.instance->get_bone_local_position("vertical_upper_root");
+            right_bone := spine_animator.instance->get_bone_local_position("vertical_lower_root");
+            spine_animator.instance->set_bone_local_position("vertical_upper_root", left_bone + v2.{0.0, spacing});
+            spine_animator.instance->set_bone_local_position("vertical_lower_root", right_bone + v2.{0.0, -spacing});
+        }
+
+        state_machine := State_Machine.create();
+        open_trigger := state_machine->create_variable("open_door", .TRIGGER);
+        close_trigger := state_machine->create_variable("close_door", .TRIGGER);
+
+        layer := state_machine->create_layer("main", 0);
+
+        closed_idle := layer->create_state("closed_idle", true);
+        opening := layer->create_state("opening", false);
+        open_idle := layer->create_state("open_idle", true);
+        closing := layer->create_state("closing", false);
+
+        // Pick initial state based on starting lock state.
+        if force_locked {
+            is_open = false;
+            layer->set_initial_state(closed_idle);
+        } else {
+            is_open = true;
+            layer->set_initial_state(open_idle);
+        }
+
+        // closed_idle -> opening -> open_idle
+        closed_to_opening := layer->create_transition(closed_idle, opening, false);
+        closed_to_opening->create_trigger_condition(open_trigger);
+
+        opening_to_open_idle := layer->create_transition(opening, open_idle, true);
+
+        // open_idle -> closing -> closed_idle
+        open_idle_to_closing := layer->create_transition(open_idle, closing, false);
+        open_idle_to_closing->create_trigger_condition(close_trigger);
+
+        closing_to_closed_idle := layer->create_transition(closing, closed_idle, true);
+
+        // Attach to spine (transfer ownership to the Spine_Instance).
+        spine_animator.instance->set_state_machine(state_machine, true);
     }
 
     open_door :: proc(using this: Door) {
         force_locked = false;
         collider_entity->set_local_enabled(force_locked);
+        is_open = true;
+
+        if spine_animator != null {
+            spine_animator->awaken();
+            if spine_animator.instance != null && spine_animator.instance.state_machine != null {
+                spine_animator.instance.state_machine->set_trigger("open_door");
+            } else if spine_animator.instance != null {
+                spine_animator.instance->set_animation("opening", false, 0);
+            }
+        }
     }
 
     close_door :: proc(using this: Door) {
         force_locked = true;
         collider_entity->set_local_enabled(force_locked);
-    }
+        is_open = false;
 
-    ao_update :: proc(using this: Door, delta_time: float) {
-        found_player := false;
-        foreach player: component_iterator(Player) {
-            if length_squared(player.entity.world_position - collider_entity.world_position) < 1.0 {
-                found_player = true;
-                break;
-            }
-        }
-
-        if !found_player {
-            if is_open {
-                //Play close animation
-                is_open = false;
-            }
-        } else {
-            if !is_open {
-                //Play open animation
-                is_open = true;
+        if spine_animator != null {
+            spine_animator->awaken();
+            if spine_animator.instance != null && spine_animator.instance.state_machine != null {
+                spine_animator.instance.state_machine->set_trigger("close_door");
+            } else if spine_animator.instance != null {
+                spine_animator.instance->set_animation("closing", false, 0);
             }
         }
     }

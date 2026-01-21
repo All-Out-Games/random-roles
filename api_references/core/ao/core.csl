@@ -47,6 +47,20 @@ Scene :: struct {
     }
 }
 
+JSON :: struct {
+    serialize_raw :: proc(obj: *u8, t: typeid) -> string #foreign "json_serialize_raw";
+
+    serialize :: proc(obj: ref $T) -> string #unsafe {
+        return serialize_raw((&obj).(*u8), T);
+    }
+
+    try_deserialize_raw :: proc(json: string, out_value: *u8, t: typeid) -> bool #foreign "json_deserialize_raw";
+
+    try_deserialize :: proc(json: string, out_value: ref $T) -> bool {
+        return try_deserialize_raw(json, (&out_value).(*u8), T);
+    }
+}
+
 compute_current_stack_trace :: proc() -> string #foreign "compute_current_stack_trace";
 
 core_globals: struct "ao core globals" {

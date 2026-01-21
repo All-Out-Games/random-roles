@@ -112,6 +112,13 @@ rr_comms_outage_cooldown_ends_at: float;
 // Scene lever entity for fixing comms (named `enable_communications`)
 rr_comms_lever_entity: Entity;
 
+// --- Sabotage: Door Lockdown ---
+rr_lockdown_active: bool;
+rr_lockdown_started_at: float;
+rr_lockdown_triggered_by_id: u64;
+rr_lockdown_cooldown_ends_at: float;
+rr_lockdown_ends_at: float;
+
 rr_power_outage_add_generator_task_to_player :: proc(player: Player) {
 	if player == null return;
 	// Don't add duplicates
@@ -459,6 +466,65 @@ rr_try_start_comms_outage :: proc(caller: Player) {
 	}
 }
 
+rr_try_start_lockdown :: proc(caller: Player) {
+	// Server authoritative
+	if !Game.is_server() return;
+	// Only allow during gameplay
+	if game_state != Game_State.INGAME return;
+	if caller == null return;
+	if caller.player_state != Player_State.ALIVE return;
+	if caller.player_type != Player_Type.TRAITOR return;
+
+	if rr_lockdown_active return;
+	if get_time() < rr_lockdown_cooldown_ends_at return;
+
+	rr_lockdown_active = true;
+	rr_lockdown_started_at = get_time();
+	rr_lockdown_triggered_by_id = caller.entity.id;
+	rr_lockdown_ends_at = get_time() + LOCKDOWN_DURATION_SECONDS;
+	rr_lockdown_cooldown_ends_at = get_time() + LOCKDOWN_SABOTAGE_COOLDOWN_SECONDS;
+
+	// Match meeting behavior: force doors closed/locked.
+	close_all_doors();
+
+	// Notify everyone
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		p->Notify("Sabotage: Door Lockdown!");
+	}
+}
+
+rr_update_lockdown :: proc() {
+	// Server authoritative
+	if !Game.is_server() return;
+	if !rr_lockdown_active return;
+	if rr_lockdown_ends_at <= 0.0 return;
+
+	now := get_time();
+	if now < rr_lockdown_ends_at return;
+
+	// Time's up
+	rr_lockdown_active = false;
+	rr_lockdown_started_at = 0.0;
+	rr_lockdown_triggered_by_id = 0;
+	rr_lockdown_ends_at = 0.0;
+
+	// Only reopen doors if we're actually back in gameplay.
+	// (Voting/meetings want doors locked; they'll handle opening on exit.)
+	if game_state == Game_State.INGAME {
+		open_all_doors();
+	}
+
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		p->Notify("Door Lockdown ended.");
+	}
+}
+
 rr_end_comms_outage :: proc(fixer: Player) {
 	// Server authoritative
 	if !Game.is_server() return;
@@ -646,6 +712,11 @@ setup_lobby :: proc() {
 	// Reset sabotages
 	rr_power_outage_active = false;
 	rr_comms_outage_active = false;
+	rr_lockdown_active = false;
+	rr_lockdown_started_at = 0.0;
+	rr_lockdown_triggered_by_id = 0;
+	rr_lockdown_cooldown_ends_at = 0.0;
+	rr_lockdown_ends_at = 0.0;
 	fake_meeting_cooldown_ends_at = 0.0;
 	foreach player: component_iterator(Player) {
 		on_player_go_passive(player);
@@ -668,7 +739,12 @@ setup_ingame :: proc() {
 	meeting_initiator_id = 0;
 	meeting_initiator_from_body = false;
 	deaths_since_last_meeting = List(u64).{};
-	open_all_doors();
+	// If a lockdown is active (should be rare), respect it.
+	if rr_lockdown_active {
+		close_all_doors();
+	} else {
+		open_all_doors();
+	}
 	// Start-of-round: comms are functional.
 	rr_comms_outage_active = false;
 	rr_update_comms_lever_visuals();
@@ -809,6 +885,9 @@ ao_start :: proc() {
   }
 
 ao_update :: proc(dt: float) {
+	// Keep timed sabotages progressing regardless of game_state (e.g., lockdown during voting).
+	rr_update_lockdown();
+
 	if(game_state == Game_State.LOBBY) {
 		ao_update_lobby(dt);
 	} else if(game_state == Game_State.ANIM_INTRO) {
@@ -1244,7 +1323,10 @@ end_voting :: proc() {
 	deaths_since_last_meeting = List(u64).{};
 	meeting_initiator_id = 0;
 	meeting_initiator_from_body = false;
-	open_all_doors();
+	// If a lockdown is still active, keep doors locked like a meeting.
+	if !rr_lockdown_active {
+		open_all_doors();
+	}
 	
 	// Notify all players
 	for i: 0..players.elements.count-1 {
