@@ -1,6 +1,6 @@
 ---
 name: game-design
-description: Reference this when designing new gameplay systems
+description: You MUST reference this before implementing any new gameplay feature or system
 ---
 
 # Game Design

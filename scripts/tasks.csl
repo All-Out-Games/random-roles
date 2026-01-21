@@ -2371,13 +2371,400 @@ Task_Reroute_Power :: class : Task_Base {
 }
 
 Task_Guide_The_Electron :: class : Task_Base {
+	// UI / lifecycle
+	ui_active: bool;
+	layout_initialized: bool;
+	last_update_time: float;
+	success_time: float;
+	fail_time: float;
+
+	// Assets
+	bg_texture: Texture_Asset;
+	finish_texture: Texture_Asset;
+	start_token_texture: Texture_Asset;
+	electron_textures: [3]Texture_Asset;
+	wall_textures: [3]Texture_Asset;
+
+	// Gameplay
+	rng_initialized: bool;
+	rng: u64;
+
+	electron_pos: v2;
+	electron_grab_offset: v2;
+
+	COLUMN_COUNT :: 5;
+	SEG_MAX :: 48;
+
+	column_x: [COLUMN_COUNT]float;            // world X positions
+	// Each column is a repeating list of segments; each segment wraps individually.
+	segment_count: int;
+	segment_y: [COLUMN_COUNT][SEG_MAX]float;  // world-space Y centers for each segment
+	hole_index: [COLUMN_COUNT]int;            // middle segment to omit (hole is one segment big)
+
+	// Cached sizing for gameplay logic (set in init_layout)
+	play_rect_cached: Rect;
+	seg_thickness: float;
+	seg_length: float;
+	seg_draw_length: float; // slightly smaller to prevent overlap
+	seg_step: float;
+	hole_half: float;
+	electron_radius: float;
+
+	SUCCESS_DISPLAY_TIME :: 1.25;
+	FAIL_FLASH_TIME :: 0.35;
+
+	start_attempt :: proc(using this: Task_Guide_The_Electron, player: Player) {
+		if started {
+			return;
+		}
+		started = true;
+		ui_active = true;
+		layout_initialized = false;
+		last_update_time = 0.0;
+		success_time = 0.0;
+		fail_time = 0.0;
+		rng_initialized = false;
+	}
+
+	init_textures :: proc(using this: Task_Guide_The_Electron) {
+		bg_texture = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/bg.png");
+		finish_texture = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/finish_line.png");
+		start_token_texture = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/electron_around_atom.png");
+
+		electron_textures[0] = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/electron_1.png");
+		electron_textures[1] = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/electron_2.png");
+		electron_textures[2] = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/electron_3.png");
+
+		wall_textures[0] = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/electric_wall+segment_1.png");
+		wall_textures[1] = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/electric_wall+segment_2.png");
+		wall_textures[2] = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/electric_wall+segment_3.png");
+	}
+
+	compute_play_rect :: proc(using this: Task_Guide_The_Electron, window_rect: Rect) -> Rect {
+		w := window_rect->width();
+		h := window_rect->height();
+
+		// Inner screen area (avoid metal frame). Right side includes the clamp graphics,
+		// so keep the inset modest there.
+		inset_l := w * 0.040;
+		inset_r := w * 0.040;
+		inset_b := h * 0.065;
+		inset_t := h * 0.075;
+
+		return Rect.{
+			v2.{window_rect.min.x + inset_l, window_rect.min.y + inset_b},
+			v2.{window_rect.max.x - inset_r, window_rect.max.y - inset_t}
+		};
+	}
+
+	init_layout :: proc(using this: Task_Guide_The_Electron, window_rect: Rect) {
+		if layout_initialized {
+			return;
+		}
+		layout_initialized = true;
+
+		if !rng_initialized {
+			rng_initialized = true;
+			rng = rng_seed_time();
+		}
+
+		play_rect_cached = compute_play_rect(this, window_rect);
+		pw := play_rect_cached->width();
+		ph := play_rect_cached->height();
+
+		// Electron sizing + initial position (left side)
+		e_h := ph * 0.14;
+		e_w := e_h * electron_textures[0]->get_aspect();
+		electron_radius = min(e_w, e_h) * 0.32;
+
+		electron_pos = v2.{play_rect_cached.min.x + pw * 0.13, play_rect_cached.min.y + ph * 0.50};
+		electron_grab_offset = v2.{0, 0};
+
+		// Wall segment sizing (we rotate the horizontal sprite 90 degrees to form vertical columns)
+		seg_thickness = pw * 0.030;
+		if seg_thickness < ph * 0.028 { seg_thickness = ph * 0.028; }
+		if seg_thickness > ph * 0.060 { seg_thickness = ph * 0.060; }
+
+		seg_length = seg_thickness * wall_textures[0]->get_aspect(); // along Y after rotation
+		// One "slot" per segment. Prevent visible overlap by drawing slightly shorter than the slot.
+		seg_step = seg_length;
+		seg_draw_length = seg_length * 0.98;
+
+		// Hole is exactly one segment slot (middle segment removed).
+		hole_half = seg_step * 0.5;
+
+		// Columns between start and finish.
+		left_x := play_rect_cached.min.x + pw * 0.38;
+		right_x := play_rect_cached.min.x + pw * 0.74;
+		denom := (COLUMN_COUNT - 1).(float);
+		for i: 0..COLUMN_COUNT-1 {
+			t := 0.0;
+			if denom > 0.0 {
+				t = i.(float) / denom;
+			}
+			column_x[i] = lerp(left_x, right_x, t);
+		}
+
+		// Initialize per-segment positions so each segment can wrap individually.
+		segment_count = ((ph + seg_step * 4.0) / seg_step).(int) + 2;
+		if segment_count > SEG_MAX { segment_count = SEG_MAX; }
+		if segment_count < 7 { segment_count = 7; } // ensure a clear "middle" exists
+
+		middle := segment_count / 2;
+		total_span := segment_count.(float) * seg_step;
+
+		for c: 0..COLUMN_COUNT-1 {
+			// Random offset of up to half a segment to each column.
+			off := rng_range_float(ref rng, -0.5 * seg_step, 0.5 * seg_step);
+
+			// Center the hole around the middle of the play rect.
+			hole_center := play_rect_cached.min.y + ph * 0.5 + off;
+			start_y := hole_center - middle.(float) * seg_step;
+
+			hole_index[c] = middle;
+			for i: 0..segment_count-1 {
+				segment_y[c][i] = start_y + i.(float) * seg_step;
+			}
+		}
+	}
+
+	draw_rotated_quad :: proc(using this: Task_Guide_The_Electron, rect: Rect, texture: Texture_Asset, degrees: float, color: v4) {
+		center := rect->center();
+		UI.push_matrix(Matrix4.rotate_about_point(center, degrees));
+		defer UI.pop_matrix();
+		UI.quad(rect, texture, color);
+	}
+
+	clamp_electron_to_play :: proc(using this: Task_Guide_The_Electron, play_rect: Rect) {
+		min_x := play_rect.min.x + electron_radius;
+		max_x := play_rect.max.x - electron_radius;
+		min_y := play_rect.min.y + electron_radius;
+		max_y := play_rect.max.y - electron_radius;
+
+		electron_pos.x = clamp(electron_pos.x, min_x, max_x);
+		electron_pos.y = clamp(electron_pos.y, min_y, max_y);
+	}
+
+	check_circle_aabb_collision :: proc(using this: Task_Guide_The_Electron, center: v2, radius: float, rect: Rect) -> bool {
+		dx := 0.0;
+		if center.x < rect.min.x {
+			dx = rect.min.x - center.x;
+		} else if center.x > rect.max.x {
+			dx = center.x - rect.max.x;
+		}
+
+		dy := 0.0;
+		if center.y < rect.min.y {
+			dy = rect.min.y - center.y;
+		} else if center.y > rect.max.y {
+			dy = center.y - rect.max.y;
+		}
+
+		return (dx * dx + dy * dy) <= (radius * radius);
+	}
+
 	update_task :: proc(using this: Task_Guide_The_Electron, player: Player) {
 		if !started {
 			return;
 		}
-		log(format_string("Guide the Electron Task Updated"));
-		//Instant success
-		complete_attempt(this, player, true);
+		if completed {
+			return;
+		}
+		if !player->is_local_or_server() {
+			return;
+		}
+
+		if bg_texture == null {
+			init_textures(this);
+		}
+
+		now := get_time();
+		dt := 0.0;
+		if last_update_time > 0.0 {
+			dt = now - last_update_time;
+			dt = clamp(dt, 0.0, 0.05);
+		}
+		last_update_time = now;
+
+		// Modal darkening + task window (match other tasks)
+		screen := UI.get_screen_rect();
+		modal_bg := get_asset(Texture_Asset, "$AO/white.png");
+		UI.quad(screen, modal_bg, .{0.0, 0.0, 0.0, 0.85});
+
+		window_size := 1000.0;
+		window_rect := screen->center_rect()->grow(window_size / 2.0);
+		window_rect = window_rect->fit_aspect(bg_texture->get_aspect(), .KEEP_HEIGHT);
+		UI.quad(window_rect, bg_texture, .{1, 1, 1, 1});
+
+		// Close (top-right)
+		if draw_task_close_button(window_rect, player, this) {
+			ui_active = false;
+			layout_initialized = false;
+			return;
+		}
+
+		// Setup layout once (depends on textures)
+		init_layout(this, window_rect);
+
+		// Success flow
+		if success_time > 0.0 {
+			elapsed := now - success_time;
+			if elapsed >= SUCCESS_DISPLAY_TIME {
+				ui_active = false;
+				complete_attempt(this, player, true);
+				return;
+			}
+		}
+
+		play_rect := compute_play_rect(this, window_rect);
+
+		// Keep cached play rect in sync in case resolution/UI scale changes mid-attempt.
+		play_rect_cached = play_rect;
+	
+		// Finish line placement: centered between the two clamp "pointers" on the right side.
+		w := window_rect->width();
+		h := window_rect->height();
+		finish_h := h * 0.55;
+		finish_w := finish_h * finish_texture->get_aspect();
+		finish_center := v2.{window_rect.min.x + w * 0.84, window_rect.min.y + h * 0.50};
+		finish_rect := window_rect->bottom_left_rect()
+			->offset_unscaled(finish_center.x - window_rect.min.x, finish_center.y - window_rect.min.y)
+			->grow_unscaled(finish_h * 0.5, finish_w * 0.5, finish_h * 0.5, finish_w * 0.5);
+		UI.quad(finish_rect, finish_texture, .{1, 1, 1, 1});
+
+		// Decorative start tokens (match template)
+		token_h := play_rect->height() * 0.11;
+		token_w := token_h * start_token_texture->get_aspect();
+		for i: 0..2 {
+			t := i.(float);
+			pct := 0.42 - t * 0.12;
+			p := v2.{play_rect.min.x + play_rect->width() * 0.15, play_rect.min.y + play_rect->height() * (0.5 + pct)};
+			r := window_rect->bottom_left_rect()
+				->offset_unscaled(p.x - window_rect.min.x, p.y - window_rect.min.y)
+				->grow_unscaled(token_h * 0.5, token_w * 0.5, token_h * 0.5, token_w * 0.5);
+			UI.quad(r, start_token_texture, .{1, 1, 1, 1});
+		}
+
+		// Scroll wall columns upward (segment-by-segment wrapping)
+		scroll_speed := play_rect->height() * 0.28;
+		total_span := segment_count.(float) * seg_step;
+		wrap_y := play_rect.max.y + seg_step * 1.5;
+		for c: 0..COLUMN_COUNT-1 {
+			for i: 0..segment_count-1 {
+				segment_y[c][i] += scroll_speed * dt;
+				if segment_y[c][i] > wrap_y {
+					segment_y[c][i] -= total_span;
+				}
+			}
+		}
+
+		// Electron drag interaction
+		UI.push_id("guide_the_electron_drag");
+		defer UI.pop_id();
+
+		f := get_frame_number();
+		e_idx := ((f / 6) % 3).(int);
+		e_tex := electron_textures[e_idx];
+
+		e_h := play_rect->height() * 0.14;
+		e_w := e_h * e_tex->get_aspect();
+		// Keep collision sizing consistent with the current draw size.
+		electron_radius = min(e_w, e_h) * 0.32;
+
+		electron_rect := window_rect->bottom_left_rect()
+			->offset_unscaled(electron_pos.x - window_rect.min.x, electron_pos.y - window_rect.min.y)
+			->grow_unscaled(e_h * 0.5, e_w * 0.5, e_h * 0.5, e_w * 0.5);
+
+		// Make the interaction rect slightly larger than the sprite for touch friendliness.
+		grab_pad := max(e_w, e_h) * 0.18;
+		grab_rect := electron_rect->grow_unscaled(grab_pad, grab_pad, grab_pad, grab_pad);
+		interact := UI.button(grab_rect, .{}, .{}, "");
+		if interact.clicked {
+			electron_grab_offset = electron_pos - interact.mouse_position;
+		}
+		if interact.active && success_time <= 0.0 {
+			electron_pos = interact.mouse_position + electron_grab_offset;
+			clamp_electron_to_play(this, play_rect);
+		}
+
+		// Clip hazards to the inner screen bounds
+		UI.push_scissor(play_rect, true);
+
+		// Draw wall segments + collision check
+		w_idx := ((f / 5) % 3).(int);
+		w_tex := wall_textures[w_idx];
+
+		// Approximate collision radius slightly smaller than visual to feel fair
+		col_radius := electron_radius * 0.82;
+		collided := false;
+
+		for c: 0..COLUMN_COUNT-1 {
+			for i: 0..segment_count-1 {
+				if i == hole_index[c] {
+					continue; // one segment-sized hole
+				}
+
+				seg_y := segment_y[c][i];
+
+				seg_center := v2.{column_x[c], seg_y};
+
+				// Build a horizontal rect, rotate 90 degrees to appear vertical.
+				base := window_rect->bottom_left_rect()->offset_unscaled(seg_center.x - window_rect.min.x, seg_center.y - window_rect.min.y);
+				seg_rect := base->grow_unscaled(seg_thickness * 0.5, seg_draw_length * 0.5, seg_thickness * 0.5, seg_draw_length * 0.5);
+
+				draw_rotated_quad(this, seg_rect, w_tex, 90.0, .{1, 1, 1, 1});
+
+				// Collision uses the rotated AABB (vertical)
+				col_rect := Rect.{
+					v2.{seg_center.x - seg_thickness * 0.5, seg_center.y - seg_draw_length * 0.5},
+					v2.{seg_center.x + seg_thickness * 0.5, seg_center.y + seg_draw_length * 0.5}
+				};
+
+				if check_circle_aabb_collision(this, electron_pos, col_radius, col_rect) {
+					collided = true;
+				}
+			}
+		}
+
+		// Electron is on top of hazards
+		UI.quad(electron_rect, e_tex, .{1, 1, 1, 1});
+
+		UI.pop_scissor();
+
+		// Collision response
+		if collided && success_time <= 0.0 {
+			fail_time = now;
+
+			// Reset to start
+			electron_pos = v2.{play_rect.min.x + play_rect->width() * 0.13, play_rect.min.y + play_rect->height() * 0.50};
+			clamp_electron_to_play(this, play_rect);
+		}
+
+		// Success check (electron reaches finish line region)
+		if success_time <= 0.0 {
+			// hitbox is slightly inset so it feels like reaching the center of the goal
+			hit := Rect.{
+				v2.{finish_rect.min.x + finish_w * 0.18, finish_rect.min.y + finish_h * 0.18},
+				v2.{finish_rect.max.x - finish_w * 0.18, finish_rect.max.y - finish_h * 0.18}
+			};
+			if electron_pos.x >= hit.min.x && electron_pos.x <= hit.max.x && electron_pos.y >= hit.min.y && electron_pos.y <= hit.max.y {
+				success_time = now;
+			}
+		}
+
+		// Feedback overlays (outside clip)
+		if fail_time > 0.0 {
+			el := now - fail_time;
+			if el <= FAIL_FLASH_TIME {
+				t := 1.0 - (el / FAIL_FLASH_TIME);
+				UI.quad(play_rect, modal_bg, .{1.0, 0.1, 0.1, 0.22 * t});
+			}
+		}
+		if success_time > 0.0 {
+			el := now - success_time;
+			t := clamp(el / SUCCESS_DISPLAY_TIME, 0.0, 1.0);
+			UI.quad(play_rect, modal_bg, .{0.2, 1.0, 0.3, 0.14 * (1.0 - t)});
+		}
 	}
 }
 

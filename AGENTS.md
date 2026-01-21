@@ -265,9 +265,10 @@ Use `@ao_serialize` to expose a field to the user in the editor.
 - Do not hallucinate syntax from other languages. If you are unsure on syntax or available APIs, check skills.
 - These games are mobile-first so don't use any keyboard input. 
 - Logging: `log_info("Name: %, age: %", {get_name(), get_age()});`
-- To display feedback to the user (e.g. when interacting with Interactables) use `Notifier.notify("Not enough cash!")` wrapped with is_local checks. 
+- To display feedback to a specific player from the server, use `Notifier.notify(player, "Not enough cash!")` which sends an RPC. For local-only notifications, use `Notifier.notify("message")` wrapped with is_local checks. 
 - CSL does not have closures, if needed add a `userdata: Object` field alongside the callbacks. Any class instance can be stored in an `Object` variable and cast back to its original type.
 - When starting fresh you **must** reference the syntax skill. 
 - If the task you're working on requires any UI, you **must** use the ui skill. 
+- If designing new gameplay systems, you **must** use the game-design skill.
 
 After you make changes you **must** run the All Out MCP compile tool.
