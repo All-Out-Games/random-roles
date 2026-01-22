@@ -1,0 +1,360 @@
+import "core:ao"
+
+// --- Portal Maker gameplay ---
+// - Portals are per Portal Maker (stored on the owning Player).
+// - Any alive player can use a linked portal by standing on it for 2 seconds.
+// - After teleporting, the destination portal won't re-teleport you until you step off and back on.
+
+PORTAL_MAKER_BOLT_SPEED :: 14.0;
+// Bolt travel tuning: keep portals from always reaching the wall.
+PORTAL_MAKER_BOLT_LIFETIME_SECONDS :: 1.0;
+PORTAL_MAKER_MAX_RANGE :: 10.0;
+
+PORTAL_MAKER_PORTAL_RADIUS :: 0.6;
+PORTAL_MAKER_TELEPORT_SECONDS :: 0.2;
+
+PORTAL_MAKER_PORTAL_SCALE :: 0.6;
+// Render order: map floor tiles are commonly around depth_offset ~0.12.
+// Slightly smaller depth_offset draws in front of the map, while still staying behind players.
+PORTAL_MAKER_PORTAL_DEPTH_OFFSET :: 1.0;
+
+// When a portal is placed near a wall edge, push it back a bit so it doesn't overlap.
+PORTAL_MAKER_WALL_TEST_AHEAD :: 0.8;
+PORTAL_MAKER_WALL_BACKSTEP :: 0.9;
+
+rr_portal_maker_cleanup_for_player :: proc(player: Player) {
+	if player == null return;
+
+	// Unlink + destroy red
+	if player.portal_maker_red_portal != null && #alive(player.portal_maker_red_portal) {
+		red_portal := player.portal_maker_red_portal->get_component(RR_Portal);
+		if red_portal != null && red_portal.linked_portal != null && #alive(red_portal.linked_portal) {
+			other := red_portal.linked_portal->get_component(RR_Portal);
+			if other != null {
+				other.linked_portal = null;
+			}
+		}
+		player.portal_maker_red_portal->destroy();
+	}
+
+	// Unlink + destroy blue
+	if player.portal_maker_blue_portal != null && #alive(player.portal_maker_blue_portal) {
+		blue_portal := player.portal_maker_blue_portal->get_component(RR_Portal);
+		if blue_portal != null && blue_portal.linked_portal != null && #alive(blue_portal.linked_portal) {
+			other := blue_portal.linked_portal->get_component(RR_Portal);
+			if other != null {
+				other.linked_portal = null;
+			}
+		}
+		player.portal_maker_blue_portal->destroy();
+	}
+
+	player.portal_maker_red_portal = null;
+	player.portal_maker_blue_portal = null;
+	player.portal_standing_on_portal = null;
+	player.portal_blocked_portal = null;
+	player.portal_standing_seconds = 0.0;
+}
+
+rr_destroy_all_portals :: proc() {
+	// Destroy all portal entities in the scene.
+	foreach portal: component_iterator(RR_Portal) {
+		if portal == null continue;
+		if !#alive(portal.entity) continue;
+		portal.entity->destroy();
+	}
+
+	// Clear per-player references/state.
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		p.portal_maker_red_portal = null;
+		p.portal_maker_blue_portal = null;
+		p.portal_standing_on_portal = null;
+		p.portal_blocked_portal = null;
+		p.portal_standing_seconds = 0.0;
+	}
+}
+
+RR_Portal :: class : Component {
+	sprite: Sprite_Renderer;
+	is_red: bool;
+	owner_player_entity_id: u64;
+	linked_portal: Entity;
+}
+
+rr_portal_maker_try_clamp_to_navmesh :: proc(position: v2) -> v2 {
+	point: v2 = position;
+	triangle_hint: s64;
+	try_find_closest_point_on_navmesh(position, ref point, ref triangle_hint);
+	return point;
+}
+
+rr_portal_maker_place_portal :: proc(owner: Player, is_red: bool, position: v2, approach_dir: v2) {
+	if owner == null return;
+	if !#alive(owner.entity) return;
+
+	// Only place portals during gameplay.
+	if game_state != Game_State.INGAME return;
+
+	pos := rr_portal_maker_try_clamp_to_navmesh(position);
+
+	// If we are near an unwalkable edge in the direction of travel, backstep the portal inward.
+	if length_squared(approach_dir) > 0.001 {
+		dir := normalize(approach_dir);
+		test_point := pos + dir * PORTAL_MAKER_WALL_TEST_AHEAD;
+		closest: v2;
+		test_hint: s64;
+		if try_find_closest_point_on_navmesh(test_point, ref closest, ref test_hint) {
+			// If the "ahead" point clamps back significantly, we were aiming into a wall.
+			if !in_range(closest - test_point, 0.01) {
+				pos = rr_portal_maker_try_clamp_to_navmesh(pos - dir * PORTAL_MAKER_WALL_BACKSTEP);
+			}
+		}
+	}
+
+	// Remove old portal of the same color (and unlink its partner if needed).
+	old: Entity;
+	if is_red {
+		old = owner.portal_maker_red_portal;
+	} else {
+		old = owner.portal_maker_blue_portal;
+	}
+	if old != null && #alive(old) {
+		old_portal := old->get_component(RR_Portal);
+		if old_portal != null && old_portal.linked_portal != null && #alive(old_portal.linked_portal) {
+			other := old_portal.linked_portal->get_component(RR_Portal);
+			if other != null {
+				other.linked_portal = null;
+			}
+		}
+		old->destroy();
+	}
+
+	// Spawn portal entity.
+	e := Scene.create_entity();
+	e->set_local_position(pos);
+	e->set_local_rotation(0.0);
+	e->set_local_scale(v2.{PORTAL_MAKER_PORTAL_SCALE, PORTAL_MAKER_PORTAL_SCALE});
+
+	sprite := e->add_component(Sprite_Renderer);
+	if is_red {
+		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/portal_maker/red_portal.png"));
+	} else {
+		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/portal_maker/blue_portal.png"));
+	}
+	// Above map, below players (similar to other ground decals).
+	sprite.layer = 0;
+	sprite.depth_offset = PORTAL_MAKER_PORTAL_DEPTH_OFFSET;
+	sprite.color = v4.{1, 1, 1, 0.95};
+
+	portal := e->add_component(RR_Portal);
+	portal.sprite = sprite;
+	portal.is_red = is_red;
+	portal.owner_player_entity_id = owner.entity.id;
+	portal.linked_portal = null;
+
+	if is_red {
+		owner.portal_maker_red_portal = e;
+	} else {
+		owner.portal_maker_blue_portal = e;
+	}
+
+	// Link if the other portal exists.
+	other_entity: Entity;
+	if is_red {
+		other_entity = owner.portal_maker_blue_portal;
+	} else {
+		other_entity = owner.portal_maker_red_portal;
+	}
+	if other_entity != null && #alive(other_entity) {
+		other_portal := other_entity->get_component(RR_Portal);
+		if other_portal != null {
+			portal.linked_portal = other_entity;
+			other_portal.linked_portal = e;
+		}
+	}
+}
+
+RR_Portal_Bolt :: class : Component {
+	sprite: Sprite_Renderer;
+	velocity: v2;
+	approach_dir: v2;
+	lifetime: float;
+	spawn_time: float;
+	owner_player_entity_id: u64;
+	is_red: bool;
+	triangle_hint: s64;
+
+	ao_start :: proc(using this: RR_Portal_Bolt) {
+		spawn_time = get_time();
+		if lifetime <= 0.0 {
+			lifetime = PORTAL_MAKER_BOLT_LIFETIME_SECONDS;
+		}
+		if sprite == null {
+			sprite = entity->get_component(Sprite_Renderer);
+		}
+	}
+
+	ao_update :: proc(using this: RR_Portal_Bolt, dt: float) {
+		// Face direction of travel
+		if length_squared(velocity) > 0.0001 {
+			angle := to_degrees(atan2(velocity.y, velocity.x));
+			entity->set_local_rotation(angle);
+		}
+
+		// Move
+		entity->add_local_position(velocity * dt);
+
+		now := get_time();
+		time_alive := now - spawn_time;
+
+		// If we cross into non-walkable area (walls/objects), land at the closest navmesh point.
+		land_pos := entity.world_position;
+		should_land := false;
+
+		point: v2;
+		if try_find_closest_point_on_navmesh(land_pos, ref point, ref triangle_hint) {
+			if !in_range(point - land_pos, 0.01) {
+				land_pos = point;
+				should_land = true;
+			}
+		}
+
+		if time_alive >= lifetime {
+			// Land at the closest valid ground point.
+			land_pos = rr_portal_maker_try_clamp_to_navmesh(land_pos);
+			should_land = true;
+		}
+
+		if should_land {
+			owner := rr_get_player_by_entity_id(owner_player_entity_id);
+			if owner != null {
+				rr_portal_maker_place_portal(owner, is_red, land_pos, approach_dir);
+			}
+			entity->destroy();
+		}
+	}
+}
+
+rr_portal_maker_fire_bolt :: proc(owner: Player, is_red: bool, direction: v2) {
+	if owner == null return;
+	if owner.player_state != Player_State.ALIVE return;
+	if game_state != Game_State.INGAME return;
+
+	// Spawn bolt entity
+	e := Scene.create_entity();
+	spawn_pos := owner.entity.world_position + direction * 0.6;
+	e->set_local_position(spawn_pos);
+	e->set_local_rotation(0.0);
+	e->set_local_scale(v2.{0.65, 0.65});
+
+	sprite := e->add_component(Sprite_Renderer);
+	if is_red {
+		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/portal_maker/red_portal.png"));
+		sprite.color = v4.{1, 0.85, 0.85, 1.0};
+	} else {
+		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/portal_maker/blue_portal.png"));
+		sprite.color = v4.{0.85, 0.9, 1.0, 1.0};
+	}
+	sprite.layer = 6;
+	sprite.depth_offset = -0.35;
+
+	bolt := e->add_component(RR_Portal_Bolt);
+	bolt.sprite = sprite;
+	bolt.velocity = direction * PORTAL_MAKER_BOLT_SPEED;
+	bolt.approach_dir = direction;
+	bolt.owner_player_entity_id = owner.entity.id;
+	bolt.is_red = is_red;
+	bolt.lifetime = min(PORTAL_MAKER_BOLT_LIFETIME_SECONDS, PORTAL_MAKER_MAX_RANGE / PORTAL_MAKER_BOLT_SPEED);
+}
+
+rr_update_portal_teleport_for_player :: proc(player: Player, dt: float) {
+	// Server authoritative gameplay.
+	if !Game.is_server() return;
+	if player == null return;
+	if !#alive(player.entity) return;
+	if game_state != Game_State.INGAME return;
+	if player.player_state != Player_State.ALIVE return;
+
+	// Block instant bounce-back: if we're standing on the destination portal, do nothing until we step off.
+	if player.portal_blocked_portal != null && #alive(player.portal_blocked_portal) {
+		if in_range(player.entity.world_position - player.portal_blocked_portal.world_position, PORTAL_MAKER_PORTAL_RADIUS) {
+			player.portal_standing_on_portal = null;
+			player.portal_standing_seconds = 0.0;
+			return;
+		} else {
+			player.portal_blocked_portal = null;
+		}
+	} else {
+		player.portal_blocked_portal = null;
+	}
+
+	// Find nearest portal underfoot.
+	best: RR_Portal;
+	best_dist_sq := 999999.0;
+	radius_sq := PORTAL_MAKER_PORTAL_RADIUS * PORTAL_MAKER_PORTAL_RADIUS;
+
+	foreach portal: component_iterator(RR_Portal) {
+		if portal == null continue;
+		if !#alive(portal.entity) continue;
+
+		delta := player.entity.world_position - portal.entity.world_position;
+		dist_sq := length_squared(delta);
+		if dist_sq <= radius_sq && dist_sq < best_dist_sq {
+			best = portal;
+			best_dist_sq = dist_sq;
+		}
+	}
+
+	if best == null {
+		player.portal_standing_on_portal = null;
+		player.portal_standing_seconds = 0.0;
+		return;
+	}
+
+	// Only usable when linked (both portals exist).
+	if best.linked_portal == null || !#alive(best.linked_portal) {
+		player.portal_standing_on_portal = null;
+		player.portal_standing_seconds = 0.0;
+		return;
+	}
+
+	// Start / continue channel timer.
+	if player.portal_standing_on_portal == null || !#alive(player.portal_standing_on_portal) || player.portal_standing_on_portal != best.entity {
+		player.portal_standing_on_portal = best.entity;
+		player.portal_standing_seconds = 0.0;
+		return;
+	}
+
+	player.portal_standing_seconds += dt;
+	if player.portal_standing_seconds < PORTAL_MAKER_TELEPORT_SECONDS {
+		return;
+	}
+
+	// Teleport!
+	dest := best.linked_portal;
+	if dest == null || !#alive(dest) {
+		player.portal_standing_on_portal = null;
+		player.portal_standing_seconds = 0.0;
+		return;
+	}
+
+	player.entity->set_local_position(dest.world_position);
+	player.portal_blocked_portal = dest;
+	player.portal_standing_on_portal = null;
+	player.portal_standing_seconds = 0.0;
+}
+
+// Local helper: abilities.csl has its own lookup; keep this one file-local and uniquely named.
+rr_get_player_by_entity_id :: proc(entity_id: u64) -> Player {
+	if entity_id == 0 return null;
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if p.entity.id == entity_id return p;
+	}
+	return null;
+}
+

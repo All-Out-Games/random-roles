@@ -100,6 +100,7 @@ entity := instantiate(prefab_asset);
 Reference the spine skill when working with Spine_Animators 
 
 ### Creating Custom Components
+> Make new components in dedicated files. 
 
 Can override these lifecycle methods:
 
@@ -108,6 +109,7 @@ Can override these lifecycle methods:
 - ao_late_update - After all updates
 - ao_end - When component is destroyed
 ```csl
+// orbiter.csl
 Orbiter :: class : Component {
     center: v2;
     radius: float;

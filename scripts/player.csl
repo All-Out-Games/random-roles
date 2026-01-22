@@ -36,6 +36,19 @@ Player :: class : Player_Base {
 	is_temporarily_resurrected: bool;
 	temporarily_resurrected_until: float;
 
+	// --- Coroner ---
+	// Stores killer entity ids sampled from corpses. Consumed one-at-a-time by DNA Match.
+	coroner_dna_vials: [..]u64;
+
+	// --- Portal Maker ---
+	portal_maker_red_portal: Entity;
+	portal_maker_blue_portal: Entity;
+
+	// Per-player portal interaction (anyone can use portals)
+	portal_standing_on_portal: Entity;
+	portal_standing_seconds: float;
+	portal_blocked_portal: Entity; // prevents instant teleport back until leaving the destination portal
+
     is_frozen: bool;
 
 	// True when the local player has any task attempt currently open/in progress.
@@ -142,6 +155,8 @@ Player :: class : Player_Base {
 	}
 
     ao_end :: proc(using this: Player) {
+		// Clean up portal maker portals on disconnect.
+		rr_portal_maker_cleanup_for_player(this);
         // Player entity is being destroyed (typically disconnect). Clean up any corpses they spawned.
         destroy_corpses_for_player(this.entity.id);
         unordered_remove_by_value(ref players, this);
@@ -169,6 +184,7 @@ Player :: class : Player_Base {
             }
         }
         update_tasks(this);
+		rr_update_portal_teleport_for_player(this, delta_time);
     }
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
@@ -222,6 +238,18 @@ Player :: class : Player_Base {
 					}
 					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.MOVIE_STAR {
 						draw_ability_button(this, Autograph_Ability, abilityIndex);
+						abilityIndex += 1;
+					}
+					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.CORONER {
+						draw_ability_button(this, DNA_Sample_Ability, abilityIndex);
+						abilityIndex += 1;
+						draw_ability_button(this, DNA_Match_Ability, abilityIndex);
+						abilityIndex += 1;
+					}
+					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.PORTAL_MAKER {
+						draw_ability_button(this, Red_Portal_Ability, abilityIndex);
+						abilityIndex += 1;
+						draw_ability_button(this, Blue_Portal_Ability, abilityIndex);
 						abilityIndex += 1;
 					}
 					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PRANKSTER {
@@ -316,6 +344,10 @@ Player :: class : Player_Base {
     }
 
     kill :: proc(using this: Player) {
+		this->kill_with_killer(0);
+    }
+
+	kill_with_killer :: proc(using this: Player, killer_player_entity_id: u64) {
         //freeze_player = true;
 		// If this player was temporarily resurrected, clear the flag so tasks/UI don't get stuck.
 		this.is_temporarily_resurrected = false;
@@ -323,8 +355,8 @@ Player :: class : Player_Base {
 		// Track death for the next meeting's recap UI.
 		rr_register_player_death(this.entity.id);
         on_player_go_dead(this);
-        world_references->spawn_corpse(this);
-        log(format_string("Player % killed", .{this.entity.id}));
+        world_references->spawn_corpse(this, killer_player_entity_id);
+        log(format_string("Player % killed (killer=%)", .{this.entity.id, killer_player_entity_id}));
     }
 
 player_role_to_string :: proc(player: Player) -> string {
@@ -335,6 +367,8 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .DOCTOR:     return "DOCTOR";
 		case .PRESIDENT:  return "PRESIDENT";
 		case .MOVIE_STAR: return "MOVIE STAR";
+		case .CORONER:    return "CORONER";
+		case .PORTAL_MAKER: return "PORTAL MAKER";
 		case .PRANKSTER:  return "PRANKSTER";
 		case .PIRATE:     return "PIRATE";
 	}
@@ -375,6 +409,28 @@ draw_player_role_hud :: proc(player: Player) {
 	ts.outline_color = v4.{0, 0, 0, 1};
 
 	UI.text(rect, ts, "ROLE: %", .{player_role_to_string(player)});
+
+	// Coroner vial count: right side around mid-screen (local-only).
+	if player.player_role == Player_Role.CORONER && player->is_local() {
+		UI.push_layer(1600);
+		defer UI.pop_layer();
+
+		vial := get_asset(Texture_Asset, "sprites/icons/coroner/dna_vial.png");
+		anchor := screen->right_center_rect()->offset(-70.0, 0.0);
+		icon_rect := anchor->grow(60.0); // big icon
+		UI.quad(icon_rect->fit_aspect(vial->get_aspect()), vial, v4.{1, 1, 1, 1});
+
+		// Count overlaid on the vial
+		count_ts := UI.default_text_settings();
+		count_ts.size = 44;
+		count_ts.color = v4.{1, 1, 1, 1};
+		count_ts.halign = .CENTER;
+		count_ts.valign = .CENTER;
+		count_ts.do_outline = true;
+		count_ts.outline_thickness = 3;
+		count_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(icon_rect, count_ts, format_string("%", .{player.coroner_dna_vials.count}));
+	}
 }
 
     revive :: proc(using this: Player) {
@@ -601,6 +657,10 @@ destroy_corpses_for_player :: proc(player_entity_id: u64) {
 Corpse :: class : Component {
     has_been_reported: bool;
     owner_player_entity_id: u64;
+	// 0 means unknown / non-player source.
+	killer_player_entity_id: u64;
+	// Coroner can only sample once per corpse.
+	has_dna_been_sampled: bool;
 }
 
 draw_minimap_close_button :: proc(window_rect: Rect) -> bool {

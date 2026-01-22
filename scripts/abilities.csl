@@ -99,7 +99,7 @@ Kill_Ability :: class : Ability_Base {
         if params.clicked && params.can_use {
             closest_alive_player := get_closest_alive_player(this, player);
             if closest_alive_player != null {
-                closest_alive_player->kill();
+                closest_alive_player->kill_with_killer(player.entity.id);
                 current_cooldown = KILL_COOLDOWN_SECONDS;
             }
         }
@@ -194,6 +194,197 @@ Resurrect_Ability :: class : Ability_Base {
         if remaining < 0 { remaining = 0; }
         UI.text(rect->inset(2)->cut_top(20), ts, format_string("%/%", .{remaining, DOCTOR_RESURRECTS_PER_ROUND}));
     }
+}
+
+// --- Coroner ---
+CORONER_DNA_SAMPLE_RANGE :: 5.0;
+CORONER_DNA_MATCH_RANGE  :: 5.0;
+CORONER_DNA_MATCH_VIAL_DISPLAY_SECONDS :: 2.0;
+
+Coroner_DNA_Vial_Display :: class : Component {
+	active: bool;
+	start_time: float;
+	end_time: float;
+	color: v4;
+
+	vial_tex: Texture_Asset;
+	glow_tex: Texture_Asset;
+
+	arm :: proc(using this: Coroner_DNA_Vial_Display, glow_color: v4) {
+		active = true;
+		color = glow_color;
+		start_time = get_time();
+		end_time = start_time + CORONER_DNA_MATCH_VIAL_DISPLAY_SECONDS;
+
+		// Lazy-load textures
+		if vial_tex == null {
+			vial_tex = get_asset(Texture_Asset, "sprites/icons/coroner/dna_vial.png");
+		}
+		if glow_tex == null {
+			glow_tex = get_asset(Texture_Asset, "sprites/icons/coroner/dna_glow.png");
+		}
+	}
+
+	ao_late_update :: proc(using this: Coroner_DNA_Vial_Display, dt: float) {
+		if !active {
+			return;
+		}
+
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Cosmetic only: only show to the coroner's local client.
+		if !p->is_local() {
+			return;
+		}
+
+		// Safety: don't render outside gameplay / while dead.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			active = false;
+			return;
+		}
+
+		now := get_time();
+		if now >= end_time {
+			active = false;
+			return;
+		}
+
+		t01 := clamp((now - start_time) / 0.35, 0.0, 1.0);
+		t := Ease.out_back(t01);
+
+		base := entity.world_position;
+		// "Moves above the coroner's head"
+		y_off := lerp(0.6, 1.55, t);
+		pos := base + v2.{0, y_off};
+
+		UI.push_world_draw_context();
+		defer UI.pop_draw_context();
+		UI.push_z(pos.y);
+		defer UI.pop_z();
+
+		// World-space sizing (meters)
+		size := 0.22;
+		rect := Rect{pos, pos}->grow(size, size, size, size);
+
+		// Vial first
+		UI.quad(rect->fit_aspect(vial_tex->get_aspect()), vial_tex, v4.{1, 1, 1, 1});
+
+		// Glow on top of the vial
+		glow_alpha := clamp(1.0 - ((now - start_time) / CORONER_DNA_MATCH_VIAL_DISPLAY_SECONDS) * 0.1, 0.0, 1.0);
+		glow_col := color;
+		glow_col.w = glow_col.w * glow_alpha;
+		UI.quad(rect->grow(0.10)->fit_aspect(glow_tex->get_aspect()), glow_tex, glow_col);
+	}
+}
+
+DNA_Sample_Ability :: class : Ability_Base {
+	NAME :: "DNA Sample";
+
+	on_init :: proc(instance: DNA_Sample_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/coroner/ability_take_dna.png");
+	}
+
+	get_closest_sampleable_corpse :: proc(instance: DNA_Sample_Ability, coroner: Player) -> Corpse {
+		finder := make_finder(Corpse, coroner.entity.world_position, CORONER_DNA_SAMPLE_RANGE);
+		foreach corpse: component_iterator(Corpse) {
+			if corpse.has_been_reported continue;
+			if corpse.has_dna_been_sampled continue;
+			// Only corpses with known player killers yield a vial.
+			if corpse.killer_player_entity_id == 0 continue;
+			finder->check(corpse, corpse.entity.world_position);
+		}
+		return finder.closest;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.CIVILIAN return false;
+		if player.player_role != Player_Role.CORONER return false;
+		return get_closest_sampleable_corpse(this, player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			corpse := get_closest_sampleable_corpse(this, player);
+			if corpse == null return;
+
+			corpse.has_dna_been_sampled = true;
+			player.coroner_dna_vials->append(corpse.killer_player_entity_id);
+
+			current_cooldown = 1.0;
+		}
+	}
+
+	on_draw_button :: proc(instance: DNA_Sample_Ability, rect: Rect) {
+		draw_ability_name_label(rect, DNA_Sample_Ability.NAME);
+	}
+}
+
+DNA_Match_Ability :: class : Ability_Base {
+	NAME :: "DNA Match";
+
+	on_init :: proc(instance: DNA_Match_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/coroner/ability_compare_dna.png");
+	}
+
+	get_closest_alive_other_player :: proc(instance: DNA_Match_Ability, coroner: Player) -> Player {
+		finder := make_finder(Player, coroner.entity.world_position, CORONER_DNA_MATCH_RANGE);
+		for i: 0..players.elements.count-1 {
+			target := players.elements[i];
+			if target == null continue;
+			if !#alive(target.entity) continue;
+			if target == coroner continue;
+			if target.player_state != Player_State.ALIVE continue;
+			finder->check(target, target.entity.world_position);
+		}
+		return finder.closest;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.CIVILIAN return false;
+		if player.player_role != Player_Role.CORONER return false;
+		if player.coroner_dna_vials.count <= 0 return false;
+		return get_closest_alive_other_player(this, player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			target := get_closest_alive_other_player(this, player);
+			if target == null return;
+
+			killer_id := player.coroner_dna_vials->pop();
+			is_match := target.entity.id == killer_id;
+
+			// Show vial feedback above the coroner's head.
+			display := player.entity->get_component(Coroner_DNA_Vial_Display);
+			if display == null {
+				display = player.entity->add_component(Coroner_DNA_Vial_Display);
+			}
+
+			if is_match {
+				display->arm(v4.{0.2, 1.0, 0.4, 0.95}); // green
+				player->Notify(format_string("DNA MATCH: %", .{target.entity->get_name()}));
+			} else {
+				display->arm(v4.{1.0, 0.2, 0.2, 0.95}); // red
+				player->Notify("No match.");
+			}
+
+			current_cooldown = 1.0;
+		}
+	}
+
+	on_draw_button :: proc(instance: DNA_Match_Ability, rect: Rect) {
+		draw_ability_name_label(rect, DNA_Match_Ability.NAME);
+	}
 }
 
 Report_Ability :: class : Ability_Base {
@@ -972,7 +1163,11 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 
 	// Kill the nearest victim.
 	if nearest != null {
-		nearest->kill();
+		killer_id: u64 = 0;
+		if #alive(owner) {
+			killer_id = owner.id;
+		}
+		nearest->kill_with_killer(killer_id);
 		{
 			sfx := SFX.default_sfx_desc();
 			sfx->set_position(nearest.entity.world_position);
@@ -1524,5 +1719,72 @@ Autograph_Ability :: class : Ability_Base {
 
 	on_draw_button :: proc(instance: Autograph_Ability, rect: Rect) {
 		draw_ability_name_label(rect, Autograph_Ability.NAME);
+	}
+}
+
+// --- Portal Maker ---
+PORTAL_MAKER_PORTAL_COOLDOWN_SECONDS :: 25.0;
+
+Red_Portal_Ability :: class : Ability_Base {
+	NAME :: "Red Portal";
+
+	on_init :: proc(instance: Red_Portal_Ability) {
+		instance.name = NAME;
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/portal_maker/red_portal.png");
+		instance.is_aimed_ability = true;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.CIVILIAN return false;
+		if player.player_role != Player_Role.PORTAL_MAKER return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		// Click-to-aim: press ability button to enter aim mode, then click to fire.
+		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+		if params.can_use && activation.activate {
+			rr_portal_maker_fire_bolt(player, true, activation.direction);
+			current_cooldown = PORTAL_MAKER_PORTAL_COOLDOWN_SECONDS;
+		}
+	}
+
+	on_draw_button :: proc(instance: Red_Portal_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Red_Portal_Ability.NAME);
+	}
+}
+
+Blue_Portal_Ability :: class : Ability_Base {
+	NAME :: "Blue Portal";
+
+	on_init :: proc(instance: Blue_Portal_Ability) {
+		instance.name = NAME;
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/portal_maker/blue_portal.png");
+		instance.is_aimed_ability = true;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.CIVILIAN return false;
+		if player.player_role != Player_Role.PORTAL_MAKER return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		// Click-to-aim: press ability button to enter aim mode, then click to fire.
+		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+		if params.can_use && activation.activate {
+			rr_portal_maker_fire_bolt(player, false, activation.direction);
+			current_cooldown = PORTAL_MAKER_PORTAL_COOLDOWN_SECONDS;
+		}
+	}
+
+	on_draw_button :: proc(instance: Blue_Portal_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Blue_Portal_Ability.NAME);
 	}
 }
