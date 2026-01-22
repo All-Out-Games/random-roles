@@ -5,8 +5,8 @@
   "name": "RoundTree3.png",
   "local_enabled": true,
   "local_position": {
-    "X": 16.8545799255371094,
-    "Y": 14.8013162612915039
+    "X": 24.4239292144775391,
+    "Y": 33.1780090332031250
   },
   "local_rotation": 0,
   "local_scale": {

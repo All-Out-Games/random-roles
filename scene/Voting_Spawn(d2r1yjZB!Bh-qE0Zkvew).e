@@ -3,7 +3,7 @@
 131301273908801 1765314628047534000
 {
   "name": "Voting_Spawn",
-  "local_enabled": true,
+  "local_enabled": false,
   "local_position": {
     "X": 12.1037616729736328,
     "Y": -7.7280907630920410

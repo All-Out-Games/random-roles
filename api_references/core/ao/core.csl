@@ -719,6 +719,19 @@ UI :: struct {
     push_player_material       :: proc(player: Player) #foreign "ui_push_player_material";
     push_unlit_player_material :: proc(player: Player) #foreign "ui_push_unlit_player_material";
 
+    Mask_Rect :: struct {
+        _list: u64;
+        _index: s64;
+    }
+
+    build_mask_begin :: proc(rect: Rect) -> Mask_Rect #foreign "ui_build_mask_begin";
+    build_mask_end   :: proc() #foreign "ui_build_mask_end";
+    use_mask_begin   :: proc(mask: Mask_Rect) #foreign "ui_use_mask_begin";
+    use_mask_end     :: proc() #foreign "ui_use_mask_end";
+
+    push_scissor :: proc(rect: Rect, override_current: bool = false) #foreign "ui_push_scissor";
+    pop_scissor  :: proc() #foreign "ui_pop_scissor";
+
     push_scroll_view :: proc(rect: Rect, id: string, settings: Scroll_View_Settings) -> Scroll_View_Result #foreign "ui_push_scroll_view";
     pop_scroll_view :: proc() #foreign "ui_pop_scroll_view";
     expand_current_scroll_view :: proc(rect: Rect) #foreign "ui_expand_current_scroll_view";
@@ -875,6 +888,10 @@ print :: log_info;
 log :: log_info;
 
 format_string :: proc(fmt: string, args: [^]any = {}) -> string #foreign;
+
+string_trim :: proc(str: string) -> string #foreign;
+string_substring :: proc(str: string, start: int, length: int) -> string #foreign;
+string_split :: proc(str: string, delimiter: string) -> []string #foreign;
 
 Format_Int :: struct {
     // :CSLFormatInt
@@ -1252,7 +1269,6 @@ Save_Game_Int :: struct {
 }
 
 Save :: struct {
-    // Player-specific save functions
     set_string :: proc(player: Player, key: string, value: string)             #foreign "save_set_string";
     get_string :: proc(player: Player, key: string, default: string) -> string #foreign "save_get_string";
     set_int    :: proc(player: Player, key: string, value: s64)                #foreign "save_set_int";
@@ -1261,7 +1277,17 @@ Save :: struct {
     get_f64    :: proc(player: Player, key: string, default: f64) -> f64       #foreign "save_get_f64";
     delete_key :: proc(player: Player, key: string)                            #foreign "save_delete_key";
 
-    // Game-wide save functions (not player-specific)
+    set_json_raw     :: proc(player: Player, key: string, data: *u8, t: typeid)              #foreign "save_set_json_raw";
+    try_get_json_raw :: proc(player: Player, key: string, out_data: *u8, t: typeid) -> bool  #foreign "save_try_get_json_raw";
+
+    set_json :: proc(player: Player, key: string, value: ref $T) #unsafe {
+        set_json_raw(player, key, (&value).(*u8), T);
+    }
+
+    try_get_json :: proc(player: Player, key: string, out_value: ref $T) -> bool {
+        return try_get_json_raw(player, key, (&out_value).(*u8), T);
+    }
+
     set_game_string       :: proc(key: string, value: string)                                      #foreign "save_set_game_string";
     get_game_string       :: proc(key: string, default: string) -> string                          #foreign "save_get_game_string";
     increment_game_int    :: proc(key: string, amount: s64, optimistic_update: bool = true)        #foreign "save_increment_game_int";
@@ -1269,7 +1295,6 @@ Save :: struct {
     get_all_game_strings  :: proc() -> []Save_Game_String                                          #foreign "save_get_all_game_strings";
     get_all_game_ints     :: proc() -> []Save_Game_Int                                             #foreign "save_get_all_game_ints";
 
-    // Ordered/sorted document functions (for leaderboards, etc.)
     ordered_set     :: proc(document: string, key: string, value: f64) #foreign "save_ordered_set";
     ordered_get     :: proc(document: string, key: string, default: f64, userdata: Object, callback: proc(entry: Ordered_Save_Entry, userdata: Object)) #foreign "save_ordered_get";
     ordered_get_all :: proc(document: string, offset: s64, limit: s64, userdata: Object, callback: proc(entries: []Ordered_Save_Entry, userdata: Object)) #foreign "save_ordered_get_all";
@@ -1362,7 +1387,8 @@ Item_Instance :: class : Item_Instance_Base {
 }
 
 Notifier :: struct {
-    notify :: proc(text: string) #foreign "notifier_notify";
+    notify :: proc(fmt: string, args: [^]any = {}) #foreign "notifier_notify";
+    notify :: proc(player: Player, fmt: string, args: [^]any = {}) #foreign "notifier_notify_to_player";
 }
 
 Ease :: struct {

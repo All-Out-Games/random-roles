@@ -26,6 +26,10 @@ Save :: struct {
     set_f64    :: proc(player: Player, key: string, value: f64);
     get_f64    :: proc(player: Player, key: string, default: f64) -> f64;
     
+    // JSON (for complex data structures)
+    set_json     :: proc(player: Player, key: string, value: ref $T);
+    try_get_json :: proc(player: Player, key: string, out: ref $T) -> bool;
+    
     delete_key :: proc(player: Player, key: string);
 }
 ```
@@ -174,6 +178,31 @@ add_xp :: proc(player: Player, amount: s64) {
 | String | `Save.set_string` | `Save.get_string` |
 | Integer (s64) | `Save.set_int` | `Save.get_int` |
 | Float (f64) | `Save.set_f64` | `Save.get_f64` |
+| Complex structures | `Save.set_json` | `Save.try_get_json` |
+
+## Saving Complex Data (JSON)
+
+For data structures with multiple fields, use `Save.set_json` / `Save.try_get_json`. Only fields marked with `@ao_serialize` are saved.
+
+```csl
+Player_Progress :: class {
+    version: int @ao_serialize;
+    max_health: int @ao_serialize;
+    unlocked_skins: [..]string @ao_serialize;
+}
+
+// Save
+Save.set_json(player, "progress", ref progress);
+
+// Load
+progress: Player_Progress;
+if !Save.try_get_json(player, "progress", ref progress) {
+    // Key doesn't exist or parse failed - use defaults
+    progress.max_health = 100;
+}
+```
+
+See the **json** skill for schema versioning and migration patterns.
 
 ## Best Practices
 

@@ -3,7 +3,7 @@
 5209500228540660 1764870780194850700
 {
   "name": "MAP",
-  "local_enabled": true,
+  "local_enabled": false,
   "local_position": {
     "X": 141.8794097900390625
   },
