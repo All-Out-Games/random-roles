@@ -5,7 +5,7 @@
   "name": "MAP",
   "local_enabled": true,
   "local_position": {
-
+    "X": 141.8794097900390625
   },
   "local_rotation": 0,
   "local_scale": {
