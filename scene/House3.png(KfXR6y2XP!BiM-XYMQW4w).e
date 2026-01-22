@@ -5,8 +5,8 @@
   "name": "House3.png",
   "local_enabled": true,
   "local_position": {
-    "X": 96.7899627685546875,
-    "Y": -21.7968006134033203
+    "X": 2.6363639831542969,
+    "Y": -21.5923957824707031
   },
   "local_rotation": 0,
   "local_scale": {

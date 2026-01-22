@@ -5,8 +5,8 @@
   "name": "House2.png",
   "local_enabled": true,
   "local_position": {
-    "X": 91.6831665039062500,
-    "Y": -21.5097103118896484
+    "X": 15.5171165466308594,
+    "Y": -15.0709867477416992
   },
   "local_rotation": 0,
   "local_scale": {

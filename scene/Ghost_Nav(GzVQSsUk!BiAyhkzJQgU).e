@@ -3,7 +3,7 @@
 29915794294052 1765633263510292500
 {
   "name": "Ghost_Nav",
-  "local_enabled": false,
+  "local_enabled": true,
   "local_position": {
     "X": 22.3278999328613281,
     "Y": 5.0229153633117676

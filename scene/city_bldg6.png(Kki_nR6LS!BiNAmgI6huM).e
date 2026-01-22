@@ -5,8 +5,8 @@
   "name": "city_bldg6.png",
   "local_enabled": true,
   "local_position": {
-    "X": 45.8107109069824219,
-    "Y": 8.5895538330078125
+    "X": 47.4072189331054688,
+    "Y": 15.5128173828125000
   },
   "local_rotation": 0,
   "local_scale": {

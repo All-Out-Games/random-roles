@@ -5,8 +5,8 @@
   "name": "Slum_Tent1.png",
   "local_enabled": true,
   "local_position": {
-    "X": 106.9939956665039062,
-    "Y": -24.1748580932617188
+    "X": -10.0724220275878906,
+    "Y": 13.0952711105346680
   },
   "local_rotation": 0,
   "local_scale": {
@@ -23,6 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Building/Slum_Tent1.png"
+    "texture": "sprites/phota/Building/Slum_Tent1.png",
+    "depth_offset": -0.2920894622802734
   }
 }

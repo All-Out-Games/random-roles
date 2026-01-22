@@ -5,15 +5,15 @@
   "name": "Slum_Tent5.png",
   "local_enabled": true,
   "local_position": {
-    "X": 111.8167419433593750,
-    "Y": -24.3052177429199219
+    "X": 49.6817932128906250,
+    "Y": -5.0049791336059570
   },
   "local_rotation": 0,
   "local_scale": {
     "X": 1,
     "Y": 1
   },
-  "previous_sibling": "2952790655669835:1769067461353282700",
+  "previous_sibling": "2952758934777132:1769067453786498900",
   "next_sibling": "2952778848205963:1769067458536699700",
   "parent": "3091319737574052:1769100506438532600"
 },
@@ -23,6 +23,45 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
-    "texture": "sprites/phota/Building/Slum_Tent5.png"
+    "texture": "sprites/phota/Building/Slum_Tent5.png",
+    "depth_offset": -0.6030644178390503
+  }
+},
+{
+  "cid": 2,
+  "aoid": "3163662584676248:1769117763288263100",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Polygon_Collider",
+  "data": {
+    "points": [
+      {
+        "X": -1.9887404441833496,
+        "Y": -0.6978451013565063
+      },
+      {
+        "X": -0.2245035171508789,
+        "Y": -1.2413294315338135
+      },
+      {
+        "X": 2.0205850601196289,
+        "Y": -0.7094368934631348
+      },
+      {
+        "X": 1.1464781761169434,
+        "Y": 1.8332151174545288
+      },
+      {
+        "X": 0.2263975143432617,
+        "Y": 2.2879714965820312
+      },
+      {
+        "X": -1.1675071716308594,
+        "Y": 1.8033963441848755
+      },
+      {
+        "X": -1.1739454269409180,
+        "Y": 1.1556557416915894
+      }
+    ]
   }
 }

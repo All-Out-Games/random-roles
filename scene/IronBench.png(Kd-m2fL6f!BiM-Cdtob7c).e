@@ -13,8 +13,8 @@
     "X": 1,
     "Y": 1
   },
-  "previous_sibling": "2946849940499651:1769066044239731300",
-  "next_sibling": "2946655286278044:1769065997806410200",
+  "previous_sibling": "3132692835579858:1769110375684266700",
+  "next_sibling": "3146734703340891:1769113725267695800",
   "parent": "2922217397215187:1769060168329189000"
 },
 {
@@ -24,5 +24,21 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Props/IronBench.png"
+  }
+},
+{
+  "cid": 2,
+  "aoid": "3163073526621469:1769117622772831900",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Box_Collider",
+  "data": {
+    "size": {
+      "X": 1.4873580932617188,
+      "Y": 0.2447981834411621
+    },
+    "offset": {
+      "X": -0.0060157775878906,
+      "Y": 0.0406186580657959
+    }
   }
 }

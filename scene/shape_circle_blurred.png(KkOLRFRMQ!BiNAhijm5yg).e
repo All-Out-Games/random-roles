@@ -5,7 +5,7 @@
   "name": "shape_circle_blurred.png",
   "local_enabled": true,
   "local_position": {
-    "X": -24.5526504516601562,
+    "X": -60.0113296508789062,
     "Y": 3.6216428279876709
   },
   "local_rotation": 315,

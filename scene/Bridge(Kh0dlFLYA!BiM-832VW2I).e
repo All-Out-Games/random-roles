@@ -5,7 +5,7 @@
   "name": "Bridge",
   "local_enabled": true,
   "local_position": {
-    "X": 20.5626659393310547,
+    "X": 19.6029605865478516,
     "Y": 2.0517833232879639
   },
   "local_rotation": 0,

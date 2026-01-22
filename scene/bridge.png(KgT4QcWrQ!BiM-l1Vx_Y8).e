@@ -24,6 +24,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Bridge/bridge.png",
-    "depth_offset": -1.3931515216827393
+    "depth_offset": 1.2842043638229370
   }
 }

@@ -3,7 +3,7 @@
 123968093968347 1764885644030734800
 {
   "name": "Weasel_Stuff",
-  "local_enabled": false,
+  "local_enabled": true,
   "local_position": {
     "X": -4.7870206832885742,
     "Y": -3.9180252552032471

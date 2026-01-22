@@ -5,8 +5,8 @@
   "name": "city_bldg6.png",
   "local_enabled": true,
   "local_position": {
-    "X": 55.3864250183105469,
-    "Y": 22.1423282623291016
+    "X": 47.2276840209960938,
+    "Y": 10.8808307647705078
   },
   "local_rotation": 0,
   "local_scale": {
@@ -24,6 +24,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Building/city_bldg6.png",
-    "depth_offset": -3.2581100463867188
+    "depth_offset": -0.4406099319458008
   }
 }

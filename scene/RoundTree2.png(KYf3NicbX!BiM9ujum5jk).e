@@ -29,4 +29,16 @@
       "X": 1.2968456745147705
     }
   }
+},
+{
+  "cid": 2,
+  "aoid": "3163993130308739:1769117842137472600",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Circle_Collider",
+  "data": {
+    "size": 0.2000000178813934,
+    "offset": {
+      "Y": -1.3000001907348633
+    }
+  }
 }
