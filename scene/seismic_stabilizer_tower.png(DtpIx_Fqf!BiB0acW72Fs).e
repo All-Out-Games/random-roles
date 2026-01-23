@@ -3,7 +3,7 @@
 1045163949972127 1765923044480475500
 {
   "name": "seismic_stabilizer_tower.png",
-  "local_enabled": true,
+  "local_enabled": false,
   "local_position": {
     "X": -5.2875404357910156,
     "Y": 0.5694696903228760
