@@ -3,6 +3,9 @@ import "core:ao"
 POPUP_DURATION: float : 2.0;
 SCROLL_DURATION: float : 2.0;
 
+// Ensure intro/victory popups always draw above gameplay UI.
+POPUP_UI_LAYER :: 10000;
+
 Body_Found_Popup :: class {
 
 	spine_asset: Spine_Asset;
@@ -129,6 +132,7 @@ Intro_Popup :: class {
 	show_start_time: float;
 
 	spine_instance: Spine_Instance;
+	local_player: Player;
 	player_type: Player_Type;
 	player_role: Player_Role;
 	
@@ -136,10 +140,12 @@ Intro_Popup :: class {
 		bg_texture = get_asset(Texture_Asset, "sprites/intro.png");
 		is_visible = false;
 		show_start_time = 0.0;
+		local_player = null;
 	}
 
 	set_local_player :: proc(using this: Intro_Popup, player: Player) {
 		this.spine_instance = player.animator.instance;
+		this.local_player = player;
 		this.player_type = player.player_type;
 		this.player_role = player.player_role;
 	}
@@ -233,6 +239,9 @@ render_popup :: proc(using popup: Intro_Popup, elapsed: float) {
 	role_ease := Ease.out_elastic(role_progress);
 	
 	screen := UI.get_screen_rect();
+
+	UI.push_layer(POPUP_UI_LAYER);
+	defer UI.pop_layer();
 	
 	// Background with fade in
 	bg_rect := screen->fit_aspect(bg_texture->get_aspect(), .KEEP_BIGGER);
@@ -242,7 +251,12 @@ render_popup :: proc(using popup: Intro_Popup, elapsed: float) {
 	player_size := 150.0 * player_scale;
 	player_rect := screen->center_rect()->grow(player_size);
 	player_rect = player_rect->offset(0, -400);
-	UI.spine(player_rect->center(), spine_instance, .{200, 200}, 0.0);
+
+	if local_player != null {
+		UI.push_player_material(local_player);
+		UI.spine(player_rect->center(), spine_instance, .{200, 200}, 0.0);
+		UI.pop_material();
+	}
 	
 	// Type text above player
 	type_name := get_type_name(player_type);
@@ -298,6 +312,7 @@ Victory_Popup :: class {
 	winning_type: Player_Type;
 	winner_spines: List(Spine_Instance);
 	winner_names: List(string);
+	winner_players: List(Player);
 	
 	init :: proc(using this: Victory_Popup) {
 		bg_texture = get_asset(Texture_Asset, "sprites/win.png");
@@ -305,6 +320,7 @@ Victory_Popup :: class {
 		show_start_time = 0.0;
 		winner_spines = List(Spine_Instance).{};
 		winner_names = List(string).{};
+		winner_players = List(Player).{};
 	}
 
 	show :: proc(using this: Victory_Popup, victor_type: Player_Type, winners: List(Player)) {
@@ -315,6 +331,7 @@ Victory_Popup :: class {
 		// Clear previous winners
 		winner_spines = List(Spine_Instance).{};
 		winner_names = List(string).{};
+		winner_players = List(Player).{};
 		
 		// Collect winning players' spines and names
 		for i: 0..winners.elements.count-1 {
@@ -323,6 +340,7 @@ Victory_Popup :: class {
 			if p != null && #alive(p.entity) {
 				append(ref winner_spines, p.animator.instance);
 				append(ref winner_names, p.entity->get_name());
+				append(ref winner_players, p);
 			}
 		}
 	}
@@ -364,6 +382,9 @@ render_popup :: proc(using popup: Victory_Popup, elapsed: float) {
 	players_ease := Ease.out_back(players_progress);
 	
 	screen := UI.get_screen_rect();
+
+	UI.push_layer(POPUP_UI_LAYER);
+	defer UI.pop_layer();
 	
 	// Background with fade in
 	bg_rect := screen->fit_aspect(bg_texture->get_aspect(), .KEEP_BIGGER);
@@ -414,7 +435,16 @@ render_popup :: proc(using popup: Victory_Popup, elapsed: float) {
 			// Player spine
 			player_rect := screen->center_rect()->grow(80);
 			player_rect = player_rect->offset(x_offset, -300.0 + 30.0 * (1.0 - player_ease));
-			UI.spine(player_rect->center(), winner_spines.elements[i], .{180, 180}, 0.0);
+
+			// Use proper cosmetics/material for the winner.
+			p := winner_players.elements[i];
+			if p != null {
+				UI.push_player_material(p);
+				UI.spine(player_rect->center(), winner_spines.elements[i], .{180, 180}, 0.0);
+				UI.pop_material();
+			} else {
+				UI.spine(player_rect->center(), winner_spines.elements[i], .{180, 180}, 0.0);
+			}
 			
 			// Player name below
 			name_ts := UI.default_text_settings();
