@@ -110,10 +110,16 @@ Kill_Ability :: class : Ability_Base {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
 		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
         return get_closest_alive_player(this, player) != null;
     }
 
     on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
         if params.clicked && params.can_use {
             closest_alive_player := get_closest_alive_player(this, player);
             if closest_alive_player != null {
@@ -342,12 +348,18 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
 		return get_closest_alive_target(this, player) != null;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		// Apply any contract-based cooldown adjustments (from kills via other methods).
 		if player != null && player.player_role == Player_Role.HITMAN && player.hitman_kill_cooldown_adjust_seconds != 0.0 {
 			current_cooldown = max(0.0, current_cooldown + player.hitman_kill_cooldown_adjust_seconds);
@@ -473,6 +485,7 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
 		// Unlock after 2 kills.
@@ -537,6 +550,11 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		// Click-to-target: click ability to enter aim mode, then click to fire (right-click to cancel).
 		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
 		targeting := targeted.targeting;
@@ -1788,6 +1806,7 @@ Powder_Keg_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_role != Player_Role.PIRATE return false;
 		return true;
 	}
@@ -1815,6 +1834,11 @@ Powder_Keg_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		// Drive enter/exit targeting via standard helper.
 		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
 		targeting := targeted.targeting;
@@ -2018,17 +2042,31 @@ Fake_Meeting_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if instance.player.player_state != Player_State.ALIVE return false;
 		if instance.player->has_task_in_progress() return false;
-		return true;
+
+		// Respect the shared meeting cooldown AND the prankster's fake-meeting cooldown.
+		// These are server-owned but replicated to clients, so we can safely use them for UI disabling.
+		now := get_time();
+		cooldown_end := max(meeting_cooldown_ends_at, fake_meeting_cooldown_ends_at);
+		return now >= cooldown_end;
 	}
 
 	on_update :: proc(instance: Fake_Meeting_Ability, params: ref Ability_Update_Params) {
+		// Keep the button's cooldown overlay synced with the authoritative cooldown timers.
+		now := get_time();
+		cooldown_end := max(meeting_cooldown_ends_at, fake_meeting_cooldown_ends_at);
+		remaining := cooldown_end - now;
+		if remaining < 0.0 remaining = 0.0;
+		instance.current_cooldown = remaining;
+
 		if params.clicked && params.can_use {
-			// Only consume cooldown if the meeting actually started (i.e., not blocked by meeting cooldown).
-			prev_state := game_state;
 			start_fake_meeting(instance.player);
-			if prev_state != game_state {
-				instance.current_cooldown = 60.0;
-			}
+
+			// Resync immediately in case the meeting successfully started this frame.
+			now = get_time();
+			cooldown_end = max(meeting_cooldown_ends_at, fake_meeting_cooldown_ends_at);
+			remaining = cooldown_end - now;
+			if remaining < 0.0 remaining = 0.0;
+			instance.current_cooldown = remaining;
 		}
 	}
 

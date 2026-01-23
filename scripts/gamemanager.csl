@@ -195,6 +195,9 @@ NORMAL_LOBBY_COUNTDOWN_SECONDS :: 10.0;
 MEETING_COOLDOWN_SECONDS :: 30.0;
 FAKE_MEETING_COOLDOWN_SECONDS :: 120.0;
 
+// After a meeting/voting ends, briefly lock out killing abilities to prevent instant spawn-kills.
+POST_MEETING_KILL_LOCKOUT_SECONDS :: 5.0;
+
 // --- Sabotage: Power Outage ---
 rr_power_outage_active: bool;
 rr_power_outage_started_at: float;
@@ -536,6 +539,7 @@ waiting_for_restart: bool;
 voting_start_time: float;
 round_number: int;
 meeting_cooldown_ends_at: float;
+post_meeting_kill_lockout_ends_at: float;
 
 // --- Single-player test mode ---
 // If a round is started with only one player (via force start), we disable all end-game win triggers.
@@ -940,6 +944,7 @@ setup_lobby :: proc() {
 	game_end_time = 0.0;
 	waiting_for_restart = false;
 	meeting_cooldown_ends_at = 0.0;
+	post_meeting_kill_lockout_ends_at = 0.0;
 	meeting_initiator_id = 0;
 	meeting_initiator_from_body = false;
 	deaths_since_last_meeting = List(u64).{};
@@ -975,6 +980,7 @@ setup_ingame :: proc() {
 	waiting_for_restart = false;
 	voting_start_time = 0.0;
 	meeting_cooldown_ends_at = 0.0;
+	post_meeting_kill_lockout_ends_at = 0.0;
 	meeting_initiator_id = 0;
 	meeting_initiator_from_body = false;
 	deaths_since_last_meeting = List(u64).{};
@@ -1577,6 +1583,9 @@ end_voting :: proc() {
 		players.elements[i].votes_received = 0;
 	}
 	
+	// Brief lockout for killing abilities after meetings.
+	post_meeting_kill_lockout_ends_at = get_time() + POST_MEETING_KILL_LOCKOUT_SECONDS;
+
 	game_state = Game_State.INGAME;
 	voting_start_time = 0.0;
 	// Next meeting should only show deaths that occur after this one ends.
