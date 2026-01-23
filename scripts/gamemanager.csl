@@ -19,6 +19,101 @@ rr_refresh_rng_state :: proc() {
 	rr_rng_state.value = rng_seed((get_real_time() * 1000000000).(u64));
 }
 
+// --- Hitman (Traitor role) ---
+HITMAN_MINE_UNLOCK_KILLS :: 1;
+HITMAN_SNIPER_UNLOCK_KILLS :: 2;
+
+// How strongly contracts affect the Hitman's kill cooldown.
+// Negative reduces cooldown; positive increases it.
+HITMAN_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS :: -10.0;
+HITMAN_OFF_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS :: 10.0;
+
+rr_hitman_is_valid_contract_target :: proc(hitman: Player, target: Player) -> bool {
+	if hitman == null return false;
+	if target == null return false;
+	if !#alive(hitman.entity) return false;
+	if !#alive(target.entity) return false;
+	if hitman == target return false;
+	if hitman.player_state != Player_State.ALIVE return false;
+	if target.player_state != Player_State.ALIVE return false;
+
+	// Avoid uncompletable contracts: traitors can't (and shouldn't) target other traitors.
+	if target.player_type == Player_Type.TRAITOR return false;
+
+	return true;
+}
+
+rr_hitman_assign_new_contract :: proc(hitman: Player) {
+	// TODO: Make it so this is a permanent on screen UI & not a notification.
+	if hitman == null return;
+	if hitman.player_role != Player_Role.HITMAN return;
+	if hitman.player_state != Player_State.ALIVE return;
+	if !hitman->is_local_or_server() return;
+
+	// Build candidate list (exclude previous contract to reduce repeats when possible).
+	candidates: List(Player);
+	prev_target_id := hitman.hitman_contract_target_id;
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !rr_hitman_is_valid_contract_target(hitman, p) continue;
+		// Prefer not to repeat the same contract back-to-back.
+		if prev_target_id != 0 && p.entity.id == prev_target_id continue;
+		append(ref candidates, p);
+	}
+
+	// If we filtered everything out (e.g. only one valid target), fall back to allowing repeats.
+	// TODO: Early return if no valid target, no repeat allowed.
+	if candidates.elements.count <= 0 {
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+			if !rr_hitman_is_valid_contract_target(hitman, p) continue;
+			append(ref candidates, p);
+		}
+	}
+
+	if candidates.elements.count <= 0 {
+		hitman.hitman_contract_target_id = 0;
+		return;
+	}
+
+	rr_refresh_rng_state();
+	idx := rng_range_int(ref rr_rng_state.value, 0, candidates.elements.count - 1);
+	target := candidates.elements[idx];
+	if target == null || !#alive(target.entity) {
+		hitman.hitman_contract_target_id = 0;
+		return;
+	}
+
+	hitman.hitman_contract_target_id = target.entity.id;
+}
+
+rr_hitman_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_entity_id: u64) {
+	if killer_player_entity_id == 0 return;
+	if victim_player_entity_id == 0 return;
+
+	killer := get_player_by_entity_id(killer_player_entity_id);
+	if killer == null return;
+	if killer.player_role != Player_Role.HITMAN return;
+	if killer.player_state != Player_State.ALIVE return;
+	if !killer->is_local_or_server() return;
+
+	// Track kills for unlocks.
+	killer.hitman_kills += 1;
+
+	// Professional: adjust kill cooldown based on whether the victim was the contract.
+	is_contract := (killer.hitman_contract_target_id != 0 && killer.hitman_contract_target_id == victim_player_entity_id);
+	if is_contract {
+		killer.hitman_kill_cooldown_adjust_seconds += HITMAN_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS;
+	} else {
+		killer.hitman_kill_cooldown_adjust_seconds += HITMAN_OFF_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS;
+	}
+
+	// New contract after each kill.
+	rr_hitman_assign_new_contract(killer);
+}
+
 // --- Role variety (no duplicates per round, maximize variety across rounds) ---
 civilian_role_bag: List(Player_Role);
 anarchist_role_bag: List(Player_Role);
@@ -91,6 +186,10 @@ draw_roles_from_bag :: proc(bag: ref List(Player_Role), master: List(Player_Role
 }
 
 MIN_NUMBER_OF_PLAYERS: int : 4;
+
+// Lobby countdown: first round after server start is longer to let players join.
+FIRST_ROUND_LOBBY_COUNTDOWN_SECONDS :: 30.0;
+NORMAL_LOBBY_COUNTDOWN_SECONDS :: 10.0;
 
 // Non-body-report meetings (button/fake meetings) cooldown to prevent spam.
 MEETING_COOLDOWN_SECONDS :: 30.0;
@@ -215,6 +314,13 @@ Player_Role :: enum {
 	PRANKSTER;
 	//Traitor Roles
 	PIRATE;
+	HITMAN;
+}
+
+Hitman_Kill_Style :: enum {
+	NONE;
+	NECK_SNAP;
+	SNIPER;
 }
 
 // --- Movie Star: Autograph trap ---
@@ -229,6 +335,135 @@ Autograph_Trap_Entry :: class {
 }
 
 autograph_traps: List(Autograph_Trap_Entry);
+
+// --- Hitman: Mines ---
+Hitman_Mine_Entry :: class {
+	pos: v2;
+	owner_entity_id: u64;
+	mine_entity: Entity;
+}
+
+hitman_mines: List(Hitman_Mine_Entry);
+
+// Match portal ground decal conventions.
+HITMAN_MINE_VISUAL_SCALE :: 0.6;
+HITMAN_MINE_VISUAL_LAYER :: 0;
+HITMAN_MINE_VISUAL_DEPTH_OFFSET :: 1.0;
+
+rr_hitman_clear_mines :: proc() {
+	// Server authoritative
+	if !Game.is_server() return;
+
+	for i: 0..hitman_mines.elements.count-1 {
+		m := hitman_mines.elements[i];
+		if m == null continue;
+		if m.mine_entity != null && #alive(m.mine_entity) {
+			m.mine_entity->destroy();
+		}
+	}
+	hitman_mines = List(Hitman_Mine_Entry).{};
+}
+
+rr_hitman_place_mine :: proc(owner: Player, pos: v2) {
+	// Server authoritative
+	if !Game.is_server() return;
+	if owner == null return;
+	if owner.player_role != Player_Role.HITMAN return;
+	if owner.player_state != Player_State.ALIVE return;
+
+	// Clamp to navmesh so mines don't end up outside walkable space.
+	clamped := pos;
+	nav_point: v2;
+	triangle_hint: s64;
+	if try_find_closest_point_on_navmesh(pos, ref nav_point, ref triangle_hint) {
+		clamped = nav_point;
+	}
+
+	entry := new(Hitman_Mine_Entry);
+	entry.pos = clamped;
+	entry.owner_entity_id = owner.entity.id;
+
+	// World visual
+	mine_e := Scene.create_entity();
+	mine_e->set_local_position(clamped);
+	mine_e->set_local_rotation(0.0);
+	mine_e->set_local_scale(v2.{HITMAN_MINE_VISUAL_SCALE, HITMAN_MINE_VISUAL_SCALE});
+	sprite := mine_e->add_component(Sprite_Renderer);
+	if sprite != null {
+		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/hitman/land_mine.png"));
+		// Above map, below players (same as portals).
+		sprite.layer = HITMAN_MINE_VISUAL_LAYER;
+		sprite.depth_offset = HITMAN_MINE_VISUAL_DEPTH_OFFSET;
+		sprite.color = v4.{1, 1, 1, 0.95};
+	}
+	entry.mine_entity = mine_e;
+
+	append(ref hitman_mines, entry);
+}
+
+update_hitman_mines :: proc() {
+	// Server authoritative
+	if !Game.is_server() return;
+	if hitman_mines.elements.count <= 0 return;
+
+	i := 0;
+	while i < hitman_mines.elements.count {
+		m := hitman_mines.elements[i];
+		if m == null {
+			last := hitman_mines.elements.count - 1;
+			hitman_mines.elements[i] = hitman_mines.elements[last];
+			pop(ref hitman_mines);
+			continue;
+		}
+
+		// Remove dead visuals defensively.
+		if m.mine_entity != null && !#alive(m.mine_entity) {
+			last := hitman_mines.elements.count - 1;
+			hitman_mines.elements[i] = hitman_mines.elements[last];
+			pop(ref hitman_mines);
+			continue;
+		}
+
+		// Trigger: first alive player (not owner) who walks over it.
+		triggered := false;
+		for p_i: 0..players.elements.count-1 {
+			p := players.elements[p_i];
+			if p == null continue;
+			if !#alive(p.entity) continue;
+			if p.player_state != Player_State.ALIVE continue;
+			if p.entity.id == m.owner_entity_id continue;
+
+			if in_range(p.entity.world_position - m.pos, HITMAN_MINE_TRIGGER_RADIUS) {
+				// Explode + fling
+				rr_refresh_rng_state();
+				angle := rng_range_float(ref rr_rng_state.value, 0.0, 6.28318);
+				dir := v2.{cos(angle), sin(angle)};
+				if length_squared(dir) < 0.001 { dir = v2.{1, 0}; }
+
+				fling := p.entity->get_component(Hitman_Mine_Fling);
+				if fling == null {
+					fling = p.entity->add_component(Hitman_Mine_Fling);
+				}
+				fling->arm(HITMAN_MINE_MAX_FLING_SECONDS, dir, HITMAN_MINE_FLING_SPEED);
+
+				triggered = true;
+				break;
+			}
+		}
+
+		if triggered {
+			if m.mine_entity != null && #alive(m.mine_entity) {
+				m.mine_entity->destroy();
+			}
+			last := hitman_mines.elements.count - 1;
+			hitman_mines.elements[i] = hitman_mines.elements[last];
+			pop(ref hitman_mines);
+			continue;
+		}
+
+		i += 1;
+	}
+}
 
 rr_add_autograph_trap :: proc(owner: Player, pos: v2) {
 	if owner == null return;
@@ -712,6 +947,7 @@ setup_lobby :: proc() {
 	rr_round_start_player_count = 0;
 	close_all_doors();
 	rr_destroy_all_portals();
+	rr_hitman_clear_mines();
 	// Reset sabotages
 	rr_power_outage_active = false;
 	rr_comms_outage_active = false;
@@ -1025,20 +1261,26 @@ ao_update_lobby :: proc(dt: float) {
 	}
 	
 	if player_count >= MIN_NUMBER_OF_PLAYERS {
+		// First round after server boot waits longer; subsequent rounds use the normal countdown.
+		countdown_seconds := NORMAL_LOBBY_COUNTDOWN_SECONDS;
+		if round_number == 0 {
+			countdown_seconds = FIRST_ROUND_LOBBY_COUNTDOWN_SECONDS;
+		}
+
 		// Start or continue countdown
 		if !countdown_active {
 			countdown_active = true;
 			countdown_start_time = current_time;
 		}
 		
-		// Check if countdown has completed (10 seconds)
+		// Check if countdown has completed
 		elapsed := current_time - countdown_start_time;
-		if elapsed >= 10.0 {
+		if elapsed >= countdown_seconds {
 			// Start the game - assign_players_to_types sets state to ANIM_INTRO
 			assign_players_to_types();
 		} else {
 			// Display countdown on screen
-			remaining := 10.0 - elapsed;
+			remaining := countdown_seconds - elapsed;
 			// Format as mm:ss with leading zeroes (e.g. 00:04)
 			remaining_i := (remaining + 0.999).(int);
 			if remaining_i < 0 { remaining_i = 0; }
@@ -1077,9 +1319,23 @@ force_start_lobby_game :: proc() {
 	assign_players_to_types();
 }
 
+// Chat command: /force_start
+// Server-only by default (no @any annotation).
+force_start :: proc(player: Player) {
+	// Only valid from lobby.
+	if game_state != Game_State.LOBBY {
+		Notifier.notify(player, "Can only force start from the lobby.");
+		return;
+	}
+
+	// Reuse the same flow as the lobby UI button.
+	force_start_lobby_game();
+} @chat_command
+
 ao_update_ingame :: proc(dt: float) {
 	update_temporary_resurrections();
 	update_autograph_traps();
+	update_hitman_mines();
 	rr_update_comms_lever_visuals();
 	alive_count := get_alive_player_count();
 	civilian_count := get_player_count(Player_Type.CIVILIAN);
@@ -1455,6 +1711,7 @@ assign_players_to_types :: proc() {
 	append(ref civilian_roles_master, Player_Role.PORTAL_MAKER);
 	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
 	append(ref traitor_roles_master, Player_Role.PIRATE);
+	append(ref traitor_roles_master, Player_Role.HITMAN);
 
 	civ_players: List(Player);
 	an_players: List(Player);
@@ -1500,6 +1757,10 @@ assign_players_to_types :: proc() {
 		// Per-round resets
 		p.doctor_resurrects_used = 0;
 		p.coroner_dna_vials->clear();
+		p.hitman_kills = 0;
+		p.hitman_contract_target_id = 0;
+		p.hitman_kill_cooldown_adjust_seconds = 0.0;
+		p.hitman_last_kill_style = Hitman_Kill_Style.NONE;
 
 		if p.player_role == Player_Role.PRANKSTER {
 			p.active_tasks = List(Task_Base).{};
@@ -1518,6 +1779,14 @@ assign_players_to_types :: proc() {
 			p.prankster_fake_meetings_called = 0;
 			p.prankster_jester_unlocked_time = 0.0;
 		}
+	}
+
+	// Hitman contracts (start-of-round + after each kill).
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if p.player_role != Player_Role.HITMAN continue;
+		rr_hitman_assign_new_contract(p);
 	}
 	
 	// Show intro popup for local player

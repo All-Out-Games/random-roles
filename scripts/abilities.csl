@@ -5,6 +5,24 @@ DOCTOR_RESURRECTS_PER_ROUND :: 2;
 
 KILL_COOLDOWN_SECONDS :: 30.0;
 
+// --- Hitman ---
+HITMAN_NECK_SNAP_COOLDOWN_SECONDS :: 60.0;
+HITMAN_SNIPER_COOLDOWN_SECONDS :: 90.0;
+HITMAN_MINE_COOLDOWN_SECONDS :: 60.0;
+
+HITMAN_NECK_SNAP_RANGE :: 2.0;
+HITMAN_MINE_TRIGGER_RADIUS :: 0.8;
+HITMAN_MINE_STUN_SECONDS :: 10.0;
+HITMAN_MINE_MAX_FLING_SECONDS :: 1.5;
+HITMAN_MINE_FLING_SPEED :: 14.0;
+
+HITMAN_MINE_FLING_REASON :: "hitman_mine_fling";
+HITMAN_MINE_STUN_REASON :: "hitman_mine_stun";
+HITMAN_SNIPER_CAMERA_ZOOMED_OUT_SIZE :: 18.0;
+
+HITMAN_NECK_SNAP_LOCK_REASON :: "hitman_neck_snap_lock";
+HITMAN_NECK_SNAP_LOCK_SECONDS :: 1.1;
+
 get_player_by_entity_id :: proc(entity_id: u64) -> Player {
     for i: 0..players.elements.count-1 {
         p := players.elements[i];
@@ -107,6 +125,499 @@ Kill_Ability :: class : Ability_Base {
 
 	on_draw_button :: proc(instance: Kill_Ability, rect: Rect) {
 		draw_ability_name_label(rect, Kill_Ability.NAME);
+	}
+}
+
+Hitman_Mine_Stun :: class : Component {
+	stun_end_time: float;
+	active: bool;
+
+	arm :: proc(using this: Hitman_Mine_Stun, seconds: float) {
+		if seconds <= 0.0 { seconds = 0.1; }
+		stun_end_time = get_time() + seconds;
+		active = true;
+
+		p := entity->get_component(Player);
+		if p != null {
+			p->add_disable_movement_input_reason(HITMAN_MINE_STUN_REASON);
+			p->set_trigger("hitman_broken_leg_idle");
+		}
+	}
+
+	ao_update :: proc(using this: Hitman_Mine_Stun, dt: float) {
+		if !active return;
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Safety: exit if gameplay ended or player died.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(HITMAN_MINE_STUN_REASON);
+			// Ensure we leave the broken-leg loop when the stun ends early.
+			p->set_trigger("RESET");
+			active = false;
+			return;
+		}
+
+		if get_time() >= stun_end_time {
+			p->remove_disable_movement_input_reason(HITMAN_MINE_STUN_REASON);
+			// Stop broken-leg idle when stun ends.
+			p->set_trigger("RESET");
+			active = false;
+		}
+	}
+}
+
+Hitman_Neck_Snap_Lock :: class : Component {
+	active: bool;
+	end_time: float;
+
+	arm :: proc(using this: Hitman_Neck_Snap_Lock, seconds: float) {
+		if seconds <= 0.0 { seconds = 0.1; }
+		end_time = get_time() + seconds;
+		active = true;
+
+		p := entity->get_component(Player);
+		if p != null {
+			p->add_disable_movement_input_reason(HITMAN_NECK_SNAP_LOCK_REASON);
+		}
+	}
+
+	ao_update :: proc(using this: Hitman_Neck_Snap_Lock, dt: float) {
+		if !active return;
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Safety: exit if gameplay ended or player died.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(HITMAN_NECK_SNAP_LOCK_REASON);
+			p->set_trigger("RESET");
+			active = false;
+			return;
+		}
+
+		if get_time() >= end_time {
+			p->remove_disable_movement_input_reason(HITMAN_NECK_SNAP_LOCK_REASON);
+			p->set_trigger("RESET");
+			active = false;
+		}
+	}
+}
+
+Hitman_Mine_Fling :: class : Component {
+	active: bool;
+	end_time: float;
+	dir: v2;
+	last_pos: v2;
+	stuck_frames: int;
+
+	arm :: proc(using this: Hitman_Mine_Fling, seconds: float, direction: v2, speed: float) {
+		if seconds <= 0.0 { seconds = 0.1; }
+		end_time = get_time() + seconds;
+		active = true;
+		dir = direction;
+		last_pos = entity.world_position;
+		stuck_frames = 0;
+
+		p := entity->get_component(Player);
+		if p != null {
+			p->add_disable_movement_input_reason(HITMAN_MINE_FLING_REASON);
+			p->set_facing_right(dir.x > 0);
+			p->set_trigger("hitman_fly_forward");
+			p.agent.velocity = dir * speed;
+		}
+	}
+
+	ao_update :: proc(using this: Hitman_Mine_Fling, dt: float) {
+		if !active return;
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Safety: exit if gameplay ended or player died.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(HITMAN_MINE_FLING_REASON);
+			active = false;
+			return;
+		}
+
+		// Keep pushing until collision or timeout.
+		p.agent.velocity = dir * HITMAN_MINE_FLING_SPEED;
+
+		pos := entity.world_position;
+		moved := length(pos - last_pos);
+		last_pos = pos;
+
+		// If we aren't moving meaningfully for a few frames, treat as collision.
+		if moved < 0.01 {
+			stuck_frames += 1;
+		} else {
+			stuck_frames = 0;
+		}
+
+		collided := stuck_frames >= 3;
+		if collided || get_time() >= end_time {
+			p->remove_disable_movement_input_reason(HITMAN_MINE_FLING_REASON);
+			p->set_trigger("hitman_collide_midair_land");
+
+			stun := entity->get_component(Hitman_Mine_Stun);
+			if stun == null {
+				stun = entity->add_component(Hitman_Mine_Stun);
+			}
+			stun->arm(HITMAN_MINE_STUN_SECONDS);
+
+			active = false;
+		}
+	}
+}
+
+Hitman_Sniper_Camera_Zoom :: class : Component {
+	active: bool;
+	end_time: float;
+	orig_size: float;
+
+	arm :: proc(using this: Hitman_Sniper_Camera_Zoom, duration: float) {
+		if duration <= 0.0 { duration = 0.1; }
+		end_time = get_time() + duration;
+		active = true;
+
+		p := entity->get_component(Player);
+		if p != null && p->is_local() {
+			orig_size = p.camera.size;
+			p.camera.size = HITMAN_SNIPER_CAMERA_ZOOMED_OUT_SIZE;
+		}
+	}
+
+	ao_update :: proc(using this: Hitman_Sniper_Camera_Zoom, dt: float) {
+		if !active return;
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		if get_time() >= end_time {
+			if p->is_local() {
+				p.camera.size = orig_size;
+			}
+			active = false;
+		}
+	}
+}
+
+Hitman_Neck_Snap_Ability :: class : Ability_Base {
+	NAME :: "Neck Snap";
+
+	on_init :: proc(instance: Hitman_Neck_Snap_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/hitman/knee_snap.png");
+	}
+
+	get_closest_alive_target :: proc(instance: Hitman_Neck_Snap_Ability, player: Player) -> Player {
+		finder := make_finder(Player, player.entity.world_position, HITMAN_NECK_SNAP_RANGE);
+		for i: 0..players.elements.count-1 {
+			target := players.elements[i];
+			if target == null continue;
+			if !#alive(target.entity) continue;
+			if target == player continue;
+			if target.player_state != Player_State.ALIVE continue;
+
+			// No friendly-fire on traitors.
+			if player.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR {
+				continue;
+			}
+
+			finder->check(target, target.entity.world_position);
+		}
+		return finder.closest;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.TRAITOR return false;
+		if player.player_role != Player_Role.HITMAN return false;
+		return get_closest_alive_target(this, player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		// Apply any contract-based cooldown adjustments (from kills via other methods).
+		if player != null && player.player_role == Player_Role.HITMAN && player.hitman_kill_cooldown_adjust_seconds != 0.0 {
+			current_cooldown = max(0.0, current_cooldown + player.hitman_kill_cooldown_adjust_seconds);
+			player.hitman_kill_cooldown_adjust_seconds = 0.0;
+		}
+
+		if params.clicked && params.can_use {
+			target := get_closest_alive_target(this, player);
+			if target != null {
+				// Lock movement so the animation completes before control returns.
+				lock := player.entity->get_component(Hitman_Neck_Snap_Lock);
+				if lock == null {
+					lock = player.entity->add_component(Hitman_Neck_Snap_Lock);
+				}
+				lock->arm(HITMAN_NECK_SNAP_LOCK_SECONDS);
+
+				player.hitman_last_kill_style = Hitman_Kill_Style.NECK_SNAP;
+				player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
+				player->set_trigger("hitman_kill_snap_neck");
+				target->kill_with_killer(player.entity.id);
+				current_cooldown = HITMAN_NECK_SNAP_COOLDOWN_SECONDS;
+			}
+		}
+	}
+
+	on_draw_button :: proc(instance: Hitman_Neck_Snap_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Hitman_Neck_Snap_Ability.NAME);
+	}
+}
+
+Hitman_Mine_Ability :: class : Ability_Base {
+	NAME :: "Mine";
+	was_targeting: bool;
+
+	on_init :: proc(instance: Hitman_Mine_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/hitman/land_mine.png");
+		instance.is_aimed_ability = true;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.TRAITOR return false;
+		if player.player_role != Player_Role.HITMAN return false;
+		// Unlock after 1 kill.
+		if player.hitman_kills < HITMAN_MINE_UNLOCK_KILLS return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		// Click-to-target: enter targeting mode, then click to place at cursor.
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		targeting := targeted.targeting;
+
+		// Prevent targeting mode while on cooldown / otherwise unusable.
+		if targeting && !params.can_use {
+			player.active_ability = null;
+			was_targeting = false;
+			return;
+		}
+
+		if !targeting {
+			was_targeting = false;
+			return;
+		}
+
+		was_targeting = true;
+
+		aiming := Ability_Utilities.update_aiming_ability(player, ref params);
+		if aiming.cancel {
+			player.active_ability = null;
+			was_targeting = false;
+			return;
+		}
+
+		target_pos := get_mouse_world_position();
+		if player->is_local() {
+			UI.push_world_draw_context();
+			defer UI.pop_draw_context();
+			UI.push_z(target_pos.y);
+			defer UI.pop_z();
+			UI.quad(Rect{target_pos, target_pos}->grow(0.10, 0.10, 0.10, 0.10), core_globals.white_sprite, v4.{1, 0.4, 0.1, 0.9});
+		}
+
+		if aiming.activate && params.can_use {
+			rr_hitman_place_mine(player, target_pos);
+			current_cooldown = HITMAN_MINE_COOLDOWN_SECONDS;
+			player.active_ability = null;
+			was_targeting = false;
+		}
+	}
+
+	on_draw_button :: proc(instance: Hitman_Mine_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Hitman_Mine_Ability.NAME);
+
+		// Locked overlay (still show button for learnability).
+		p := instance.player;
+		if p != null && p.player_role == Player_Role.HITMAN && p.hitman_kills < HITMAN_MINE_UNLOCK_KILLS {
+			ts := UI.default_text_settings();
+			ts.size = 18;
+			ts.halign = .CENTER;
+			ts.valign = .TOP;
+			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+		}
+	}
+}
+
+Hitman_Sniper_Ability :: class : Ability_Base {
+	NAME :: "Sniper";
+
+	camera_zoom_active: bool;
+	camera_original_size: float;
+	was_targeting: bool;
+	activated_this_session: bool;
+
+	on_init :: proc(instance: Hitman_Sniper_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/hitman/sniper_rifle.png");
+		instance.is_aimed_ability = true;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.TRAITOR return false;
+		if player.player_role != Player_Role.HITMAN return false;
+		// Unlock after 2 kills.
+		if player.hitman_kills < HITMAN_SNIPER_UNLOCK_KILLS return false;
+		// Needs a valid contract target to snipe.
+		if player.hitman_contract_target_id == 0 return false;
+		return true;
+	}
+
+	set_camera_zoom :: proc(using this: Hitman_Sniper_Ability, active: bool) {
+		// Only the local player has a camera, so guard with is_local_or_server (same as other camera tweaks).
+		if !player->is_local_or_server() {
+			return;
+		}
+		if active {
+			if !camera_zoom_active {
+				camera_original_size = player.camera.size;
+				player.camera.size = HITMAN_SNIPER_CAMERA_ZOOMED_OUT_SIZE;
+				camera_zoom_active = true;
+			}
+		} else {
+			if camera_zoom_active {
+				player.camera.size = camera_original_size;
+				camera_zoom_active = false;
+			}
+		}
+	}
+
+	cleanup_targeting :: proc(using this: Hitman_Sniper_Ability) {
+		this->set_camera_zoom(false);
+		was_targeting = false;
+		activated_this_session = false;
+	}
+
+	get_closest_alive_target_at_point :: proc(instance: Hitman_Sniper_Ability, shooter: Player, point: v2, range: float) -> Player {
+		best: Player = null;
+		best_dist_sq := 0.0;
+		r_sq := range * range;
+
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+			if !#alive(p.entity) continue;
+			if p == shooter continue;
+			if p.player_state != Player_State.ALIVE continue;
+
+			// Prevent traitor friendly-fire (consistent with Kill/Neck Snap).
+			if shooter.player_type == Player_Type.TRAITOR && p.player_type == Player_Type.TRAITOR {
+				continue;
+			}
+
+			d := p.entity.world_position - point;
+			dist_sq := length_squared(d);
+			if dist_sq > r_sq continue;
+
+			if best == null || dist_sq < best_dist_sq {
+				best = p;
+				best_dist_sq = dist_sq;
+			}
+		}
+		return best;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		// Click-to-target: click ability to enter aim mode, then click to fire (right-click to cancel).
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		targeting := targeted.targeting;
+
+		// Prevent targeting mode while on cooldown / otherwise unusable.
+		if targeting && !params.can_use {
+			player.active_ability = null;
+			this->cleanup_targeting();
+			return;
+		}
+
+		// Handle targeting transitions.
+		if targeting && !was_targeting {
+			activated_this_session = false;
+			was_targeting = true;
+		}
+		if !targeting {
+			if was_targeting {
+				this->cleanup_targeting();
+			}
+			return;
+		}
+
+		this->set_camera_zoom(true);
+
+		aiming := Ability_Utilities.update_aiming_ability(player, ref params);
+		if aiming.cancel {
+			player.active_ability = null;
+			this->cleanup_targeting();
+			return;
+		}
+
+		// Preview
+		target_pos := get_mouse_world_position();
+		draw_aiming_line(player.entity.world_position, aiming.aim_direction, 1.0 / player.camera.size * 6);
+		if player->is_local() {
+			UI.push_world_draw_context();
+			defer UI.pop_draw_context();
+			UI.push_z(target_pos.y);
+			defer UI.pop_z();
+			UI.quad(Rect{target_pos, target_pos}->grow(0.12, 0.12, 0.12, 0.12), core_globals.white_sprite, v4.{1, 0.2, 0.2, 0.9});
+		}
+
+		if activated_this_session {
+			return;
+		}
+
+		if aiming.activate && params.can_use {
+			activated_this_session = true;
+
+			// Pick target under cursor (global snipe).
+			target := get_closest_alive_target_at_point(this, player, target_pos, 1.5);
+			if target == null {
+				// Stay in targeting mode if they missed.
+				activated_this_session = false;
+				return;
+			}
+
+			player.hitman_last_kill_style = Hitman_Kill_Style.SNIPER;
+			player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
+			player->set_trigger("hitman_shoot_sniper");
+			target->kill_with_killer(player.entity.id);
+			current_cooldown = HITMAN_SNIPER_COOLDOWN_SECONDS;
+
+			player.active_ability = null;
+			this->cleanup_targeting();
+		}
+	}
+
+	on_draw_button :: proc(instance: Hitman_Sniper_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Hitman_Sniper_Ability.NAME);
+
+		// Locked overlay (still show button for learnability).
+		p := instance.player;
+		if p != null && p.player_role == Player_Role.HITMAN && p.hitman_kills < HITMAN_SNIPER_UNLOCK_KILLS {
+			ts := UI.default_text_settings();
+			ts.size = 18;
+			ts.halign = .CENTER;
+			ts.valign = .TOP;
+			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+		}
 	}
 }
 

@@ -49,6 +49,17 @@ Player :: class : Player_Base {
 	portal_standing_seconds: float;
 	portal_blocked_portal: Entity; // prevents instant teleport back until leaving the destination portal
 
+	// --- Hitman ---
+	// Kills credited to this player (used for Mine/Sniper unlocks).
+	hitman_kills: int;
+	// Entity id of the current contract target (0 = none / invalid).
+	hitman_contract_target_id: u64;
+	// Dynamic adjustment applied to the next Hitman kill ability cooldown.
+	// (Negative = reduced cooldown for killing contract; positive = increased for off-contract kill.)
+	hitman_kill_cooldown_adjust_seconds: float;
+	// Last-kill style used for corpse death animation selection.
+	hitman_last_kill_style: Hitman_Kill_Style;
+
     is_frozen: bool;
 
 	// True when the local player has any task attempt currently open/in progress.
@@ -215,7 +226,12 @@ Player :: class : Player_Base {
                 } else if game_state == Game_State.INGAME {
                     // During gameplay, show abilities based on type and role
                     if player_type == Player_Type.TRAITOR {
-                        draw_ability_button(this, Kill_Ability, abilityIndex);
+						// Hitman replaces the default kill with Neck Snap.
+						if player_role == Player_Role.HITMAN {
+							draw_ability_button(this, Hitman_Neck_Snap_Ability, abilityIndex);
+						} else {
+                        	draw_ability_button(this, Kill_Ability, abilityIndex);
+						}
                         abilityIndex += 1;
                         
                         // Pirate gets Shoot and Black Flag abilities
@@ -227,6 +243,14 @@ Player :: class : Player_Base {
 							draw_ability_button(this, Powder_Keg_Ability, abilityIndex);
 							abilityIndex += 1;
                         }
+
+						// Hitman gets Mine + Sniper (unlock in ability logic).
+						if player_role == Player_Role.HITMAN {
+							draw_ability_button(this, Hitman_Mine_Ability, abilityIndex);
+							abilityIndex += 1;
+							draw_ability_button(this, Hitman_Sniper_Ability, abilityIndex);
+							abilityIndex += 1;
+						}
                     }
                     if player_type == Player_Type.CIVILIAN && player_role == Player_Role.SHERIFF {
                         draw_ability_button(this, Shoot_Ability, abilityIndex);
@@ -356,6 +380,7 @@ Player :: class : Player_Base {
 		rr_register_player_death(this.entity.id);
         on_player_go_dead(this);
         world_references->spawn_corpse(this, killer_player_entity_id);
+		rr_hitman_on_player_killed(killer_player_entity_id, this.entity.id);
         log(format_string("Player % killed (killer=%)", .{this.entity.id, killer_player_entity_id}));
     }
 
@@ -371,6 +396,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .PORTAL_MAKER: return "PORTAL MAKER";
 		case .PRANKSTER:  return "PRANKSTER";
 		case .PIRATE:     return "PIRATE";
+		case .HITMAN:     return "HITMAN";
 	}
 	return "CREW";
 }
@@ -409,6 +435,66 @@ draw_player_role_hud :: proc(player: Player) {
 	ts.outline_color = v4.{0, 0, 0, 1};
 
 	UI.text(rect, ts, "ROLE: %", .{player_role_to_string(player)});
+
+	// Hitman contract HUD (local-only).
+	if player.player_role == Player_Role.HITMAN && player->is_local() {
+		UI.push_layer(1600);
+		defer UI.pop_layer();
+
+		safe := UI.get_safe_screen_rect();
+		bg2 := get_asset(Texture_Asset, "$AO/white.png");
+
+		panel := safe->top_left_rect()->grow(40, 360, 160, 0)->offset(20, -110);
+		UI.quad(panel, bg2, v4.{0.0, 0.0, 0.0, 0.55});
+		UI.quad(panel->inset(2), bg2, v4.{0.25, 0.05, 0.05, 0.55});
+
+		content := panel->inset(14);
+		header := content->cut_top(34);
+		body := content;
+
+		h_ts := UI.default_text_settings();
+		h_ts.size = 26;
+		h_ts.color = v4.{1.0, 0.85, 0.25, 1.0};
+		h_ts.halign = .LEFT;
+		h_ts.valign = .CENTER;
+		h_ts.do_outline = true;
+		h_ts.outline_thickness = 2;
+		h_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(header, h_ts, "CONTRACT");
+
+		target_name := "None";
+		if player.hitman_contract_target_id != 0 {
+			t := get_player_by_entity_id(player.hitman_contract_target_id);
+			if t != null && t.player_state == Player_State.ALIVE {
+				target_name = t.entity->get_name();
+			}
+		}
+
+		name_rect := body->cut_top(48);
+		n_ts := UI.default_text_settings();
+		n_ts.size = 36;
+		n_ts.color = v4.{1.0, 1.0, 1.0, 1.0};
+		n_ts.halign = .LEFT;
+		n_ts.valign = .CENTER;
+		n_ts.do_outline = true;
+		n_ts.outline_thickness = 2;
+		n_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(name_rect, n_ts, target_name);
+
+		body->cut_top(8);
+		line_ts := UI.default_text_settings();
+		line_ts.size = 22;
+		line_ts.color = v4.{0.9, 0.92, 0.98, 1};
+		line_ts.halign = .LEFT;
+		line_ts.valign = .CENTER;
+		line_ts.do_drop_shadow = true;
+		line_ts.drop_shadow_offset = v2.{1, -1};
+		line_ts.drop_shadow_color = v4.{0, 0, 0, 1};
+
+		UI.text(body->cut_top(26), line_ts, format_string("Kills: %", .{player.hitman_kills}));
+		UI.text(body->cut_top(26), line_ts, format_string("Mine: %/%", .{min(player.hitman_kills, HITMAN_MINE_UNLOCK_KILLS), HITMAN_MINE_UNLOCK_KILLS}));
+		UI.text(body->cut_top(26), line_ts, format_string("Sniper: %/%", .{min(player.hitman_kills, HITMAN_SNIPER_UNLOCK_KILLS), HITMAN_SNIPER_UNLOCK_KILLS}));
+	}
 
 	// Coroner vial count: right side around mid-screen (local-only).
 	if player.player_role == Player_Role.CORONER && player->is_local() {
@@ -494,6 +580,36 @@ draw_player_role_hud :: proc(player: Player) {
 		stunned_autograph_state := layer->create_state("004RAND_movie_star/stunned_by_autograph_loop", false, 15.0);
 		layer->create_global_transition(stunned_autograph_state, false)->create_trigger_condition(stunned_autograph_var);
 		layer->create_transition(stunned_autograph_state, idle_state, true);
+
+		// --- Hitman ---
+		// Neck snap (killer animation)
+		hitman_kill_snap_neck_var := sm->create_variable("hitman_kill_snap_neck", State_Machine_Variable.Kind.TRIGGER);
+		// Keep this short so the hitman regains control right as the animation ends.
+		hitman_kill_snap_neck_state := layer->create_state("004RAND_hitman/Kill_Snap_Neck", false, 1.1);
+		layer->create_global_transition(hitman_kill_snap_neck_state, false)->create_trigger_condition(hitman_kill_snap_neck_var);
+		layer->create_transition(hitman_kill_snap_neck_state, idle_state, true);
+
+		// Sniper (killer animation)
+		hitman_shoot_sniper_var := sm->create_variable("hitman_shoot_sniper", State_Machine_Variable.Kind.TRIGGER);
+		hitman_shoot_sniper_state := layer->create_state("004RAND_hitman/Shoot_Sniper", false, 0.9);
+		layer->create_global_transition(hitman_shoot_sniper_state, false)->create_trigger_condition(hitman_shoot_sniper_var);
+		layer->create_transition(hitman_shoot_sniper_state, idle_state, true);
+
+		// Mine victim (fly -> collide -> broken leg idle while stunned)
+		hitman_fly_forward_var := sm->create_variable("hitman_fly_forward", State_Machine_Variable.Kind.TRIGGER);
+		// Loop while the fling component is active; we explicitly transition via collide + RESET.
+		hitman_fly_forward_state := layer->create_state("004RAND_hitman/Fly_Forward_Loop", true, 0.0);
+		layer->create_global_transition(hitman_fly_forward_state, false)->create_trigger_condition(hitman_fly_forward_var);
+
+		hitman_collide_midair_land_var := sm->create_variable("hitman_collide_midair_land", State_Machine_Variable.Kind.TRIGGER);
+		hitman_collide_midair_land_state := layer->create_state("004RAND_hitman/Collide_Midair_Land", false, 0.8);
+		layer->create_global_transition(hitman_collide_midair_land_state, false)->create_trigger_condition(hitman_collide_midair_land_var);
+		layer->create_transition(hitman_collide_midair_land_state, idle_state, true);
+
+		hitman_broken_leg_idle_var := sm->create_variable("hitman_broken_leg_idle", State_Machine_Variable.Kind.TRIGGER);
+		hitman_broken_leg_idle_state := layer->create_state("004RAND_hitman/Broken_Leg_Idle", true, 10.0);
+		layer->create_global_transition(hitman_broken_leg_idle_state, false)->create_trigger_condition(hitman_broken_leg_idle_var);
+		// This is a loop; we exit it via the existing RESET trigger (fired when stun ends).
 
 		sm_inited = true;
         log_info("State machine initialized");
