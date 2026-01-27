@@ -3,7 +3,7 @@
 39691926699348 1766170517861848400
 {
   "name": "Bars_R.png",
-  "local_enabled": true,
+  "local_enabled": false,
   "local_position": {
     "X": 2.1819968223571777,
     "Y": -2.4838104248046875

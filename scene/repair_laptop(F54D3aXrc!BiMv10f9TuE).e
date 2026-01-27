@@ -5,8 +5,8 @@
   "name": "repair_laptop",
   "local_enabled": true,
   "local_position": {
-    "X": 24.7538299560546875,
-    "Y": 25.2719249725341797
+    "X": -6.0520915985107422,
+    "Y": -6.9890155792236328
   },
   "local_rotation": 0,
   "local_scale": {
