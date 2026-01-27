@@ -114,6 +114,21 @@ rr_hitman_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_e
 	rr_hitman_assign_new_contract(killer);
 }
 
+// --- Werewolf (Traitor role) ---
+rr_werewolf_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_entity_id: u64) {
+	if killer_player_entity_id == 0 return;
+	if victim_player_entity_id == 0 return;
+
+	killer := get_player_by_entity_id(killer_player_entity_id);
+	if killer == null return;
+	if killer.player_role != Player_Role.WEREWOLF return;
+	if killer.player_state != Player_State.ALIVE return;
+	// Track on server + local player only (avoid remote-client double counting).
+	if !killer->is_local_or_server() return;
+
+	killer.werewolf_kills += 1;
+}
+
 // --- Role variety (no duplicates per round, maximize variety across rounds) ---
 civilian_role_bag: List(Player_Role);
 anarchist_role_bag: List(Player_Role);
@@ -318,6 +333,7 @@ Player_Role :: enum {
 	//Traitor Roles
 	PIRATE;
 	HITMAN;
+	WEREWOLF;
 }
 
 Hitman_Kill_Style :: enum {
@@ -1363,6 +1379,26 @@ ao_update_ingame :: proc(dt: float) {
 		prankster_check_unlock_jester_win(p);
 	}
 
+	// -- Traitor: All non-traitors are infected (mini-werewolves)
+	// If there are any alive non-traitors, and all of them are currently infected, traitors win.
+	alive_non_traitor := 0;
+	alive_non_traitor_infected := 0;
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.player_type == Player_Type.TRAITOR continue;
+		alive_non_traitor += 1;
+		if p.werewolf_infected {
+			alive_non_traitor_infected += 1;
+		}
+	}
+	if alive_non_traitor > 0 && alive_non_traitor_infected == alive_non_traitor {
+		end_game_with_victor(Player_Type.TRAITOR);
+		return;
+	}
+
 	// -- Traitor: Only traitors alive
 	if traitor_count > 0 && traitor_count == alive_count {
 		end_game_with_victor(Player_Type.TRAITOR);
@@ -1721,6 +1757,7 @@ assign_players_to_types :: proc() {
 	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 	append(ref traitor_roles_master, Player_Role.HITMAN);
+	append(ref traitor_roles_master, Player_Role.WEREWOLF);
 
 	civ_players: List(Player);
 	an_players: List(Player);
@@ -1770,6 +1807,14 @@ assign_players_to_types :: proc() {
 		p.hitman_contract_target_id = 0;
 		p.hitman_kill_cooldown_adjust_seconds = 0.0;
 		p.hitman_last_kill_style = Hitman_Kill_Style.NONE;
+		// Werewolf
+		p.werewolf_kills = 0;
+		p.werewolf_infected = false;
+		p.werewolf_infected_from_id = 0;
+		p.werewolf_cycle_t = 0.0;
+		p.werewolf_is_wolf_form = false;
+		p.werewolf_grace_until = 0.0;
+		p.werewolf_last_game_state = game_state;
 
 		if p.player_role == Player_Role.PRANKSTER {
 			p.active_tasks = List(Task_Base).{};

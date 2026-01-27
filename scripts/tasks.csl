@@ -268,6 +268,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Restart Generator";
 		case RR_ENABLE_COMMUNICATIONS_TASK_ID:
 			return "Enable Communications";
+		case WEREWOLF_INFECT_TO_CURE_TASK_ID:
+			return "Infect someone";
 		case:
 			return task_id;
 	}
@@ -521,8 +523,8 @@ update_tasks_ui :: proc(player: Player) {
 		return;
 	}
 
-	// Civilians see their normal tasks; Prankster sees their objective.
-	if player.player_type != Player_Type.CIVILIAN && player.player_role != Player_Role.PRANKSTER {
+	// Civilians see their normal tasks; Prankster sees their objective; infected mini-werewolves see the infection objective.
+	if player.player_type != Player_Type.CIVILIAN && player.player_role != Player_Role.PRANKSTER && !player.werewolf_infected {
 		return;
 	}
 
@@ -570,7 +572,11 @@ update_tasks_ui :: proc(player: Player) {
 	title_ts.color = .{1, 1, 1, 1};
 	title_ts.halign = .CENTER;
 	title_ts.valign = .CENTER;
-	UI.text(title_rect, title_ts, "TASKS");
+	if player.werewolf_infected {
+		UI.text(title_rect, title_ts, "OBJECTIVE");
+	} else {
+		UI.text(title_rect, title_ts, "TASKS");
+	}
 
 	// Footer: overall civilian task progress (alive civilians only).
 	footer_h := 75.0;
@@ -603,6 +609,10 @@ update_tasks_ui :: proc(player: Player) {
 			case Task_Call_Fake_Meeting: {
 				task_name = format_string("% (%/1)", .{task_name, player.prankster_fake_meetings_called});
 			}
+		}
+		if task_id == WEREWOLF_INFECT_TO_CURE_TASK_ID {
+			// Always 0/1 while infected; cured players restore their original task list immediately.
+			task_name = format_string("% (%/1)", .{task_name, 0});
 		}
 		if task_completed {
 			task_name = format_string("[X] %", .{task_name});

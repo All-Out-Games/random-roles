@@ -134,6 +134,385 @@ Kill_Ability :: class : Ability_Base {
 	}
 }
 
+// --- Werewolf (Traitor role) ---
+WEREWOLF_DEVOUR_COOLDOWN_SECONDS :: 60.0;
+WEREWOLF_INFECT_COOLDOWN_SECONDS :: 60.0;
+WEREWOLF_CLAW_COOLDOWN_SECONDS :: 90.0;
+
+WEREWOLF_DEVOUR_RANGE :: 2.0;
+WEREWOLF_INFECT_RANGE :: 2.0;
+WEREWOLF_PASS_BITE_RANGE :: 2.0;
+
+WEREWOLF_INFECT_UNLOCK_KILLS :: 1;
+WEREWOLF_CLAW_UNLOCK_KILLS :: 2;
+
+WEREWOLF_CLAW_PROJECTILE_SPEED :: 12.0;
+WEREWOLF_CLAW_PROJECTILE_LIFETIME :: 0.45;
+
+WEREWOLF_INFECTION_STUN_REASON :: "werewolf_infection_stun";
+WEREWOLF_INFECTION_STUN_SECONDS :: 1.0;
+// Delay before applying the werewolf skin on infected targets (halfway through transform anim).
+WEREWOLF_INFECTED_SKIN_DELAY_SECONDS :: 1.0;
+WEREWOLF_INFECT_TO_CURE_TASK_ID :: "werewolf_infect_to_cure";
+
+rr_werewolf_apply_infected_task_override :: proc(target: Player) {
+	if target == null return;
+	if !target.werewolf_infected return;
+
+	// Only override once per infection session.
+	if !target.werewolf_saved_tasks_active {
+		target.werewolf_saved_tasks = target.active_tasks;
+		target.werewolf_saved_tasks_active = true;
+	}
+
+	// Replace with a single objective entry.
+	target.active_tasks = List(Task_Base).{};
+	obj := new(Task_Base);
+	obj.id = WEREWOLF_INFECT_TO_CURE_TASK_ID;
+	obj.started = false;
+	obj.completed = false;
+	append(ref target.active_tasks, obj);
+}
+
+rr_werewolf_clear_infected_task_override :: proc(player: Player) {
+	if player == null return;
+	if player.werewolf_infected return; // still infected
+	if !player.werewolf_saved_tasks_active return;
+
+	player.active_tasks = player.werewolf_saved_tasks;
+	player.werewolf_saved_tasks = List(Task_Base).{};
+	player.werewolf_saved_tasks_active = false;
+}
+
+rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_werewolf: bool) -> Player {
+	if attacker == null return null;
+	finder := make_finder(Player, attacker.entity.world_position, range);
+	for i: 0..players.elements.count-1 {
+		target := players.elements[i];
+		if target == null continue;
+		if !#alive(target.entity) continue;
+		if target == attacker continue;
+		if target.player_state != Player_State.ALIVE continue;
+
+		// Traitors shouldn't be able to melee-kill other traitors.
+		if attacker.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR {
+			continue;
+		}
+		if exclude_werewolf && target.player_role == Player_Role.WEREWOLF {
+			continue;
+		}
+
+		finder->check(target, target.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_werewolf_apply_infection :: proc(infector: Player, target: Player) {
+	if infector == null return;
+	if target == null return;
+	if !#alive(infector.entity) return;
+	if !#alive(target.entity) return;
+	if infector.player_state != Player_State.ALIVE return;
+	if target.player_state != Player_State.ALIVE return;
+
+	// Server authoritative: infection state is gameplay-relevant.
+	if !Game.is_server() return;
+
+	target.werewolf_infected = true;
+	target.werewolf_infected_from_id = infector.entity.id;
+
+	// Merged rig handles animations; trigger bite + transform.
+	infector->set_trigger("werewolf_infection_bite");
+	target->set_trigger("werewolf_infected_transform");
+	// Enable werewolf skin halfway through the victim's transform animation.
+	target.werewolf_skin_enable_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS;
+	target.werewolf_skin_disable_at = 0.0;
+
+	target->Notify("You were bitten! Pass it on to return to normal.");
+	rr_werewolf_apply_infected_task_override(target);
+
+	// Brief "fall" stun for readability.
+	stun := target.entity->get_component(Werewolf_Infection_Stun);
+	if stun == null {
+		stun = target.entity->add_component(Werewolf_Infection_Stun);
+	}
+	stun->arm(WEREWOLF_INFECTION_STUN_SECONDS);
+}
+
+rr_werewolf_pass_infection :: proc(biter: Player, new_target: Player) {
+	if biter == null return;
+	if new_target == null return;
+	if !#alive(biter.entity) return;
+	if !#alive(new_target.entity) return;
+	if biter.player_state != Player_State.ALIVE return;
+	if new_target.player_state != Player_State.ALIVE return;
+	if !biter.werewolf_infected return;
+	if new_target.player_role == Player_Role.WEREWOLF return; // cannot pass back to the werewolf
+
+	// Server authoritative.
+	if !Game.is_server() return;
+
+	from_id := biter.werewolf_infected_from_id;
+	biter.werewolf_infected = false;
+	biter.werewolf_infected_from_id = 0;
+	rr_werewolf_clear_infected_task_override(biter);
+
+	new_target.werewolf_infected = true;
+	new_target.werewolf_infected_from_id = from_id;
+	rr_werewolf_apply_infected_task_override(new_target);
+
+	// Restore the cured player's look, and trigger transform on the new infected player.
+	biter->set_trigger("RESET");
+	biter.werewolf_skin_enable_at = 0.0;
+	biter.werewolf_skin_disable_at = get_time();
+	new_target->set_trigger("werewolf_infected_transform");
+	new_target.werewolf_skin_enable_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS;
+	new_target.werewolf_skin_disable_at = 0.0;
+
+	biter->Notify("You passed the bite. You're back to normal.");
+	new_target->Notify("You were bitten! Pass it on to return to normal.");
+
+	stun := new_target.entity->get_component(Werewolf_Infection_Stun);
+	if stun == null {
+		stun = new_target.entity->add_component(Werewolf_Infection_Stun);
+	}
+	stun->arm(WEREWOLF_INFECTION_STUN_SECONDS);
+}
+
+Werewolf_Infection_Stun :: class : Component {
+	active: bool;
+	end_time: float;
+
+	arm :: proc(using this: Werewolf_Infection_Stun, seconds: float) {
+		if seconds <= 0.0 { seconds = 0.1; }
+		end_time = get_time() + seconds;
+		active = true;
+
+		p := entity->get_component(Player);
+		if p != null {
+			p->add_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
+		}
+	}
+
+	ao_update :: proc(using this: Werewolf_Infection_Stun, dt: float) {
+		if !active return;
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Safety: exit if gameplay ended or player died.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
+			active = false;
+			return;
+		}
+
+		if get_time() >= end_time {
+			p->remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
+			active = false;
+		}
+	}
+}
+
+Werewolf_Devour_Ability :: class : Ability_Base {
+	NAME :: "Devour";
+
+	on_init :: proc(instance: Werewolf_Devour_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/werewolf/devour.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
+		if player.player_type != Player_Type.TRAITOR return false;
+		if player.player_role != Player_Role.WEREWOLF return false;
+		if !player.werewolf_is_wolf_form return false;
+		return rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
+		if params.clicked && params.can_use {
+			target := rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true);
+			if target != null {
+				target->kill_with_killer_no_corpse(player.entity.id);
+				current_cooldown = WEREWOLF_DEVOUR_COOLDOWN_SECONDS;
+			}
+		}
+	}
+
+	on_draw_button :: proc(instance: Werewolf_Devour_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Werewolf_Devour_Ability.NAME);
+	}
+}
+
+Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
+	NAME :: "Infect";
+
+	on_init :: proc(instance: Werewolf_Infecting_Bite_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/werewolf/infecting_bite.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
+		if player.player_type != Player_Type.TRAITOR return false;
+		if player.player_role != Player_Role.WEREWOLF return false;
+		if !player.werewolf_is_wolf_form return false;
+		// Unlock after 1 kill.
+		if player.werewolf_kills < WEREWOLF_INFECT_UNLOCK_KILLS return false;
+		return rr_werewolf_find_melee_target(player, WEREWOLF_INFECT_RANGE, true) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
+		if params.clicked && params.can_use {
+			target := rr_werewolf_find_melee_target(player, WEREWOLF_INFECT_RANGE, true);
+			if target != null {
+				rr_werewolf_apply_infection(player, target);
+				current_cooldown = WEREWOLF_INFECT_COOLDOWN_SECONDS;
+			}
+		}
+	}
+
+	on_draw_button :: proc(instance: Werewolf_Infecting_Bite_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Werewolf_Infecting_Bite_Ability.NAME);
+
+		// Locked overlay (shown while in wolf form until unlocked).
+		p := instance.player;
+		if p != null && p.player_role == Player_Role.WEREWOLF && p.werewolf_kills < WEREWOLF_INFECT_UNLOCK_KILLS {
+			ts := UI.default_text_settings();
+			ts.size = 18;
+			ts.halign = .CENTER;
+			ts.valign = .TOP;
+			ts.do_outline = true;
+			ts.outline_thickness = 2;
+			ts.outline_color = v4.{0, 0, 0, 1};
+			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+		}
+	}
+}
+
+Werewolf_Claw_Slash_Ability :: class : Ability_Base {
+	NAME :: "Claw";
+
+	on_init :: proc(instance: Werewolf_Claw_Slash_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/werewolf/claw_slash.png");
+		instance.disable_keybind = true;
+		instance.is_aimed_ability = true;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
+		if player.player_type != Player_Type.TRAITOR return false;
+		if player.player_role != Player_Role.WEREWOLF return false;
+		if !player.werewolf_is_wolf_form return false;
+		// Unlock after 2 kills.
+		if player.werewolf_kills < WEREWOLF_CLAW_UNLOCK_KILLS return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
+		activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
+		if params.can_use && activation.activate {
+			p := shoot_projectile(player.entity.world_position, activation.direction * WEREWOLF_CLAW_PROJECTILE_SPEED, 1, WEREWOLF_CLAW_PROJECTILE_LIFETIME, player.entity);
+			// Slightly bigger hit radius for a "slash" feel.
+			if p != null {
+				proj := p->get_component(RR_Projectile);
+				if proj != null {
+					proj.hit_radius = 0.65;
+				}
+			}
+			current_cooldown = WEREWOLF_CLAW_COOLDOWN_SECONDS;
+		}
+	}
+
+	on_draw_button :: proc(instance: Werewolf_Claw_Slash_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Werewolf_Claw_Slash_Ability.NAME);
+
+		// Locked overlay (shown while in wolf form until unlocked).
+		p := instance.player;
+		if p != null && p.player_role == Player_Role.WEREWOLF && p.werewolf_kills < WEREWOLF_CLAW_UNLOCK_KILLS {
+			ts := UI.default_text_settings();
+			ts.size = 18;
+			ts.halign = .CENTER;
+			ts.valign = .TOP;
+			ts.do_outline = true;
+			ts.outline_thickness = 2;
+			ts.outline_color = v4.{0, 0, 0, 1};
+			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+		}
+	}
+}
+
+Werewolf_Pass_Bite_Ability :: class : Ability_Base {
+	NAME :: "Infect";
+
+	on_init :: proc(instance: Werewolf_Pass_Bite_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/werewolf/infecting_bite.png");
+	}
+
+	get_closest_pass_target :: proc(instance: Werewolf_Pass_Bite_Ability, biter: Player) -> Player {
+		if biter == null return null;
+		finder := make_finder(Player, biter.entity.world_position, WEREWOLF_PASS_BITE_RANGE);
+		for i: 0..players.elements.count-1 {
+			target := players.elements[i];
+			if target == null continue;
+			if !#alive(target.entity) continue;
+			if target == biter continue;
+			if target.player_state != Player_State.ALIVE continue;
+			if target.player_role == Player_Role.WEREWOLF continue; // exclude werewolf(s)
+			finder->check(target, target.entity.world_position);
+		}
+		return finder.closest;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if !player.werewolf_infected return false;
+		return get_closest_pass_target(this, player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			target := get_closest_pass_target(this, player);
+			if target != null {
+				rr_werewolf_pass_infection(player, target);
+				// No cooldown; the constraint is being infected + needing a nearby target.
+				current_cooldown = 0.0;
+			}
+		}
+	}
+
+	on_draw_button :: proc(instance: Werewolf_Pass_Bite_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Werewolf_Pass_Bite_Ability.NAME);
+	}
+}
+
 Hitman_Mine_Stun :: class : Component {
 	stun_end_time: float;
 	active: bool;

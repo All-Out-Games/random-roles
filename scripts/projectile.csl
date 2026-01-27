@@ -36,22 +36,29 @@ RR_Projectile :: class : Component {
             foreach player: component_iterator(Player) {
                 if player.player_state == Player_State.DEAD continue;
                 if #alive(owner) && owner == player.entity continue;
+
+				// Traitors shouldn't be able to projectile-kill other traitors.
+				owner_player: Player = null;
+				if #alive(owner) {
+					owner_player = owner->get_component(Player);
+				}
+				if owner_player != null && owner_player.player_type == Player_Type.TRAITOR && player.player_type == Player_Type.TRAITOR {
+					continue;
+				}
+
                 if in_range(player.entity.world_position - entity.world_position, hit_radius) {
                     // False Fire: Sheriff shooting a civilian kills the Sheriff instead
                     player_to_kill: Player = player;
-                    if #alive(owner) {
-                        owner_player := owner->get_component(Player);
-                        if owner_player != null {
-                            // Check if shooter is Sheriff (civilian with sheriff role)
-                            is_sheriff := owner_player.player_type == Player_Type.CIVILIAN && owner_player.player_role == Player_Role.SHERIFF;
-                            // Check if target is a civilian (not traitor or anarchist)
-                            target_is_civilian := player.player_type == Player_Type.CIVILIAN;
-                            
-                            if is_sheriff && target_is_civilian {
-                                // False Fire! Sheriff shot an innocent - Sheriff dies instead
-                                player_to_kill = owner_player;
-                                owner_player->Notify("False Fire! You shot an innocent and paid the price!");
-                            }
+                    if owner_player != null {
+                        // Check if shooter is Sheriff (civilian with sheriff role)
+                        is_sheriff := owner_player.player_type == Player_Type.CIVILIAN && owner_player.player_role == Player_Role.SHERIFF;
+                        // Check if target is a civilian (not traitor or anarchist)
+                        target_is_civilian := player.player_type == Player_Type.CIVILIAN;
+                        
+                        if is_sheriff && target_is_civilian {
+                            // False Fire! Sheriff shot an innocent - Sheriff dies instead
+                            player_to_kill = owner_player;
+                            owner_player->Notify("False Fire! You shot an innocent and paid the price!");
                         }
                     }
                     
