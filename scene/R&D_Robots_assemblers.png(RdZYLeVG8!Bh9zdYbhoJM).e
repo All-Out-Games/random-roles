@@ -14,6 +14,7 @@
     "Y": 1
   },
   "previous_sibling": "4914171796349039:1764792898334288700",
+  "next_sibling": "240048293182126:1769526830000428700",
   "parent": "4914397990471977:1764792957984553500"
 },
 {
@@ -23,6 +24,6 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/R&D/R&D/R&D_Robots_assemblers.png",
-    "depth_offset": -0.3402414321899414
+    "depth_offset": -0.4833646416664124
   }
 }
