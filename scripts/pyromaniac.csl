@@ -1,0 +1,420 @@
+import "core:ao"
+
+// --- Pyromaniac (Anarchist role) ---
+
+PYRO_FIRE_ATTACH_OFFSET_X :: 0.0;
+PYRO_FIRE_ATTACH_OFFSET_Y :: -0.6;
+// Fallback render order if the prop has no Sprite_Renderer.
+PYRO_FIRE_FALLBACK_LAYER :: 2;
+PYRO_FIRE_FALLBACK_DEPTH_OFFSET :: 2.0;
+PYRO_FIRE_ABOVE_PROP_LAYER_BUMP :: 1;
+PYRO_FIRE_ABOVE_PROP_DEPTH_BUMP :: 0.05;
+PYRO_FIRE_IGNITE_RADIUS :: 0.95;
+PYRO_FIRE_INTERACT_RADIUS :: 1.1;
+
+PYRO_ON_FIRE_DURATION_SECONDS :: 4.0;
+PYRO_ON_FIRE_SPEED_MULTIPLIER :: 1.5;
+
+PYRO_LIGHT_CORPSE_RANGE :: 4.5;
+PYRO_LIGHT_CORPSE_COOLDOWN_SECONDS :: 120.0;
+PYRO_CORPSE_BURN_ANIM_SECONDS :: 2.2;
+
+PYRO_WORLD_FIRE_OVERLAY_LAYER :: 9000;
+PYRO_WORLD_FIRE_OVERLAY_SECONDS :: 5.0;
+PYRO_WORLD_FIRE_COLOR_R :: 1.0;
+PYRO_WORLD_FIRE_COLOR_G :: 0.35;
+PYRO_WORLD_FIRE_COLOR_B :: 0.05;
+
+// Local-only cinematic overlay + bigfire around the pyro.
+RR_Pyro_World_Fire_Cinematic :: class : Component {
+	active: bool;
+	start_time: float;
+	fire_entity: Entity;
+
+	arm :: proc(using this: RR_Pyro_World_Fire_Cinematic) {
+		// Cosmetic: this component renders client-side overlay; safe to exist everywhere.
+		active = true;
+		start_time = get_time();
+
+		// Spawn a big fire around the pyro in world space.
+		fire_entity = Scene.create_entity();
+		fire_entity->set_parent(entity, false);
+		fire_entity->set_local_position(v2.{0.0, PYRO_FIRE_ATTACH_OFFSET_Y});
+		fire_entity->set_local_rotation(0.0);
+		fire_entity->set_local_scale(v2.{1.0, 1.0});
+
+		spine := fire_entity->add_component(Spine_Animator);
+		spine->awaken();
+		spine.layer = 999; // above most gameplay
+		spine.depth_offset = 999.0;
+		spine.instance->set_skeleton(get_asset(Spine_Asset, "anims/torch_fire/008BED_fire.spine"));
+		spine.instance->set_animation("004RAND/bigfire_intro", false, 0);
+	}
+
+	ao_update :: proc(using this: RR_Pyro_World_Fire_Cinematic, dt: float) {
+		if !active return;
+		// Stop when leaving pyro win state.
+		if game_state != Game_State.ANIM_PYRO_WIN {
+			active = false;
+			if fire_entity != null && #alive(fire_entity) {
+				fire_entity->destroy();
+			}
+			fire_entity = null;
+			return;
+		}
+
+		// Keep bigfire looping after intro.
+		if fire_entity != null && #alive(fire_entity) {
+			elapsed := get_time() - start_time;
+			spine := fire_entity->get_component(Spine_Animator);
+			if spine != null && spine.instance != null {
+				if elapsed > 0.7 {
+					spine.instance->set_animation("004RAND/bigfire_idleloop", true, 0);
+				}
+			}
+		}
+	}
+
+	ao_late_update :: proc(using this: RR_Pyro_World_Fire_Cinematic, dt: float) {
+		if !active return;
+		// Local-only overlay
+		p := entity->get_component(Player);
+		if p == null return;
+		if !p->is_local() return;
+		if game_state != Game_State.ANIM_PYRO_WIN return;
+
+		elapsed := get_time() - start_time;
+		t := clamp(elapsed / PYRO_WORLD_FIRE_OVERLAY_SECONDS, 0.0, 1.0);
+		alpha := Ease.out_cubic(t);
+
+		screen := UI.get_screen_rect();
+		bg := get_asset(Texture_Asset, "$AO/white.png");
+
+		UI.push_layer(PYRO_WORLD_FIRE_OVERLAY_LAYER);
+		defer UI.pop_layer();
+		col := v4.{PYRO_WORLD_FIRE_COLOR_R, PYRO_WORLD_FIRE_COLOR_G, PYRO_WORLD_FIRE_COLOR_B, 1.0};
+		col.w = alpha;
+		UI.quad(screen, bg, col);
+	}
+}
+
+rr_pyro_extinguish_all_fires :: proc() {
+	// Server authoritative cleanup between rounds / in lobby.
+	if !Game.is_server() return;
+	foreach fire: component_iterator(RR_Prop_Fire_Target) {
+		fire->extinguish(null);
+	}
+}
+
+rr_pyro_find_task :: proc(player: Player, task_id: string) -> Task_Base {
+	if player == null return null;
+	if task_id.count == 0 return null;
+	for i: 0..player.active_tasks.elements.count-1 {
+		t := player.active_tasks.elements[i];
+		if t == null continue;
+		if t.id == task_id {
+			return t;
+		}
+	}
+	return null;
+}
+
+rr_pyro_check_objectives :: proc(player: Player) {
+	if player == null return;
+	if player.player_role != Player_Role.PYROMANIAC return;
+
+	// Mark objective completion (these tasks are just UI objectives).
+	t_corpse := rr_pyro_find_task(player, "pyro_burn_1_corpse");
+	if t_corpse != null {
+		t_corpse.completed = player.pyro_corpses_burned >= 1;
+	}
+	t_props := rr_pyro_find_task(player, "pyro_ignite_5_props");
+	if t_props != null {
+		t_props.completed = player.pyro_props_ignited >= 5;
+	}
+
+	// Unlock World Fire once both are complete.
+	unlocked := (player.pyro_corpses_burned >= 1) && (player.pyro_props_ignited >= 5);
+	if unlocked && player.pyro_world_fire_unlocked_time <= 0.0 {
+		player.pyro_world_fire_unlocked_time = get_time();
+		player->Notify("World Fire unlocked!");
+	}
+}
+
+rr_pyro_register_prop_ignited :: proc(player: Player) {
+	// Server authoritative; counters are replicated.
+	if !Game.is_server() return;
+	if player == null return;
+	if player.player_role != Player_Role.PYROMANIAC return;
+	player.pyro_props_ignited += 1;
+	rr_pyro_check_objectives(player);
+}
+
+rr_pyro_register_corpse_burned :: proc(player: Player) {
+	// Server authoritative; counters are replicated.
+	if !Game.is_server() return;
+	if player == null return;
+	if player.player_role != Player_Role.PYROMANIAC return;
+	player.pyro_corpses_burned += 1;
+	rr_pyro_check_objectives(player);
+}
+
+rr_pyro_find_burnable_corpse :: proc(pyro: Player) -> Corpse {
+	if pyro == null return null;
+	finder := make_finder(Corpse, pyro.entity.world_position, PYRO_LIGHT_CORPSE_RANGE);
+	foreach corpse: component_iterator(Corpse) {
+		if corpse == null continue;
+		if corpse.has_been_reported continue;
+		if corpse.pyro_has_been_burned continue;
+		// Must still have a live entity.
+		if !#alive(corpse.entity) continue;
+		finder->check(corpse, corpse.entity.world_position);
+	}
+	return finder.closest;
+}
+
+// Visual driver for burning corpses (runs on all machines so the animation shows).
+RR_Pyro_Burning_Corpse :: class : Component {
+	start_time: float;
+
+	ao_start :: proc(using this: RR_Pyro_Burning_Corpse) {
+		start_time = get_time();
+
+		spine := entity->get_component(Spine_Animator);
+		if spine != null {
+			spine->awaken();
+			if spine.instance != null {
+				spine.instance->set_animation("004RAND_pyromaniac/Die_On_Fire", false, 0);
+			}
+		}
+	}
+}
+
+// Per-prop fire controller. This is attached at runtime to the chosen prop.
+RR_Prop_Fire_Target :: class : Component {
+	active: bool;
+	fire_entity: Entity;
+	ignited_at: float;
+
+	ignite :: proc(using this: RR_Prop_Fire_Target) {
+		// Server authoritative: affects gameplay (burning + interaction)
+		if !Game.is_server() return;
+		if active return;
+		if entity == null || !#alive(entity) return;
+
+		active = true;
+		ignited_at = get_time();
+
+		// Create a child entity to hold the fire visuals + interactable.
+		fire_entity = Scene.create_entity();
+		fire_entity->set_parent(entity, false);
+		fire_entity->set_local_position(v2.{PYRO_FIRE_ATTACH_OFFSET_X, PYRO_FIRE_ATTACH_OFFSET_Y});
+		fire_entity->set_local_rotation(0.0);
+		fire_entity->set_local_scale(v2.{1.0, 1.0});
+
+		// Visual (Spine)
+		spine := fire_entity->add_component(Spine_Animator);
+		// NOTE: Spine skeleton/animation is initialized client-side in
+		// RR_Extinguish_Fire_Interactable.ao_start so visuals appear on all clients.
+
+		// Interactable (extinguish)
+		ext := fire_entity->add_component(RR_Extinguish_Fire_Interactable);
+		ext.target = this;
+	}
+
+	extinguish :: proc(using this: RR_Prop_Fire_Target, by: Player = null) {
+		// Server authoritative.
+		if !Game.is_server() return;
+		if !active return;
+
+		active = false;
+
+		// Play outro and destroy visual entity.
+		if fire_entity != null && #alive(fire_entity) {
+			spine := fire_entity->get_component(Spine_Animator);
+			if spine != null {
+				spine->awaken();
+				if spine.instance != null {
+					spine.instance->set_animation("004RAND/smallfire_outro", false, 0);
+				}
+			}
+			fire_entity->queue_for_destruction(0.8);
+		}
+		fire_entity = null;
+
+		if by != null {
+			by->Notify("Fire extinguished!");
+		}
+	}
+
+	ao_update :: proc(using this: RR_Prop_Fire_Target, dt: float) {
+		// Server authoritative gameplay checks.
+		if !Game.is_server() return;
+		if !active return;
+		if fire_entity == null || !#alive(fire_entity) return;
+		if game_state != Game_State.INGAME return;
+
+		// Burn players who walk through it.
+		pos := fire_entity.world_position;
+		r_sq := PYRO_FIRE_IGNITE_RADIUS * PYRO_FIRE_IGNITE_RADIUS;
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+			if !#alive(p.entity) continue;
+			if p.player_state != Player_State.ALIVE continue;
+			// Pyromaniacs are immune to their own fire.
+			if p.player_role == Player_Role.PYROMANIAC continue;
+
+			d := p.entity.world_position - pos;
+			if length_squared(d) > r_sq continue;
+
+			on_fire := p.entity->get_component(RR_Player_On_Fire_Status);
+			if on_fire == null {
+				on_fire = p.entity->add_component(RR_Player_On_Fire_Status);
+			}
+			on_fire->arm(PYRO_ON_FIRE_DURATION_SECONDS);
+		}
+	}
+}
+
+// Interactable on the fire entity to extinguish it.
+RR_Extinguish_Fire_Interactable :: class : Interactable {
+	target: RR_Prop_Fire_Target;
+	start_time: float;
+	switched_to_idle: bool;
+
+	ao_start :: method() {
+		this->set_listener(this);
+		this->set_text("Extinguish");
+		this->set_hold_text("Extinguishing...");
+		radius = PYRO_FIRE_INTERACT_RADIUS;
+		required_hold_time = 0.75;
+		priority = 50;
+
+		start_time = get_time();
+		switched_to_idle = false;
+
+		spine := entity->get_component(Spine_Animator);
+		if spine != null {
+			spine->awaken();
+
+			// Render above the parent prop (match prop sort order if possible).
+			parent := entity.parent;
+			prop_sprite: Sprite_Renderer = null;
+			if parent != null {
+				prop_sprite = parent->get_component(Sprite_Renderer);
+			}
+			if prop_sprite != null {
+				spine.layer = prop_sprite.layer + PYRO_FIRE_ABOVE_PROP_LAYER_BUMP;
+				spine.depth_offset = prop_sprite.depth_offset + PYRO_FIRE_ABOVE_PROP_DEPTH_BUMP;
+			} else {
+				spine.layer = PYRO_FIRE_FALLBACK_LAYER;
+				spine.depth_offset = PYRO_FIRE_FALLBACK_DEPTH_OFFSET;
+			}
+
+			spine.instance->set_skeleton(get_asset(Spine_Asset, "anims/torch_fire/008BED_fire.spine"));
+			spine.instance->set_skin("fire");
+			spine.instance->set_animation("004RAND/004RAND/bigfire_idleloop", true, 0);
+		}
+	}
+
+	ao_update :: method(dt: float) {
+		// Cosmetic: switch to idle loop after intro.
+		if switched_to_idle return;
+		if (get_time() - start_time) < 0.7 return;
+		spine := entity->get_component(Spine_Animator);
+		if spine != null && spine.instance != null {
+			spine.instance->set_animation("004RAND/smallfire_idleloop", true, 0);
+			switched_to_idle = true;
+		}
+	}
+
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if target == null return false;
+		if !target.active return false;
+		return true;
+	}
+
+	on_interact :: method(player: Player) {
+		if target == null return;
+		target->extinguish(player);
+	}
+}
+
+// Player-side status applied when they walk through fire.
+// - 150% move speed
+// - cannot use abilities or interactables (enforced by Player hooks)
+RR_Player_On_Fire_Status :: class : Component {
+	active: bool;
+	end_time: float;
+	orig_speed: float;
+	orig_speed_valid: bool;
+
+	arm :: proc(using this: RR_Player_On_Fire_Status, seconds: float) {
+		if seconds <= 0.0 { seconds = 0.1; }
+		end_time = get_time() + seconds;
+		active = true;
+
+		p := entity->get_component(Player);
+		if p != null {
+			p.pyro_on_fire = true;
+
+			// Capture baseline move speed once per "session".
+			if !orig_speed_valid {
+				orig_speed = p.agent.movement_speed;
+				orig_speed_valid = true;
+			}
+
+			// Switch to on-fire idle loop (merged rig).
+			p->set_trigger("pyro_on_fire_idle");
+		}
+	}
+
+	clear :: proc(using this: RR_Player_On_Fire_Status, play_blow_out: bool) {
+		active = false;
+		end_time = 0.0;
+
+		p := entity->get_component(Player);
+		if p != null {
+			p.pyro_on_fire = false;
+			if orig_speed_valid {
+				p.agent.movement_speed = orig_speed;
+			}
+			if play_blow_out {
+				p->set_trigger("pyro_blow_out_fire");
+			} else {
+				p->set_trigger("RESET");
+			}
+		}
+
+		orig_speed_valid = false;
+	}
+
+	ao_update :: proc(using this: RR_Player_On_Fire_Status, dt: float) {
+		if !active return;
+
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Safety: stop if gameplay ended or player died.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			this->clear(false);
+			return;
+		}
+
+		// Apply speed boost while active.
+		if orig_speed_valid {
+			p.agent.movement_speed = orig_speed * PYRO_ON_FIRE_SPEED_MULTIPLIER;
+		}
+
+		if get_time() >= end_time {
+			this->clear(true);
+		}
+	}
+}
+

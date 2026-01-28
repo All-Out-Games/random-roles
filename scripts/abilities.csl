@@ -343,7 +343,8 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			target := rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true);
 			if target != null {
-				target->kill_with_killer_no_corpse(player.entity.id);
+				// Devour should leave a corpse behind (used for report/doctor/coroner/pyro, etc.).
+				target->kill_with_killer(player.entity.id);
 				current_cooldown = WEREWOLF_DEVOUR_COOLDOWN_SECONDS;
 			}
 		}
@@ -2299,6 +2300,200 @@ PRANK_DELAY_SECONDS :: 10.0;
 PRANK_MELEE_RANGE :: 3.0;
 PRANK_STUN_SECONDS :: 2.0;
 PRANK_STUN_REASON :: "prank_slip";
+
+// --- Pyromaniac (Anarchist role) ---
+PYRO_LIGHT_FIRE_RANGE :: 4.5;
+PYRO_LIGHT_FIRE_COOLDOWN_SECONDS :: 25.0;
+
+rr_pyro_get_closest_unlit_prop :: proc(player: Player) -> Entity {
+	if player == null return null;
+	if world_references == null return null;
+
+	props: [..]Sprite_Renderer;
+	world_references->find_props_child_sprite_renderers(ref props, clear_first=true);
+	if props.count <= 0 return null;
+
+	best: Entity = null;
+	best_dist_sq := 0.0;
+	r_sq := PYRO_LIGHT_FIRE_RANGE * PYRO_LIGHT_FIRE_RANGE;
+
+	for i: 0..props.count-1 {
+		s := props[i];
+		if s == null continue;
+		e := s.entity;
+		if e == null continue;
+		if !#alive(e) continue;
+
+		// Skip already-burning props.
+		existing := e->get_component(RR_Prop_Fire_Target);
+		if existing != null && existing.active {
+			continue;
+		}
+
+		d := e.world_position - player.entity.world_position;
+		dist_sq := length_squared(d);
+		if dist_sq > r_sq continue;
+
+		if best == null || dist_sq < best_dist_sq {
+			best = e;
+			best_dist_sq = dist_sq;
+		}
+	}
+	return best;
+}
+
+Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
+	NAME :: "Light Fire";
+
+	on_init :: proc(instance: Pyromaniac_Light_Fire_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/pyro/set_fire.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.ANARCHIST return false;
+		if player.player_role != Player_Role.PYROMANIAC return false;
+		if player.pyro_on_fire return false;
+		return rr_pyro_get_closest_unlit_prop(player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			// Server authoritative: spawns gameplay-relevant fire instance.
+			if Game.is_server() {
+				target := rr_pyro_get_closest_unlit_prop(player);
+				if target != null {
+					fire := target->get_component(RR_Prop_Fire_Target);
+					if fire == null {
+						fire = target->add_component(RR_Prop_Fire_Target);
+					}
+					fire->ignite();
+					// Cosmetic but should replicate: trigger snap animation on merged rig.
+					player->set_trigger("pyro_snap_fingers");
+					rr_pyro_register_prop_ignited(player);
+				}
+			}
+			current_cooldown = PYRO_LIGHT_FIRE_COOLDOWN_SECONDS;
+		}
+	}
+
+	on_draw_button :: proc(instance: Pyromaniac_Light_Fire_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Pyromaniac_Light_Fire_Ability.NAME);
+	}
+}
+
+Pyromaniac_Light_Corpse_Ability :: class : Ability_Base {
+	NAME :: "Light Corpse";
+
+	on_init :: proc(instance: Pyromaniac_Light_Corpse_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/pyro/light_corpse.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.ANARCHIST return false;
+		if player.player_role != Player_Role.PYROMANIAC return false;
+		if player.pyro_on_fire return false;
+		return rr_pyro_find_burnable_corpse(player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			if Game.is_server() {
+				corpse := rr_pyro_find_burnable_corpse(player);
+				if corpse != null && #alive(corpse.entity) {
+					corpse.pyro_has_been_burned = true;
+
+					// Play burn-to-ashes animation on the corpse (corpse uses the merged player rig).
+					// Drive animation via a component so it shows on all clients.
+					burn := corpse.entity->get_component(RR_Pyro_Burning_Corpse);
+					if burn == null {
+						burn = corpse.entity->add_component(RR_Pyro_Burning_Corpse);
+					}
+
+					// Remove after the animation.
+					corpse.entity->queue_for_destruction(PYRO_CORPSE_BURN_ANIM_SECONDS);
+
+					rr_pyro_register_corpse_burned(player);
+					player->set_trigger("pyro_snap_fingers");
+				}
+			}
+			current_cooldown = PYRO_LIGHT_CORPSE_COOLDOWN_SECONDS;
+		}
+	}
+
+	on_draw_button :: proc(instance: Pyromaniac_Light_Corpse_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Pyromaniac_Light_Corpse_Ability.NAME);
+	}
+}
+
+Pyromaniac_World_Fire_Ability :: class : Ability_Base {
+	NAME :: "World Fire";
+
+	on_init :: proc(instance: Pyromaniac_World_Fire_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/pyro/worldfire.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.ANARCHIST return false;
+		if player.player_role != Player_Role.PYROMANIAC return false;
+		if player.pyro_on_fire return false;
+		// Still allow the button to show while locked (so we can draw LOCKED overlay),
+		// but don't allow activation until unlocked.
+		if player.pyro_world_fire_unlocked_time <= 0.0 return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			// Trigger the server-authoritative win cinematic.
+			start_pyro_win_cinematic(player);
+
+			// Kick off local-only overlay + bigfire around pyro for the duration.
+			if player->is_local_or_server() {
+				c := player.entity->get_component(RR_Pyro_World_Fire_Cinematic);
+				if c == null {
+					c = player.entity->add_component(RR_Pyro_World_Fire_Cinematic);
+				}
+				c->arm();
+			}
+
+			current_cooldown = 9999.0;
+		}
+	}
+
+	on_draw_button :: proc(instance: Pyromaniac_World_Fire_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Pyromaniac_World_Fire_Ability.NAME);
+
+		// Locked overlay + progress
+		p := instance.player;
+		if p == null return;
+		if p.pyro_world_fire_unlocked_time > 0.0 return;
+
+		ts := UI.default_text_settings();
+		ts.size = 18;
+		ts.halign = .CENTER;
+		ts.valign = .TOP;
+		ts.do_outline = true;
+		ts.outline_thickness = 2;
+		ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+
+		// Show objective progress underneath.
+		prog := format_string("Corpse %/1  Props %/5", .{min(p.pyro_corpses_burned, 1), min(p.pyro_props_ignited, 5)});
+		ts2 := ts;
+		ts2.size = 14;
+		ts2.valign = .BOTTOM;
+		UI.text(rect->inset(2)->cut_bottom(18), ts2, prog);
+	}
+}
 
 Pranked_Effect :: class : Component {
 	trigger_time: float;

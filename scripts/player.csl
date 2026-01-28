@@ -26,6 +26,13 @@ Player :: class : Player_Base {
 	prankster_prank_count: int;
 	prankster_fake_meetings_called: int;
 
+	// --- Pyromaniac ---
+	// True while this player is currently "on fire" (status effect).
+	pyro_on_fire: bool;
+	pyro_props_ignited: int;
+	pyro_corpses_burned: int;
+	pyro_world_fire_unlocked_time: float; // 0 = locked; otherwise time unlocked
+
 	// Jester Win (unlock + timer)
 	prankster_jester_unlocked_time: float; // 0 = locked, otherwise time it unlocked
 	sm_inited: bool;
@@ -89,6 +96,21 @@ Player :: class : Player_Base {
 			}
 		}
 		return false;
+	}
+
+	// Global ability gate (called after cooldown + ability can_use).
+	ao_can_use_ability :: proc(using this: Player, ability: Ability_Base) -> bool {
+		// While on fire, you can only move.
+		if pyro_on_fire return false;
+		return true;
+	}
+
+	// Global interact gate (called before interactable can_use).
+	ao_can_use_interactable :: proc(using this: Player, interactable: Interactable) -> bool {
+		if pyro_on_fire return false;
+		// Basic sanity: dead/passive can't use interactables.
+		if player_state != Player_State.ALIVE return false;
+		return true;
 	}
 
     update_freeze_reasons :: proc(using this: Player) {
@@ -203,7 +225,7 @@ Player :: class : Player_Base {
 			update_minimap_ui(this);
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			draw_player_role_hud(this);
-			if game_state == Game_State.ANIM_JESTER_WIN {
+			if game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
 				this->draw_letterbox_bars();
 			}
             if game_state == Game_State.ANIM_INTRO {
@@ -225,15 +247,15 @@ Player :: class : Player_Base {
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
-			// If we were overriding the camera for the Jester Win cinematic and it ended,
+			// If we were overriding the camera for a win cinematic and it ended,
 			// restore the normal follow behavior.
-			if jester_win_camera_override_active && game_state != Game_State.ANIM_JESTER_WIN {
+			if jester_win_camera_override_active && game_state != Game_State.ANIM_JESTER_WIN && game_state != Game_State.ANIM_PYRO_WIN {
 				this.camera.follow_player = true;
 				jester_win_camera_override_active = false;
 			}
 
-			// During the Jester Win cinematic, keep the camera locked to the jester every frame.
-			if game_state == Game_State.ANIM_JESTER_WIN {
+			// During win cinematics, keep the camera locked to the cinematic actor every frame.
+			if game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
 				// Turn off camera follow and set position ONCE to reduce per-frame camera work.
 				if !jester_win_camera_override_active {
 					if this->try_begin_jester_win_camera_override() {
@@ -332,6 +354,14 @@ Player :: class : Player_Base {
 						draw_ability_button(this, Fake_Meeting_Ability, abilityIndex);
 						abilityIndex += 1;
 						draw_ability_button(this, Jester_Win_Ability, abilityIndex);
+						abilityIndex += 1;
+					}
+					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PYROMANIAC {
+						draw_ability_button(this, Pyromaniac_Light_Fire_Ability, abilityIndex);
+						abilityIndex += 1;
+						draw_ability_button(this, Pyromaniac_Light_Corpse_Ability, abilityIndex);
+						abilityIndex += 1;
+						draw_ability_button(this, Pyromaniac_World_Fire_Ability, abilityIndex);
 						abilityIndex += 1;
 					}
 
@@ -466,6 +496,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .CORONER:    return "CORONER";
 		case .PORTAL_MAKER: return "PORTAL MAKER";
 		case .PRANKSTER:  return "PRANKSTER";
+		case .PYROMANIAC: return "PYROMANIAC";
 		case .PIRATE:     return "PIRATE";
 		case .HITMAN:     return "HITMAN";
 		case .WEREWOLF:   return "WEREWOLF";
@@ -970,6 +1001,30 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 		layer->create_global_transition(werewolf_infected_transform_state, false)->create_trigger_condition(werewolf_infected_transform_var);
 		layer->create_transition(werewolf_infected_transform_state, idle_state, true);
 
+		// --- Pyromaniac ---
+		// Snap fingers (one-shot) for Light Fire.
+		pyro_snap_fingers_var := sm->create_variable("pyro_snap_fingers", State_Machine_Variable.Kind.TRIGGER);
+		pyro_snap_fingers_state := layer->create_state("004RAND_pyromaniac/Snap_Fingers", false, 1.0);
+		layer->create_global_transition(pyro_snap_fingers_state, false)->create_trigger_condition(pyro_snap_fingers_var);
+		layer->create_transition(pyro_snap_fingers_state, idle_state, true);
+
+		// On-fire idle loop (explicitly entered; exits via RESET or Blow_Out_Fire).
+		pyro_on_fire_idle_var := sm->create_variable("pyro_on_fire_idle", State_Machine_Variable.Kind.TRIGGER);
+		pyro_on_fire_idle_state := layer->create_state("004RAND_pyromaniac/Idle_On_Fire", true, 0.0);
+		layer->create_global_transition(pyro_on_fire_idle_state, false)->create_trigger_condition(pyro_on_fire_idle_var);
+
+		// Extinguish (one-shot) -> back to normal Idle.
+		pyro_blow_out_fire_var := sm->create_variable("pyro_blow_out_fire", State_Machine_Variable.Kind.TRIGGER);
+		pyro_blow_out_fire_state := layer->create_state("004RAND_pyromaniac/Blow_Out_Fire", false, 1.0);
+		layer->create_global_transition(pyro_blow_out_fire_state, false)->create_trigger_condition(pyro_blow_out_fire_var);
+		layer->create_transition(pyro_blow_out_fire_state, idle_state, true);
+
+		// End-game (one-shot) -> back to Idle.
+		pyro_end_game_var := sm->create_variable("pyro_end_game", State_Machine_Variable.Kind.TRIGGER);
+		pyro_end_game_state := layer->create_state("004RAND_pyromaniac/End_Game", false, 5.0);
+		layer->create_global_transition(pyro_end_game_state, false)->create_trigger_condition(pyro_end_game_var);
+		layer->create_transition(pyro_end_game_state, idle_state, true);
+
 		sm_inited = true;
         log_info("State machine initialized");
 	}
@@ -989,12 +1044,19 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 	}
 
 	try_begin_jester_win_camera_override :: proc(using this: Player) -> bool {
-		if jester_win_player_id == 0 {
+		// Supports both Jester and Pyro win cinematics.
+		target_id: u64 = 0;
+		if game_state == Game_State.ANIM_JESTER_WIN {
+			target_id = jester_win_player_id;
+		} else if game_state == Game_State.ANIM_PYRO_WIN {
+			target_id = pyro_win_player_id;
+		}
+		if target_id == 0 {
 			return false;
 		}
 		for i: 0..players.elements.count-1 {
 			p := players.elements[i];
-			if p != null && #alive(p.entity) && p.entity.id == jester_win_player_id {
+			if p != null && #alive(p.entity) && p.entity.id == target_id {
 				// Force the cinematic actor to face right and lock the camera once.
 				p->set_facing_right(true);
 				this.camera.follow_player = false;
@@ -1141,6 +1203,8 @@ Corpse :: class : Component {
 	killer_player_entity_id: u64;
 	// Coroner can only sample once per corpse.
 	has_dna_been_sampled: bool;
+	// Pyromaniac can only burn once per corpse.
+	pyro_has_been_burned: bool;
 }
 
 draw_minimap_close_button :: proc(window_rect: Rect) -> bool {

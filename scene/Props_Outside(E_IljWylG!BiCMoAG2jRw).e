@@ -2,7 +2,7 @@
 1859720839169
 1399168867969350 1766029529334822000
 {
-  "name": "Props",
+  "name": "Props_Outside",
   "local_enabled": true,
   "local_position": {
 

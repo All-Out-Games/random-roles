@@ -304,6 +304,7 @@ Game_State :: enum {
 	ANIM_MEETING_CALLED;
 	VOTING;
 	ANIM_JESTER_WIN;
+	ANIM_PYRO_WIN;
 	ANIM_VICTORY;
 }
 
@@ -330,6 +331,7 @@ Player_Role :: enum {
 	PORTAL_MAKER;
 	//Anarchist Roles
 	PRANKSTER;
+	PYROMANIAC;
 	//Traitor Roles
 	PIRATE;
 	HITMAN;
@@ -595,6 +597,12 @@ JESTER_WIN_CINEMATIC_TIME :: 5.0;
 jester_win_active: bool;
 jester_win_start_time: float;
 jester_win_player_id: u64;
+
+// --- Pyromaniac Win cinematic ---
+PYRO_WIN_CINEMATIC_TIME :: 5.0;
+pyro_win_active: bool;
+pyro_win_start_time: float;
+pyro_win_player_id: u64;
 
 rr_try_start_power_outage :: proc(caller: Player) {
 	// Server authoritative
@@ -908,6 +916,28 @@ start_jester_win_cinematic :: proc(caller: Player) {
 	caller->set_trigger("jester_win");
 }
 
+start_pyro_win_cinematic :: proc(caller: Player) {
+	if caller == null return;
+	if caller.player_state != Player_State.ALIVE return;
+	if caller.player_role != Player_Role.PYROMANIAC return;
+	if game_state != Game_State.INGAME return;
+
+	// Server authoritative endgame trigger.
+	if !Game.is_server() return;
+
+	pyro_win_active = true;
+	pyro_win_start_time = get_time();
+	pyro_win_player_id = caller.entity.id;
+
+	// Freeze game flow + show cinematic
+	game_state = Game_State.ANIM_PYRO_WIN;
+	close_all_doors();
+
+	// Play pyromaniac end animation (wired into merged rig state machine).
+	caller->set_facing_right(true);
+	caller->set_trigger("pyro_end_game");
+}
+
 on_player_go_dead :: proc(player: Player) {
 	player.player_state = Player_State.DEAD;
 	// Safety: temporary resurrection should always end when dead.
@@ -969,6 +999,7 @@ setup_lobby :: proc() {
 	close_all_doors();
 	rr_destroy_all_portals();
 	rr_hitman_clear_mines();
+	rr_pyro_extinguish_all_fires();
 	// Reset sabotages
 	rr_power_outage_active = false;
 	rr_comms_outage_active = false;
@@ -1164,6 +1195,8 @@ ao_update :: proc(dt: float) {
 		ao_update_voting(dt);
 	} else if(game_state == Game_State.ANIM_JESTER_WIN) {
 		ao_update_jester_win(dt);
+	} else if(game_state == Game_State.ANIM_PYRO_WIN) {
+		ao_update_pyro_win(dt);
 	} else if(game_state == Game_State.ANIM_VICTORY) {
 		ao_update_victory(dt);
 	}
@@ -1491,6 +1524,33 @@ ao_update_jester_win :: proc(dt: float) {
 	}
 }
 
+ao_update_pyro_win :: proc(dt: float) {
+	elapsed := get_time() - pyro_win_start_time;
+	if elapsed < PYRO_WIN_CINEMATIC_TIME {
+		return;
+	}
+
+	// After the cinematic, end the game with only the pyromaniac as winner.
+	winners: List(Player);
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p != null && #alive(p.entity) && p.entity.id == pyro_win_player_id {
+			append(ref winners, p);
+			break;
+		}
+	}
+
+	pyro_win_active = false;
+	pyro_win_player_id = 0;
+	pyro_win_start_time = 0.0;
+
+	if winners.elements.count > 0 {
+		end_game_with_winners(Player_Type.ANARCHIST, winners);
+	} else {
+		end_game_with_victor(Player_Type.ANARCHIST);
+	}
+}
+
 ao_update_voting :: proc(dt: float) {
 	current_time := get_time();
 	elapsed := current_time - voting_start_time;
@@ -1755,6 +1815,7 @@ assign_players_to_types :: proc() {
 	append(ref civilian_roles_master, Player_Role.CORONER);
 	append(ref civilian_roles_master, Player_Role.PORTAL_MAKER);
 	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
+	append(ref anarchist_roles_master, Player_Role.PYROMANIAC);
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 	append(ref traitor_roles_master, Player_Role.HITMAN);
 	append(ref traitor_roles_master, Player_Role.WEREWOLF);
@@ -1816,6 +1877,12 @@ assign_players_to_types :: proc() {
 		p.werewolf_grace_until = 0.0;
 		p.werewolf_last_game_state = game_state;
 
+		// Pyromaniac
+		p.pyro_on_fire = false;
+		p.pyro_props_ignited = 0;
+		p.pyro_corpses_burned = 0;
+		p.pyro_world_fire_unlocked_time = 0.0;
+
 		if p.player_role == Player_Role.PRANKSTER {
 			p.active_tasks = List(Task_Base).{};
 			task := new(Task_Prank_3_People);
@@ -1832,6 +1899,23 @@ assign_players_to_types :: proc() {
 			p.prankster_prank_count = 0;
 			p.prankster_fake_meetings_called = 0;
 			p.prankster_jester_unlocked_time = 0.0;
+		}
+
+		if p.player_role == Player_Role.PYROMANIAC {
+			// Pyro objectives replace normal tasks.
+			p.active_tasks = List(Task_Base).{};
+
+			obj1 := new(Task_Base);
+			obj1.id = "pyro_burn_1_corpse";
+			obj1.started = true;
+			obj1.completed = false;
+			append(ref p.active_tasks, obj1);
+
+			obj2 := new(Task_Base);
+			obj2.id = "pyro_ignite_5_props";
+			obj2.started = true;
+			obj2.completed = false;
+			append(ref p.active_tasks, obj2);
 		}
 	}
 

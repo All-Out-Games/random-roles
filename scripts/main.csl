@@ -164,6 +164,7 @@ World_References :: class : Component {
             corpse_component.owner_player_entity_id = player.entity.id;
 			corpse_component.killer_player_entity_id = killer_player_entity_id;
 			corpse_component.has_dna_been_sampled = false;
+			corpse_component.pyro_has_been_burned = false;
         }
 
         spine_Animator := corpse->get_component(Spine_Animator);
@@ -193,4 +194,52 @@ World_References :: class : Component {
 			}
         }
     }
+
+	// Collect all Sprite_Renderers in the descendants of any entity named "Props".
+	// (Does not include Sprite_Renderers on the "Props" entity itself.)
+	find_props_child_sprite_renderers :: proc(using this: World_References, results: ref [..]Sprite_Renderer, clear_first: bool = true) {
+		if clear_first {
+			results->clear();
+		}
+		foreach e: entity_iterator() {
+			if e == null continue;
+			if !#alive(e) continue;
+			if e->get_name() != "Props" continue;
+
+			this->append_sprite_renderers_in_descendants(e, ref results);
+		}
+	}
+
+	append_sprite_renderers_in_descendants :: proc(using this: World_References, root: Entity, results: ref [..]Sprite_Renderer) {
+		if root == null return;
+		if !#alive(root) return;
+
+		// Iterative DFS over children to avoid recursion depth issues.
+		stack: [..]Entity;
+
+		// Seed stack with root's direct children (so we don't include root itself).
+		child := root.first_child;
+		while child != null {
+			stack->append(child);
+			child = child.next_sibling;
+		}
+
+		while stack.count > 0 {
+			cur := stack->pop();
+			if cur == null continue;
+			if !#alive(cur) continue;
+
+			sprite := cur->get_component(Sprite_Renderer);
+			if sprite != null {
+				results->append(sprite);
+			}
+
+			// Push this entity's children.
+			c := cur.first_child;
+			while c != null {
+				stack->append(c);
+				c = c.next_sibling;
+			}
+		}
+	}
 }
