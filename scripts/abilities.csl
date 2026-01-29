@@ -1901,6 +1901,10 @@ Shoot_Ability :: class : Ability_Base {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
         if player->has_task_in_progress() return false;
+		// Sheriff only gets 1 shot.
+		if player.player_type == Player_Type.CIVILIAN && player.player_role == Player_Role.SHERIFF {
+			if player.sheriff_gun_ammo <= 0 return false;
+		}
         return true;
     }
 
@@ -1924,13 +1928,49 @@ Shoot_Ability :: class : Ability_Base {
                 sfx.speed_perturb = 0.1;
                 shoot_projectile(player.entity.world_position, activation.direction * 10.0, 1, 0.75, player.entity);
                 SFX.play(get_asset(SFX_Asset, "sfx/shoot.wav"), sfx);
-                current_cooldown = 30.0;
+
+				is_sheriff := player.player_type == Player_Type.CIVILIAN && player.player_role == Player_Role.SHERIFF;
+
+				// Consume sheriff ammo on fire (disables ability after first shot).
+				if is_sheriff {
+					player.sheriff_gun_ammo -= 1;
+					if player.sheriff_gun_ammo < 0 { player.sheriff_gun_ammo = 0; }
+				}
+
+				// No need to apply cooldown if Sheriff is out of bullets.
+				if is_sheriff && player.sheriff_gun_ammo <= 0 {
+					current_cooldown = 0.0;
+				} else {
+					current_cooldown = 30.0;
+				}
             }
         }
     }
 
 	on_draw_button :: proc(instance: Shoot_Ability, rect: Rect) {
 		draw_ability_name_label(rect, instance.name);
+
+		// Sheriff gun ammo overlay (1 shot total): show a big number in top-right.
+		if instance.player != null && instance.player.player_type == Player_Type.CIVILIAN && instance.player.player_role == Player_Role.SHERIFF {
+			ammo := instance.player.sheriff_gun_ammo;
+			if ammo < 0 { ammo = 0; }
+			if ammo > 1 { ammo = 1; }
+
+			bg := get_asset(Texture_Asset, "$AO/white.png");
+			content := rect->inset(8);
+			ammo_rect := content->top_right_rect()->offset(-18, -18)->grow(18);
+			UI.quad(ammo_rect, bg, v4.{0, 0, 0, 0.55});
+
+			ts := UI.default_text_settings();
+			ts.size = 30;
+			ts.color = (ammo > 0) ? v4.{1, 1, 1, 1} : v4.{0.8, 0.8, 0.8, 0.9};
+			ts.halign = .CENTER;
+			ts.valign = .CENTER;
+			ts.do_outline = true;
+			ts.outline_thickness = 2;
+			ts.outline_color = v4.{0, 0, 0, 1};
+			UI.text(ammo_rect, ts, format_string("%", .{ammo}));
+		}
 	}
 }
 
@@ -2314,6 +2354,7 @@ Pirate_Treasure_Map_Ability :: class : Ability_Base {
 POWDER_KEG_COOLDOWN_SECONDS :: 90.0;
 POWDER_KEG_CAMERA_ZOOMED_OUT_SIZE :: 18.0;
 POWDER_KEG_THROW_TRAVEL_TIME :: 0.75;
+POWDER_KEG_MAX_THROW_RANGE :: 10.0;
 POWDER_KEG_EXPLOSION_RADIUS :: 4.5;
 POWDER_KEG_KNOCKBACK_SECONDS :: 0.55;
 POWDER_KEG_KNOCKBACK_SPEED :: 14.0;
@@ -2414,10 +2455,16 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 	// Find all players in range and track nearest.
 	nearest: Player = null;
 	nearest_dist_sq := 0.0;
+	owner_id: u64 = 0;
+	if #alive(owner) {
+		owner_id = owner.id;
+	}
 
 	// First pass: determine the nearest victim in the blast.
 	foreach p: component_iterator(Player) {
 		if p.player_state != Player_State.ALIVE continue;
+		// Pirate cannot kill themselves with their own keg.
+		if owner_id != 0 && #alive(p.entity) && p.entity.id == owner_id continue;
 		d := p.entity.world_position - position;
 		dist_sq := length_squared(d);
 		if dist_sq > POWDER_KEG_EXPLOSION_RADIUS * POWDER_KEG_EXPLOSION_RADIUS continue;
@@ -2623,6 +2670,20 @@ Powder_Keg_Ability :: class : Ability_Base {
 
 		// Preview target (world-space).
 		target_pos := get_mouse_world_position();
+		{
+			// Clamp max throw distance so the keg can't be thrown across the map.
+			origin := player.entity.world_position;
+			delta := target_pos - origin;
+			max_r := POWDER_KEG_MAX_THROW_RANGE;
+			if length_squared(delta) > max_r * max_r {
+				if length_squared(delta) < 0.001 {
+					delta = v2.{1, 0};
+				} else {
+					delta = normalize(delta);
+				}
+				target_pos = origin + delta * max_r;
+			}
+		}
 		draw_aiming_line(player.entity.world_position, aiming.aim_direction, 1.0 / player.camera.size * 4);
 
 		// Optional: show a subtle circle at the target.
