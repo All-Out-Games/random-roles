@@ -23,6 +23,11 @@ rr_refresh_rng_state :: proc() {
 HITMAN_MINE_UNLOCK_KILLS :: 1;
 HITMAN_SNIPER_UNLOCK_KILLS :: 2;
 
+// --- Ghost (Spectator) ---
+// Dead players move faster and see more of the map while spectating.
+GHOST_SPEED_MULTIPLIER :: 1.5;
+GHOST_CAMERA_ZOOMED_OUT_SIZE :: 9.0;
+
 // How strongly contracts affect the Hitman's kill cooldown.
 // Negative reduces cooldown; positive increases it.
 HITMAN_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS :: -10.0;
@@ -555,6 +560,11 @@ countdown_active: bool;
 game_end_time: float;
 waiting_for_restart: bool;
 voting_start_time: float;
+
+// After voting completes, keep the game in VOTING briefly to reveal the result.
+RR_VOTE_RESULTS_REVEAL_SECONDS :: 4.0;
+rr_vote_results_active: bool;
+rr_vote_results_end_time: float;
 round_number: int;
 meeting_cooldown_ends_at: float;
 post_meeting_kill_lockout_ends_at: float;
@@ -577,6 +587,12 @@ rr_suppress_meeting_initiator: bool;
 
 // Player entity ids that died since the previous meeting ended.
 deaths_since_last_meeting: List(u64);
+
+// --- Voting outcome (used by vote UI to show who was ejected) ---
+// Updated whenever a voting session ends. Clients can decide whether to show this
+// inside the vote UI (if open) or as a popup (if the UI is closed).
+rr_last_vote_result_time: float;     // 0 = none yet; otherwise game-time the result was set
+rr_last_vote_ejected_player_id: u64; // 0 = no one ejected; otherwise entity id of ejected player
 
 u64_list_contains :: proc(list: List(u64), value: u64) -> bool {
 	for i: 0..list.elements.count-1 {
@@ -939,10 +955,23 @@ start_pyro_win_cinematic :: proc(caller: Player) {
 }
 
 on_player_go_dead :: proc(player: Player) {
+	// If the player was mid-task when they died, close the task UI so death feedback/cinematics
+	// aren't obscured. Ghost civilians can still reopen and continue tasks afterwards.
+	rr_cancel_all_task_attempts(player);
+
 	player.player_state = Player_State.DEAD;
 	// Safety: temporary resurrection should always end when dead.
 	player.is_temporarily_resurrected = false;
 	player.temporarily_resurrected_until = 0.0;
+
+	// Ghost QoL: apply a server-side movement speed boost while spectating.
+	// (Movement is authoritative on the server.)
+	if !player.ghost_speed_override_active {
+		player.ghost_speed_original_movement_speed = player.agent.movement_speed;
+		player.ghost_speed_override_active = true;
+	}
+	player.agent.movement_speed = player.ghost_speed_original_movement_speed * GHOST_SPEED_MULTIPLIER;
+
 	player->add_ghost_reason("spectator");
 	player.agent->set_navmesh_to_lock_to(world_references.ghost_navmesh);
 	player->apply_voice_chat_masks_for_current_state();
@@ -956,6 +985,11 @@ on_player_go_passive :: proc(player: Player) {
 	player.temporarily_resurrected_until = 0.0;
 	world_references->teleport_near_lobby(player);
 	player->remove_ghost_reason("spectator");
+	// Restore baseline speed when leaving ghost mode.
+	if player.ghost_speed_override_active {
+		player.agent.movement_speed = player.ghost_speed_original_movement_speed;
+		player.ghost_speed_override_active = false;
+	}
 	player.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
 	player->apply_voice_chat_masks_for_current_state();
 }
@@ -964,6 +998,11 @@ on_player_go_alive :: proc(player: Player) {
 	player->revive();
 	player.player_state = Player_State.ALIVE;
 	player->remove_ghost_reason("spectator");
+	// Restore baseline speed when leaving ghost mode.
+	if player.ghost_speed_override_active {
+		player.agent.movement_speed = player.ghost_speed_original_movement_speed;
+		player.ghost_speed_override_active = false;
+	}
 	player.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
 	rebuild_game_world_navmesh();
 	player->apply_voice_chat_masks_for_current_state();
@@ -989,6 +1028,8 @@ setup_lobby :: proc() {
 	countdown_start_time = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
+	rr_vote_results_active = false;
+	rr_vote_results_end_time = 0.0;
 	meeting_cooldown_ends_at = 0.0;
 	post_meeting_kill_lockout_ends_at = 0.0;
 	meeting_initiator_id = 0;
@@ -1026,6 +1067,8 @@ setup_ingame :: proc() {
 	game_end_time = 0.0;
 	waiting_for_restart = false;
 	voting_start_time = 0.0;
+	rr_vote_results_active = false;
+	rr_vote_results_end_time = 0.0;
 	meeting_cooldown_ends_at = 0.0;
 	post_meeting_kill_lockout_ends_at = 0.0;
 	meeting_initiator_id = 0;
@@ -1050,6 +1093,8 @@ setup_ingame :: proc() {
 setup_voting :: proc() {
 	game_state = Game_State.VOTING;
 	voting_start_time = get_time();
+	rr_vote_results_active = false;
+	rr_vote_results_end_time = 0.0;
 	close_all_doors();
 	
 	// Reset all votes
@@ -1241,7 +1286,10 @@ get_player_count :: proc(type: Player_Type) -> int {
 all_civilians_completed_tasks :: proc() -> bool {
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
-		if p.player_state == Player_State.ALIVE && p.player_type == Player_Type.CIVILIAN {
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if p.player_state == Player_State.PASSIVE continue;
+		if p.player_type == Player_Type.CIVILIAN {
 			// Check if this civilian has completed all their tasks
 			if p.active_tasks.elements.count == 0 {
 				return false; // No tasks assigned means not completed
@@ -1553,6 +1601,16 @@ ao_update_pyro_win :: proc(dt: float) {
 
 ao_update_voting :: proc(dt: float) {
 	current_time := get_time();
+
+	// During the brief results reveal phase, keep the game in VOTING but do not
+	// allow further voting interaction/tallying.
+	if rr_vote_results_active {
+		if rr_vote_results_end_time > 0.0 && current_time >= rr_vote_results_end_time {
+			finalize_voting();
+		}
+		return;
+	}
+
 	elapsed := current_time - voting_start_time;
 	
 	// Display voting timer
@@ -1585,19 +1643,33 @@ voting_text := format_string("Voting ends in: % seconds", .{format_float(remaini
 	}
 	
 	if alive_count > 0 && voted_count == alive_count {
-		end_voting();
-		return;
+		if Game.is_server() {
+			end_voting();
+			return;
+		}
 	}
 	
 	// After 1 minute, end voting and return to game
 	if elapsed >= 60.0 {
-		end_voting();
+		if Game.is_server() {
+			end_voting();
+			return;
+		}
 	}
 }
 
 end_voting :: proc() {
+	// Server-authoritative.
+	if !Game.is_server() return;
+
+	// Begin results phase (don't transition out of VOTING yet).
+	rr_vote_results_active = true;
+	rr_vote_results_end_time = get_time() + RR_VOTE_RESULTS_REVEAL_SECONDS;
+
 	// If this was a fake meeting, skip ejection entirely.
 	if fake_meeting_active {
+		rr_last_vote_result_time = get_time();
+		rr_last_vote_ejected_player_id = 0;
 		for i: 0..players.elements.count-1 {
 			players.elements[i]->Notify("It was a fake meeting!");
 		}
@@ -1644,18 +1716,26 @@ end_voting :: proc() {
 		// - Player tie (>1 with max, and max > 0) => tie, no ejection.
 		// - Single player max (>0) and skip lower => eject that player.
 		if skip_votes > max_player_votes {
+			rr_last_vote_result_time = get_time();
+			rr_last_vote_ejected_player_id = 0;
 			for i: 0..players.elements.count-1 {
 				players.elements[i]->Notify("Vote skipped. No one was ejected.");
 			}
 		} else if skip_votes == max_player_votes && max_player_votes > 0 {
+			rr_last_vote_result_time = get_time();
+			rr_last_vote_ejected_player_id = 0;
 			for i: 0..players.elements.count-1 {
 				players.elements[i]->Notify("It's a tie! No one was ejected.");
 			}
 		} else if max_player_votes <= 0 {
+			rr_last_vote_result_time = get_time();
+			rr_last_vote_ejected_player_id = 0;
 			for i: 0..players.elements.count-1 {
 				players.elements[i]->Notify("No votes were cast. No one was ejected.");
 			}
 		} else if max_player_count > 1 || max_player == null {
+			rr_last_vote_result_time = get_time();
+			rr_last_vote_ejected_player_id = 0;
 			for i: 0..players.elements.count-1 {
 				players.elements[i]->Notify("It's a tie! No one was ejected.");
 			}
@@ -1664,13 +1744,24 @@ end_voting :: proc() {
 			rr_register_player_death(max_player.entity.id);
 			on_player_go_dead(max_player);
 
+			rr_last_vote_result_time = get_time();
+			rr_last_vote_ejected_player_id = max_player.entity.id;
+
 			ejected_message := format_string("% has been ejected!", .{max_player.entity->get_name()});
 			for i: 0..players.elements.count-1 {
 				players.elements[i]->Notify(ejected_message);
 			}
 		}
 	}
-	
+
+	// Note: The rest of voting cleanup + transition back to INGAME happens in finalize_voting()
+	// after the brief results reveal window.
+}
+
+finalize_voting :: proc() {
+	// Server-authoritative.
+	if !Game.is_server() return;
+
 	// Reset votes
 	for i: 0..players.elements.count-1 {
 		players.elements[i].voted_for = null;
@@ -1684,6 +1775,8 @@ end_voting :: proc() {
 
 	game_state = Game_State.INGAME;
 	voting_start_time = 0.0;
+	rr_vote_results_active = false;
+	rr_vote_results_end_time = 0.0;
 	// Next meeting should only show deaths that occur after this one ends.
 	deaths_since_last_meeting = List(u64).{};
 	meeting_initiator_id = 0;

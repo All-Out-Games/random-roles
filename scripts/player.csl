@@ -21,6 +21,14 @@ Player :: class : Player_Base {
 
 	// Local UI state
 	show_minimap: bool;
+
+	// --- Ghost QoL ---
+	// Local-only camera zoom so dead players can see more of the map.
+	ghost_camera_zoom_active: bool;
+	ghost_camera_original_size: float;
+	// Server-side speed override applied while dead (spectator).
+	ghost_speed_override_active: bool;
+	ghost_speed_original_movement_speed: float;
 	
 	// Prankster progress (server-driven, shown locally via tasks UI)
 	prankster_prank_count: int;
@@ -114,8 +122,12 @@ Player :: class : Player_Base {
 	// Global interact gate (called before interactable can_use).
 	ao_can_use_interactable :: proc(using this: Player, interactable: Interactable) -> bool {
 		if pyro_on_fire return false;
-		// Basic sanity: dead/passive can't use interactables.
-		if player_state != Player_State.ALIVE return false;
+		// Basic sanity: passive players can't use interactables.
+		if player_state == Player_State.PASSIVE return false;
+		// Ghost tasks: dead civilians are allowed to interact (Task_Interactable.can_use does the task gating).
+		if player_state != Player_State.ALIVE {
+			return player_state == Player_State.DEAD && player_type == Player_Type.CIVILIAN && !werewolf_infected && !is_temporarily_resurrected;
+		}
 		return true;
 	}
 
@@ -131,9 +143,10 @@ Player :: class : Player_Base {
 
         should_check_tasks :=
             game_state == Game_State.INGAME &&
-            this.player_state == Player_State.ALIVE &&
             this.player_type == Player_Type.CIVILIAN &&
-			!this.werewolf_infected;
+			!this.werewolf_infected &&
+			!this.is_temporarily_resurrected &&
+			(this.player_state == Player_State.ALIVE || this.player_state == Player_State.DEAD);
 
         has_task_in_progress := false;
         if should_check_tasks {
@@ -256,6 +269,35 @@ Player :: class : Player_Base {
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
+			// Ghost QoL: zoom the local dead player's camera out a bit so they can
+			// see more of the map while spectating.
+			//
+			// Important:
+			// - Only the local player has a camera.
+			// - Avoid fighting win cinematics (handled by the early return below).
+			if this->is_local() {
+				in_cinematic :=
+					game_state == Game_State.ANIM_JESTER_WIN ||
+					game_state == Game_State.ANIM_PYRO_WIN;
+				should_ghost_zoom :=
+					!in_cinematic &&
+					this.player_state == Player_State.DEAD &&
+					(game_state == Game_State.INGAME || game_state == Game_State.VOTING);
+
+				if should_ghost_zoom {
+					if !ghost_camera_zoom_active {
+						ghost_camera_original_size = this.camera.size;
+						ghost_camera_zoom_active = true;
+					}
+					this.camera.size = GHOST_CAMERA_ZOOMED_OUT_SIZE;
+				} else {
+					if ghost_camera_zoom_active {
+						this.camera.size = ghost_camera_original_size;
+						ghost_camera_zoom_active = false;
+					}
+				}
+			}
+
 			// If we were overriding the camera for a win cinematic and it ended,
 			// restore the normal follow behavior.
 			if jester_win_camera_override_active && game_state != Game_State.ANIM_JESTER_WIN && game_state != Game_State.ANIM_PYRO_WIN {
@@ -375,8 +417,6 @@ Player :: class : Player_Base {
 						draw_ability_button(this, Pyromaniac_World_Fire_Ability, abilityIndex);
 						abilityIndex += 1;
 					}
-
-                    draw_ability_button(this, Report_Ability, abilityIndex);
                 }
             } else if game_state == Game_State.LOBBY {
                 // Lobby-only UI must be driven from a player update.
@@ -1233,7 +1273,8 @@ Task_Interactable :: class : Component {
 			return false;
 		}
 
-        can_use_base := player.player_state == Player_State.ALIVE && player.player_type == Player_Type.CIVILIAN;
+		can_do_tasks := player.player_state == Player_State.ALIVE || player.player_state == Player_State.DEAD;
+        can_use_base := can_do_tasks && player.player_type == Player_Type.CIVILIAN;
         if !can_use_base {
             return false;
         }
@@ -1265,6 +1306,45 @@ Call_Meeting_Interactable :: class : Component {
     can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
         return player.player_state == Player_State.ALIVE;
     }
+}
+
+// Spawned on corpse entities so reporting is an in-world interaction, not an ability.
+Report_Corpse_Interactable :: class : Interactable {
+	ao_start :: method() {
+		this->set_listener(this);
+		this->set_text("Report");
+		this->set_hold_text("Reporting...");
+		// Match the old report ability's feel (range ~5m, but prompt shouldn't be huge).
+		radius = 3.0;
+		prompt_offset = v2.{0, 1.0};
+		required_hold_time = 0.0;
+		priority = 50;
+	}
+
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if game_state != Game_State.INGAME return false;
+		// Only alive players can report bodies.
+		if player.player_state != Player_State.ALIVE return false;
+
+		corpse := entity->get_component(Corpse);
+		if corpse == null return false;
+		if corpse.has_been_reported return false;
+		return true;
+	}
+
+	on_interact :: method(player: Player) {
+		corpse := entity->get_component(Corpse);
+		if corpse != null {
+			corpse.has_been_reported = true;
+		}
+		// Once a body has been reported, delete it.
+		if #alive(entity) {
+			entity->destroy();
+		}
+		// Start the meeting.
+		start_meeting(true, player);
+	}
 }
 
 destroy_corpses_for_player :: proc(player_entity_id: u64) {

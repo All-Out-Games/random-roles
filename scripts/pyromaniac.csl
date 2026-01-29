@@ -18,6 +18,8 @@ PYRO_ON_FIRE_SPEED_MULTIPLIER :: 1.5;
 PYRO_LIGHT_CORPSE_RANGE :: 4.5;
 PYRO_LIGHT_CORPSE_COOLDOWN_SECONDS :: 120.0;
 PYRO_CORPSE_BURN_ANIM_SECONDS :: 2.2;
+// 008BED_fire "004RAND/corpse_extinguish" has keyframes out to ~0.9333s.
+PYRO_CORPSE_EXTINGUISH_ANIM_SECONDS :: 1.0;
 
 PYRO_WORLD_FIRE_OVERLAY_LAYER :: 9000;
 PYRO_WORLD_FIRE_OVERLAY_SECONDS :: 5.0;
@@ -174,19 +176,79 @@ rr_pyro_find_burnable_corpse :: proc(pyro: Player) -> Corpse {
 	return finder.closest;
 }
 
-// Visual driver for burning corpses
+rr_pyro_start_burning_corpse_visual :: proc(corpse_entity: Entity) -> Entity {
+	if corpse_entity == null || !#alive(corpse_entity) return null;
+
+	fire_entity := Scene.create_entity();
+	fire_entity->set_local_position(corpse_entity.world_position + v2.{PYRO_FIRE_ATTACH_OFFSET_X, PYRO_FIRE_ATTACH_OFFSET_Y});
+	fire_entity->set_local_rotation(0.0);
+	fire_entity->set_local_scale(v2.{1.0, 1.0});
+
+	spine := fire_entity->add_component(Spine_Animator);
+	spine->awaken();
+
+	// Render above the corpse (match corpse sort order if possible).
+	corpse_spine: Spine_Animator = null;
+	corpse_spine = corpse_entity->get_component(Spine_Animator);
+	if corpse_spine != null {
+		spine.layer = corpse_spine.layer + PYRO_FIRE_ABOVE_PROP_LAYER_BUMP;
+		spine.depth_offset = corpse_spine.depth_offset + PYRO_FIRE_ABOVE_PROP_DEPTH_BUMP;
+	} else {
+		spine.layer = PYRO_FIRE_FALLBACK_LAYER;
+		spine.depth_offset = PYRO_FIRE_FALLBACK_DEPTH_OFFSET;
+	}
+
+	spine.instance->set_skeleton(get_asset(Spine_Asset, "anims/torch_fire/008BED_fire.spine"));
+	spine.instance->set_skin("fire");
+	spine.instance->set_animation("004RAND/bigfire_idleloop", true, 0);
+
+	seq := fire_entity->add_component(RR_Pyro_Burning_Corpse);
+	seq.corpse_entity = corpse_entity;
+	seq.start_time = get_time();
+	seq.did_extinguish = false;
+
+	return fire_entity;
+}
+
+// Visual driver for burning corpses (runs on spawned 008BED_fire entity).
 RR_Pyro_Burning_Corpse :: class : Component {
+	corpse_entity: Entity;
 	start_time: float;
+	did_extinguish: bool;
 
 	ao_start :: proc(using this: RR_Pyro_Burning_Corpse) {
-		start_time = get_time();
+		// Fallback if someone adds the component without initializing it.
+		if start_time <= 0.0 {
+			start_time = get_time();
+		}
+	}
 
+	ao_update :: proc(using this: RR_Pyro_Burning_Corpse, dt: float) {
+		// Follow the corpse while it exists.
+		if !did_extinguish && corpse_entity != null && #alive(corpse_entity) {
+			entity->set_local_position(corpse_entity.world_position + v2.{PYRO_FIRE_ATTACH_OFFSET_X, PYRO_FIRE_ATTACH_OFFSET_Y});
+		}
+
+		if did_extinguish return;
+		if (get_time() - start_time) < PYRO_CORPSE_BURN_ANIM_SECONDS return;
+
+		// Switch the fire to corpse extinguish.
 		spine := entity->get_component(Spine_Animator);
 		if spine != null {
 			spine->awaken();
 			if spine.instance != null {
-				spine.instance->set_animation("004RAND_pyromaniac/Die_On_Fire", false, 0);
+				spine.instance->set_animation("004RAND/corpse_extinguish", false, 0);
 			}
+		}
+
+		did_extinguish = true;
+
+		// Server-authoritative destruction (replicates to clients).
+		if Game.is_server() {
+			if corpse_entity != null && #alive(corpse_entity) {
+				corpse_entity->destroy();
+			}
+			entity->queue_for_destruction(PYRO_CORPSE_EXTINGUISH_ANIM_SECONDS);
 		}
 	}
 }

@@ -381,6 +381,16 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
+		// If pressed while locked, explain unlock requirement.
+		if params.clicked && !params.can_use {
+			if player != null && player.player_role == Player_Role.WEREWOLF && player.werewolf_kills < WEREWOLF_INFECT_UNLOCK_KILLS {
+				player->Notify(format_string("Infect locked: get %/% kills as Werewolf to unlock.", .{
+					min(player.werewolf_kills, WEREWOLF_INFECT_UNLOCK_KILLS),
+					WEREWOLF_INFECT_UNLOCK_KILLS
+				}));
+			}
+		}
+
 		if params.clicked && params.can_use {
 			target := rr_werewolf_find_melee_target(player, WEREWOLF_INFECT_RANGE, true);
 			if target != null {
@@ -435,6 +445,16 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
+
+		// If pressed while locked, explain unlock requirement.
+		if params.clicked && !params.can_use {
+			if player != null && player.player_role == Player_Role.WEREWOLF && player.werewolf_kills < WEREWOLF_CLAW_UNLOCK_KILLS {
+				player->Notify(format_string("Claw locked: get %/% kills as Werewolf to unlock.", .{
+					min(player.werewolf_kills, WEREWOLF_CLAW_UNLOCK_KILLS),
+					WEREWOLF_CLAW_UNLOCK_KILLS
+				}));
+			}
+		}
 
 		activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
 		if params.can_use && activation.activate {
@@ -791,6 +811,16 @@ Hitman_Mine_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// If pressed while locked, explain unlock requirement.
+		if params.clicked && !params.can_use {
+			if player != null && player.player_role == Player_Role.HITMAN && player.hitman_kills < HITMAN_MINE_UNLOCK_KILLS {
+				player->Notify(format_string("Mine locked: get %/% kills as Hitman to unlock.", .{
+					min(player.hitman_kills, HITMAN_MINE_UNLOCK_KILLS),
+					HITMAN_MINE_UNLOCK_KILLS
+				}));
+			}
+		}
+
 		// Click-to-target: enter targeting mode, then click to place at cursor.
 		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
 		targeting := targeted.targeting;
@@ -934,6 +964,16 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
+
+		// If pressed while locked, explain unlock requirement.
+		if params.clicked && !params.can_use {
+			if player != null && player.player_role == Player_Role.HITMAN && player.hitman_kills < HITMAN_SNIPER_UNLOCK_KILLS {
+				player->Notify(format_string("Sniper locked: get %/% kills as Hitman to unlock.", .{
+					min(player.hitman_kills, HITMAN_SNIPER_UNLOCK_KILLS),
+					HITMAN_SNIPER_UNLOCK_KILLS
+				}));
+			}
+		}
 
 		// Click-to-target: click ability to enter aim mode, then click to fire (right-click to cancel).
 		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
@@ -1296,48 +1336,6 @@ DNA_Match_Ability :: class : Ability_Base {
 	}
 }
 
-Report_Ability :: class : Ability_Base {
-    NAME :: "Report";
-
-    on_init :: proc(instance: Report_Ability) {
-        instance.icon = get_asset(Texture_Asset, "sprites/icons/report_ability.png");
-    }
-
-    get_closest_corpse :: proc(instance: Report_Ability, player: Player) -> Corpse {
-        finder := make_finder(Corpse, player.entity.world_position, 5.0);
-        foreach corpse: component_iterator(Corpse) {
-            if corpse.has_been_reported {
-                continue;
-            }
-            finder->check(corpse, corpse.entity.world_position);
-        }
-        return finder.closest;
-    }
-
-    can_use :: proc(instance: Report_Ability) -> bool {
-        return instance->get_closest_corpse(instance.player) != null;
-    }
-
-    on_update :: proc(instance: Report_Ability, params: ref Ability_Update_Params) {
-        if params.clicked && params.can_use {
-            closest_corpse := instance->get_closest_corpse(instance.player);
-            if closest_corpse != null {
-                closest_corpse.has_been_reported = true;
-                // Once a body has been reported, delete it.
-                if #alive(closest_corpse.entity) {
-                    closest_corpse.entity->destroy();
-                }
-                // Start the meeting.
-                start_meeting(true, instance.player);
-            }
-        }
-    }
-
-	on_draw_button :: proc(instance: Report_Ability, rect: Rect) {
-		draw_ability_name_label(rect, Report_Ability.NAME);
-	}
-}
-
 Vote_Ability :: class : Ability_Base {
     NAME :: "Vote";
     voting_ui_open: bool;
@@ -1363,6 +1361,7 @@ Vote_Ability :: class : Ability_Base {
             voting_ui_open = false;
             show_recent_deaths = false;
             last_voting_start_time_seen = 0.0;
+			recent_deaths_open_time = 0.0;
             return;
         }
 
@@ -1373,6 +1372,15 @@ Vote_Ability :: class : Ability_Base {
             show_recent_deaths = true;
 			recent_deaths_open_time = get_time();
         }
+
+		// Voting has ended, but we keep the game in VOTING briefly to reveal the result.
+		// If the vote UI is closed, the existing Notifier popups handle the message.
+		if rr_vote_results_active {
+			if voting_ui_open && player->is_local_or_server() {
+				draw_vote_result_ui(this, player);
+			}
+			return;
+		}
 
         // Only allow closing after the player has voted or skipped.
         if params.clicked && params.can_use && player.has_voted {
@@ -1391,6 +1399,64 @@ Vote_Ability :: class : Ability_Base {
             }
         }
     }
+
+	draw_vote_result_ui :: proc(instance: Vote_Ability, local_player: Player) {
+		screen := UI.get_safe_screen_rect();
+		white := get_asset(Texture_Asset, "$AO/white.png");
+
+		UI.quad(screen, white, v4.{0, 0, 0, 0.82});
+
+		panel_rect := screen->center_rect()->grow(240, 520, 240, 520);
+		UI.quad(panel_rect, white, v4.{0.05, 0.06, 0.08, 0.92});
+
+		content := panel_rect->inset(26);
+		header := content->cut_top(80);
+		footer := content->cut_bottom(80);
+		body := content;
+
+		title_ts := UI.default_text_settings();
+		title_ts.size = 44;
+		title_ts.color = v4.{0.95, 0.97, 1.0, 1};
+		title_ts.halign = .CENTER;
+		title_ts.valign = .CENTER;
+		title_ts.do_outline = true;
+		title_ts.outline_thickness = 3;
+		title_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(header, title_ts, "VOTE RESULT");
+
+		message := "No one was ejected.";
+		if rr_last_vote_ejected_player_id != 0 {
+			p := get_player_by_entity_id(rr_last_vote_ejected_player_id);
+			name := "Someone";
+			if p != null {
+				name = p.entity->get_name();
+			}
+			message = format_string("% has been ejected!", .{name});
+		}
+
+		msg_ts := UI.default_text_settings();
+		msg_ts.size = 34;
+		msg_ts.color = v4.{1, 1, 1, 1};
+		msg_ts.halign = .CENTER;
+		msg_ts.valign = .CENTER;
+		msg_ts.word_wrap = true;
+		msg_ts.do_outline = true;
+		msg_ts.outline_thickness = 2;
+		msg_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(body, msg_ts, message);
+
+		// Optional close button (dismisses the UI while waiting for the results window to end).
+		bs := UI.default_button_settings();
+		bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png"); // grey
+		bs.press_scaling = 0.96;
+		ts := UI.default_text_settings();
+		ts.size = 24;
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		if UI.button(footer->center_rect()->grow(18, 170, 18, 170), bs, ts, "CLOSE").clicked {
+			instance.voting_ui_open = false;
+		}
+	}
 
     draw_recent_deaths_ui :: proc(instance: Vote_Ability, local_player: Player) {
         screen := UI.get_safe_screen_rect();
@@ -1653,57 +1719,80 @@ Vote_Ability :: class : Ability_Base {
             row_ts.do_drop_shadow = true;
             row_ts.drop_shadow_offset = v2.{1, -1};
             row_ts.drop_shadow_color = v4.{0, 0, 0, 1};
+			// Once the local player has cast their ballot, make all vote choices
+			// visually + interactively disabled (so it's clear votes are locked).
+			row_is_enabled := !local_player.has_voted && target_player != local_player;
 
-            btn := UI.begin_button(row_rect, row_bs, row_ts, ""); {
-                defer UI.end_button();
+			btn_clicked := false;
+			draw_rect := row_rect;
 
-                // Selected highlight
-                if local_player.voted_for == target_player {
-                    UI.quad(btn.rect, hightlight, v4.{c_accent.x, c_accent.y, c_accent.z, 0.18});
-                }
-
-                inner := btn.rect->inset(16, 14, 16, 14);
-                right := inner->cut_right(140);
-
-                // Name
-                name_rect := inner;
-				// Megaphone for meeting initiator (report/call-meeting). Not shown for fake meetings.
-				if meeting_initiator_id != 0 && target_player.entity.id == meeting_initiator_id {
-					meg := get_asset(Texture_Asset, "sprites/icons/call_meeting_icon.png");
-					meg_rect := name_rect->cut_left(34)->inset(2);
-					UI.quad(meg_rect->fit_aspect(meg->get_aspect()), meg, v4.{1, 1, 1, 1});
-					name_rect->cut_left(8);
+			if row_is_enabled {
+				btn := UI.begin_button(row_rect, row_bs, row_ts, ""); {
+					defer UI.end_button();
+					btn_clicked = btn.clicked;
+					draw_rect = btn.rect;
 				}
-                UI.text(name_rect, row_ts, target_player.entity->get_name());
+			} else {
+				// Disabled look (dim row) + no interaction.
+				UI.quad(row_rect, row_sprite, v4.{1, 1, 1, 0.55});
+			}
 
-                // Vote count pill
-                pill := right->inset(6, 6, 6, 6);
-                UI.quad(pill->grow_unscaled(2), white, v4.{0, 0, 0, 0.65});
-                UI.quad(pill, white, v4.{0.08, 0.1, 0.14, 0.75});
+			// Selected highlight
+			if local_player.voted_for == target_player {
+				UI.quad(draw_rect, hightlight, v4.{c_accent.x, c_accent.y, c_accent.z, 0.18});
+			}
 
-                vote_ts := UI.default_text_settings();
-                vote_ts.size = 22;
-                vote_ts.color = v4.{1, 0.88, 0.25, 1};
-                vote_ts.halign = .CENTER;
-                vote_ts.valign = .CENTER;
-                vote_ts.do_outline = true;
-                vote_ts.outline_thickness = 2;
-                vote_ts.outline_color = v4.{0, 0, 0, 1};
-                UI.text(pill, vote_ts, format_string("Votes: %", .{target_player.votes_received}));
+			inner := draw_rect->inset(16, 14, 16, 14);
+			right := inner->cut_right(140);
 
-                // Checkbox icon at far right
-                icon_rect := btn.rect->cut_right(44)->inset(10);
-                if local_player.voted_for == target_player {
-                    UI.quad(icon_rect->fit_aspect(check_on->get_aspect()), check_on, v4.{1, 1, 1, 1});
-                } else {
-                    UI.quad(icon_rect->fit_aspect(check_off->get_aspect()), check_off, v4.{1, 1, 1, 1});
-                }
-            }
+			// Name
+			name_rect := inner;
+			// Megaphone for meeting initiator (report/call-meeting). Not shown for fake meetings.
+			if meeting_initiator_id != 0 && target_player.entity.id == meeting_initiator_id {
+				meg := get_asset(Texture_Asset, "sprites/icons/call_meeting_icon.png");
+				meg_rect := name_rect->cut_left(34)->inset(2);
+				UI.quad(meg_rect->fit_aspect(meg->get_aspect()), meg, v4.{1, 1, 1, 1});
+				name_rect->cut_left(8);
+			}
+			if !row_is_enabled {
+				row_ts.color = v4.{c_text.x, c_text.y, c_text.z, 0.7};
+			}
+			UI.text(name_rect, row_ts, target_player.entity->get_name());
 
-            // Click handling (only allow voting for others, and only if you haven't voted)
-            if btn.clicked && target_player != local_player && !local_player.has_voted {
-                cast_vote(local_player, target_player);
-            }
+			// Vote count pill
+			pill := right->inset(6, 6, 6, 6);
+			UI.quad(pill->grow_unscaled(2), white, v4.{0, 0, 0, 0.65});
+			UI.quad(pill, white, v4.{0.08, 0.1, 0.14, 0.75});
+
+			vote_ts := UI.default_text_settings();
+			vote_ts.size = 22;
+			vote_ts.color = v4.{1, 0.88, 0.25, 1};
+			vote_ts.halign = .CENTER;
+			vote_ts.valign = .CENTER;
+			vote_ts.do_outline = true;
+			vote_ts.outline_thickness = 2;
+			vote_ts.outline_color = v4.{0, 0, 0, 1};
+			if !row_is_enabled {
+				vote_ts.color.w = 0.7;
+			}
+			UI.text(pill, vote_ts, format_string("Votes: %", .{target_player.votes_received}));
+
+			// Checkbox icon at far right
+			icon_rect := draw_rect->cut_right(44)->inset(10);
+			icon_alpha := 1.0;
+			if !row_is_enabled {
+				icon_alpha = 0.7;
+			}
+			if local_player.voted_for == target_player {
+				UI.quad(icon_rect->fit_aspect(check_on->get_aspect()), check_on, v4.{1, 1, 1, icon_alpha});
+			} else {
+				UI.quad(icon_rect->fit_aspect(check_off->get_aspect()), check_off, v4.{1, 1, 1, icon_alpha});
+			}
+
+			// Click handling (only allow voting for others, and only if you haven't voted)
+			if btn_clicked && row_is_enabled {
+				cast_vote(local_player, target_player);
+			}
         }
 
         // Footer: cast status
@@ -1756,11 +1845,16 @@ Vote_Ability :: class : Ability_Base {
             UI.quad(skip_rect, hightlight, v4.{c_accent.x, c_accent.y, c_accent.z, 0.18});
         }
 
-        UI.push_disabled(local_player.has_voted);
-        if UI.button(skip_rect, skip_bs, skip_ts, "SKIP").clicked {
-            cast_skip_vote(local_player);
-        }
-        UI.pop_disabled();
+		// Once voted, the skip button should be obviously disabled.
+		if local_player.has_voted {
+			UI.push_color_multiplier(v4.{1, 1, 1, 0.55});
+			defer UI.pop_color_multiplier();
+		}
+		UI.push_disabled(local_player.has_voted);
+		if UI.button(skip_rect, skip_bs, skip_ts, "SKIP").clicked {
+			cast_skip_vote(local_player);
+		}
+		UI.pop_disabled();
 
         // Close button (centered)
         close_bs := UI.default_button_settings();
@@ -1952,6 +2046,16 @@ Black_Flag_Ability :: class : Ability_Base {
     }
     
     on_update :: method(params: ref Ability_Update_Params) {
+        // If pressed while locked, explain unlock requirement.
+        if params.clicked && !params.can_use {
+            if player != null && player.player_role == Player_Role.PIRATE && player.pirate_treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
+                player->Notify(format_string("Black Flag locked: get %/% treasure to unlock.", .{
+                    min(player.pirate_treasure, PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST),
+                    PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST
+                }));
+            }
+        }
+
         if params.clicked && params.can_use {
             // Spawn prefab (includes the spine setup already)
             prefab := get_asset(Prefab_Asset, "prefabs/black_flag.prefab");
@@ -2475,6 +2579,16 @@ Powder_Keg_Ability :: class : Ability_Base {
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
+		// If pressed while locked, explain unlock requirement.
+		if params.clicked && !params.can_use {
+			if player != null && player.player_role == Player_Role.PIRATE && player.pirate_treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+				player->Notify(format_string("Powder Keg locked: get %/% treasure to unlock.", .{
+					min(player.pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST),
+					PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST
+				}));
+			}
+		}
+
 		// Drive enter/exit targeting via standard helper.
 		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
 		targeting := targeted.targeting;
@@ -2688,15 +2802,8 @@ Pyromaniac_Light_Corpse_Ability :: class : Ability_Base {
 				if corpse != null && #alive(corpse.entity) {
 					corpse.pyro_has_been_burned = true;
 
-					// Play burn-to-ashes animation on the corpse (corpse uses the merged player rig).
-					// Drive animation via a component so it shows on all clients.
-					burn := corpse.entity->get_component(RR_Pyro_Burning_Corpse);
-					if burn == null {
-						burn = corpse.entity->add_component(RR_Pyro_Burning_Corpse);
-					}
-
-					// Remove after the animation.
-					corpse.entity->queue_for_destruction(PYRO_CORPSE_BURN_ANIM_SECONDS);
+					// Spawn 008BED_fire and drive the burn->extinguish->cleanup sequence.
+					rr_pyro_start_burning_corpse_visual(corpse.entity);
 
 					rr_pyro_register_corpse_burned(player);
 					player->set_trigger("pyro_snap_fingers");
@@ -2732,6 +2839,16 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// If pressed while locked, explain unlock requirement.
+		if params.clicked && !params.can_use {
+			if player != null && player.pyro_world_fire_unlocked_time <= 0.0 {
+				player->Notify(format_string("World Fire locked: burn 1 corpse + light 5 props (Corpse %/1, Props %/5).", .{
+					min(player.pyro_corpses_burned, 1),
+					min(player.pyro_props_ignited, 5)
+				}));
+			}
+		}
+
 		if params.clicked && params.can_use {
 			// Trigger the server-authoritative win cinematic.
 			start_pyro_win_cinematic(player);
@@ -2953,7 +3070,25 @@ Jester_Win_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
-		// Clicking early does nothing; button should be disabled by can_use.
+		// If pressed while locked, explain unlock requirement / timing.
+		if params.clicked && !params.can_use {
+			if player != null {
+				if player.prankster_jester_unlocked_time <= 0.0 {
+					player->Notify(format_string("Jester Win locked: prank %/% and call %/% fake meetings to unlock.", .{
+						min(player.prankster_prank_count, 3),
+						3,
+						min(player.prankster_fake_meetings_called, 1),
+						1
+					}));
+				} else {
+					remaining := (player.prankster_jester_unlocked_time + JESTER_WIN_DELAY_SECONDS) - get_time();
+					if remaining > 0.0 {
+						player->Notify(format_string("Jester Win charging: survive %s more seconds.", .{format_float(remaining, decimals=0)}));
+					}
+				}
+			}
+		}
+
 		if params.clicked && params.can_use {
 			// Start the cinematic; game will end after 5 seconds.
 			start_jester_win_cinematic(player);

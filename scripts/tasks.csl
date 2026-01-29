@@ -179,9 +179,21 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 }
 
 update_tasks :: proc(player: Player) {
-	// Close any in-progress task UI when leaving gameplay (meeting/voting/etc),
-	// or when the player dies.
-	if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE || player.is_temporarily_resurrected {
+	// Close any in-progress task UI when leaving gameplay (meeting/voting/etc).
+	// (Ghost civilians are allowed to keep doing tasks while dead.)
+	if game_state != Game_State.INGAME || player.is_temporarily_resurrected {
+		if player->is_local_or_server() {
+			for i: 0..player.active_tasks.elements.count-1 {
+				task := player.active_tasks.elements[i];
+				if task.started && !task.completed {
+					task->cancel_attempt(player);
+				}
+			}
+		}
+		return;
+	}
+	// Only civilians can do tasks while dead (ghost tasks).
+	if player.player_state != Player_State.ALIVE && player.player_type != Player_Type.CIVILIAN {
 		if player->is_local_or_server() {
 			for i: 0..player.active_tasks.elements.count-1 {
 				task := player.active_tasks.elements[i];
@@ -214,9 +226,9 @@ update_tasks :: proc(player: Player) {
 	}
 }
 
-// Computes the total/remaining tasks for the civilian win condition:
-// only counts tasks for ALIVE civilians (matches `all_civilians_completed_tasks()`).
-rr_get_alive_civilian_task_counts :: proc(total: ref int, remaining: ref int) {
+// Computes the total/remaining tasks for the civilian win condition.
+// Counts tasks for ALL civilians (alive + dead), matching `all_civilians_completed_tasks()`.
+rr_get_civilian_task_counts :: proc(total: ref int, remaining: ref int) {
 	total = 0;
 	remaining = 0;
 
@@ -224,7 +236,7 @@ rr_get_alive_civilian_task_counts :: proc(total: ref int, remaining: ref int) {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
-		if p.player_state != Player_State.ALIVE continue;
+		if p.player_state == Player_State.PASSIVE continue;
 		if p.player_type != Player_Type.CIVILIAN continue;
 
 		for j: 0..p.active_tasks.elements.count-1 {
@@ -332,7 +344,7 @@ rr_cancel_all_task_attempts :: proc(player: Player) {
 }
 
 update_tasks_ui :: proc(player: Player) {
-	// Only show tasks for alive civilians during gameplay
+	// Task UI is drawn during gameplay. Ghost civilians can still complete tasks.
 	if !player->is_local_or_server() {
 		return;
 	}
@@ -343,8 +355,11 @@ update_tasks_ui :: proc(player: Player) {
 		return;
 	}
 	if player.player_state != Player_State.ALIVE {
-		rr_cancel_all_task_attempts(player);
-		return;
+		// Non-civilians can't do tasks while dead.
+		if player.player_type != Player_Type.CIVILIAN {
+			rr_cancel_all_task_attempts(player);
+			return;
+		}
 	}
 	if player.is_temporarily_resurrected {
 		rr_cancel_all_task_attempts(player);
@@ -643,7 +658,7 @@ update_tasks_ui :: proc(player: Player) {
 	// --- Civilian win progress bar (bottom of task UI) ---
 	total_tasks := 0;
 	remaining_tasks := 0;
-	rr_get_alive_civilian_task_counts(ref total_tasks, ref remaining_tasks);
+	rr_get_civilian_task_counts(ref total_tasks, ref remaining_tasks);
 
 	completed_tasks := total_tasks - remaining_tasks;
 	if completed_tasks < 0 { completed_tasks = 0; }
@@ -3012,23 +3027,21 @@ Task_Catching_Butterflies :: class : Task_Base {
 		h := window_rect->height();
 
 		// --- Net input (grab handle) ---
-		// Make this fairly generous so it's easy to grab on mobile / with fat fingers,
-		// and so it matches the visible handle even if the pivot isn't pixel-perfect.
-		grab_size := h * 0.2;
-		// net_handle_pos is bottom-right, so build a rect whose bottom-right is at that point.
-		handle_rect := window_rect->bottom_left_rect()
-			->offset_unscaled(net_handle_pos.x - window_rect.min.x, net_handle_pos.y - window_rect.min.y)
-			->grow_unscaled(grab_size/2.0, 0.0, 0.0, grab_size/2.0);
-
-		UI.push_id("catching_butterflies_net_handle");
+		// QoL: clicking anywhere inside the task window picks up the handle and
+		// moves it to your hand (no need to click the tiny handle hotspot).
+		UI.push_id("catching_butterflies_net_grab_area");
 		defer UI.pop_id();
-		interact := UI.button(handle_rect, .{}, .{}, "");
+		interact := UI.button(window_rect, .{}, .{}, "");
 
+		// On click, snap the handle to the pointer so it feels like you grabbed it.
 		if interact.clicked {
-			net_grab_offset = net_handle_pos - interact.mouse_position;
+			net_grab_offset = v2.{0.0, 0.0};
+			// Reset velocity baseline so this "teleport" doesn't create a giant fling.
+			net_handle_prev_pos = interact.mouse_position;
+			net_angle_vel = 0.0;
 		}
 
-		if interact.active {
+		if interact.active || interact.clicked {
 			// Clamp handle to a reasonable region inside the window (left-ish).
 			// Since this is the bottom-right anchor, keep it away from the far-left edge
 			// so the net (which extends left) doesn't go off-screen too easily.
