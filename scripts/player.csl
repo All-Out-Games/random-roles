@@ -67,6 +67,12 @@ Player :: class : Player_Base {
 	// Last-kill style used for corpse death animation selection.
 	hitman_last_kill_style: Hitman_Kill_Style;
 
+	// --- Pirate ---
+	// Treasure used to unlock pirate abilities (Black Flag + Powder Keg).
+	pirate_treasure: int;
+	pirate_black_flag_unlocked: bool;
+	pirate_powder_keg_unlocked: bool;
+
 	// --- Werewolf (Traitor role) ---
 	// Server-driven transformation cycle; UI reads these fields locally.
 	werewolf_kills: int;              // unlocks for werewolf abilities
@@ -209,6 +215,8 @@ Player :: class : Player_Base {
 		rr_portal_maker_cleanup_for_player(this);
         // Player entity is being destroyed (typically disconnect). Clean up any corpses they spawned.
         destroy_corpses_for_player(this.entity.id);
+		// Clean up any pirate dig-spots they spawned.
+		destroy_pirate_dig_spots_for_player(this.entity.id);
         unordered_remove_by_value(ref players, this);
     }
 
@@ -223,6 +231,7 @@ Player :: class : Player_Base {
 			rr_draw_power_outage_overlay_if_needed(this);
             update_tasks_ui(this);
 			update_minimap_ui(this);
+			rr_draw_pirate_treasure_guidance_if_needed(this);
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			draw_player_role_hud(this);
 			if game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
@@ -302,6 +311,8 @@ Player :: class : Player_Base {
                             draw_ability_button(this, Black_Flag_Ability, abilityIndex);
                             abilityIndex += 1;
 							draw_ability_button(this, Powder_Keg_Ability, abilityIndex);
+							abilityIndex += 1;
+							draw_ability_button(this, Pirate_Treasure_Map_Ability, abilityIndex);
 							abilityIndex += 1;
                         }
 
@@ -619,6 +630,75 @@ draw_player_role_hud :: proc(player: Player) {
 		count_ts.outline_thickness = 3;
 		count_ts.outline_color = v4.{0, 0, 0, 1};
 		UI.text(icon_rect, count_ts, format_string("%", .{player.coroner_dna_vials.count}));
+	}
+
+	// Pirate treasure + unlock progress (local-only).
+	if player.player_role == Player_Role.PIRATE && player->is_local() {
+		UI.push_layer(1600);
+		defer UI.pop_layer();
+
+		// Treasure count icon on the right.
+		icon := get_asset(Texture_Asset, "sprites/icons/pirate/dig_for_treasure.png");
+		anchor := screen->right_center_rect()->offset(-70.0, -90.0);
+		icon_rect := anchor->grow(60.0); // big icon
+		if icon != null {
+			UI.quad(icon_rect->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
+		}
+
+		count_ts := UI.default_text_settings();
+		count_ts.size = 44;
+		count_ts.color = v4.{1, 1, 1, 1};
+		count_ts.halign = .CENTER;
+		count_ts.valign = .CENTER;
+		count_ts.do_outline = true;
+		count_ts.outline_thickness = 3;
+		count_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(icon_rect, count_ts, format_string("%", .{player.pirate_treasure}));
+
+		// Left-side panel with unlock progress (same layout as other role HUD panels).
+		safe := UI.get_safe_screen_rect();
+		bg2 := get_asset(Texture_Asset, "$AO/white.png");
+
+		panel := safe->top_left_rect()->grow(40, 360, 140, 0)->offset(20, -110);
+		UI.quad(panel, bg2, v4.{0.0, 0.0, 0.0, 0.55});
+		UI.quad(panel->inset(2), bg2, v4.{0.10, 0.08, 0.03, 0.55});
+
+		content := panel->inset(14);
+		header := content->cut_top(34);
+		body := content;
+
+		h_ts := UI.default_text_settings();
+		h_ts.size = 26;
+		h_ts.color = v4.{1.0, 0.85, 0.25, 1.0};
+		h_ts.halign = .LEFT;
+		h_ts.valign = .CENTER;
+		h_ts.do_outline = true;
+		h_ts.outline_thickness = 2;
+		h_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(header, h_ts, "TREASURE");
+
+		line_ts := UI.default_text_settings();
+		line_ts.size = 22;
+		line_ts.color = v4.{0.9, 0.92, 0.98, 1};
+		line_ts.halign = .LEFT;
+		line_ts.valign = .CENTER;
+		line_ts.do_drop_shadow = true;
+		line_ts.drop_shadow_offset = v2.{1, -1};
+		line_ts.drop_shadow_color = v4.{0, 0, 0, 1};
+
+		UI.text(body->cut_top(26), line_ts, format_string("Treasure: %", .{player.pirate_treasure}));
+
+		if player.pirate_treasure >= PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
+			UI.text(body->cut_top(26), line_ts, "Black Flag: UNLOCKED");
+		} else {
+			UI.text(body->cut_top(26), line_ts, format_string("Black Flag: %/%", .{min(player.pirate_treasure, PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST), PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST}));
+		}
+
+		if player.pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+			UI.text(body->cut_top(26), line_ts, "Powder Keg: UNLOCKED");
+		} else {
+			UI.text(body->cut_top(26), line_ts, format_string("Powder Keg: %/%", .{min(player.pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST), PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
+		}
 	}
 
 	// Werewolf transformation timer: left side (local-only).
@@ -1025,6 +1105,13 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 		layer->create_global_transition(pyro_end_game_state, false)->create_trigger_condition(pyro_end_game_var);
 		layer->create_transition(pyro_end_game_state, idle_state, true);
 
+		// --- Pirate ---
+		// Dig for treasure (one-shot) -> back to normal Idle.
+		pirate_dig_for_treasure_var := sm->create_variable("pirate_dig_for_treasure", State_Machine_Variable.Kind.TRIGGER);
+		pirate_dig_for_treasure_state := layer->create_state("004RAND_pirate/dig_for_treasure", false, 2.0);
+		layer->create_global_transition(pirate_dig_for_treasure_state, false)->create_trigger_condition(pirate_dig_for_treasure_var);
+		layer->create_transition(pirate_dig_for_treasure_state, idle_state, true);
+
 		sm_inited = true;
         log_info("State machine initialized");
 	}
@@ -1205,6 +1292,8 @@ Corpse :: class : Component {
 	has_dna_been_sampled: bool;
 	// Pyromaniac can only burn once per corpse.
 	pyro_has_been_burned: bool;
+	// Pirate can only loot one treasure map per corpse.
+	pirate_map_taken: bool;
 }
 
 draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
@@ -1311,6 +1400,26 @@ update_minimap_ui :: proc(player: Player) {
 		UI.quad(dot, core_globals.white_sprite, v4.{0.2, 0.9, 0.3, 0.95});
 	}
 
+	// Pirate treasure dig spots (local-only).
+	if player->is_local() && player.player_role == Player_Role.PIRATE {
+		icon := get_asset(Texture_Asset, "sprites/icons/pirate/dig_for_treasure.png");
+		if icon != null {
+			size := map_rect->height() * 0.030;
+			if size < 14.0 { size = 14.0; }
+			if size > 42.0 { size = 42.0; }
+
+			foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+				if spot == null continue;
+				if spot.owner_player_entity_id != player.entity.id continue;
+				if spot.is_dug continue;
+
+				p_ui := rr_minimap_world_to_ui(map_rect, spot.entity.world_position);
+				r := Rect{p_ui, p_ui}->grow_unscaled(size, size, size, size);
+				UI.quad(r->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
+			}
+		}
+	}
+
 	// --- Sabotage buttons (traitors only): to the right of the minimap ---
 	power_clicked := false;
 	comms_clicked := false;
@@ -1336,6 +1445,69 @@ update_minimap_ui :: proc(player: Player) {
 
 	if draw_minimap_close_button(map_rect) {
 		player.show_minimap = false;
+	}
+}
+
+// --- Pirate treasure guidance (local-only arrows + cleanup) ---
+
+rr_find_nearest_pirate_dig_spot_pos :: proc(player: Player) -> v2, bool {
+	if player == null return {}, false;
+
+	best_dist_sq := 0.0;
+	best_pos: v2;
+	found := false;
+
+	foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+		if spot == null continue;
+		if spot.owner_player_entity_id != player.entity.id continue;
+		if spot.is_dug continue;
+
+		d := spot.entity.world_position - player.entity.world_position;
+		dist_sq := length_squared(d);
+		if !found || dist_sq < best_dist_sq {
+			best_dist_sq = dist_sq;
+			best_pos = spot.entity.world_position;
+			found = true;
+		}
+	}
+
+	return best_pos, found;
+}
+
+rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
+	if player == null return;
+	if !player->is_local() return;
+	if game_state != Game_State.INGAME return;
+	if player.player_state != Player_State.ALIVE return;
+	if player.player_role != Player_Role.PIRATE return;
+
+	target_pos, ok := rr_find_nearest_pirate_dig_spot_pos(player);
+	if !ok return;
+
+	tutorial_arrow_options := Tutorial_Arrow.default_options();
+	tutorial_arrow_options.far = true;
+	tutorial_arrow_options.near = true;
+	tutorial_arrow_options.bob_scale = 0.5;
+	tutorial_arrow_options.bob_bias = 1.5;
+
+	dist := length(player.entity.world_position - target_pos);
+	tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
+	Tutorial_Arrow.draw(player, target_pos, tutorial_arrow_options);
+}
+
+destroy_pirate_dig_spots_for_player :: proc(player_entity_id: u64) {
+	to_destroy: List(Entity);
+	foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+		if spot == null continue;
+		if spot.owner_player_entity_id != player_entity_id continue;
+		append(ref to_destroy, spot.entity);
+	}
+
+	for i: 0..to_destroy.elements.count-1 {
+		e := to_destroy.elements[i];
+		if #alive(e) {
+			e->destroy();
+		}
 	}
 }
 

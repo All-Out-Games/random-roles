@@ -1844,6 +1844,28 @@ Shoot_Ability :: class : Ability_Base {
 BLACK_FLAG_RADIUS :: 5.0;
 BLACK_FLAG_DURATION :: 30.0;
 
+// Pirate unlock economy
+PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST :: 1;
+PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST :: 2;
+
+// Pirate treasure maps / digging
+PIRATE_TREASURE_MAP_LOOT_RANGE :: 5.0;
+PIRATE_TREASURE_DIG_SECONDS :: 1.6;
+PIRATE_TREASURE_DIG_REASON :: "pirate_dig_for_treasure";
+
+rr_pirate_refresh_unlocks :: proc(player: Player) {
+	if player == null return;
+	if player.player_role != Player_Role.PIRATE return;
+
+	// Treasure is NOT consumed on unlock; abilities become usable once you have enough.
+	if player.pirate_treasure >= PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
+		player.pirate_black_flag_unlocked = true;
+	}
+	if player.pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+		player.pirate_powder_keg_unlocked = true;
+	}
+}
+
 Black_Flag :: class : Component {
     owner_entity: Entity;
     spawn_time: float;
@@ -1924,6 +1946,8 @@ Black_Flag_Ability :: class : Ability_Base {
         if player.player_state != Player_State.ALIVE return false;
         if player->has_task_in_progress() return false;
         if player.player_role != Player_Role.PIRATE return false;
+		// Auto-unlock based on current treasure amount (treasure is not spent).
+		if player.pirate_treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST return false;
         return true;
     }
     
@@ -1949,6 +1973,236 @@ Black_Flag_Ability :: class : Ability_Base {
 
 	on_draw_button :: proc(instance: Black_Flag_Ability, rect: Rect) {
 		draw_ability_name_label(rect, Black_Flag_Ability.NAME);
+
+		// Locked overlay (still show button for learnability).
+		p := instance.player;
+		if p != null && p.player_role == Player_Role.PIRATE && p.pirate_treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
+			ts := UI.default_text_settings();
+			ts.size = 18;
+			ts.halign = .CENTER;
+			ts.valign = .TOP;
+			ts.do_outline = true;
+			ts.outline_thickness = 2;
+			ts.outline_color = v4.{0, 0, 0, 1};
+			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+
+			ts2 := ts;
+			ts2.size = 14;
+			ts2.valign = .BOTTOM;
+			UI.text(rect->inset(2)->cut_bottom(18), ts2, format_string("Need: %", .{PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST}));
+		}
+	}
+}
+
+// --- Pirate: Treasure Maps / Digging ---
+
+rr_pirate_get_closest_unlooted_corpse :: proc(pirate: Player) -> Corpse {
+	if pirate == null return null;
+	finder := make_finder(Corpse, pirate.entity.world_position, PIRATE_TREASURE_MAP_LOOT_RANGE);
+	foreach corpse: component_iterator(Corpse) {
+		if corpse == null continue;
+		if corpse.has_been_reported continue;
+		if corpse.pirate_map_taken continue;
+		finder->check(corpse, corpse.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_pirate_pick_dig_spot_position :: proc(origin: v2) -> v2 {
+	// Prefer random points across the whole map; clamp to navmesh for validity.
+	rng := rng_seed_time();
+
+	wmin := rr_get_map_world_min();
+	wmax := rr_get_map_world_max();
+	min_x := min(wmin.x, wmax.x);
+	max_x := max(wmin.x, wmax.x);
+	min_y := min(wmin.y, wmax.y);
+	max_y := max(wmin.y, wmax.y);
+
+	triangle_hint: s64;
+	for i: 0..15 {
+		p := v2.{rng_range_float(ref rng, min_x, max_x), rng_range_float(ref rng, min_y, max_y)};
+		nav_point: v2;
+		if try_find_closest_point_on_navmesh(p, ref nav_point, ref triangle_hint) {
+			return nav_point;
+		}
+	}
+
+	// Fallback: clamp the corpse position.
+	nav_point: v2;
+	if try_find_closest_point_on_navmesh(origin, ref nav_point, ref triangle_hint) {
+		return nav_point;
+	}
+	return origin;
+}
+
+rr_pirate_spawn_dig_spot_for_player :: proc(pirate: Player, origin: v2) {
+	if pirate == null return;
+	if !Game.is_server() return;
+	if pirate.player_role != Player_Role.PIRATE return;
+	if pirate.player_state != Player_State.ALIVE return;
+
+	pos := rr_pirate_pick_dig_spot_position(origin);
+	e := Scene.create_entity();
+	e->set_local_position(pos);
+
+	spot := e->add_component(Pirate_Treasure_Dig_Spot);
+	spot.owner_player_entity_id = pirate.entity.id;
+}
+
+Pirate_Dig_Lock :: class : Component {
+	active: bool;
+	end_time: float;
+	spot_entity_id: u64;
+
+	arm :: proc(using this: Pirate_Dig_Lock, seconds: float, spot_entity: Entity) {
+		if seconds <= 0.0 { seconds = 0.1; }
+		end_time = get_time() + seconds;
+		active = true;
+		spot_entity_id = 0;
+		if #alive(spot_entity) {
+			spot_entity_id = spot_entity.id;
+		}
+
+		p := entity->get_component(Player);
+		if p != null {
+			p->add_disable_movement_input_reason(PIRATE_TREASURE_DIG_REASON);
+			// Visible to everyone (server-driven trigger replicated via player rig).
+			p->set_trigger("pirate_dig_for_treasure");
+		}
+	}
+
+	clear_spot_digging_flag :: proc(using this: Pirate_Dig_Lock) {
+		if spot_entity_id == 0 return;
+		foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+			if spot == null continue;
+			if spot.entity == null continue;
+			if spot.entity.id != spot_entity_id continue;
+			spot.is_digging = false;
+			return;
+		}
+	}
+
+	destroy_spot_entity_if_alive :: proc(using this: Pirate_Dig_Lock) {
+		if spot_entity_id == 0 return;
+		foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+			if spot == null continue;
+			if spot.entity == null continue;
+			if spot.entity.id != spot_entity_id continue;
+			if #alive(spot.entity) {
+				spot.entity->destroy();
+			}
+			return;
+		}
+	}
+
+	ao_update :: proc(using this: Pirate_Dig_Lock, dt: float) {
+		if !active return;
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Safety: cancel if gameplay ended or player died.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(PIRATE_TREASURE_DIG_REASON);
+			p->set_trigger("RESET");
+			this->clear_spot_digging_flag();
+			active = false;
+			return;
+		}
+
+		if get_time() >= end_time {
+			p->remove_disable_movement_input_reason(PIRATE_TREASURE_DIG_REASON);
+			p->set_trigger("RESET");
+
+			// Award treasure server-side.
+			if Game.is_server() {
+				p.pirate_treasure += 1;
+				rr_pirate_refresh_unlocks(p);
+				p->Notify("Found treasure! (+1)");
+				this->destroy_spot_entity_if_alive();
+			}
+
+			active = false;
+		}
+	}
+}
+
+Pirate_Treasure_Dig_Spot :: class : Interactable {
+	owner_player_entity_id: u64;
+	is_dug: bool;
+	is_digging: bool;
+
+	ao_start :: method() {
+		this->set_listener(this);
+		radius = 1.25;
+		prompt_offset = v2.{0, 0.6};
+		required_hold_time = 0.0;
+		priority = 25;
+		this->set_text("Dig");
+	}
+
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role != Player_Role.PIRATE return false;
+		if owner_player_entity_id == 0 return false;
+		if player.entity.id != owner_player_entity_id return false;
+		if is_dug return false;
+		if is_digging return false;
+		return true;
+	}
+
+	on_interact :: method(player: Player) {
+		if player == null return;
+		if !Game.is_server() return;
+		if is_dug || is_digging return;
+
+		is_digging = true;
+
+		lock := player.entity->get_component(Pirate_Dig_Lock);
+		if lock == null {
+			lock = player.entity->add_component(Pirate_Dig_Lock);
+		}
+		lock->arm(PIRATE_TREASURE_DIG_SECONDS, entity);
+	}
+}
+
+Pirate_Treasure_Map_Ability :: class : Ability_Base {
+	NAME :: "Treasure Map";
+
+	on_init :: proc(instance: Pirate_Treasure_Map_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/pirate/dig_for_treasure.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_role != Player_Role.PIRATE return false;
+		return rr_pirate_get_closest_unlooted_corpse(player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			corpse := rr_pirate_get_closest_unlooted_corpse(player);
+			if corpse == null return;
+
+			if Game.is_server() {
+				corpse.pirate_map_taken = true;
+				rr_pirate_spawn_dig_spot_for_player(player, corpse.entity.world_position);
+			}
+
+			player->Notify("Collected a treasure map!");
+			current_cooldown = 1.0;
+		}
+	}
+
+	on_draw_button :: proc(instance: Pirate_Treasure_Map_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Pirate_Treasure_Map_Ability.NAME);
 	}
 }
 
@@ -2188,6 +2442,8 @@ Powder_Keg_Ability :: class : Ability_Base {
 		if player->has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_role != Player_Role.PIRATE return false;
+		// Auto-unlock based on current treasure amount (treasure is not spent).
+		if player.pirate_treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST return false;
 		return true;
 	}
 
@@ -2292,6 +2548,24 @@ Powder_Keg_Ability :: class : Ability_Base {
 
 	on_draw_button :: proc(instance: Powder_Keg_Ability, rect: Rect) {
 		draw_ability_name_label(rect, Powder_Keg_Ability.NAME);
+
+		// Locked overlay (still show button for learnability).
+		p := instance.player;
+		if p != null && p.player_role == Player_Role.PIRATE && p.pirate_treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+			ts := UI.default_text_settings();
+			ts.size = 18;
+			ts.halign = .CENTER;
+			ts.valign = .TOP;
+			ts.do_outline = true;
+			ts.outline_thickness = 2;
+			ts.outline_color = v4.{0, 0, 0, 1};
+			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+
+			ts2 := ts;
+			ts2.size = 14;
+			ts2.valign = .BOTTOM;
+			UI.text(rect->inset(2)->cut_bottom(18), ts2, format_string("Need: %", .{PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
+		}
 	}
 }
 
@@ -2302,7 +2576,7 @@ PRANK_STUN_SECONDS :: 2.0;
 PRANK_STUN_REASON :: "prank_slip";
 
 // --- Pyromaniac (Anarchist role) ---
-PYRO_LIGHT_FIRE_RANGE :: 4.5;
+PYRO_LIGHT_FIRE_RANGE :: 2.0;
 PYRO_LIGHT_FIRE_COOLDOWN_SECONDS :: 25.0;
 
 rr_pyro_get_closest_unlit_prop :: proc(player: Player) -> Entity {
@@ -2350,13 +2624,16 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 	}
 
 	can_use :: method() -> bool {
+		p := player;
 		if game_state != Game_State.INGAME return false;
-		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
-		if player.player_type != Player_Type.ANARCHIST return false;
-		if player.player_role != Player_Role.PYROMANIAC return false;
-		if player.pyro_on_fire return false;
-		return rr_pyro_get_closest_unlit_prop(player) != null;
+		if p == null return false;
+		if p.player_state != Player_State.ALIVE return false;
+		if p->has_task_in_progress() return false;
+		if p.player_type != Player_Type.ANARCHIST return false;
+		if p.player_role != Player_Role.PYROMANIAC return false;
+		if p.pyro_on_fire return false;
+		// Disabled when no valid nearby prop target.
+		return rr_pyro_get_closest_unlit_prop(p) != null;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -2392,13 +2669,16 @@ Pyromaniac_Light_Corpse_Ability :: class : Ability_Base {
 	}
 
 	can_use :: method() -> bool {
+		p := player;
 		if game_state != Game_State.INGAME return false;
-		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
-		if player.player_type != Player_Type.ANARCHIST return false;
-		if player.player_role != Player_Role.PYROMANIAC return false;
-		if player.pyro_on_fire return false;
-		return rr_pyro_find_burnable_corpse(player) != null;
+		if p == null return false;
+		if p.player_state != Player_State.ALIVE return false;
+		if p->has_task_in_progress() return false;
+		if p.player_type != Player_Type.ANARCHIST return false;
+		if p.player_role != Player_Role.PYROMANIAC return false;
+		if p.pyro_on_fire return false;
+		// Disabled when no valid nearby corpse target.
+		return rr_pyro_find_burnable_corpse(p) != null;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
