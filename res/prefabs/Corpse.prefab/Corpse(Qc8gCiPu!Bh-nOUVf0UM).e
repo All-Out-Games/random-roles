@@ -20,11 +20,10 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Spine_Animator",
   "data": {
-    "skeleton_data_asset": "$AO/streamed_character",
+    "skeleton_data_asset": "player.merged_spine_rig#output",
     "ordered_skins": [
       "base/crewchsia"
-    ],
-    "initial_animation": "Death_No_HP"
+    ]
   }
 },
 {
