@@ -1560,79 +1560,151 @@ Vote_Ability :: class : Ability_Base {
 
         screen := UI.get_safe_screen_rect();
 
-        // --- Style constants ---
+        // Render above everything (popups are 10000).
+        UI.push_layer(20000);
+        defer UI.pop_layer();
+
+        // --- Style / assets (prefer $AO/ui/kit; fall back safely if missing) ---
         white := get_asset(Texture_Asset, "$AO/white.png");
-        row_sprite := get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png"); // grey button
-        hightlight := get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_10.png");
-        check_on := get_asset(Texture_Asset, "sprites/icons/vote_select_icon.png");
-        check_off := get_asset(Texture_Asset, "sprites/icons/vote_unselect_icon.png");
 
-        c_overlay := v4.{0, 0, 0, 0.82};
-        c_panel_shadow := v4.{0, 0, 0, 0.55};
+        // Use kit modal textures and draw them with nine-slice so borders/corners don't stretch.
+        // Use transp_black1 as base for tinting (it has nice rounded corners and no color override).
+        kit_panel := get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/transp_black1.png");
+        if kit_panel == null { kit_panel = get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/modal_simple_black1.png"); }
+        if kit_panel == null { kit_panel = white; }
+
+        kit_card := get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_grey1.png");
+        if kit_card == null { kit_card = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png"); }
+        if kit_card == null { kit_card = white; }
+
+        kit_card_selected := get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_red1.png");
+        if kit_card_selected == null { kit_card_selected = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_3.png"); }
+        if kit_card_selected == null { kit_card_selected = white; }
+
+        kit_card_dead := get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_black1.png");
+        if kit_card_dead == null { kit_card_dead = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png"); }
+        if kit_card_dead == null { kit_card_dead = white; }
+
+        kit_skip_button := get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_arrow_green1.png");
+        if kit_skip_button == null { kit_skip_button = get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_green1.png"); }
+        if kit_skip_button == null { kit_skip_button = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_2.png"); }
+        if kit_skip_button == null { kit_skip_button = white; }
+
+        // Icons: match the mock better (kit tick/plus/cross), keep revolver from game icons.
+        check_icon := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/green_tick_outline.png");
+        if check_icon == null { check_icon = get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/white_tick.png"); }
+        if check_icon == null { check_icon = get_asset(Texture_Asset, "sprites/icons/vote_select_icon.png"); }
+        gun_icon := get_asset(Texture_Asset, "sprites/icons/revolver.png");           // used as "your vote" mark
+        plus_icon := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/plus_button2.png");
+        if plus_icon == null { plus_icon = get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/plus_button.png"); }
+        dead_icon := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/red_cross.png");
+        if dead_icon == null { dead_icon = get_asset(Texture_Asset, "sprites/icons/kill_ability.png"); }
+
+        // The mock has a translucent modal over gameplay (not fully opaque).
+        c_overlay := v4.{0, 0, 0, 0.55};
+        // No color override, no alpha (as requested).
+        c_panel_tint := v4.{1, 1, 1, 1};
+        if kit_panel == white { c_panel_tint = v4.{0.05, 0.06, 0.08, 0.92}; }
+
         c_text := v4.{0.95, 0.97, 1.0, 1};
-        c_muted := v4.{0.75, 0.8, 0.9, 1};
-        c_accent := v4.{0.25, 0.8, 0.55, 1};
-        c_warn := v4.{1.0, 0.55, 0.3, 1};
+        c_muted := v4.{0.80, 0.84, 0.92, 1};
+        c_good := v4.{0.25, 0.90, 0.45, 1};
+        c_bad := v4.{1.0, 0.25, 0.25, 1};
 
-        // Dark background overlay
+        // Background overlay
         UI.quad(screen, white, c_overlay);
 
-        panel_rect := screen->center_rect()->grow(420, 520, 420, 520);
-        UI.quad(panel_rect, white, c_panel_shadow);
+        // Main panel (9-sliced)
+        panel_rect := screen->center_rect()->grow(470, 860, 470, 860);
+        {
+            // Draw non-interactive 9-slice panel using the button renderer.
+            bs_panel := UI.default_button_settings();
+            bs_panel.sprite = kit_panel;
+            bs_panel.press_scaling = 1.0;
+            bs_panel.color = c_panel_tint;
+            bs_panel.hovered_color = c_panel_tint;
+            bs_panel.pressed_color = c_panel_tint;
+            bs_panel.disabled_color = c_panel_tint;
+            bs_panel.background_color_multiplier = v4.{1, 1, 1, 1};
+
+            // Approximate kit modal border thickness. (If you want tighter/looser corners, tweak this.)
+            NINE_SLICE_PX :: 96.0;
+            bs_panel.nine_slice_data.slice = v4.{NINE_SLICE_PX, NINE_SLICE_PX, NINE_SLICE_PX, NINE_SLICE_PX};
+            bs_panel.nine_slice_data.slice_scale = 1.0;
+
+            UI.push_disabled(true);
+            defer UI.pop_disabled();
+            UI.begin_button(panel_rect, bs_panel, {}, ""); { defer UI.end_button(); }
+        }
 
         content := panel_rect->inset(26);
-        header := content->cut_top(92);
-        footer := content->cut_bottom(78);
+        header := content->cut_top(120);
+        footer := content->cut_bottom(120);
+        grid := content;
 
-        // Timer display + title
+        // --- Timer (top-right) ---
         current_time := get_time();
         elapsed := current_time - voting_start_time;
         remaining := 60.0 - elapsed;
         if remaining < 0.0 { remaining = 0.0; }
+        pct := remaining / 60.0;
+        if pct < 0.0 { pct = 0.0; }
+        if pct > 1.0 { pct = 1.0; }
 
-        title_rect := header->cut_top(46);
+        title_row := header->cut_top(58);
+        // Use unscaled cuts when using computed widths (avoid scale-factor mismatch).
+        timer_w := min(310.0, title_row->width() * 0.33);
+        timer_area := title_row->cut_right_unscaled(timer_w);
+        title_rect := title_row;
+
         title_ts := UI.default_text_settings();
-        title_ts.size = 44;
+        title_ts.size = 58;
         title_ts.color = c_text;
         title_ts.halign = .LEFT;
         title_ts.valign = .CENTER;
         title_ts.do_outline = true;
-        title_ts.outline_thickness = 3;
+        title_ts.outline_thickness = 4;
         title_ts.outline_color = v4.{0, 0, 0, 1};
-        UI.text(title_rect, title_ts, "VOTING");
+        UI.text(title_rect, title_ts, "Voting Screen");
 
-        timer_rect := title_rect->cut_right(190);
-        timer_ts := UI.default_text_settings();
-        timer_ts.size = 26;
-        timer_ts.color = c_warn;
-        if remaining > 30.0 {
-            timer_ts.color = c_text;
-        } else if remaining > 10.0 {
-            timer_ts.color = v4.{1, 0.85, 0.2, 1};
+        // Timer box + bar (no grow() so it can't exceed header bounds)
+        timer_box := timer_area->inset(8, 10, 8, 10);
+        UI.quad(timer_box, white, v4.{0, 0, 0, 0.55});
+        UI.quad(timer_box->inset(2), white, v4.{0.10, 0.12, 0.16, 0.80});
+
+        // Number
+        t_color := c_text;
+        if remaining <= 10.0 {
+            t_color = v4.{1.0, 0.35, 0.35, 1.0};
+        } else if remaining <= 30.0 {
+            t_color = v4.{1.0, 0.85, 0.25, 1.0};
         }
-        timer_ts.halign = .RIGHT;
-        timer_ts.valign = .CENTER;
-        timer_ts.do_outline = true;
-        timer_ts.outline_thickness = 2;
-        timer_ts.outline_color = v4.{0, 0, 0, 1};
-        UI.text(timer_rect, timer_ts, format_string("%s", .{format_float(remaining, decimals=0)}));
+        num_rect := timer_box->cut_top_unscaled(timer_box->height() * 0.65);
+        num_ts := UI.default_text_settings();
+        num_ts.size = 42;
+        num_ts.color = t_color;
+        num_ts.halign = .CENTER;
+        num_ts.valign = .CENTER;
+        num_ts.do_outline = true;
+        num_ts.outline_thickness = 3;
+        num_ts.outline_color = v4.{0, 0, 0, 1};
 
-        // President info
-        president: Player = null;
-        for i: 0..players.elements.count-1 {
-            p := players.elements[i];
-            if p == null continue;
-            if p.player_state != Player_State.ALIVE continue;
-            if p.player_role == Player_Role.PRESIDENT {
-                president = p;
-                break;
-            }
-        }
+        // Bar (line timer)
+        bar_rect := timer_box->inset(14, 14, 14, 14)->cut_bottom_unscaled(12);
+        UI.quad(bar_rect, white, v4.{0, 0, 0, 0.55});
+        fill := bar_rect->inset(2)->subrect(0, 0, pct, 1);
+        UI.quad(fill, white, t_color);
 
-        info_rect := header->cut_top(36);
-        UI.quad(info_rect, white, v4.{0.08, 0.1, 0.14, 0.6});
+        // Draw text after bar so it renders on top
+        UI.text(num_rect, num_ts, format_string("%", .{format_float(remaining, decimals=0)}));
+
+        // --- Optional meeting info row (kept compact; no chat bubble) ---
+        info_row := header;
+        info_row = info_row->inset(0, 0, 12, 0);
+        UI.quad(info_row, white, v4.{0.06, 0.08, 0.11, 0.55});
+
         info_ts := UI.default_text_settings();
-        info_ts.size = 20;
+        info_ts.size = 22;
         info_ts.color = c_muted;
         info_ts.halign = .LEFT;
         info_ts.valign = .CENTER;
@@ -1640,236 +1712,344 @@ Vote_Ability :: class : Ability_Base {
         info_ts.drop_shadow_offset = v2.{1, -1};
         info_ts.drop_shadow_color = v4.{0, 0, 0, 1};
 
-        pres_name := "None";
-        if president != null {
-            pres_name = president.entity->get_name();
-        }
-        UI.text(info_rect->inset(10, 12, 10, 12), info_ts, format_string("President: %  (President votes are worth 2x)", .{pres_name}));
-
-        // Meeting initiator (do not show for prankster fake meetings).
+        initiator_str := "";
         if meeting_initiator_id != 0 {
             caller := get_player_by_entity_id(meeting_initiator_id);
             caller_name := "Unknown";
-            if caller != null {
-                caller_name = caller.entity->get_name();
-            }
-
-            kind := "MEETING";
-            if meeting_initiator_from_body {
-                kind = "REPORT";
-            }
-
-            called_rect := header->cut_top(32);
-            UI.quad(called_rect, white, v4.{0.08, 0.1, 0.14, 0.6});
-            info_ts.size = 20;
-            info_ts.halign = .LEFT;
-            UI.text(called_rect->inset(10, 12, 10, 12), info_ts, format_string("Called by: %  (%)", .{caller_name, kind}));
+            if caller != null { caller_name = caller.entity->get_name(); }
+            initiator_str = format_string("Called by: %", .{caller_name});
         }
+        voted_str := build_voted_list();
+        if voted_str.count <= 0 { voted_str = "-"; }
+        UI.text(info_row->inset(14, 14, 14, 14), info_ts, format_string("%   Voted: %", .{initiator_str, voted_str}));
 
-        // Calculate layout for player list
-        alive_players: List(Player);
-        for i: 0..players.elements.count-1 {
-            if players.elements[i].player_state == Player_State.ALIVE {
-                append(ref alive_players, players.elements[i]);
+        // --- Grid of players (alive + dead) ---
+        // We keep a fixed 4x3 grid like the reference so tiles never stretch.
+        total_players := players.elements.count;
+        if total_players <= 0 {
+            empty_ts := UI.default_text_settings();
+            empty_ts.size = 44;
+            empty_ts.color = c_text;
+            empty_ts.halign = .CENTER;
+            empty_ts.valign = .CENTER;
+            empty_ts.do_outline = true;
+            empty_ts.outline_thickness = 3;
+            empty_ts.outline_color = v4.{0, 0, 0, 1};
+            UI.text(grid, empty_ts, "No players");
+        } else {
+            cols :: 4;
+            rows :: 3;
+            CARD_ASPECT :: 3.15; // width / height (matches the mock's wide tiles)
+
+            spacing := 16.0;
+            gw := grid->width();
+            gh := grid->height();
+
+            max_w_per := (gw - spacing * (cols - 1).(float)) / cols.(float);
+            max_h_per := (gh - spacing * (rows - 1).(float)) / rows.(float);
+
+            card_h := min(max_h_per, max_w_per / CARD_ASPECT);
+            if card_h < 1.0 { card_h = 1.0; }
+            card_w := card_h * CARD_ASPECT;
+
+            total_w := card_w * cols.(float) + spacing * (cols - 1).(float);
+            start_x := grid.min.x + (gw - total_w) * 0.5;
+            start_y_top := grid.max.y; // top aligned like the reference
+
+            // Card text style
+            name_ts := UI.default_text_settings();
+            name_ts.size = 48; // Bigger text
+            name_ts.color = v4.{1, 1, 1, 1};
+            name_ts.halign = .CENTER;
+            name_ts.valign = .CENTER;
+            name_ts.do_outline = true;
+            name_ts.outline_thickness = 5; // Thicker outline
+            name_ts.outline_color = v4.{0, 0, 0, 1};
+            name_ts.do_autofit = true;
+            name_ts.autofit_min_size = 18;
+            name_ts.autofit_max_size = 34;
+
+            // Card button settings
+            card_bs := UI.default_button_settings();
+            card_bs.sprite = kit_card;
+            card_bs.press_scaling = 0.98;
+            // Enable 9-slice for cards so they don't stretch weirdly.
+            CARD_SLICE_PX :: 32.0;
+            card_bs.nine_slice_data.slice = v4.{CARD_SLICE_PX, CARD_SLICE_PX, CARD_SLICE_PX, CARD_SLICE_PX};
+            card_bs.nine_slice_data.slice_scale = 1.0;
+
+            // Helpers for matching the mock's player-tinted tiles.
+            get_vote_tile_bg :: proc(color: Color_Replace_Color) -> v4 {
+                switch color {
+                    // More saturated/darker pastels to contrast with white bottom strip
+                    case .RED:        return v4.{1.00, 0.70, 0.70, 1.0};
+                    case .RED2:       return v4.{1.00, 0.70, 0.70, 1.0};
+                    case .CYAN:       return v4.{0.60, 0.85, 1.00, 1.0};
+                    case .GREEN:      return v4.{0.60, 1.00, 0.70, 1.0};
+                    case .GREEN3:     return v4.{0.60, 1.00, 0.70, 1.0};
+                    case .LIGHT_GREEN:return v4.{0.60, 1.00, 0.70, 1.0};
+                    case .BLUE2:      return v4.{0.60, 0.80, 1.00, 1.0};
+                    case .PINK:       return v4.{1.00, 0.70, 0.90, 1.0};
+                    case .PURPLE:     return v4.{0.85, 0.70, 1.00, 1.0};
+                    case .PURPLE2:    return v4.{0.85, 0.70, 1.00, 1.0};
+                    case .PURPLE3:    return v4.{0.85, 0.70, 1.00, 1.0};
+                    case .YELLOW:     return v4.{1.00, 0.92, 0.60, 1.0};
+                    case .ORANGE:     return v4.{1.00, 0.85, 0.60, 1.0};
+                    case .ORANGE2:    return v4.{1.00, 0.85, 0.60, 1.0};
+                    // Black/Gray/White -> Red (per user request)
+                    case .LIGHT_GRAY: return v4.{1.00, 0.70, 0.70, 1.0};
+                    case .WHITE1:     return v4.{1.00, 0.70, 0.70, 1.0};
+                    case .BLACK:      return v4.{1.00, 0.70, 0.70, 1.0};
+                    case .BLACK2:     return v4.{1.00, 0.70, 0.70, 1.0};
+                    
+                    case .BROWN1:     return v4.{0.85, 0.75, 0.65, 1.0};
+                }
+                return v4.{0.90, 0.90, 0.90, 1.0};
             }
-        }
 
-        // Count cast ballots + weighted votes for footer info (skip counts as a ballot)
-        total_cast := 0;
-        total_alive := 0;
-        total_weight_cast := 0;
-        for i: 0..players.elements.count-1 {
-            p := players.elements[i];
-            if p == null continue;
-            if p.player_state != Player_State.ALIVE continue;
-            total_alive += 1;
-            if p.has_voted {
-                total_cast += 1;
-                if p.player_role == Player_Role.PRESIDENT {
-                    total_weight_cast += 2;
+            get_vote_tile_name :: proc(color: Color_Replace_Color) -> v4 {
+                switch color {
+                    case .RED:        return v4.{1.00, 0.25, 0.25, 1.0};
+                    case .RED2:       return v4.{1.00, 0.25, 0.25, 1.0};
+                    case .CYAN:       return v4.{0.10, 0.65, 1.00, 1.0};
+                    case .GREEN:      return v4.{0.20, 0.90, 0.35, 1.0};
+                    case .GREEN3:     return v4.{0.20, 0.90, 0.35, 1.0};
+                    case .LIGHT_GREEN:return v4.{0.20, 0.90, 0.35, 1.0};
+                    case .BLUE2:      return v4.{0.25, 0.55, 1.00, 1.0};
+                    case .PINK:       return v4.{1.00, 0.20, 0.70, 1.0};
+                    case .PURPLE:     return v4.{0.75, 0.30, 1.00, 1.0};
+                    case .PURPLE2:    return v4.{0.75, 0.30, 1.00, 1.0};
+                    case .PURPLE3:    return v4.{0.75, 0.30, 1.00, 1.0};
+                    case .YELLOW:     return v4.{0.25, 0.90, 0.35, 1.0}; // reference uses green-ish name on yellow tiles
+                    case .ORANGE:     return v4.{1.00, 0.55, 0.15, 1.0};
+                    case .ORANGE2:    return v4.{1.00, 0.55, 0.15, 1.0};
+                    // Black/Gray/White -> Red text
+                    case .LIGHT_GRAY: return v4.{1.00, 0.25, 0.25, 1.0};
+                    case .WHITE1:     return v4.{1.00, 0.25, 0.25, 1.0};
+                    case .BLACK:      return v4.{1.00, 0.25, 0.25, 1.0};
+                    case .BLACK2:     return v4.{1.00, 0.25, 0.25, 1.0};
+                    
+                    case .BROWN1:     return v4.{0.25, 0.25, 0.25, 1.0};
+                }
+                return v4.{0.25, 0.25, 0.25, 1.0};
+            }
+
+            max_cells := cols * rows;
+            for i: 0..min(total_players, max_cells)-1 {
+                p := players.elements[i];
+                if p == null continue;
+
+                // Compute card rect for index i (row-major, top to bottom).
+                col := i % cols;
+                row := i / cols;
+
+                x0 := start_x + col.(float) * (card_w + spacing);
+                y_top := start_y_top - row.(float) * (card_h + spacing);
+                y0 := y_top - card_h;
+                card_rect := Rect.{v2.{x0, y0}, v2.{x0 + card_w, y0 + card_h}};
+
+                is_dead := p.player_state != Player_State.ALIVE;
+                is_selected := (local_player.voted_for == p);
+                can_vote_for := !local_player.has_voted && !is_dead && p != local_player;
+
+                UI.push_id("vote_card_%", .{p.entity.id});
+                defer UI.pop_id();
+
+                clicked := false;
+                draw_rect := card_rect;
+
+                // Determine button color based on state
+                btn_color := v4.{1, 1, 1, 1};
+                if is_dead {
+                    btn_color = v4.{0.5, 0.5, 0.5, 1.0}; // Grey, not black
+                } else if is_selected {
+                    btn_color = v4.{1, 1, 1, 1}; // Selected sprite is already red
                 } else {
-                    total_weight_cast += 1;
+                    btn_color = get_vote_tile_bg(p.avatar_color);
+                }
+
+                if can_vote_for {
+                    // Tint the interactive button itself
+                    bs_active := card_bs;
+                    bs_active.color = btn_color;
+                    
+                    btn := UI.begin_button(card_rect, bs_active, {}, ""); {
+                        defer UI.end_button();
+                        clicked = btn.clicked;
+                        draw_rect = btn.rect;
+                    }
+                } else {
+                    // Disabled/dim states (using button to get 9-slice rendering)
+                    alpha := is_dead ? 0.55 : 0.80;
+                    
+                    bs_disabled := card_bs;
+                    // Use specific sprites for states if available, otherwise fallback to tinting kit_card
+                    if is_selected {
+                        bs_disabled.sprite = kit_card_selected;
+                    } else if is_dead {
+                        bs_disabled.sprite = kit_card_dead;
+                    }
+                    
+                    bs_disabled.color = btn_color;
+                    bs_disabled.disabled_color = v4.{btn_color.x, btn_color.y, btn_color.z, alpha};
+                    
+                    UI.push_disabled(true);
+                    UI.button(card_rect, bs_disabled, {}, ""); 
+                    UI.pop_disabled();
+                }
+
+                // White strip at the bottom (covers the button color).
+                // We inset slightly (6px) to avoid covering the rounded corners/borders of the button.
+                bottom_h := draw_rect->height() * 0.25;
+                bottom_strip_rect := draw_rect->inset(4, 4, 4, 4)->cut_bottom_unscaled(bottom_h);
+                
+                if !is_selected {
+                    // For dead players, the strip is grey. For others, white.
+                    strip_color := is_dead ? v4.{0.25, 0.25, 0.25, 1.0} : v4.{1, 1, 1, 1};
+                    UI.quad(bottom_strip_rect, white, strip_color);
+                } else {
+                    // Selected: no white bottom area.
+                    // Draw transp_black1 panel behind player (use same 9-slice as tiles so corners match).
+                    bg_square := draw_rect->subrect(0.0, 0.0, 0.42, 0.78)->inset(4, 4, 4, 4);
+                    transp_black := get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/transp_black1.png");
+                    if transp_black != null {
+                        bs_side := UI.default_button_settings();
+                        bs_side.sprite = transp_black;
+                        bs_side.press_scaling = 1.0;
+                        bs_side.color = v4.{1, 1, 1, 0.9};
+                        bs_side.hovered_color = bs_side.color;
+                        bs_side.pressed_color = bs_side.color;
+                        bs_side.disabled_color = bs_side.color;
+
+                        SIDE_SLICE_PX :: 32.0;
+                        bs_side.nine_slice_data.slice = v4.{SIDE_SLICE_PX, SIDE_SLICE_PX, SIDE_SLICE_PX, SIDE_SLICE_PX};
+                        bs_side.nine_slice_data.slice_scale = 1.0;
+
+                        UI.push_disabled(true);
+                        UI.button(bg_square, bs_side, {}, "");
+                        UI.pop_disabled();
+                    }
+                }
+
+                // Rig display area (left side)
+                // Extend lower to overlap bottom white area (0.85 -> 1.0)
+                rig_area := draw_rect->subrect(0.03, 0.05, 0.24, 1.0);
+                if p.animator != null && p.animator.instance != null {
+                    // Match other UIs: push player material so cosmetics/replace colors render.
+                    if is_dead {
+                        // Grayed out spine for dead players
+                        UI.push_color_multiplier(v4.{0.5, 0.5, 0.5, 1.0});
+                    }
+                    
+                    UI.push_player_material(p);
+                    defer UI.pop_material();
+                    if is_dead {
+                        defer UI.pop_color_multiplier();
+                    }
+
+                    // Scale based on card height (screen space).
+                    s := draw_rect->height() * 1.22; // Bigger spine
+                    pos := rig_area->center() + v2.{0.0, -draw_rect->height() * 0.12};
+                    UI.spine(pos, p.animator.instance, v2.{s, s}, 0.0);
+                }
+
+                // Name (bottom area)
+                name_area := draw_rect->subrect(0.20, 0.00, 1.00, 0.40)->inset(10, 10, 10, 10);
+                if is_selected {
+                    name_ts.color = v4.{1, 1, 1, 1};
+                } else if is_dead {
+                    name_ts.color = v4.{0.35, 0.35, 0.35, 1};
+                } else {
+                    name_ts.color = get_vote_tile_name(p.avatar_color);
+                }
+                UI.text(name_area, name_ts, p.entity->get_name());
+
+                // "Has voted" checkmark (green, top-right)
+                if check_icon != null && p.has_voted {
+                    check_rect := draw_rect->top_right_rect()->offset(-24, -24)->grow(22);
+                    UI.quad(check_rect->fit_aspect(check_icon->get_aspect()), check_icon, c_good);
+                }
+
+                // "You voted for this player" marker: gun (red, top-left)
+                if gun_icon != null && is_selected {
+                    gun_rect := draw_rect->top_left_rect()->offset(120, -24)->grow(22);
+                    UI.quad(gun_rect->fit_aspect(gun_icon->get_aspect()), gun_icon, c_bad);
+
+                    // Red "+" next to the gun.
+                    if plus_icon != null {
+                        plus_rect := draw_rect->top_left_rect()->offset(150, -24)->grow(18);
+                        UI.quad(plus_rect->fit_aspect(plus_icon->get_aspect()), plus_icon, c_bad);
+                    } else {
+                        plus_rect := draw_rect->top_left_rect()->offset(148, -24)->grow(16);
+                        plus_ts := UI.default_text_settings();
+                        plus_ts.size = 34;
+                        plus_ts.color = c_bad;
+                        plus_ts.halign = .CENTER;
+                        plus_ts.valign = .CENTER;
+                        plus_ts.do_outline = true;
+                        plus_ts.outline_thickness = 3;
+                        plus_ts.outline_color = v4.{0, 0, 0, 1};
+                        UI.text(plus_rect, plus_ts, "+");
+                    }
+                }
+
+                // Dead overlay (skull-ish marker + heavy dim)
+                if is_dead {
+                    if dead_icon != null {
+                        dead_rect := draw_rect->center_rect()->grow(34);
+                        UI.quad(dead_rect->fit_aspect(dead_icon->get_aspect()), dead_icon, v4.{c_bad.x, c_bad.y, c_bad.z, 0.85});
+                    }
+                }
+
+                if clicked && can_vote_for {
+                    cast_vote(local_player, p);
                 }
             }
         }
 
-        // Draw player entries (clean rows; click row to vote)
-        list_rect := content;
-        row_h := 56.0;
+        // --- Footer: Skip Vote button (single large button like the mock) ---
+        footer_inner := footer->inset(18)->cut_top_unscaled(20); // Raise up
+        btn_rect := footer_inner->bottom_center_rect()->grow(36, 220, 36, 220);
 
-        row_bs := UI.default_button_settings();
-        row_bs.sprite = row_sprite;
-        row_bs.press_scaling = 0.98;
-
-        for i: 0..alive_players.elements.count-1 {
-            target_player := alive_players.elements[i];
-            if target_player == null continue;
-
-            row_rect := list_rect->cut_top(row_h);
-            list_rect->cut_top(8.0); // spacing
-
-            UI.push_id("vote_row_%", .{i});
-            defer UI.pop_id();
-
-            row_ts := UI.default_text_settings();
-            row_ts.size = 26;
-            row_ts.color = c_text;
-            row_ts.halign = .LEFT;
-            row_ts.valign = .CENTER;
-            row_ts.do_drop_shadow = true;
-            row_ts.drop_shadow_offset = v2.{1, -1};
-            row_ts.drop_shadow_color = v4.{0, 0, 0, 1};
-			// Once the local player has cast their ballot, make all vote choices
-			// visually + interactively disabled (so it's clear votes are locked).
-			row_is_enabled := !local_player.has_voted && target_player != local_player;
-
-			btn_clicked := false;
-			draw_rect := row_rect;
-
-			if row_is_enabled {
-				btn := UI.begin_button(row_rect, row_bs, row_ts, ""); {
-					defer UI.end_button();
-					btn_clicked = btn.clicked;
-					draw_rect = btn.rect;
-				}
-			} else {
-				// Disabled look (dim row) + no interaction.
-				UI.quad(row_rect, row_sprite, v4.{1, 1, 1, 0.55});
-			}
-
-			// Selected highlight
-			if local_player.voted_for == target_player {
-				UI.quad(draw_rect, hightlight, v4.{c_accent.x, c_accent.y, c_accent.z, 0.18});
-			}
-
-			inner := draw_rect->inset(16, 14, 16, 14);
-			right := inner->cut_right(140);
-
-			// Name
-			name_rect := inner;
-			// Megaphone for meeting initiator (report/call-meeting). Not shown for fake meetings.
-			if meeting_initiator_id != 0 && target_player.entity.id == meeting_initiator_id {
-				meg := get_asset(Texture_Asset, "sprites/icons/call_meeting_icon.png");
-				meg_rect := name_rect->cut_left(34)->inset(2);
-				UI.quad(meg_rect->fit_aspect(meg->get_aspect()), meg, v4.{1, 1, 1, 1});
-				name_rect->cut_left(8);
-			}
-			if !row_is_enabled {
-				row_ts.color = v4.{c_text.x, c_text.y, c_text.z, 0.7};
-			}
-			UI.text(name_rect, row_ts, target_player.entity->get_name());
-
-			// Vote count pill
-			pill := right->inset(6, 6, 6, 6);
-			UI.quad(pill->grow_unscaled(2), white, v4.{0, 0, 0, 0.65});
-			UI.quad(pill, white, v4.{0.08, 0.1, 0.14, 0.75});
-
-			vote_ts := UI.default_text_settings();
-			vote_ts.size = 22;
-			vote_ts.color = v4.{1, 0.88, 0.25, 1};
-			vote_ts.halign = .CENTER;
-			vote_ts.valign = .CENTER;
-			vote_ts.do_outline = true;
-			vote_ts.outline_thickness = 2;
-			vote_ts.outline_color = v4.{0, 0, 0, 1};
-			if !row_is_enabled {
-				vote_ts.color.w = 0.7;
-			}
-			UI.text(pill, vote_ts, format_string("Votes: %", .{target_player.votes_received}));
-
-			// Checkbox icon at far right
-			icon_rect := draw_rect->cut_right(44)->inset(10);
-			icon_alpha := 1.0;
-			if !row_is_enabled {
-				icon_alpha = 0.7;
-			}
-			if local_player.voted_for == target_player {
-				UI.quad(icon_rect->fit_aspect(check_on->get_aspect()), check_on, v4.{1, 1, 1, icon_alpha});
-			} else {
-				UI.quad(icon_rect->fit_aspect(check_off->get_aspect()), check_off, v4.{1, 1, 1, icon_alpha});
-			}
-
-			// Click handling (only allow voting for others, and only if you haven't voted)
-			if btn_clicked && row_is_enabled {
-				cast_vote(local_player, target_player);
-			}
-        }
-
-        // Footer: cast status
-        UI.quad(footer, white, v4.{0.06, 0.08, 0.11, 0.65});
-        footer_inner := footer->inset(14);
-        buttons_rect := footer_inner->cut_bottom(44.0);
-        stats_rect := footer_inner;
-        line1 := stats_rect->cut_top(26);
-		line2 := stats_rect->cut_top(24);
-        left := line1->cut_left(260);
-
-        foot_ts := UI.default_text_settings();
-        foot_ts.size = 22;
-        foot_ts.color = c_muted;
-        foot_ts.halign = .LEFT;
-        foot_ts.valign = .CENTER;
-        UI.text(left, foot_ts, format_string("Ballots cast: %/%", .{total_cast, total_alive}));
-
-        right := line1;
-        foot_ts.halign = .RIGHT;
-        UI.text(right, foot_ts, format_string("Total vote weight: %", .{total_weight_cast}));
-
-		voted := build_voted_list();
-		if voted.count <= 0 { voted = "-"; }
-		foot_ts.size = 18;
-		foot_ts.halign = .LEFT;
-		foot_ts.word_wrap = true;
-		foot_ts.do_autofit = true;
-		foot_ts.autofit_min_size = 12;
-		foot_ts.autofit_max_size = 18;
-		UI.text(line2, foot_ts, format_string("Voted: %", .{voted}));
-
-        // Buttons row: SKIP + CLOSE (centered)
-        button_row := buttons_rect->center_rect()->grow(20.0, 200.0, 20.0, 200.0); // 40h, 400w
-        skip_rect := button_row->cut_left(190.0);
-        button_row->cut_left(20.0);
-        close_rect := button_row;
-
-        // Skip button (blank vote)
         skip_bs := UI.default_button_settings();
-        skip_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_5.png"); // blue
+        skip_bs.sprite = kit_skip_button;
         skip_bs.press_scaling = 0.96;
+        
+        // Use 9-slice to prevent the arrow button from squishing/stretching weirdly.
+        // The kit arrow button likely has the arrow on one side and a stretchable body.
+        // We'll guess a safe slice amount (e.g. 64px) to preserve the arrow cap.
+        SKIP_SLICE_PX :: 64.0;
+        skip_bs.nine_slice_data.slice = v4.{SKIP_SLICE_PX, SKIP_SLICE_PX, SKIP_SLICE_PX, SKIP_SLICE_PX};
+        skip_bs.nine_slice_data.slice_scale = 1.0;
+
+        // Darken the arrow button slightly as requested
+        skip_bs.color_multiplier = v4.{0.9, 0.9, 0.9, 1.0};
+
         skip_ts := UI.default_text_settings();
-        skip_ts.size = 22;
+        skip_ts.size = 44;
         skip_ts.color = v4.{1, 1, 1, 1};
         skip_ts.halign = .CENTER;
         skip_ts.valign = .CENTER;
+        skip_ts.do_outline = true;
+        skip_ts.outline_thickness = 3;
+        skip_ts.outline_color = v4.{0, 0, 0, 1};
 
+        // Disabled once you've voted (votes are locked).
+        if local_player.has_voted {
+            UI.push_disabled(true);
+            defer UI.pop_disabled();
+            UI.push_color_multiplier(v4.{1, 1, 1, 0.55});
+            defer UI.pop_color_multiplier();
+        }
+
+        // If the local player already chose skip, add a subtle highlight.
         if local_player.voted_skip {
-            UI.quad(skip_rect, hightlight, v4.{c_accent.x, c_accent.y, c_accent.z, 0.18});
+            UI.quad(btn_rect, white, v4.{0.20, 0.90, 0.45, 0.12});
         }
 
-		// Once voted, the skip button should be obviously disabled.
-		if local_player.has_voted {
-			UI.push_color_multiplier(v4.{1, 1, 1, 0.55});
-			defer UI.pop_color_multiplier();
-		}
-		UI.push_disabled(local_player.has_voted);
-		if UI.button(skip_rect, skip_bs, skip_ts, "SKIP").clicked {
-			cast_skip_vote(local_player);
-		}
-		UI.pop_disabled();
-
-        // Close button (centered)
-        close_bs := UI.default_button_settings();
-        close_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_3.png"); // red
-        close_bs.press_scaling = 0.96;
-        close_ts := UI.default_text_settings();
-        close_ts.size = 22;
-        close_ts.color = v4.{1, 1, 1, 1};
-        close_ts.halign = .CENTER;
-        close_ts.valign = .CENTER;
-        UI.push_disabled(!local_player.has_voted);
-        if UI.button(close_rect, close_bs, close_ts, "CLOSE").clicked {
-            instance.voting_ui_open = false;
+        if UI.button(btn_rect, skip_bs, skip_ts, "Skip Vote").clicked {
+            cast_skip_vote(local_player);
         }
-        UI.pop_disabled();
     }
 
 	on_draw_button :: proc(instance: Vote_Ability, rect: Rect) {
