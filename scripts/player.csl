@@ -559,6 +559,23 @@ player_role_to_string :: proc(player: Player) -> string {
 	return "CREW";
 }
 
+player_role_to_icon_texture :: proc(role: Player_Role) -> Texture_Asset {
+	switch role {
+		case .SHERIFF:      return get_asset(Texture_Asset, "sprites/icons/roles/sheriff_icon.png");
+		case .DOCTOR:       return get_asset(Texture_Asset, "sprites/icons/roles/doctor_icon.png");
+		case .PRESIDENT:    return get_asset(Texture_Asset, "sprites/icons/roles/president_icon.png");
+		case .MOVIE_STAR:   return get_asset(Texture_Asset, "sprites/icons/roles/moviestar_icon.png");
+		case .CORONER:      return get_asset(Texture_Asset, "sprites/icons/roles/coroner_icon.png");
+		case .PORTAL_MAKER: return get_asset(Texture_Asset, "sprites/icons/roles/portalmaker_icon.png");
+		case .PRANKSTER:    return get_asset(Texture_Asset, "sprites/icons/roles/trickster_icon.png");
+		case .PYROMANIAC:   return get_asset(Texture_Asset, "sprites/icons/roles/pyromaniac_icon.png");
+		case .PIRATE:       return get_asset(Texture_Asset, "sprites/icons/roles/pirate_icon.png");
+		case .HITMAN:       return get_asset(Texture_Asset, "sprites/icons/roles/hitman_icon.png");
+		case .WEREWOLF:     return get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png");
+	}
+	return null;
+}
+
 draw_player_role_hud :: proc(player: Player) {
 	if player == null return;
 	// Don't show role UI in lobby.
@@ -568,8 +585,6 @@ draw_player_role_hud :: proc(player: Player) {
 	UI.push_layer(1500);
 	defer UI.pop_layer();
 
-	// Top-center pill
-	rect := screen->top_center_rect()->grow(34, 260, 0, 260)->offset(0, -40);
 	bg := get_asset(Texture_Asset, "$AO/white.png");
 
 	// Color accent by team
@@ -580,19 +595,20 @@ draw_player_role_hud :: proc(player: Player) {
 		accent = v4.{1.0, 0.55, 0.25, 1};
 	}
 
-	UI.quad(rect, bg, v4.{0, 0, 0, 0.65});
-	UI.quad(rect->inset(2), bg, v4.{accent.x * 0.15, accent.y * 0.15, accent.z * 0.15, 0.85});
+	// Role icon (task UI). This replaces the old "ROLE: ..." title pill.
+	// Positioning: place it on the left inner side of the task panel title strip.
+	icon := player_role_to_icon_texture(player.player_role);
+	if icon != null {
+		// Mirror `update_tasks_ui` panel layout (see `scripts/tasks.csl`).
+		title_strip := UI.get_safe_screen_rect()->cut_top(150);
 
-	ts := UI.default_text_settings();
-	ts.size = 34;
-	ts.color = accent;
-	ts.halign = .CENTER;
-	ts.valign = .CENTER;
-	ts.do_outline = true;
-	ts.outline_thickness = 2;
-	ts.outline_color = v4.{0, 0, 0, 1};
+		ICON_HALF_SIZE :: 50.0;
+		ICON_PAD_X :: 500.0;
 
-	UI.text(rect, ts, "ROLE: %", .{player_role_to_string(player)});
+		anchor := title_strip->left_center_rect()->offset(ICON_PAD_X, 0.0);
+		icon_rect := anchor->grow(ICON_HALF_SIZE);
+		UI.quad(icon_rect->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
+	}
 
 	// Hitman contract HUD (local-only).
 	if player.player_role == Player_Role.HITMAN && player->is_local() {
@@ -602,7 +618,8 @@ draw_player_role_hud :: proc(player: Player) {
 		safe := UI.get_safe_screen_rect();
 		bg2 := get_asset(Texture_Asset, "$AO/white.png");
 
-		panel := safe->top_left_rect()->grow(40, 360, 160, 0)->offset(20, -110);
+		// Align this panel with the task list height (see `update_tasks_ui` in `scripts/tasks.csl`).
+		panel := safe->top_left_rect()->grow(40, 360, 160, 0)->offset(20, -250);
 		UI.quad(panel, bg2, v4.{0.0, 0.0, 0.0, 0.55});
 		UI.quad(panel->inset(2), bg2, v4.{0.25, 0.05, 0.05, 0.55});
 
@@ -703,7 +720,8 @@ draw_player_role_hud :: proc(player: Player) {
 		safe := UI.get_safe_screen_rect();
 		bg2 := get_asset(Texture_Asset, "$AO/white.png");
 
-		panel := safe->top_left_rect()->grow(40, 360, 140, 0)->offset(20, -110);
+		// Align this panel with the task list height (see `update_tasks_ui` in `scripts/tasks.csl`).
+		panel := safe->top_left_rect()->grow(40, 360, 140, 0)->offset(20, -250);
 		UI.quad(panel, bg2, v4.{0.0, 0.0, 0.0, 0.55});
 		UI.quad(panel->inset(2), bg2, v4.{0.10, 0.08, 0.03, 0.55});
 
@@ -753,7 +771,8 @@ draw_player_role_hud :: proc(player: Player) {
 		safe := UI.get_safe_screen_rect();
 		bg2 := get_asset(Texture_Asset, "$AO/white.png");
 
-		panel := safe->top_left_rect()->grow(40, 360, 140, 0)->offset(20, -110);
+		// Align this panel with the task list height (see `update_tasks_ui` in `scripts/tasks.csl`).
+		panel := safe->top_left_rect()->grow(40, 360, 140, 0)->offset(20, -250);
 		UI.quad(panel, bg2, v4.{0.0, 0.0, 0.0, 0.55});
 		UI.quad(panel->inset(2), bg2, v4.{0.25, 0.05, 0.05, 0.55});
 
@@ -1481,7 +1500,13 @@ update_minimap_ui :: proc(player: Player) {
 		if dot_size < 10.0 { dot_size = 10.0; }
 		if dot_size > 22.0 { dot_size = 22.0; }
 		dot := Rect{p_ui, p_ui}->grow_unscaled(dot_size, dot_size, dot_size, dot_size);
-		UI.quad(dot, core_globals.white_sprite, v4.{0.2, 0.9, 0.3, 0.95});
+		player_icon := get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_schleem.png");
+		if player_icon != null {
+			UI.quad(dot->fit_aspect(player_icon->get_aspect()), player_icon, v4.{1, 1, 1, 0.95});
+		} else {
+			// Fallback if the asset is missing.
+			UI.quad(dot, core_globals.white_sprite, v4.{0.2, 0.9, 0.3, 0.95});
+		}
 	}
 
 	// Pirate treasure dig spots (local-only).
