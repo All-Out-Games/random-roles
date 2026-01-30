@@ -1127,12 +1127,6 @@ cast_vote :: proc(voter: Player, target: Player) {
 		vote_weight = 2;
 	}
 	target.votes_received += vote_weight;
-	
-	if vote_weight == 2 {
-		voter->Notify(format_string("You voted for % (2x)", .{target.entity->get_name()}));
-	} else {
-		voter->Notify(format_string("You voted for %", .{target.entity->get_name()}));
-	}
 }
 
 cast_skip_vote :: proc(voter: Player) {
@@ -1153,12 +1147,6 @@ cast_skip_vote :: proc(voter: Player) {
 	vote_weight := 1;
 	if voter.player_role == Player_Role.PRESIDENT {
 		vote_weight = 2;
-	}
-
-	if vote_weight == 2 {
-		voter->Notify("You voted to skip (2x)");
-	} else {
-		voter->Notify("You voted to skip");
 	}
 }
 
@@ -1617,19 +1605,6 @@ ao_update_voting :: proc(dt: float) {
 	remaining := 60.0 - elapsed;
 	if remaining < 0.0 { remaining = 0.0; }
 	
-voting_text := format_string("Voting ends in: % seconds", .{format_float(remaining, decimals=0)});
-	
-	screen := UI.get_safe_screen_rect();
-	rect := screen->subrect(0.5, 0.1, 0.5, 0.1, -150, -25, -150, -25);
-	
-	ts := UI.default_text_settings();
-	ts.size = 48;
-	ts.color = .{1, 1, 1, 1};
-	ts.halign = .CENTER;
-	ts.valign = .CENTER;
-	
-	UI.text(rect, ts, voting_text);
-
 	// Check if all alive players have voted - early end if so
 	alive_count := 0;
 	voted_count := 0;
@@ -1739,11 +1714,6 @@ end_voting :: proc() {
 
 			rr_last_vote_result_time = get_time();
 			rr_last_vote_ejected_player_id = max_player.entity.id;
-
-			ejected_message := format_string("% has been ejected!", .{max_player.entity->get_name()});
-			for i: 0..players.elements.count-1 {
-				players.elements[i]->Notify(ejected_message);
-			}
 		}
 	}
 
@@ -1777,11 +1747,6 @@ finalize_voting :: proc() {
 	// If a lockdown is still active, keep doors locked like a meeting.
 	if !rr_lockdown_active {
 		open_all_doors();
-	}
-	
-	// Notify all players
-	for i: 0..players.elements.count-1 {
-		players.elements[i]->Notify("Voting has ended. The game continues!");
 	}
 }
 

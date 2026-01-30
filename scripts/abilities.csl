@@ -1573,31 +1573,26 @@ Vote_Ability :: class : Ability_Base {
         if kit_panel == null { kit_panel = get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/modal_simple_black1.png"); }
         if kit_panel == null { kit_panel = white; }
 
-        kit_card := get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_grey1.png");
-        if kit_card == null { kit_card = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png"); }
-        if kit_card == null { kit_card = white; }
+        // Voting UI specific textures (project assets in /res/ui/voting)
+        vote_dead_icon := get_asset(Texture_Asset, "ui/voting/dead_crew_icon.png"); // skull
+        vote_tile_backing := get_asset(Texture_Asset, "ui/voting/player_backing.png"); // stays white
+        vote_tile_top := get_asset(Texture_Asset, "ui/voting/player_backing_top.png"); // tinted by player color
+        vote_tile_selected := get_asset(Texture_Asset, "ui/voting/player_backing_selected.png");
+        vote_schleem_shadow := get_asset(Texture_Asset, "ui/voting/schleem_shadow.png");
+        vote_skip_button := get_asset(Texture_Asset, "ui/voting/skip_vote_button.png");
 
-        kit_card_selected := get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_red1.png");
-        if kit_card_selected == null { kit_card_selected = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_3.png"); }
-        if kit_card_selected == null { kit_card_selected = white; }
-
-        kit_card_dead := get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_black1.png");
-        if kit_card_dead == null { kit_card_dead = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png"); }
-        if kit_card_dead == null { kit_card_dead = white; }
-
-        kit_skip_button := get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_arrow_green1.png");
-        if kit_skip_button == null { kit_skip_button = get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_green1.png"); }
-        if kit_skip_button == null { kit_skip_button = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_2.png"); }
-        if kit_skip_button == null { kit_skip_button = white; }
-
-        // Icons: match the mock better (kit tick/plus/cross), keep revolver from game icons.
+        // Icons: match the mock better (kit tick/plus), use voting weapon icon.
         check_icon := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/green_tick_outline.png");
         if check_icon == null { check_icon = get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/white_tick.png"); }
         if check_icon == null { check_icon = get_asset(Texture_Asset, "sprites/icons/vote_select_icon.png"); }
-        gun_icon := get_asset(Texture_Asset, "sprites/icons/revolver.png");           // used as "your vote" mark
+        vote_weapon_icon := get_asset(Texture_Asset, "ui/voting/shoot_weapon_icon.png");
+        gun_icon := vote_weapon_icon; // used as "your vote" mark
+        if gun_icon == null { gun_icon = get_asset(Texture_Asset, "sprites/icons/revolver.png"); }
         plus_icon := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/plus_button2.png");
         if plus_icon == null { plus_icon = get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/plus_button.png"); }
-        dead_icon := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/red_cross.png");
+        // Dead should use the skull icon.
+        dead_icon := vote_dead_icon;
+        if dead_icon == null { dead_icon = get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/red_cross.png"); }
         if dead_icon == null { dead_icon = get_asset(Texture_Asset, "sprites/icons/kill_ability.png"); }
 
         // The mock has a translucent modal over gameplay (not fully opaque).
@@ -1739,7 +1734,11 @@ Vote_Ability :: class : Ability_Base {
         } else {
             cols :: 4;
             rows :: 3;
-            CARD_ASPECT :: 3.15; // width / height (matches the mock's wide tiles)
+            // Match tile aspect (never stretch).
+            tile_aspect := 3.15;
+            if vote_tile_backing != null {
+                tile_aspect = vote_tile_backing->get_aspect();
+            }
 
             spacing := 16.0;
             gw := grid->width();
@@ -1748,9 +1747,9 @@ Vote_Ability :: class : Ability_Base {
             max_w_per := (gw - spacing * (cols - 1).(float)) / cols.(float);
             max_h_per := (gh - spacing * (rows - 1).(float)) / rows.(float);
 
-            card_h := min(max_h_per, max_w_per / CARD_ASPECT);
+            card_h := min(max_h_per, max_w_per / tile_aspect);
             if card_h < 1.0 { card_h = 1.0; }
-            card_w := card_h * CARD_ASPECT;
+            card_w := card_h * tile_aspect;
 
             total_w := card_w * cols.(float) + spacing * (cols - 1).(float);
             start_x := grid.min.x + (gw - total_w) * 0.5;
@@ -1758,25 +1757,18 @@ Vote_Ability :: class : Ability_Base {
 
             // Card text style
             name_ts := UI.default_text_settings();
-            name_ts.size = 48; // Bigger text
+            name_ts.size = 52; // Bigger text
             name_ts.color = v4.{1, 1, 1, 1};
             name_ts.halign = .CENTER;
             name_ts.valign = .CENTER;
             name_ts.do_outline = true;
             name_ts.outline_thickness = 5; // Thicker outline
             name_ts.outline_color = v4.{0, 0, 0, 1};
-            name_ts.do_autofit = true;
-            name_ts.autofit_min_size = 18;
-            name_ts.autofit_max_size = 34;
 
-            // Card button settings
+            // Card button settings (use voting tile art; always keep aspect)
             card_bs := UI.default_button_settings();
-            card_bs.sprite = kit_card;
             card_bs.press_scaling = 0.98;
-            // Enable 9-slice for cards so they don't stretch weirdly.
-            CARD_SLICE_PX :: 32.0;
-            card_bs.nine_slice_data.slice = v4.{CARD_SLICE_PX, CARD_SLICE_PX, CARD_SLICE_PX, CARD_SLICE_PX};
-            card_bs.nine_slice_data.slice_scale = 1.0;
+            card_bs.sprite_fit_aspect = true;
 
             // Helpers for matching the mock's player-tinted tiles.
             get_vote_tile_bg :: proc(color: Color_Replace_Color) -> v4 {
@@ -1858,87 +1850,79 @@ Vote_Ability :: class : Ability_Base {
                 clicked := false;
                 draw_rect := card_rect;
 
-                // Determine button color based on state
-                btn_color := v4.{1, 1, 1, 1};
-                if is_dead {
-                    btn_color = v4.{0.5, 0.5, 0.5, 1.0}; // Grey, not black
-                } else if is_selected {
-                    btn_color = v4.{1, 1, 1, 1}; // Selected sprite is already red
-                } else {
-                    btn_color = get_vote_tile_bg(p.avatar_color);
-                }
-
+                // Invisible button for interaction (we draw the tile art ourselves so we can top-anchor
+                // `player_backing_top.png` and keep the bottom area white).
                 if can_vote_for {
-                    // Tint the interactive button itself
-                    bs_active := card_bs;
-                    bs_active.color = btn_color;
-                    
-                    btn := UI.begin_button(card_rect, bs_active, {}, ""); {
+                    hit_bs := UI.default_button_settings();
+                    hit_bs.sprite = white;
+                    hit_bs.press_scaling = 1.0;
+                    hit_bs.color = v4.{1, 1, 1, 0.0};
+                    hit_bs.hovered_color = hit_bs.color;
+                    hit_bs.pressed_color = hit_bs.color;
+                    hit_bs.disabled_color = hit_bs.color;
+
+                    btn := UI.begin_button(card_rect, hit_bs, {}, ""); {
                         defer UI.end_button();
                         clicked = btn.clicked;
                         draw_rect = btn.rect;
                     }
                 } else {
-                    // Disabled/dim states (using button to get 9-slice rendering)
-                    alpha := is_dead ? 0.55 : 0.80;
-                    
-                    bs_disabled := card_bs;
-                    // Use specific sprites for states if available, otherwise fallback to tinting kit_card
-                    if is_selected {
-                        bs_disabled.sprite = kit_card_selected;
-                    } else if is_dead {
-                        bs_disabled.sprite = kit_card_dead;
-                    }
-                    
-                    bs_disabled.color = btn_color;
-                    bs_disabled.disabled_color = v4.{btn_color.x, btn_color.y, btn_color.z, alpha};
-                    
-                    UI.push_disabled(true);
-                    UI.button(card_rect, bs_disabled, {}, ""); 
-                    UI.pop_disabled();
+                    draw_rect = card_rect;
                 }
 
-                // White strip at the bottom (covers the button color).
-                // We inset slightly (6px) to avoid covering the rounded corners/borders of the button.
-                bottom_h := draw_rect->height() * 0.25;
-                bottom_strip_rect := draw_rect->inset(4, 4, 4, 4)->cut_bottom_unscaled(bottom_h);
-                
-                if !is_selected {
-                    // For dead players, the strip is grey. For others, white.
-                    strip_color := is_dead ? v4.{0.25, 0.25, 0.25, 1.0} : v4.{1, 1, 1, 1};
-                    UI.quad(bottom_strip_rect, white, strip_color);
+                // Determine overlay color (dead is grey; selected uses its own sprite)
+                top_color := v4.{1, 1, 1, 1};
+                if is_dead {
+                    top_color = v4.{0.1, 0.1, 0.1, 1.0};
+                } else if !is_selected {
+                    top_color = get_vote_tile_bg(p.avatar_color);
+                }
+
+                // Tile art
+                if is_selected {
+                    // Selected is a full sprite; draw it over the whole tile rect.
+                    if vote_tile_selected != null {
+                        UI.quad(draw_rect, vote_tile_selected, v4.{1, 1, 1, 1});
+                    } else {
+                        UI.quad(draw_rect, white, v4.{1, 0.20, 0.20, 1});
+                    }
                 } else {
-                    // Selected: no white bottom area.
-                    // Draw transp_black1 panel behind player (use same 9-slice as tiles so corners match).
-                    bg_square := draw_rect->subrect(0.0, 0.0, 0.42, 0.78)->inset(4, 4, 4, 4);
-                    transp_black := get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/transp_black1.png");
-                    if transp_black != null {
-                        bs_side := UI.default_button_settings();
-                        bs_side.sprite = transp_black;
-                        bs_side.press_scaling = 1.0;
-                        bs_side.color = v4.{1, 1, 1, 0.9};
-                        bs_side.hovered_color = bs_side.color;
-                        bs_side.pressed_color = bs_side.color;
-                        bs_side.disabled_color = bs_side.color;
+                    // Backing stays white.
+                    if is_dead {
+                        UI.quad(draw_rect, vote_tile_backing, v4.{0.5, 0.5, 0.5, 1});
+                    } else {
+                        UI.quad(draw_rect, vote_tile_backing, v4.{1, 1, 1, 1});
+                    }
 
-                        SIDE_SLICE_PX :: 32.0;
-                        bs_side.nine_slice_data.slice = v4.{SIDE_SLICE_PX, SIDE_SLICE_PX, SIDE_SLICE_PX, SIDE_SLICE_PX};
-                        bs_side.nine_slice_data.slice_scale = 1.0;
+                    // Top overlay should NOT reach the bottom area.
+                    // Draw it in a top-anchored rect that fits its aspect and spans the tile width.
+                    if vote_tile_top != null {
+                        overlay_aspect := vote_tile_top->get_aspect();
+                        overlay_w := draw_rect->width();
+                        overlay_h := overlay_w / overlay_aspect;
+                        if overlay_h > draw_rect->height() {
+                            overlay_h = draw_rect->height();
+                            overlay_w = overlay_h * overlay_aspect;
+                        }
+                        overlay_x0 := draw_rect.min.x + (draw_rect->width() - overlay_w) * 0.5;
+                        overlay_y1 := draw_rect.max.y;
+                        overlay_rect := Rect.{v2.{overlay_x0, overlay_y1 - overlay_h}, v2.{overlay_x0 + overlay_w, overlay_y1}};
+                        UI.quad(overlay_rect, vote_tile_top, top_color);
+                    }
 
-                        UI.push_disabled(true);
-                        UI.button(bg_square, bs_side, {}, "");
-                        UI.pop_disabled();
+                    // Dead: darken the bottom/whole tile a bit more so it reads as disabled.
+                    if is_dead {
+                        UI.quad(draw_rect, white, v4.{0, 0, 0, 0.26});
                     }
                 }
 
-                // Rig display area (left side)
-                // Extend lower to overlap bottom white area (0.85 -> 1.0)
-                rig_area := draw_rect->subrect(0.03, 0.05, 0.24, 1.0);
+                // Rig display area (left side) - allow overlap with bottom portion
+                rig_area := draw_rect->subrect(0.15, 0.1, 0.26, 0.8);
                 if p.animator != null && p.animator.instance != null {
                     // Match other UIs: push player material so cosmetics/replace colors render.
                     if is_dead {
                         // Grayed out spine for dead players
-                        UI.push_color_multiplier(v4.{0.5, 0.5, 0.5, 1.0});
+                        UI.push_color_multiplier(v4.{0.55, 0.55, 0.55, 0.95});
                     }
                     
                     UI.push_player_material(p);
@@ -1947,14 +1931,22 @@ Vote_Ability :: class : Ability_Base {
                         defer UI.pop_color_multiplier();
                     }
 
-                    // Scale based on card height (screen space).
-                    s := draw_rect->height() * 1.22; // Bigger spine
-                    pos := rig_area->center() + v2.{0.0, -draw_rect->height() * 0.12};
+                    // Shadow behind (slightly more left/down)
+                    if is_selected || is_dead {
+                        shadow_pos := rig_area->center() + v2.{-draw_rect->width() * 0.06, -draw_rect->height() * 0.01};
+                        shadow_size := draw_rect->height() * 0.55;
+                        shadow_rect := Rect.{shadow_pos, shadow_pos}->grow(shadow_size);
+                        UI.quad(shadow_rect->fit_aspect(vote_schleem_shadow->get_aspect()), vote_schleem_shadow, v4.{1, 1, 1, 1.0});
+                    }
+
+                    // Spine (bigger + lower, overlaps bottom area)
+                    s := draw_rect->height() * 1.35;
+                    pos := rig_area->center() + v2.{-draw_rect->width() * 0.01, -draw_rect->height() * 0.30};
                     UI.spine(pos, p.animator.instance, v2.{s, s}, 0.0);
                 }
 
                 // Name (bottom area)
-                name_area := draw_rect->subrect(0.20, 0.00, 1.00, 0.40)->inset(10, 10, 10, 10);
+                name_area := draw_rect->subrect(0.20, 0.00, 1.00, 0.50)->inset(10, 10, 10, 10);
                 if is_selected {
                     name_ts.color = v4.{1, 1, 1, 1};
                 } else if is_dead {
@@ -1970,34 +1962,17 @@ Vote_Ability :: class : Ability_Base {
                     UI.quad(check_rect->fit_aspect(check_icon->get_aspect()), check_icon, c_good);
                 }
 
-                // "You voted for this player" marker: gun (red, top-left)
+                // "You voted for this player" marker: gun
                 if gun_icon != null && is_selected {
-                    gun_rect := draw_rect->top_left_rect()->offset(120, -24)->grow(22);
-                    UI.quad(gun_rect->fit_aspect(gun_icon->get_aspect()), gun_icon, c_bad);
-
-                    // Red "+" next to the gun.
-                    if plus_icon != null {
-                        plus_rect := draw_rect->top_left_rect()->offset(150, -24)->grow(18);
-                        UI.quad(plus_rect->fit_aspect(plus_icon->get_aspect()), plus_icon, c_bad);
-                    } else {
-                        plus_rect := draw_rect->top_left_rect()->offset(148, -24)->grow(16);
-                        plus_ts := UI.default_text_settings();
-                        plus_ts.size = 34;
-                        plus_ts.color = c_bad;
-                        plus_ts.halign = .CENTER;
-                        plus_ts.valign = .CENTER;
-                        plus_ts.do_outline = true;
-                        plus_ts.outline_thickness = 3;
-                        plus_ts.outline_color = v4.{0, 0, 0, 1};
-                        UI.text(plus_rect, plus_ts, "+");
-                    }
+                    gun_rect := draw_rect->top_left_rect()->offset(150, -24)->grow(32);
+                    UI.quad(gun_rect->fit_aspect(gun_icon->get_aspect()), gun_icon, v4.{1, 1, 1, 1});
                 }
 
-                // Dead overlay (skull-ish marker + heavy dim)
+                // Dead overlay (skull)
                 if is_dead {
                     if dead_icon != null {
-                        dead_rect := draw_rect->center_rect()->grow(34);
-                        UI.quad(dead_rect->fit_aspect(dead_icon->get_aspect()), dead_icon, v4.{c_bad.x, c_bad.y, c_bad.z, 0.85});
+                        dead_rect := draw_rect->center_rect()->offset(0, 0)->grow(42);
+                        UI.quad(dead_rect->fit_aspect(dead_icon->get_aspect()), dead_icon, v4.{1, 1, 1, 1});
                     }
                 }
 
@@ -2009,20 +1984,17 @@ Vote_Ability :: class : Ability_Base {
 
         // --- Footer: Skip Vote button (single large button like the mock) ---
         footer_inner := footer->inset(18)->cut_top_unscaled(20); // Raise up
-        btn_rect := footer_inner->bottom_center_rect()->grow(36, 220, 36, 220);
+        btn_rect := footer_inner->bottom_center_rect()->grow(36, 260, 36, 260);
 
+        // Skip vote button (use voting art, keep aspect)
         skip_bs := UI.default_button_settings();
-        skip_bs.sprite = kit_skip_button;
+        skip_bs.sprite = vote_skip_button;
+        if skip_bs.sprite == null {
+            skip_bs.sprite = get_asset(Texture_Asset, "$AO/ui/kit/Modals/basic_buttons/button_large_arrow_green1.png");
+        }
         skip_bs.press_scaling = 0.96;
-        
-        // Use 9-slice to prevent the arrow button from squishing/stretching weirdly.
-        // The kit arrow button likely has the arrow on one side and a stretchable body.
-        // We'll guess a safe slice amount (e.g. 64px) to preserve the arrow cap.
-        SKIP_SLICE_PX :: 64.0;
-        skip_bs.nine_slice_data.slice = v4.{SKIP_SLICE_PX, SKIP_SLICE_PX, SKIP_SLICE_PX, SKIP_SLICE_PX};
-        skip_bs.nine_slice_data.slice_scale = 1.0;
-
-        // Darken the arrow button slightly as requested
+        skip_bs.sprite_fit_aspect = true;
+        // Darken slightly
         skip_bs.color_multiplier = v4.{0.9, 0.9, 0.9, 1.0};
 
         skip_ts := UI.default_text_settings();
@@ -2045,6 +2017,11 @@ Vote_Ability :: class : Ability_Base {
         // If the local player already chose skip, add a subtle highlight.
         if local_player.voted_skip {
             UI.quad(btn_rect, white, v4.{0.20, 0.90, 0.45, 0.12});
+        }
+
+        // Ensure the rect matches the sprite aspect so it never squishes.
+        if skip_bs.sprite != null {
+            btn_rect = btn_rect->fit_aspect(skip_bs.sprite->get_aspect());
         }
 
         if UI.button(btn_rect, skip_bs, skip_ts, "Skip Vote").clicked {
