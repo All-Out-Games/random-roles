@@ -21,6 +21,8 @@ Player :: class : Player_Base {
 
 	// Local UI state
 	show_minimap: bool;
+	chat_mode_inited: bool;
+	chat_mode_last_applied: Chat.Mode;
 
 	// --- Ghost QoL ---
 	// Local-only camera zoom so dead players can see more of the map.
@@ -243,6 +245,7 @@ Player :: class : Player_Base {
 			// Cosmetic-only: name coloring is per-viewer. Do this only on the local client.
 			if this->is_local() {
             	this->setup_player_colors();
+				this->update_chat_mode();
 			}
 			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
 			rr_draw_power_outage_overlay_if_needed(this);
@@ -270,6 +273,20 @@ Player :: class : Player_Base {
 		// Cosmetic: apply scheduled skin toggles on all clients.
 		rr_werewolf_update_skins(this);
     }
+
+	update_chat_mode :: proc(using this: Player) {
+		desired := Chat.Mode.DEFAULT;
+		// In-game: bubble-only chat for alive players (ghosts stay in default chat).
+		if game_state == Game_State.INGAME && this.player_state == Player_State.ALIVE {
+			desired = Chat.Mode.BUBBLE_ONLY;
+		}
+
+		if chat_mode_inited && desired == chat_mode_last_applied return;
+
+		Chat.set_mode(desired);
+		chat_mode_last_applied = desired;
+		chat_mode_inited = true;
+	}
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
@@ -596,16 +613,22 @@ draw_player_role_hud :: proc(player: Player) {
 	}
 
 	// Role icon (task UI). This replaces the old "ROLE: ..." title pill.
-	// Positioning: place it on the left inner side of the task panel title strip.
+	// Positioning:
+	// - Default: top-left of the safe screen.
+	// - If chat is open: offset right by the chat rect so it doesn't overlap.
 	icon := player_role_to_icon_texture(player.player_role);
 	if icon != null {
-		// Mirror `update_tasks_ui` panel layout (see `scripts/tasks.csl`).
-		title_strip := UI.get_safe_screen_rect()->cut_top(150);
-
 		ICON_HALF_SIZE :: 50.0;
-		ICON_PAD_X :: 500.0;
+		PAD :: 20.0;
 
-		anchor := title_strip->left_center_rect()->offset(ICON_PAD_X, 0.0);
+		anchor := screen->top_left_rect()->offset(ICON_HALF_SIZE + PAD, -ICON_HALF_SIZE - PAD);
+		if player->is_chat_open() {
+			chat_rect := player->get_chat_rect();
+			anchor = anchor->offset_unscaled(chat_rect->width(), 0.0);
+		} else {
+			// Handle map button
+			anchor = anchor->offset(120.0, 0.0);
+		}
 		icon_rect := anchor->grow(ICON_HALF_SIZE);
 		UI.quad(icon_rect->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
 	}
@@ -1434,6 +1457,15 @@ draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
 	return interact.clicked;
 }
 
+rr_rects_overlap :: proc(a: Rect, b: Rect) -> bool {
+	// Axis-aligned overlap check in UI space.
+	if a.max.x <= b.min.x return false;
+	if a.min.x >= b.max.x return false;
+	if a.max.y <= b.min.y return false;
+	if a.min.y >= b.max.y return false;
+	return true;
+}
+
 update_minimap_ui :: proc(player: Player) {
 	// Allow minimap during voting and for ghosts (after reveal).
 	if game_state != Game_State.INGAME && game_state != Game_State.VOTING {
@@ -1461,8 +1493,46 @@ update_minimap_ui :: proc(player: Player) {
 	// Keep minimap UI above the comms "deaf" icons (layer 5200).
 	UI.push_layer(5600);
 	defer UI.pop_layer();
+	
+	chat_height := player->is_chat_open() ? player->get_chat_rect()->height() : 0.0;
+	btn_rect := safe->top_left_rect()->grow(0.0, 120.0, 52.0, 0.0)->offset(20.0, -25.0)->offset_unscaled(0.0, -chat_height);
 
-	btn_rect := safe->top_left_rect()->grow(0.0, 120.0, 52.0, 0.0)->offset(12.0, -12.0);
+	if game_state == Game_State.INGAME && player->is_chat_open() {
+		// Mirror `update_tasks_ui` panel layout (see `scripts/tasks.csl`).
+		should_show_task_panel := false;
+		if rr_power_outage_active || rr_comms_outage_active {
+			should_show_task_panel = true;
+		} else {
+			// Normal tasks/objectives.
+			if !player.is_temporarily_resurrected {
+				is_civilian_like := player.player_type == Player_Type.CIVILIAN ||
+					player.player_role == Player_Role.PRANKSTER ||
+					player.player_role == Player_Role.PYROMANIAC ||
+					player.werewolf_infected;
+				if is_civilian_like && player.active_tasks.elements.count > 0 {
+					// Dead non-civilians don't get the task panel.
+					if player.player_state == Player_State.ALIVE || player.player_type == Player_Type.CIVILIAN {
+						should_show_task_panel = true;
+					}
+				}
+			}
+		}
+
+		if should_show_task_panel {
+			layout_safe := safe;
+			task_panel_rect: Rect;
+			if rr_power_outage_active || rr_comms_outage_active {
+				task_panel_rect = layout_safe->cut_left(320)->inset(250, 0, 250, 10);
+			} else {
+				task_panel_rect = layout_safe->cut_left(300)->inset(350, 0, 300, 20);
+			}
+
+			if rr_rects_overlap(btn_rect, task_panel_rect) {
+				btn_rect = btn_rect->offset(290.0, 0.0);
+			}
+		}
+	}
+
 	bs := UI.default_button_settings();
 	ts := UI.default_text_settings();
 	ts.size = 30;

@@ -27,6 +27,17 @@ Editor :: struct {
     is_entity_selected :: proc(entity: Entity) -> bool #foreign "editor_is_entity_selected";
 }
 
+Chat :: struct {
+    Mode :: enum {
+        DEFAULT;
+        BUBBLE_ONLY;
+    }
+
+    set_mode :: proc(mode: Mode) #foreign "chat_set_chat_mode";
+    server_send_message :: proc(message: string, player: Player = null) #foreign "chat_server_send_message";
+    is_open :: proc() -> bool #foreign "chat_is_open";
+}
+
 #deprecate_soft "Use entity->destroy()."
 destroy_entity :: proc(entity: Entity) #foreign "entity_destroy";
 
@@ -257,7 +268,7 @@ core_player_start :: proc(player: Player) {
     }
 }
 
-core_player_update :: proc(player: Player, dt: float) {
+core_player_update :: proc(player: Player, dt: float) #dump {
     update_ability_cooldowns(player, dt);
     if player.entity.first_effect != null {
         core_update_effects(player.entity, dt);
@@ -1565,6 +1576,13 @@ Player_Base :: class : AO_Player {
     is_local_or_server :: method() -> bool #foreign "player_is_local_or_server";
     is_local           :: method() -> bool #foreign "player_is_local";
 
+    is_chat_open              :: method() -> bool #foreign "player_is_chat_open";
+    is_ptt_button_visible     :: method() -> bool #foreign "player_is_ptt_button_visible";
+
+    get_chat_rect           :: method() -> Rect #foreign "player_get_chat_rect";
+    get_system_buttons_rect :: method() -> Rect #foreign "player_get_system_buttons_rect";
+    get_ptt_rect            :: method() -> Rect #foreign "player_get_ptt_rect";
+
     is_admin           :: method() -> bool #foreign "player_is_admin";
     is_vip             :: method() -> bool #foreign "player_is_vip";
     is_moderator       :: method() -> bool #foreign "player_is_moderator";
@@ -2063,9 +2081,6 @@ draw_ability_button :: proc(player: Player, $T: typeid, index: int) {
             case !can_use:                                               disabled = true;
             case was_aiming && index != player.was_aiming_ability_index: disabled = true;
         }
-
-        UI.push_disabled(disabled);
-        defer UI.pop_disabled();
 
         UI.push_color_multiplier({0.2, 0.2, 0.2, 1.0}, disabled);
         defer UI.pop_color_multiplier();

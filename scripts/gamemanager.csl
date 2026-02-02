@@ -231,9 +231,6 @@ rr_comms_outage_started_at: float;
 rr_comms_outage_triggered_by_id: u64;
 rr_comms_outage_cooldown_ends_at: float;
 
-// Scene lever entity for fixing comms (named `enable_communications`)
-rr_comms_lever_entity: Entity;
-
 // --- Sabotage: Door Lockdown ---
 rr_lockdown_active: bool;
 rr_lockdown_started_at: float;
@@ -668,27 +665,11 @@ rr_find_entity_named :: proc(name: string) -> Entity {
 	return null;
 }
 
-rr_get_comms_lever_entity :: proc() -> Entity {
-	if rr_comms_lever_entity != null && #alive(rr_comms_lever_entity) {
-		return rr_comms_lever_entity;
-	}
-	rr_comms_lever_entity = rr_find_entity_named(RR_ENABLE_COMMUNICATIONS_TASK_ID);
-	return rr_comms_lever_entity;
-}
-
-rr_get_comms_lever_pos :: proc() -> v2 {
-	e := rr_get_comms_lever_entity();
-	if e != null && #alive(e) {
-		return e.world_position;
-	}
-	return v2.{0.0, 0.0};
-}
-
 rr_update_comms_lever_visuals :: proc() {
 	// Server authoritative visual state
 	if !Game.is_server() return;
 
-	e := rr_get_comms_lever_entity();
+	e := world_references.rr_comms_lever_entity;
 	if e == null return;
 	if !#alive(e) return;
 
