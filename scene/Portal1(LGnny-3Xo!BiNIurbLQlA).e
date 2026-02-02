@@ -34,4 +34,19 @@
     "initial_animation": "Portal_Loop",
     "loop_initial_animation": true
   }
+},
+{
+  "cid": 2,
+  "aoid": "951992001115634:1770061923936956000",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Hub_Normal_Queue_Portal",
+  "data": {
+    "text": "Normal Queue",
+    "radius": 2,
+    "required_hold_time": 0.6000000238418579,
+    "prompt_offset": {
+      "X": -0.5000000000000000,
+      "Y": 1
+    }
+  }
 }

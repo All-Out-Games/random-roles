@@ -21,6 +21,9 @@ Player :: class : Player_Base {
 
 	// Local UI state
 	show_minimap: bool;
+
+    // --- Hub (separate Platform project) ---
+    // No persistent hub queue state (hub portal transfer is instant).
 	
 	// Prankster progress (server-driven, shown locally via tasks UI)
 	prankster_prank_count: int;
@@ -94,6 +97,19 @@ Player :: class : Player_Base {
     
     //Server Only!
     ao_start :: proc(using this: Player) {
+        // Hub game is its own Platform project (see `ao.project`).
+        // Avoid initializing the Random Roles match systems when we're in the hub.
+        if rr_is_hub_game() {
+            this->ensure_anim_state_machine();
+            this->apply_voice_chat_masks_for_current_state();
+
+            // Spawn at the lobby spawn (via World_References in the hub scene).
+            if world_references != null {
+                world_references->teleport_near_lobby(this);
+            }
+            return;
+        }
+
         append(ref players, this);
 
 		this->ensure_anim_state_machine();
@@ -142,12 +158,21 @@ Player :: class : Player_Base {
 	}
 
     ao_end :: proc(using this: Player) {
+        if rr_is_hub_game() {
+            return;
+        }
+
         // Player entity is being destroyed (typically disconnect). Clean up any corpses they spawned.
         destroy_corpses_for_player(this.entity.id);
         unordered_remove_by_value(ref players, this);
     }
 
     ao_update :: proc(using this: Player, delta_time: float) {
+        if rr_is_hub_game() {
+            // Hub doesn't run tasks/minimap/role UI.
+            return;
+        }
+
         if this->is_local_or_server() {
             this->update_freeze_reasons();
             this->setup_player_colors();
@@ -168,6 +193,10 @@ Player :: class : Player_Base {
     }
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
+        if rr_is_hub_game() {
+            return;
+        }
+
         if this->is_local_or_server() {
 			// If we were overriding the camera for the Jester Win cinematic and it ended,
 			// restore the normal follow behavior.

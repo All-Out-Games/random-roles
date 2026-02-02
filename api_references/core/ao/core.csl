@@ -8,6 +8,11 @@ Game :: struct {
     is_launched_from_editor :: proc() -> bool #foreign "is_launched_from_editor";
     is_server :: proc() -> bool #foreign "game_is_server";
     is_predicted_frame :: proc() -> bool #foreign "game_is_predicted_frame";
+
+    get_game_id :: proc() -> string #foreign "game_get_game_id";
+
+    #deprecate_soft "Use Server.get_id()"
+    get_server_id :: proc() -> string #foreign "server_get_id";
 }
 
 Server :: struct {
@@ -18,10 +23,24 @@ Server :: struct {
     queue_set_server_available :: proc(queue: string, available: bool)   #foreign "server_queue_set_server_available";
 
     transfer_player_to_game    :: proc(player: Player, game_id: string)  #foreign "server_transfer_player_to_game";
+
+    get_id :: proc() -> string #foreign "server_get_id";
+    get_private_server_host_id :: proc() -> string, bool #foreign "server_get_private_server_host_id";
 }
 
 Editor :: struct {
     is_entity_selected :: proc(entity: Entity) -> bool #foreign "editor_is_entity_selected";
+}
+
+Chat :: struct {
+    Mode :: enum {
+        DEFAULT;
+        BUBBLE_ONLY;
+    }
+
+    set_mode :: proc(mode: Mode) #foreign "chat_set_chat_mode";
+    server_send_message :: proc(message: string, player: Player = null) #foreign "chat_server_send_message";
+    is_open :: proc() -> bool #foreign "chat_is_open";
 }
 
 #deprecate_soft "Use entity->destroy()."
@@ -254,7 +273,7 @@ core_player_start :: proc(player: Player) {
     }
 }
 
-core_player_update :: proc(player: Player, dt: float) {
+core_player_update :: proc(player: Player, dt: float) #dump {
     update_ability_cooldowns(player, dt);
     if player.entity.first_effect != null {
         core_update_effects(player.entity, dt);
@@ -685,6 +704,7 @@ UI :: struct {
     quad :: proc(rect: Rect, texture: Texture_Asset, color: v4 = {1, 1, 1, 1}) #foreign "ui_quad";
     text :: proc(rect: Rect, settings: Text_Settings, str: string, args: [^]any = {}) #foreign "ui_text";
     text_sync :: proc(rect: Rect, settings: Text_Settings, str: string, args: [^]any = {}) -> Rect #foreign "ui_text_sync";
+    measure_text :: proc(rect: Rect, settings: Text_Settings, str: string, args: [^]any = {}) -> Rect #foreign "ui_measure_text";
     spine :: proc(position: v2, spine: Spine_Instance, scale: v2 = {1, 1}, rotation_degrees: float = 0) #foreign "ui_spine";
 
     button :: proc(rect: Rect, bs: Button_Settings, ts: Text_Settings, str: string, args: [^]any = {}) -> Interact_Result #foreign "ui_button";
@@ -1250,6 +1270,7 @@ Economy :: struct {
     get_balance           :: proc(player: Player, currency: string)              -> s64  #foreign "economy_get_balance";
     can_withdraw_currency :: proc(player: Player, currency: string, amount: s64) -> bool #foreign "economy_can_withdraw_currency";
     withdraw_currency     :: proc(player: Player, currency: string, amount: s64)         #foreign "economy_withdraw_currency";
+    delete_save_data      :: proc(player: Player)                                        #foreign "economy_delete_save_data";
 }
 
 Ordered_Save_Entry :: struct {
@@ -1275,7 +1296,9 @@ Save :: struct {
     get_int    :: proc(player: Player, key: string, default: s64) -> s64       #foreign "save_get_int";
     set_f64    :: proc(player: Player, key: string, value: f64)                #foreign "save_set_f64";
     get_f64    :: proc(player: Player, key: string, default: f64) -> f64       #foreign "save_get_f64";
-    delete_key :: proc(player: Player, key: string)                            #foreign "save_delete_key";
+    delete_key     :: proc(player: Player, key: string)                         #foreign "save_delete_key";
+    delete_all_keys :: proc(player: Player)                                    #foreign "save_delete_all_keys";
+    get_all_keys   :: proc(player: Player) -> []string                         #foreign "save_get_all_keys";
 
     set_json_raw     :: proc(player: Player, key: string, data: *u8, t: typeid)              #foreign "save_set_json_raw";
     try_get_json_raw :: proc(player: Player, key: string, out_data: *u8, t: typeid) -> bool  #foreign "save_try_get_json_raw";
@@ -1442,7 +1465,7 @@ Ease :: struct {
 }
 
 Keybinds :: struct {
-    register                   :: proc(name: string, default: Input)              -> Keybind    #foreign "keybinds_register";
+    register                   :: proc(name: string, default: Input)     -> Keybind             #foreign "keybinds_register";
     get_sprite_for_keybind     :: proc(player: Player, keybind: Keybind) -> Texture_Asset, bool #foreign "keybinds_get_sprite_for_keybind";
     get_keybind_string         :: proc(player: Player, keybind: Keybind) -> string              #foreign "keybinds_get_keybind_string";
 
@@ -1559,6 +1582,13 @@ Player_Base :: class : AO_Player {
     is_local_or_server :: method() -> bool #foreign "player_is_local_or_server";
     is_local           :: method() -> bool #foreign "player_is_local";
 
+    is_chat_open              :: method() -> bool #foreign "player_is_chat_open";
+    is_ptt_button_visible     :: method() -> bool #foreign "player_is_ptt_button_visible";
+
+    get_chat_rect           :: method() -> Rect #foreign "player_get_chat_rect";
+    get_system_buttons_rect :: method() -> Rect #foreign "player_get_system_buttons_rect";
+    get_ptt_rect            :: method() -> Rect #foreign "player_get_ptt_rect";
+
     is_admin           :: method() -> bool #foreign "player_is_admin";
     is_vip             :: method() -> bool #foreign "player_is_vip";
     is_moderator       :: method() -> bool #foreign "player_is_moderator";
@@ -1573,6 +1603,13 @@ Player_Base :: class : AO_Player {
     }
 
     will_draw_name :: method() -> bool #foreign "player_will_draw_name";
+
+    Friend :: struct {
+        user_id: string;
+        username: string;
+    }
+
+    get_all_friends :: method() -> []Friend #foreign "player_get_all_friends";
 
     abilities: [..]Ability_Base;
     was_aiming_ability_index: s64;
@@ -2058,23 +2095,22 @@ draw_ability_button :: proc(player: Player, $T: typeid, index: int) {
             case was_aiming && index != player.was_aiming_ability_index: disabled = true;
         }
 
-        // UI.push_disabled_visuals(disabled);
-        // defer UI.pop_disabled_visuals();
-
-        // UI.push_color_multiplier({1, 1, 1, 0.5}, disabled);
-        // defer UI.pop_color_multiplier();
+        UI.push_color_multiplier({0.2, 0.2, 0.2, 1.0}, disabled);
+        defer UI.pop_color_multiplier();
 
         should_draw_keybind := false;
         keybind: u64;
-        if !ability.disable_keybind {
-            keybind = core_globals.ability_keybinds[index];
-            if ability.keybind_override != 0 {
-                keybind = ability.keybind_override;
-            }
-            should_draw_keybind = true;
-
-            if !ability.draw_but_dont_use_keybind {
+        if player.device_kind == .PC {
+            if !ability.disable_keybind {
+                keybind = core_globals.ability_keybinds[index];
+                if ability.keybind_override != 0 {
+                    keybind = ability.keybind_override;
+                }
                 should_draw_keybind = true;
+
+                if !ability.draw_but_dont_use_keybind {
+                    should_draw_keybind = true;
+                }
             }
         }
 

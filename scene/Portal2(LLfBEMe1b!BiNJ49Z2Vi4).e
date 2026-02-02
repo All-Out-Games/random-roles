@@ -34,4 +34,13 @@
     "initial_animation": "Portal_Loop",
     "loop_initial_animation": true
   }
+},
+{
+  "cid": 2,
+  "aoid": "959779174541744:1770063580777693700",
+  "component_type": "Internal_Component",
+  "internal_component_type": "Hub_Friends_Portal_Text",
+  "data": {
+    "text": "Create a private server to play with friends"
+  }
 }

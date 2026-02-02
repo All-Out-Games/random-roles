@@ -1,0 +1,108 @@
+Hub_Normal_Queue_Portal :: class : Interactable {
+    ao_start :: method() {
+        this->set_listener(this);
+        this->set_text("Play Random Roles");
+        this->set_hold_text("");
+        if radius <= 0.0 radius = 1.75;
+        if priority == 0 priority = 100;
+    }
+
+    can_use :: method(player: Player) -> bool {
+        if !rr_is_hub_game() return false;
+        return player != null;
+    }
+
+    on_interact :: method(player: Player) {
+        if !Game.is_server() return;
+        if player == null return;
+
+        // Instant transfer to the main game (no queue/wait).
+        Server.transfer_player_to_game(player, MAIN_GAME_ID);
+    }
+}
+
+// Friend portal: informational only (no queue logic).
+Hub_Friends_Portal_Text :: class : Component {
+    text: string @ao_serialize;
+    offset: v2 @ao_serialize;
+    nine_slice_px: v4 @ao_serialize;
+    nine_slice_scale: float @ao_serialize;
+
+    ao_start :: method() {
+        if text.count == 0 {
+            text = "Create a private server to play with friends";
+        }
+        // A reasonable default above the portal.
+        if offset.x == 0.0 && offset.y == 0.0 {
+            offset = {0, 1.75};
+        }
+
+        // Defaults for 9-slice border thickness (pixels in the source texture).
+        if nine_slice_px.x == 0.0 && nine_slice_px.y == 0.0 && nine_slice_px.z == 0.0 && nine_slice_px.w == 0.0 {
+            nine_slice_px = {24, 24, 24, 24};
+        }
+        if nine_slice_scale == 0.0 {
+            nine_slice_scale = 1.0;
+        }
+    }
+
+    ao_late_update :: method(dt: float) {
+        if !rr_is_hub_game() return;
+        // Cosmetic only (draw on clients).
+        if Game.is_server() return;
+
+        UI.push_world_draw_context();
+        defer UI.pop_draw_context();
+
+        pos := entity.world_position + offset;
+        UI.push_z(pos.y);
+        defer UI.pop_z();
+
+        ts := UI.default_text_settings();
+        ts.size = 0.30;
+        ts.halign = .CENTER;
+        ts.valign = .CENTER;
+        ts.color = {1, 1, 1, 1};
+        ts.do_outline = true;
+        ts.outline_thickness = 0.03;
+        ts.outline_color = {0, 0, 0, 1};
+        ts.word_wrap = true;
+
+        // Measure the wrapped text first, then size the background to fit it.
+        // Give the measurement rect plenty of height so multi-line text can expand.
+        max_rect := Rect{pos, pos}->grow(0.60, 1.40, 0.60, 1.40);
+        padding := 0.10;
+        text_bounds := UI.measure_text(max_rect->inset(padding, padding, padding, padding), ts, text, {});
+
+        // Background expands to cover actual text bounds + padding.
+        bg_rect := text_bounds->grow(padding, padding, padding, padding);
+
+        // Rounded-corner backing using actual 9-slice rendering (via Button_Settings).
+        bg_tex := get_asset(Texture_Asset, "$AO/new/Settings Modal/9_slice_modal.png");
+        bs := UI.default_button_settings();
+        bs.sprite = bg_tex;
+        bs.nine_slice_data.slice = nine_slice_px;
+        bs.nine_slice_data.slice_scale = nine_slice_scale;
+        bs.color = {0.05, 0.05, 0.05, 0.80};
+        bs.hovered_color = bs.color;
+        bs.pressed_color = bs.color;
+        bs.disabled_color = bs.color;
+        bs.press_scaling = 0.0;
+
+        // Prevent this decorative backing from capturing interactions.
+        UI.push_entity_id(entity);
+        defer UI.pop_entity_id();
+        UI.push_disabled(true);
+        defer UI.pop_disabled();
+        UI.push_disabled_visuals(false);
+        defer UI.pop_disabled_visuals();
+
+        dummy_ts := UI.default_text_settings();
+        dummy_ts.size = 0;
+        UI.button(bg_rect, bs, dummy_ts, "", {});
+
+        // Draw text on top (using the same bounds we measured).
+        UI.text(text_bounds, ts, text, {});
+    }
+}
+
