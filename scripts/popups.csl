@@ -331,6 +331,34 @@ Victory_Popup :: class {
 		is_visible = true;
 		show_start_time = get_time();
 		this.winning_type = victor_type;
+
+		// Local end-game audio (victory/defeat).
+		// Clients play based on their own team; server should not play UI audio.
+		if !Game.is_server() {
+			local_player: Player = null;
+			foreach p: component_iterator(Player) {
+				if p != null && #alive(p.entity) && p->is_local() {
+					local_player = p;
+					break;
+				}
+			}
+
+			won := true;
+			if local_player != null {
+				won = local_player.player_type == victor_type;
+			}
+
+			sfx := SFX.default_sfx_desc();
+			if local_player != null {
+				sfx->set_position(local_player.entity.world_position);
+			}
+			sfx.volume = 0.95;
+			sfx.volume_perturb = 0.0;
+			sfx.speed_perturb = 0.0;
+
+			asset := won ? "sfx/end_game_victory.wav" : "sfx/defeat.wav";
+			SFX.play(get_asset(SFX_Asset, asset), sfx);
+		}
 		
 		// Clear previous winners
 		winner_spines = List(Spine_Instance).{};

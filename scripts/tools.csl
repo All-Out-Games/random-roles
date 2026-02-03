@@ -54,3 +54,40 @@ rebuild_game_world_navmesh :: proc() {
 try_find_closest_point_on_navmesh :: proc(position: v2, point: ref v2, triangle_hint: ref s64) -> bool {
     return world_references.main_navmesh->try_find_closest_point_on_navmesh(position, ref point, ref triangle_hint);
 }
+
+// --- UI helpers ---
+// Standard kit modal panel (opaque) used for UI backpanels.
+RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX :: 96.0;
+
+rr_ui_draw_modal_panel :: proc(rect: Rect) {
+    // Prefer kit modal sprite; fall back to a generic modal or solid color.
+    is_white_fallback := false;
+    tex := get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/transp_black1.png");
+    if tex == null { tex = get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/modal_simple_black1.png"); }
+    if tex == null { tex = get_asset(Texture_Asset, "$AO/white.png"); is_white_fallback = true; }
+
+    // Draw non-interactive 9-slice panel using the button renderer.
+    bs := UI.default_button_settings();
+    bs.sprite = tex;
+    bs.press_scaling = 1.0;
+
+    // Full opacity as requested (note: the texture itself may have transparency baked in).
+    tint := v4.{1, 1, 1, 1};
+    if is_white_fallback {
+        // Reasonable fallback if kit assets are missing.
+        tint = v4.{0.08, 0.08, 0.10, 1.0};
+    }
+
+    bs.color = tint;
+    bs.hovered_color = tint;
+    bs.pressed_color = tint;
+    bs.disabled_color = tint;
+    bs.background_color_multiplier = v4.{1, 1, 1, 1};
+
+    bs.nine_slice_data.slice = v4.{RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX, RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX, RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX, RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX};
+    bs.nine_slice_data.slice_scale = 1.0;
+
+    UI.push_disabled(true);
+    defer UI.pop_disabled();
+    UI.begin_button(rect, bs, {}, ""); { defer UI.end_button(); }
+}

@@ -80,7 +80,16 @@ Task_Base :: class {
 		}
 		if success {
 			completed = true;
-			player->Notify("You completed the task!");
+			// Local-only completion SFX (avoid double-play on host/server).
+			if player != null && player->is_local() {
+				sfx := SFX.default_sfx_desc();
+				sfx->set_position(player.entity.world_position);
+				// Half as loud as before.
+				sfx.volume = 0.425;
+				sfx.volume_perturb = 0.1;
+				sfx.speed_perturb = 0.05;
+				SFX.play(get_asset(SFX_Asset, "sfx/task_success.wav"), sfx);
+			}
 		} else {
 			player->Notify("You failed the task!");
 		}
@@ -107,6 +116,9 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 	// Build a pool of available task indices
 	available_indices: List(int);
 	for i: 0..NUM_TASKS-1 {
+		// TEMP: Disable "Build a Robot" from random civilian task selection.
+		// (Task still exists and can be manually assigned / referenced by id.)
+		if i == 6 continue; // Task_Build_A_Robot ("build_a_robot")
 		append(ref available_indices, i);
 	}
 	
@@ -295,9 +307,9 @@ get_task_display_name :: proc(task_id: string) -> string {
 // Returns true if the task was closed/cancelled this frame.
 draw_task_close_button :: proc(window_rect: Rect, player: Player, task: Task_Base) -> bool {
 	// Size scales with the task window so it stays readable across resolutions.
-	size := window_rect->height() * 0.06;
-	if size < 28.0 { size = 28.0; }
-	if size > 64.0 { size = 64.0; }
+	size := window_rect->height() * 0.065;
+	if size < 34.0 { size = 34.0; }
+	if size > 78.0 { size = 78.0; }
 	pad := size * 0.45;
 
 	anchor := window_rect->top_right_rect()->offset_unscaled(-pad, -pad);
@@ -308,22 +320,22 @@ draw_task_close_button :: proc(window_rect: Rect, player: Player, task: Task_Bas
 
 	interact := UI.button(btn, .{}, .{}, "");
 
-	bg := get_asset(Texture_Asset, "$AO/white.png");
-	col := v4.{0.12, 0.12, 0.16, 0.75};
-	if interact.active {
-		col = v4.{0.18, 0.18, 0.25, 0.85};
+	close_icon := get_asset(Texture_Asset, "sprites/icons/close_icon.png");
+	if close_icon != null {
+		// Icon is the button (no background). Draw it big.
+		icon_rect := btn->inset(max(2.0, size * 0.06));
+		UI.quad(icon_rect->fit_aspect(close_icon->get_aspect()), close_icon, v4.{1, 1, 1, 1});
+	} else {
+		ts := UI.default_text_settings();
+		ts.size = size * 0.8;
+		ts.color = v4.{1, 1, 1, 1};
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 2;
+		ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(btn, ts, "X");
 	}
-	UI.quad(btn, bg, col);
-
-	ts := UI.default_text_settings();
-	ts.size = size * 0.8;
-	ts.color = v4.{1, 1, 1, 1};
-	ts.halign = .CENTER;
-	ts.valign = .CENTER;
-	ts.do_outline = true;
-	ts.outline_thickness = 2;
-	ts.outline_color = v4.{0, 0, 0, 1};
-	UI.text(btn, ts, "X");
 
 	if interact.clicked {
 		task->cancel_attempt(player);
@@ -412,9 +424,7 @@ update_tasks_ui :: proc(player: Player) {
 
 		screen := UI.get_safe_screen_rect();
 		panel_rect := screen->cut_left(320)->inset(250, 0, 250, 10);
-
-		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
-		UI.quad(panel_rect, bg_texture, .{0.1, 0.1, 0.15, 0.92});
+		rr_ui_draw_modal_panel(panel_rect);
 
 		title_rect := panel_rect->cut_top(50);
 		title_ts := UI.default_text_settings();
@@ -494,9 +504,7 @@ update_tasks_ui :: proc(player: Player) {
 
 		screen := UI.get_safe_screen_rect();
 		panel_rect := screen->cut_left(320)->inset(250, 0, 250, 10);
-
-		bg_texture := get_asset(Texture_Asset, "$AO/white.png");
-		UI.quad(panel_rect, bg_texture, .{0.1, 0.1, 0.15, 0.92});
+		rr_ui_draw_modal_panel(panel_rect);
 
 		title_rect := panel_rect->cut_top(50);
 		title_ts := UI.default_text_settings();
@@ -582,7 +590,7 @@ update_tasks_ui :: proc(player: Player) {
 	
 	// Background panel
 	bg_texture := get_asset(Texture_Asset, "$AO/white.png");
-	UI.quad(panel_rect, bg_texture, .{0.1, 0.1, 0.15, 0.9});
+	rr_ui_draw_modal_panel(panel_rect);
 	
 	// Title - cut from top
 	title_rect := panel_rect->cut_top(50);
@@ -670,7 +678,7 @@ update_tasks_ui :: proc(player: Player) {
 	fill01 = clamp(fill01, 0.0, 1.0);
 
 	// Footer background + layout
-	UI.quad(footer_rect, bg_texture, .{0.08, 0.08, 0.12, 0.92});
+	//UI.quad(footer_rect, bg_texture, .{0.08, 0.08, 0.12, 0.92});
 	footer := footer_rect->inset(8, 10, 8, 10);
 
 	line1 := footer->cut_top(22);
@@ -740,7 +748,8 @@ Task_Repair_Laptop :: class : Task_Base {
 	PART_RAM :: 1;
 	PART_BATTERY :: 2;
 
-	SUCCESS_DISPLAY_TIME :: 1.25;
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;
 
 	start_attempt :: proc(using this: Task_Repair_Laptop, player: Player) {
 		if started {
@@ -1094,7 +1103,8 @@ Task_Call_Jail_Codes :: class : Task_Base {
 
 	CODE_LEN :: 7;
 	FAIL_LOCK_TIME :: 0.75;
-	SUCCESS_DISPLAY_TIME :: 1.5;
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;
 
 	start_attempt :: proc(using this: Task_Call_Jail_Codes, player: Player) {
 		if started {
@@ -1441,7 +1451,8 @@ Task_Restart_Generator :: class : Task_Base {
 	clock_texture: Texture_Asset;
 	ponteiro_texture: Texture_Asset;
 
-	SUCCESS_DISPLAY_TIME :: 1.5;
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;
 	PULLS_REQUIRED :: 3;
 
 	start_attempt :: proc(using this: Task_Restart_Generator, player: Player) {
@@ -1732,7 +1743,8 @@ Task_Reroute_Power :: class : Task_Base {
 
 	// Preset puzzles (no runtime generation)
 	PRESET_COUNT :: 5;
-	SUCCESS_DISPLAY_TIME :: 2.5;
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;
 
 	// --- Textures ---
 	bg_texture: Texture_Asset;
@@ -2439,7 +2451,8 @@ Task_Guide_The_Electron :: class : Task_Base {
 	hole_half: float;
 	electron_radius: float;
 
-	SUCCESS_DISPLAY_TIME :: 1.25;
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;
 	FAIL_FLASH_TIME :: 0.35;
 
 	start_attempt :: proc(using this: Task_Guide_The_Electron, player: Player) {
@@ -2816,7 +2829,8 @@ Task_Catching_Butterflies :: class : Task_Base {
 	net_back_texture: Texture_Asset;
 
 	BUTTERFLY_COUNT :: 6;
-	SUCCESS_DISPLAY_TIME :: 2.5;
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;
 
 	// Butterflies (screen-space within the task window)
 	butterfly_pos: [BUTTERFLY_COUNT]v2;
@@ -3313,7 +3327,8 @@ Task_Signal_Sync :: class : Task_Base {
 	beam_info_texture: Texture_Asset;
 	beam_boost_texture: Texture_Asset;
 
-	SUCCESS_DISPLAY_TIME :: 2.5;
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;
 	FILL_RATE :: 0.45; // bar fill per second while locked on
 
 	start_attempt :: proc(using this: Task_Signal_Sync, player: Player) {
@@ -3805,7 +3820,8 @@ Task_Anagram_Puzzle :: class : Task_Base {
 	monitor_line_texture: Texture_Asset;
 
 	FAIL_LOCK_TIME :: 0.75;
-	SUCCESS_DISPLAY_TIME :: 2.5;
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;
 
 	start_attempt :: proc(using this: Task_Anagram_Puzzle, player: Player) {
 		if started {
@@ -4292,7 +4308,8 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 	schleem_alive: Texture_Asset;
 	
 	ALIGNMENT_THRESHOLD :: 0.05;  // How close reticle needs to be to target
-	SUCCESS_DISPLAY_TIME :: 2.5;  // How long to show thumbs up before closing
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;  // How long to show thumbs up before closing
 
 	cancel_attempt :: proc(using this: Task_Calibrate_Teleporter, player: Player) {
 		if !started {
@@ -4502,7 +4519,8 @@ Task_Cypher :: class : Task_Base {
 
 	CODE_LEN :: 4;
 	FAIL_LOCK_TIME :: 0.75;
-	SUCCESS_DISPLAY_TIME :: 2.5;
+	// Reduce post-success linger before auto-close.
+	SUCCESS_DISPLAY_TIME :: 0.6;
 
 	start_attempt :: proc(using this: Task_Cypher, player: Player) {
 		if started {

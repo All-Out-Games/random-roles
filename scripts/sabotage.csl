@@ -152,6 +152,7 @@ rr_get_power_outage_generator_pos :: proc() -> v2 {
 rr_draw_sabotage_button :: proc(
 	btn: Rect,
 	id: string,
+	icon: Texture_Asset,
 	label: string,
 	active: bool,
 	cooldown_ends_at: float
@@ -166,38 +167,45 @@ rr_draw_sabotage_button :: proc(
 
 	interact := UI.button(btn, .{}, .{}, "");
 
-	bg := get_asset(Texture_Asset, "$AO/white.png");
-	col := v4.{0.75, 0.15, 0.15, 0.85};
+	// Icon button: the texture is the button (no background).
+	col := v4.{1, 1, 1, 1};
 	if active {
-		col = v4.{0.25, 0.25, 0.25, 0.85};
+		// Active: muted
+		col = v4.{0.75, 0.75, 0.75, 0.85};
 	} else if on_cooldown {
-		col = v4.{0.45, 0.2, 0.2, 0.75};
+		col = v4.{1, 1, 1, 0.35};
 	} else if interact.active {
-		col = v4.{0.9, 0.25, 0.25, 0.95};
+		col = v4.{1, 1, 1, 0.90};
 	}
-	UI.quad(btn, bg, col);
 
-	ts := UI.default_text_settings();
-	ts.size = btn->height() * 0.22;
-	ts.color = v4.{1, 1, 1, 1};
-	ts.halign = .CENTER;
-	ts.valign = .CENTER;
-	ts.do_outline = true;
-	ts.outline_thickness = 2;
-	ts.outline_color = v4.{0, 0, 0, 1};
-
-	disp := label;
-	if active {
-		disp = "ACTIVE";
+	if icon != null {
+		icon_rect := btn->inset(max(2.0, btn->height() * 0.06));
+		UI.quad(icon_rect->fit_aspect(icon->get_aspect()), icon, col);
+	} else {
+		// Fallback to text label if icon missing.
+		ts := UI.default_text_settings();
+		ts.size = btn->height() * 0.22;
+		ts.color = v4.{1, 1, 1, col.w};
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 2;
+		ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(btn, ts, label);
 	}
-	UI.text(btn, ts, disp);
 
 	if on_cooldown && !active {
 		remaining := cooldown_ends_at - get_time();
 		if remaining < 0.0 { remaining = 0.0; }
-		small := ts;
-		small.size = btn->height() * 0.16;
-		UI.text(btn->offset(0, -btn->height() * 0.28), small, "%.0fs", .{remaining});
+		small := UI.default_text_settings();
+		small.size = btn->height() * 0.18;
+		small.color = v4.{1, 1, 1, 0.95};
+		small.halign = .CENTER;
+		small.valign = .CENTER;
+		small.do_outline = true;
+		small.outline_thickness = 2;
+		small.outline_color = v4.{0, 0, 0, 1};
+		UI.text(btn->offset(0, -btn->height() * 0.40), small, "%.0fs", .{remaining});
 	}
 
 	return interact.clicked && !disabled;
@@ -237,7 +245,12 @@ rr_draw_sabotages_next_to_minimap :: proc(
 	btn2 := Rect{btn2_center, btn2_center}->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
 	btn3 := Rect{btn3_center, btn3_center}->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
 
-	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", "POWER", rr_power_outage_active, rr_power_outage_cooldown_ends_at);
-	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", "COMMS", comms_down, comms_cooldown_ends_at);
-	lockdown_clicked = rr_draw_sabotage_button(btn3, "sabotage_lockdown", "LOCKDOWN", rr_lockdown_active, rr_lockdown_cooldown_ends_at);
+	// Proper icon buttons from sprites/icons (icon is the button).
+	power_icon := get_asset(Texture_Asset, "sprites/icons/power_outage.png");
+	comms_icon := get_asset(Texture_Asset, "sprites/icons/communication_outage_icon.png");
+	lock_icon := get_asset(Texture_Asset, "sprites/icons/doors_lock.png");
+
+	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", power_icon, "POWER", rr_power_outage_active, rr_power_outage_cooldown_ends_at);
+	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", comms_icon, "COMMS", comms_down, comms_cooldown_ends_at);
+	lockdown_clicked = rr_draw_sabotage_button(btn3, "sabotage_lockdown", lock_icon, "LOCKDOWN", rr_lockdown_active, rr_lockdown_cooldown_ends_at);
 }

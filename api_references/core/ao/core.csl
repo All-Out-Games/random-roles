@@ -10,7 +10,9 @@ Game :: struct {
     is_predicted_frame :: proc() -> bool #foreign "game_is_predicted_frame";
 
     get_game_id :: proc() -> string #foreign "game_get_game_id";
-    get_server_id :: proc() -> string #foreign "game_get_server_id";
+
+    #deprecate_soft "Use Server.get_id()"
+    get_server_id :: proc() -> string #foreign "server_get_id";
 }
 
 Server :: struct {
@@ -21,6 +23,9 @@ Server :: struct {
     queue_set_server_available :: proc(queue: string, available: bool)   #foreign "server_queue_set_server_available";
 
     transfer_player_to_game    :: proc(player: Player, game_id: string)  #foreign "server_transfer_player_to_game";
+
+    get_id :: proc() -> string #foreign "server_get_id";
+    get_private_server_host_id :: proc() -> string, bool #foreign "server_get_private_server_host_id";
 }
 
 Editor :: struct {
@@ -699,6 +704,7 @@ UI :: struct {
     quad :: proc(rect: Rect, texture: Texture_Asset, color: v4 = {1, 1, 1, 1}) #foreign "ui_quad";
     text :: proc(rect: Rect, settings: Text_Settings, str: string, args: [^]any = {}) #foreign "ui_text";
     text_sync :: proc(rect: Rect, settings: Text_Settings, str: string, args: [^]any = {}) -> Rect #foreign "ui_text_sync";
+    measure_text :: proc(rect: Rect, settings: Text_Settings, str: string, args: [^]any = {}) -> Rect #foreign "ui_measure_text";
     spine :: proc(position: v2, spine: Spine_Instance, scale: v2 = {1, 1}, rotation_degrees: float = 0) #foreign "ui_spine";
 
     button :: proc(rect: Rect, bs: Button_Settings, ts: Text_Settings, str: string, args: [^]any = {}) -> Interact_Result #foreign "ui_button";
@@ -1597,6 +1603,13 @@ Player_Base :: class : AO_Player {
     }
 
     will_draw_name :: method() -> bool #foreign "player_will_draw_name";
+
+    Friend :: struct {
+        user_id: string;
+        username: string;
+    }
+
+    get_all_friends :: method() -> []Friend #foreign "player_get_all_friends";
 
     abilities: [..]Ability_Base;
     was_aiming_ability_index: s64;

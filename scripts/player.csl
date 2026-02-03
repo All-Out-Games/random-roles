@@ -444,12 +444,11 @@ Player :: class : Player_Base {
                 // Offer a "Force Start" button when we don't have enough players yet.
                 if !waiting_for_restart && players.elements.count < MIN_NUMBER_OF_PLAYERS {
                     screen := UI.get_safe_screen_rect();
-                    bg_texture := get_asset(Texture_Asset, "$AO/white.png");
 
                     // Use the 4-arg `subrect` overload for a stable layout (no offset ordering ambiguity).
                     // Bottom banner panel that stays inside SafeRect across aspect ratios.
                     panel_rect := screen->subrect(0.15, 0.05, 0.85, 0.27);
-                    UI.quad(panel_rect, bg_texture, .{0, 0, 0, 0.7});
+                    rr_ui_draw_modal_panel(panel_rect);
 
                     content := panel_rect->inset(12, 12, 12, 12);
 
@@ -639,12 +638,10 @@ draw_player_role_hud :: proc(player: Player) {
 		defer UI.pop_layer();
 
 		safe := UI.get_safe_screen_rect();
-		bg2 := get_asset(Texture_Asset, "$AO/white.png");
 
 		// Align this panel with the task list height (see `update_tasks_ui` in `scripts/tasks.csl`).
 		panel := safe->top_left_rect()->grow(40, 360, 160, 0)->offset(20, -250);
-		UI.quad(panel, bg2, v4.{0.0, 0.0, 0.0, 0.55});
-		UI.quad(panel->inset(2), bg2, v4.{0.25, 0.05, 0.05, 0.55});
+		rr_ui_draw_modal_panel(panel);
 
 		content := panel->inset(14);
 		header := content->cut_top(34);
@@ -741,12 +738,10 @@ draw_player_role_hud :: proc(player: Player) {
 
 		// Left-side panel with unlock progress (same layout as other role HUD panels).
 		safe := UI.get_safe_screen_rect();
-		bg2 := get_asset(Texture_Asset, "$AO/white.png");
 
 		// Align this panel with the task list height (see `update_tasks_ui` in `scripts/tasks.csl`).
 		panel := safe->top_left_rect()->grow(40, 360, 140, 0)->offset(20, -250);
-		UI.quad(panel, bg2, v4.{0.0, 0.0, 0.0, 0.55});
-		UI.quad(panel->inset(2), bg2, v4.{0.10, 0.08, 0.03, 0.55});
+		rr_ui_draw_modal_panel(panel);
 
 		content := panel->inset(14);
 		header := content->cut_top(34);
@@ -796,8 +791,7 @@ draw_player_role_hud :: proc(player: Player) {
 
 		// Align this panel with the task list height (see `update_tasks_ui` in `scripts/tasks.csl`).
 		panel := safe->top_left_rect()->grow(40, 360, 140, 0)->offset(20, -250);
-		UI.quad(panel, bg2, v4.{0.0, 0.0, 0.0, 0.55});
-		UI.quad(panel->inset(2), bg2, v4.{0.25, 0.05, 0.05, 0.55});
+		rr_ui_draw_modal_panel(panel);
 
 		content := panel->inset(14);
 		header := content->cut_top(34);
@@ -1044,6 +1038,15 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 	// Fire transform cues on boundary crossings (merged rig handles visuals).
 	if !prev_is_wolf && player.werewolf_is_wolf_form {
 		player->set_trigger("werewolf_howl");
+		// Client-side SFX so everyone hears it exactly once.
+		if !Game.is_server() {
+			sfx := SFX.default_sfx_desc();
+			sfx->set_position(player.entity.world_position);
+			sfx.volume = 0.9;
+			sfx.volume_perturb = 0.05;
+			sfx.speed_perturb = 0.05;
+			SFX.play(get_asset(SFX_Asset, "sfx/killer_transform.wav"), sfx);
+		}
 		// Enable werewolf skin halfway through the howl.
 		player.werewolf_skin_enable_at = now + WEREWOLF_HOWL_HALF_SECONDS;
 		player.werewolf_skin_disable_at = 0.0;
@@ -1424,9 +1427,9 @@ Corpse :: class : Component {
 
 draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
 	// Size scales with the window so it stays readable across resolutions.
-	size := window_rect->height() * 0.06;
-	if size < 28.0 { size = 28.0; }
-	if size > 64.0 { size = 64.0; }
+	size := window_rect->height() * 0.065;
+	if size < 34.0 { size = 34.0; }
+	if size > 78.0 { size = 78.0; }
 	pad := size * 0.45;
 
 	anchor := window_rect->top_right_rect()->offset_unscaled(-pad, -pad);
@@ -1437,22 +1440,22 @@ draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
 
 	interact := UI.button(btn, .{}, .{}, "");
 
-	bg := get_asset(Texture_Asset, "$AO/white.png");
-	col := v4.{0.12, 0.12, 0.16, 0.75};
-	if interact.active {
-		col = v4.{0.18, 0.18, 0.25, 0.85};
+	close_icon := get_asset(Texture_Asset, "sprites/icons/close_icon.png");
+	if close_icon != null {
+		// Icon is the button (no background). Draw it big.
+		icon_rect := btn->inset(max(2.0, size * 0.06));
+		UI.quad(icon_rect->fit_aspect(close_icon->get_aspect()), close_icon, v4.{1, 1, 1, 1});
+	} else {
+		ts := UI.default_text_settings();
+		ts.size = size * 0.8;
+		ts.color = v4.{1, 1, 1, 1};
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 2;
+		ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(btn, ts, "X");
 	}
-	UI.quad(btn, bg, col);
-
-	ts := UI.default_text_settings();
-	ts.size = size * 0.8;
-	ts.color = v4.{1, 1, 1, 1};
-	ts.halign = .CENTER;
-	ts.valign = .CENTER;
-	ts.do_outline = true;
-	ts.outline_thickness = 2;
-	ts.outline_color = v4.{0, 0, 0, 1};
-	UI.text(btn, ts, "X");
 
 	return interact.clicked;
 }
@@ -1495,7 +1498,11 @@ update_minimap_ui :: proc(player: Player) {
 	defer UI.pop_layer();
 	
 	chat_height := player->is_chat_open() ? player->get_chat_rect()->height() : 0.0;
-	btn_rect := safe->top_left_rect()->grow(0.0, 120.0, 52.0, 0.0)->offset(20.0, -25.0)->offset_unscaled(0.0, -chat_height);
+	// Map button should be about the same size as the role icon.
+	MAP_HALF_SIZE :: 55.0; // role icon uses 50.0
+	MAP_PAD :: 20.0;
+	btn_center := safe->top_left_rect()->offset(MAP_HALF_SIZE + MAP_PAD, -MAP_HALF_SIZE - MAP_PAD);
+	btn_rect := btn_center->grow(MAP_HALF_SIZE)->offset_unscaled(0.0, -chat_height);
 
 	if game_state == Game_State.INGAME && player->is_chat_open() {
 		// Mirror `update_tasks_ui` panel layout (see `scripts/tasks.csl`).
@@ -1533,15 +1540,22 @@ update_minimap_ui :: proc(player: Player) {
 		}
 	}
 
-	bs := UI.default_button_settings();
-	ts := UI.default_text_settings();
-	ts.size = 30;
-	ts.halign = .CENTER;
-	ts.valign = .CENTER;
-
 	UI.push_id("minimap_toggle");
 	defer UI.pop_id();
-	if UI.button(btn_rect, bs, ts, "MAP").clicked {
+	map_icon := get_asset(Texture_Asset, "sprites/icons/map_icon.png");
+	interact := UI.button(btn_rect, .{}, .{}, ""); // no background; icon is the button
+	if map_icon != null {
+		icon_rect := btn_rect->inset(4);
+		UI.quad(icon_rect->fit_aspect(map_icon->get_aspect()), map_icon, v4.{1, 1, 1, 1});
+	} else {
+		// Fallback
+		ts := UI.default_text_settings();
+		ts.size = 30;
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		UI.text(btn_rect, ts, "MAP");
+	}
+	if interact.clicked {
 		player.show_minimap = !player.show_minimap;
 	}
 

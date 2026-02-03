@@ -124,6 +124,17 @@ Kill_Ability :: class : Ability_Base {
             closest_alive_player := get_closest_alive_player(this, player);
             if closest_alive_player != null {
                 closest_alive_player->kill_with_killer(player.entity.id);
+
+				// Traitor knife kill SFX (server-authoritative; replicates to clients).
+				if Game.is_server() && player != null && player.player_type == Player_Type.TRAITOR {
+					sfx := SFX.default_sfx_desc();
+					sfx->set_position(closest_alive_player.entity.world_position);
+					sfx.volume = 0.9;
+					sfx.volume_perturb = 0.08;
+					sfx.speed_perturb = 0.06;
+					SFX.play(get_asset(SFX_Asset, "sfx/traitor_kill_death.wav"), sfx);
+				}
+
                 current_cooldown = KILL_COOLDOWN_SECONDS;
             }
         }
@@ -780,6 +791,17 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 				player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
 				player->set_trigger("hitman_kill_snap_neck");
 				target->kill_with_killer(player.entity.id);
+
+				// Hitman strangle/neck-snap kill SFX (server-authoritative; replicates to clients).
+				if Game.is_server() {
+					sfx := SFX.default_sfx_desc();
+					sfx->set_position(target.entity.world_position);
+					sfx.volume = 0.9;
+					sfx.volume_perturb = 0.08;
+					sfx.speed_perturb = 0.06;
+					SFX.play(get_asset(SFX_Asset, "sfx/traitor_kill_death.wav"), sfx);
+				}
+
 				current_cooldown = HITMAN_NECK_SNAP_COOLDOWN_SECONDS;
 			}
 		}
@@ -1341,6 +1363,7 @@ Vote_Ability :: class : Ability_Base {
     voting_ui_open: bool;
     show_recent_deaths: bool;
     last_voting_start_time_seen: float;
+	last_vote_result_time_seen: float;
 	recent_deaths_open_time: float;
 
     on_init :: proc(instance: Vote_Ability) {
@@ -1348,6 +1371,7 @@ Vote_Ability :: class : Ability_Base {
         instance.voting_ui_open = false;
         instance.show_recent_deaths = false;
         instance.last_voting_start_time_seen = 0.0;
+		instance.last_vote_result_time_seen = 0.0;
 		instance.recent_deaths_open_time = 0.0;
     }
 
@@ -1361,6 +1385,7 @@ Vote_Ability :: class : Ability_Base {
             voting_ui_open = false;
             show_recent_deaths = false;
             last_voting_start_time_seen = 0.0;
+			last_vote_result_time_seen = 0.0;
 			recent_deaths_open_time = 0.0;
             return;
         }
@@ -1376,6 +1401,18 @@ Vote_Ability :: class : Ability_Base {
 		// Voting has ended, but we keep the game in VOTING briefly to reveal the result.
 		// If the vote UI is closed, the existing Notifier popups handle the message.
 		if rr_vote_results_active {
+			// One-shot result SFX per voting session (client-side).
+			if player != null && player->is_local() && rr_last_vote_result_time > 0.0 && rr_last_vote_result_time != last_vote_result_time_seen {
+				last_vote_result_time_seen = rr_last_vote_result_time;
+				if rr_last_vote_ejected_player_id != 0 {
+					sfx := SFX.default_sfx_desc();
+					sfx->set_position(player.entity.world_position);
+					sfx.volume = 0.9;
+					sfx.volume_perturb = 0.05;
+					sfx.speed_perturb = 0.05;
+					SFX.play(get_asset(SFX_Asset, "sfx/voteout.wav"), sfx);
+				}
+			}
 			if voting_ui_open && player->is_local_or_server() {
 				draw_vote_result_ui(this, player);
 			}
@@ -1407,7 +1444,7 @@ Vote_Ability :: class : Ability_Base {
 		UI.quad(screen, white, v4.{0, 0, 0, 0.82});
 
 		panel_rect := screen->center_rect()->grow(240, 520, 240, 520);
-		UI.quad(panel_rect, white, v4.{0.05, 0.06, 0.08, 0.92});
+		rr_ui_draw_modal_panel(panel_rect);
 
 		content := panel_rect->inset(26);
 		header := content->cut_top(80);
@@ -1446,14 +1483,20 @@ Vote_Ability :: class : Ability_Base {
 		UI.text(body, msg_ts, message);
 
 		// Optional close button (dismisses the UI while waiting for the results window to end).
-		bs := UI.default_button_settings();
-		bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png"); // grey
-		bs.press_scaling = 0.96;
-		ts := UI.default_text_settings();
-		ts.size = 24;
-		ts.halign = .CENTER;
-		ts.valign = .CENTER;
-		if UI.button(footer->center_rect()->grow(18, 170, 18, 170), bs, ts, "CLOSE").clicked {
+		close_rect := footer->center_rect()->grow(26, 210, 26, 210);
+		close_icon := get_asset(Texture_Asset, "sprites/icons/close_icon.png");
+		interact := UI.button(close_rect, .{}, .{}, ""); // no background; icon is the button
+		if close_icon != null {
+			icon_rect := close_rect->inset(6);
+			UI.quad(icon_rect->fit_aspect(close_icon->get_aspect()), close_icon, v4.{1, 1, 1, 1});
+		} else {
+			ts := UI.default_text_settings();
+			ts.size = 24;
+			ts.halign = .CENTER;
+			ts.valign = .CENTER;
+			UI.text(close_rect, ts, "CLOSE");
+		}
+		if interact.clicked {
 			instance.voting_ui_open = false;
 		}
 	}
@@ -1475,7 +1518,7 @@ Vote_Ability :: class : Ability_Base {
         UI.quad(screen, white, v4.{0, 0, 0, overlay_alpha});
 
         panel_rect := screen->center_rect()->grow(380, 560, 380, 560)->offset(x_off, 0);
-        UI.quad(panel_rect, white, v4.{0.05, 0.06, 0.08, lerp(0.0, 0.92, t)});
+        rr_ui_draw_modal_panel(panel_rect);
 
         content := panel_rect->inset(24);
         header := content->cut_top(70);
@@ -1978,6 +2021,15 @@ Vote_Ability :: class : Ability_Base {
 
                 if clicked && can_vote_for {
                     cast_vote(local_player, p);
+					// Local-only feedback sound on vote commit.
+					if local_player != null && local_player->is_local() {
+						sfx := SFX.default_sfx_desc();
+						sfx->set_position(local_player.entity.world_position);
+						sfx.volume = 0.85;
+						sfx.volume_perturb = 0.1;
+						sfx.speed_perturb = 0.05;
+						SFX.play(get_asset(SFX_Asset, "sfx/cast_vote.wav"), sfx);
+					}
                 }
             }
         }
@@ -2026,6 +2078,15 @@ Vote_Ability :: class : Ability_Base {
 
         if UI.button(btn_rect, skip_bs, skip_ts, "Skip Vote").clicked {
             cast_skip_vote(local_player);
+			// Local-only feedback sound on skip.
+			if local_player != null && local_player->is_local() {
+				sfx := SFX.default_sfx_desc();
+				sfx->set_position(local_player.entity.world_position);
+				sfx.volume = 0.85;
+				sfx.volume_perturb = 0.1;
+				sfx.speed_perturb = 0.05;
+				SFX.play(get_asset(SFX_Asset, "sfx/cast_vote.wav"), sfx);
+			}
         }
     }
 
@@ -2643,7 +2704,9 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 			sfx := SFX.default_sfx_desc();
 			sfx->set_position(nearest.entity.world_position);
 			sfx.volume = 0.8;
-			SFX.play(get_asset(SFX_Asset, "sfx/death.wav"), sfx);
+			// Explicit death SFX (old `sfx/death.wav` removed).
+			// Note: `traitor_kill_death.wav` is reserved for knife/neck-snap kills.
+			SFX.play(get_asset(SFX_Asset, "sfx/other_death.wav"), sfx);
 		}
 	}
 
