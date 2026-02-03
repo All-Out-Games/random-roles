@@ -39,6 +39,7 @@
     "ordered_skins": [
 
     ],
+    "depth_offset": 0.2999998629093170,
     "initial_animation": "closed_idle",
     "loop_initial_animation": true
   }

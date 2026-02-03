@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Decontamination/oxygen_packs.png",
-    "depth_offset": -0.1445371657609940
+    "depth_offset": 0.0554628372192383
   }
 },
 {

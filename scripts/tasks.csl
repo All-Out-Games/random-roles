@@ -88,6 +88,9 @@ Task_Base :: class {
 				sfx.volume = 0.425;
 				sfx.volume_perturb = 0.1;
 				sfx.speed_perturb = 0.05;
+				// Global SFX mix: everything at 25% volume.
+				sfx.volume *= 0.25;
+				sfx.volume_perturb *= 0.25;
 				SFX.play(get_asset(SFX_Asset, "sfx/task_success.wav"), sfx);
 			}
 		} else {
@@ -380,9 +383,13 @@ update_tasks_ui :: proc(player: Player) {
 		return;
 	}
 	if player.active_tasks.elements.count == 0 {
-		// During power outage we still want the generator task panel even if the
-		// player normally has no tasks (traitors/anarchists).
-		if !rr_power_outage_active {
+		// During sabotages we may still want to show the sabotage panel even if the
+		// player normally has no tasks (e.g. anarchists). Traitors should not be
+		// instructed to fix sabotages.
+		if player.player_type == Player_Type.TRAITOR {
+			return;
+		}
+		if !rr_power_outage_active && !rr_comms_outage_active {
 			return;
 		}
 	}
@@ -391,8 +398,8 @@ update_tasks_ui :: proc(player: Player) {
 	UI.push_layer(9600);
 	defer UI.pop_layer();
 
-	// --- Power outage override: show ONLY the generator task for ALL players ---
-	if rr_power_outage_active {
+	// --- Power outage override: show ONLY the generator task for non-traitors ---
+	if rr_power_outage_active && player.player_type != Player_Type.TRAITOR {
 		// Draw objective arrow to the generator for local player.
 		if player->is_local() {
 			tutorial_arrow_options := Tutorial_Arrow.default_options();
@@ -472,8 +479,8 @@ update_tasks_ui :: proc(player: Player) {
 		return;
 	}
 
-	// --- Comms outage override: show ONLY the comms restore task for ALL players ---
-	if rr_comms_outage_active {
+	// --- Comms outage override: show ONLY the comms restore task for non-traitors ---
+	if rr_comms_outage_active && player.player_type != Player_Type.TRAITOR {
 		// Draw objective arrow to the comms lever for local player.
 		if player->is_local() {
 			tutorial_arrow_options := Tutorial_Arrow.default_options();

@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Wall/wall_metalpanels.png",
-    "depth_offset": -0.8522300720214844,
+    "depth_offset": -0.5522300004959106,
     "tint": {
       "X": 0.5488477945327759,
       "Y": 0.5846834182739258,

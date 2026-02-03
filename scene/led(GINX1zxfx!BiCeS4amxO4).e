@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Wall/led_strip.png",
-    "depth_offset": -0.0803431347012520,
+    "depth_offset": 0.0196569114923477,
     "tint": {
       "X": 0.1335040628910065,
       "Y": 0.1906494200229645,

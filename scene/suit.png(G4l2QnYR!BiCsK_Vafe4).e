@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Decontamination/suit.png",
-    "depth_offset": -0.4955559670925140
+    "depth_offset": -0.1955559849739075
   }
 },
 {

@@ -132,6 +132,9 @@ Kill_Ability :: class : Ability_Base {
 					sfx.volume = 0.9;
 					sfx.volume_perturb = 0.08;
 					sfx.speed_perturb = 0.06;
+					// Global SFX mix: everything at 25% volume.
+					sfx.volume *= 0.25;
+					sfx.volume_perturb *= 0.25;
 					SFX.play(get_asset(SFX_Asset, "sfx/traitor_kill_death.wav"), sfx);
 				}
 
@@ -799,6 +802,9 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 					sfx.volume = 0.9;
 					sfx.volume_perturb = 0.08;
 					sfx.speed_perturb = 0.06;
+					// Global SFX mix: everything at 25% volume.
+					sfx.volume *= 0.25;
+					sfx.volume_perturb *= 0.25;
 					SFX.play(get_asset(SFX_Asset, "sfx/traitor_kill_death.wav"), sfx);
 				}
 
@@ -1410,6 +1416,9 @@ Vote_Ability :: class : Ability_Base {
 					sfx.volume = 0.9;
 					sfx.volume_perturb = 0.05;
 					sfx.speed_perturb = 0.05;
+					// Global SFX mix: everything at 25% volume.
+					sfx.volume *= 0.25;
+					sfx.volume_perturb *= 0.25;
 					SFX.play(get_asset(SFX_Asset, "sfx/voteout.wav"), sfx);
 				}
 			}
@@ -1605,6 +1614,11 @@ Vote_Ability :: class : Ability_Base {
     draw_voting_ui :: proc(instance: Vote_Ability, local_player: Player) {
 
         screen := UI.get_safe_screen_rect();
+		// Note: `UI.spine` is affected by the UI scale factor. Our tile layout math uses rect
+		// pixel sizes (from `rect->width()/height()`), so convert any pixel-derived scale values
+		// back into "1080p units" by dividing by the current UI scale factor.
+		ui_scale := UI.get_current_scale_factor();
+		if ui_scale <= 0.001 { ui_scale = 1.0; }
 
         // Render above everything (popups are 10000).
         UI.push_layer(20000);
@@ -1982,13 +1996,18 @@ Vote_Ability :: class : Ability_Base {
                     // Shadow behind (slightly more left/down)
                     if is_selected || is_dead {
                         shadow_pos := rig_area->center() + v2.{-draw_rect->width() * 0.06, -draw_rect->height() * 0.01};
-                        shadow_size := draw_rect->height() * 0.55;
+                        // rig_area->height() is pixels; convert to 1080p units for grow().
+                        shadow_size := (rig_area->height() * 0.55) / ui_scale;
                         shadow_rect := Rect.{shadow_pos, shadow_pos}->grow(shadow_size);
                         UI.quad(shadow_rect->fit_aspect(vote_schleem_shadow->get_aspect()), vote_schleem_shadow, v4.{1, 1, 1, 1.0});
                     }
 
                     // Spine (bigger + lower, overlaps bottom area)
-                    s := draw_rect->height() * 1.35;
+                    // Convert pixel-based size to 1080p units to avoid scaling up with resolution.
+					// Use rig_area height (not full tile height) so the character doesn't dominate the card.
+                    s := (rig_area->height() * 1.15) / ui_scale;
+					// Clamp for safety across extreme aspect ratios / resolutions.
+					s = clamp(s, 90.0, 165.0);
                     pos := rig_area->center() + v2.{-draw_rect->width() * 0.01, -draw_rect->height() * 0.30};
                     UI.spine(pos, p.animator.instance, v2.{s, s}, 0.0);
                 }
@@ -2033,6 +2052,9 @@ Vote_Ability :: class : Ability_Base {
 						sfx.volume = 0.85;
 						sfx.volume_perturb = 0.1;
 						sfx.speed_perturb = 0.05;
+						// Global SFX mix: everything at 25% volume.
+						sfx.volume *= 0.25;
+						sfx.volume_perturb *= 0.25;
 						SFX.play(get_asset(SFX_Asset, "sfx/cast_vote.wav"), sfx);
 					}
                 }
@@ -2091,6 +2113,9 @@ Vote_Ability :: class : Ability_Base {
 				sfx.volume = 0.85;
 				sfx.volume_perturb = 0.1;
 				sfx.speed_perturb = 0.05;
+				// Global SFX mix: everything at 25% volume.
+				sfx.volume *= 0.25;
+				sfx.volume_perturb *= 0.25;
 				SFX.play(get_asset(SFX_Asset, "sfx/cast_vote.wav"), sfx);
 			}
         }
@@ -2151,6 +2176,9 @@ Shoot_Ability :: class : Ability_Base {
                 sfx.volume_perturb = 0.2;
                 sfx.speed_perturb = 0.1;
                 shoot_projectile(player.entity.world_position, activation.direction * 10.0, 1, 0.75, player.entity);
+				// Global SFX mix: everything at 25% volume.
+				sfx.volume *= 0.25;
+				sfx.volume_perturb *= 0.25;
                 SFX.play(get_asset(SFX_Asset, "sfx/shoot.wav"), sfx);
 
 				is_sheriff := player.player_type == Player_Type.CIVILIAN && player.player_role == Player_Role.SHERIFF;
@@ -2712,6 +2740,9 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 			sfx.volume = 0.8;
 			// Explicit death SFX (old `sfx/death.wav` removed).
 			// Note: `traitor_kill_death.wav` is reserved for knife/neck-snap kills.
+			// Global SFX mix: everything at 25% volume.
+			sfx.volume *= 0.25;
+			sfx.volume_perturb *= 0.25;
 			SFX.play(get_asset(SFX_Asset, "sfx/other_death.wav"), sfx);
 		}
 	}

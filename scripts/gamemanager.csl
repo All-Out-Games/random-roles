@@ -244,6 +244,8 @@ rr_prev_lockdown_active_client: bool;
 
 rr_power_outage_add_generator_task_to_player :: proc(player: Player) {
 	if player == null return;
+	// Traitors should never be tasked with fixing sabotages.
+	if player.player_type == Player_Type.TRAITOR return;
 	// Don't add duplicates
 	for i: 0..player.active_tasks.elements.count-1 {
 		t := player.active_tasks.elements[i];
@@ -274,6 +276,8 @@ rr_power_outage_remove_generator_task_from_player :: proc(player: Player) {
 
 rr_comms_outage_add_enable_comms_task_to_player :: proc(player: Player) {
 	if player == null return;
+	// Traitors should never be tasked with fixing sabotages.
+	if player.player_type == Player_Type.TRAITOR return;
 	// Don't add duplicates
 	for i: 0..player.active_tasks.elements.count-1 {
 		t := player.active_tasks.elements[i];
@@ -576,6 +580,14 @@ post_meeting_kill_lockout_ends_at: float;
 rr_started_solo_test_mode: bool;
 rr_round_start_player_count: int;
 
+// --- End-game delay ---
+// Give a brief moment after the final kill so players can see the death happen
+// before the victory screen takes over.
+RR_END_GAME_DELAY_AFTER_FINAL_KILL_SECONDS :: 2.0;
+rr_end_game_pending: bool;
+rr_end_game_pending_started_at: float;
+rr_end_game_pending_victor: Player_Type;
+
 // --- Fake meeting (Prankster) ---
 fake_meeting_active: bool;
 fake_meeting_caller_id: u64;
@@ -638,7 +650,7 @@ rr_try_start_power_outage :: proc(caller: Player) {
 	rr_power_outage_triggered_by_id = caller.entity.id;
 	rr_power_outage_cooldown_ends_at = get_time() + POWER_OUTAGE_SABOTAGE_COOLDOWN_SECONDS;
 
-	// Inject the generator task for all alive players (anyone can fix it).
+	// Inject the generator task for all alive non-traitors (traitors shouldn't be instructed to fix sabotages).
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
@@ -709,7 +721,7 @@ rr_try_start_comms_outage :: proc(caller: Player) {
 	rr_comms_outage_triggered_by_id = caller.entity.id;
 	rr_comms_outage_cooldown_ends_at = get_time() + COMMS_OUTAGE_SABOTAGE_COOLDOWN_SECONDS;
 
-	// Inject the fix task for all alive players (anyone can fix it).
+	// Inject the fix task for all alive non-traitors (traitors shouldn't be instructed to fix sabotages).
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
@@ -1013,6 +1025,9 @@ setup_lobby :: proc() {
 	countdown_start_time = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
+	rr_end_game_pending = false;
+	rr_end_game_pending_started_at = 0.0;
+	rr_end_game_pending_victor = Player_Type.CIVILIAN;
 	rr_vote_results_active = false;
 	rr_vote_results_end_time = 0.0;
 	meeting_cooldown_ends_at = 0.0;
@@ -1051,6 +1066,9 @@ setup_ingame :: proc() {
 	countdown_start_time = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
+	rr_end_game_pending = false;
+	rr_end_game_pending_started_at = 0.0;
+	rr_end_game_pending_victor = Player_Type.CIVILIAN;
 	voting_start_time = 0.0;
 	rr_vote_results_active = false;
 	rr_vote_results_end_time = 0.0;
@@ -1217,6 +1235,9 @@ ao_update :: proc(dt: float) {
 			sfx.volume = 0.9;
 			sfx.volume_perturb = 0.05;
 			sfx.speed_perturb = 0.05;
+			// Global SFX mix: everything at 25% volume.
+			sfx.volume *= 0.25;
+			sfx.volume_perturb *= 0.25;
 			SFX.play(get_asset(SFX_Asset, "sfx/turn_off_power.wav"), sfx);
 		}
 		if !rr_prev_lockdown_active_client && rr_lockdown_active {
@@ -1227,6 +1248,9 @@ ao_update :: proc(dt: float) {
 			sfx.volume = 0.9;
 			sfx.volume_perturb = 0.05;
 			sfx.speed_perturb = 0.05;
+			// Global SFX mix: everything at 25% volume.
+			sfx.volume *= 0.25;
+			sfx.volume_perturb *= 0.25;
 			SFX.play(get_asset(SFX_Asset, "sfx/door_sabotage.wav"), sfx);
 		}
 
@@ -1339,6 +1363,14 @@ end_game_with_victor :: proc(victor: Player_Type) {
 		}
 	}
 	end_game_with_winners(victor, winners);
+}
+
+rr_queue_end_game_with_victor :: proc(victor: Player_Type) {
+	// Only queue once.
+	if rr_end_game_pending return;
+	rr_end_game_pending = true;
+	rr_end_game_pending_started_at = get_time();
+	rr_end_game_pending_victor = victor;
 }
 
 ao_update_lobby :: proc(dt: float) {
@@ -1460,6 +1492,16 @@ ao_update_ingame :: proc(dt: float) {
 		return;
 	}
 
+	// If an end-game is queued, wait a beat before showing victory.
+	if rr_end_game_pending {
+		if (get_time() - rr_end_game_pending_started_at) >= RR_END_GAME_DELAY_AFTER_FINAL_KILL_SECONDS {
+			rr_end_game_pending = false;
+			rr_end_game_pending_started_at = 0.0;
+			end_game_with_victor(rr_end_game_pending_victor);
+		}
+		return;
+	}
+
 	//Win Conditions
 	// -- Prankster: does NOT auto-win. They must unlock + use the Jester Win ability.
 	// Still, we need to detect when they complete prerequisites so we can start the 15s timer.
@@ -1487,18 +1529,18 @@ ao_update_ingame :: proc(dt: float) {
 		}
 	}
 	if alive_non_traitor > 0 && alive_non_traitor_infected == alive_non_traitor {
-		end_game_with_victor(Player_Type.TRAITOR);
+		rr_queue_end_game_with_victor(Player_Type.TRAITOR);
 		return;
 	}
 
 	// -- Traitor: Only traitors alive
 	if traitor_count > 0 && traitor_count == alive_count {
-		end_game_with_victor(Player_Type.TRAITOR);
+		rr_queue_end_game_with_victor(Player_Type.TRAITOR);
 		return;
 	}
 	// -- Civilian: Only civilians alive
 	if civilian_count > 0 && civilian_count == alive_count {
-		end_game_with_victor(Player_Type.CIVILIAN);
+		rr_queue_end_game_with_victor(Player_Type.CIVILIAN);
 		return;
 	}
 	// -- Civilian: All civilians completed all their tasks

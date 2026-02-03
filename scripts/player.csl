@@ -1046,6 +1046,9 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 			sfx.volume = 0.9;
 			sfx.volume_perturb = 0.05;
 			sfx.speed_perturb = 0.05;
+			// Global SFX mix: everything at 25% volume.
+			sfx.volume *= 0.25;
+			sfx.volume_perturb *= 0.25;
 			SFX.play(get_asset(SFX_Asset, "sfx/killer_transform.wav"), sfx);
 		}
 		// Enable werewolf skin halfway through the howl.
@@ -1287,12 +1290,14 @@ Task_Interactable :: class : Component {
 			return false;
 		}
 
-		// During power outage, allow everyone to complete the generator task.
+		// During power outage, allow non-traitors to complete the generator task.
 		if task_id == RR_RESTART_GENERATOR_TASK_ID {
 			if game_state != Game_State.INGAME return false;
 			if !rr_power_outage_active return false;
 			if player == null return false;
 			if player.player_state != Player_State.ALIVE return false;
+			// Traitors should not be able to fix sabotages.
+			if player.player_type == Player_Type.TRAITOR return false;
 			// Temporarily resurrected players can move/talk, but cannot do tasks.
 			if player.is_temporarily_resurrected return false;
 
@@ -1305,12 +1310,14 @@ Task_Interactable :: class : Component {
 			return false;
 		}
 
-		// During comms outage, allow everyone to complete the comms restore task.
+		// During comms outage, allow non-traitors to complete the comms restore task.
 		if task_id == RR_ENABLE_COMMUNICATIONS_TASK_ID {
 			if game_state != Game_State.INGAME return false;
 			if !rr_comms_outage_active return false;
 			if player == null return false;
 			if player.player_state != Player_State.ALIVE return false;
+			// Traitors should not be able to fix sabotages.
+			if player.player_type == Player_Type.TRAITOR return false;
 			// Temporarily resurrected players can move/talk, but cannot do tasks.
 			if player.is_temporarily_resurrected return false;
 
