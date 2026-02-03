@@ -1928,8 +1928,10 @@ Task_Reroute_Power :: class : Task_Base {
 				set_tile(this, 0, TILE_BLOCKER, 0);
 				set_tile(this, 15, TILE_BLOCKER, 0);
 
-				set_tile(this, 1, TILE_CORNER, 2);
-				set_tile(this, 3, TILE_CORNER, 0);
+				// NOTE: This preset must be solvable without rotating pieces (only swapping).
+				// The previous corner rotations made it impossible to ever connect left-to-right.
+				set_tile(this, 1, TILE_CORNER, 1);
+				set_tile(this, 3, TILE_CORNER, 3);
 				set_tile(this, 4, TILE_CORNER, 0);
 				set_tile(this, 5, TILE_CORNER, 2);
 				set_tile(this, 6, TILE_CORNER, 3);
@@ -4234,6 +4236,62 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		}
 	}
 
+	handle_keyboard_input :: proc(using this: Task_Anagram_Puzzle, player: Player) -> bool {
+		// Optional QoL: allow PC players to type the answer.
+		// Mobile/touch still uses the on-screen keypad.
+		if player == null {
+			return false;
+		}
+		if player.device_kind != Device_Kind.PC {
+			return false;
+		}
+		if !ui_active {
+			return false;
+		}
+
+		// ESC closes the task window (same as the close button).
+		if get_input_down(Input.ESCAPE, true) {
+			ui_active = false;
+			return true;
+		}
+
+		max_len := target_word.count;
+		if max_len <= 0 {
+			return false;
+		}
+
+		// Delete clears the whole input.
+		if get_input_down(Input.DELETE, true) {
+			input_chars = List(u8).{};
+		}
+
+		// Backspace (with repeat) removes characters.
+		if get_input_down(Input.BACKSPACE, true) || get_input_repeat(Input.BACKSPACE, true) {
+			if input_chars.elements.count > 0 {
+				input_chars->pop();
+			}
+		}
+
+		// Letters A-Z.
+		base := Input.A.(int);
+		for i: 0..25 {
+			key := (base + i).(Input);
+			if get_input_down(key, true) {
+				if input_chars.elements.count < max_len {
+					input_chars->append((65 + i).(u8));
+				}
+			}
+		}
+
+		// Consume enter so it doesn't leak to other UI widgets.
+		// (The task still auto-validates when you reach the full length.)
+		if get_input_down(Input.ENTER, true) {
+		}
+		if get_input_down(Input.KP_ENTER, true) {
+		}
+		return false;
+	}
+
 	update_task :: proc(using this: Task_Anagram_Puzzle, player: Player) {
 		if !started {
 			return;
@@ -4269,6 +4327,11 @@ Task_Anagram_Puzzle :: class : Task_Base {
 				return;
 			}
 			fail_time = 0.0;
+		}
+
+		// PC keyboard support (optional).
+		if handle_keyboard_input(this, player) {
+			return;
 		}
 
 		// If input complete, validate
