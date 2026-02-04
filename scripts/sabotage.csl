@@ -119,11 +119,25 @@ rr_draw_comms_deaf_icons_if_needed :: proc(local_player: Player, comms_down: boo
 	UI.push_layer(5200);
 	defer UI.pop_layer();
 
+	check_los := false;
+	max_los_dist := 0.0;
+	if rr_power_outage_active && rr_power_outage_affects_player(local_player) {
+		radii := local_player->get_local_light_radii();
+		max_los_dist = radii.y/2;
+		check_los = true;
+	}
+
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
 		if !rr_should_draw_comms_deaf_icon(p, comms_down) continue;
+		if check_los {
+			dist := length(p.entity.world_position - local_player.entity.world_position);
+			if dist > max_los_dist {
+				continue;
+			}
+		}
 
 		// Start at head-ish screen position and nudge right a bit.
 		screen_pos := world_to_screen(p.entity.world_position);
@@ -229,12 +243,13 @@ rr_draw_sabotages_next_to_minimap :: proc(
 	if player.player_type != Player_Type.TRAITOR return;
 
 	// Button size based on minimap height.
-	size := map_rect->height() * 0.10;
-	if size < 74.0 { size = 74.0; }
-	if size > 130.0 { size = 130.0; }
+	size := map_rect->height() * 0.12;
+	if size < 86.0 { size = 86.0; }
+	if size > 150.0 { size = 150.0; }
 
-	pad := size * 0.18;
-	x := map_rect.max.x + size * 0.5;
+	pad := size * 0.22;
+	gap := size * 0.06;
+	x := map_rect.max.x + gap + size * 0.5;
 	y_top := map_rect.max.y - (map_rect->height() * 0.5) + size;
 
 	// Two stacked buttons.
@@ -253,4 +268,30 @@ rr_draw_sabotages_next_to_minimap :: proc(
 	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", power_icon, "POWER", rr_power_outage_active, rr_power_outage_cooldown_ends_at);
 	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", comms_icon, "COMMS", comms_down, comms_cooldown_ends_at);
 	lockdown_clicked = rr_draw_sabotage_button(btn3, "sabotage_lockdown", lock_icon, "LOCKDOWN", rr_lockdown_active, rr_lockdown_cooldown_ends_at);
+
+	// Labels under icons.
+	label_h := size * 0.26;
+	label_w := size * 2.3;
+	label_pad := label_h * 0.05;
+
+	label_ts := UI.default_text_settings();
+	label_ts.size = size * 0.26;
+	label_ts.color = v4.{1, 1, 1, 0.95};
+	label_ts.halign = .CENTER;
+	label_ts.valign = .CENTER;
+	label_ts.do_outline = true;
+	label_ts.outline_thickness = 3;
+	label_ts.outline_color = v4.{0, 0, 0, 1};
+
+	label_center := btn1->bottom_center_rect()->offset(0.0, -label_pad);
+	label_rect := label_center->grow(label_h * 0.5, label_w * 0.5, label_h * 0.5, label_w * 0.5);
+	UI.text(label_rect, label_ts, "Light Sabotage");
+
+	label_center = btn2->bottom_center_rect()->offset(0.0, -label_pad);
+	label_rect = label_center->grow(label_h * 0.5, label_w * 0.5, label_h * 0.5, label_w * 0.5);
+	UI.text(label_rect, label_ts, "Comms Sabotage");
+
+	label_center = btn3->bottom_center_rect()->offset(0.0, -label_pad);
+	label_rect = label_center->grow(label_h * 0.5, label_w * 0.5, label_h * 0.5, label_w * 0.5);
+	UI.text(label_rect, label_ts, "Lock Doors");
 }

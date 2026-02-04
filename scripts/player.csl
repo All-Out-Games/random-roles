@@ -534,6 +534,9 @@ Player :: class : Player_Base {
 								abilityIndex += 1;
 							}
 						}
+
+						// Traitor quick-access map (sabotage icon) above abilities.
+						draw_traitor_sabotage_map_button(this);
                     }
                     if player_type == Player_Type.CIVILIAN && player_role == Player_Role.SHERIFF {
                         draw_ability_button(this, Shoot_Ability, abilityIndex);
@@ -1983,6 +1986,54 @@ update_minimap_ui :: proc(player: Player) {
 
 	if draw_minimap_close_button(map_rect) {
 		player.show_minimap = false;
+	}
+}
+
+draw_traitor_sabotage_map_button :: proc(player: Player) {
+	if player == null return;
+	if !player->is_local_or_server() return;
+	if game_state != Game_State.INGAME return;
+	if player.player_state != Player_State.ALIVE return;
+	if player.player_type != Player_Type.TRAITOR return;
+
+	safe := UI.get_safe_screen_rect();
+
+	SABOTAGE_HALF_SIZE :: 48.0;
+	SABOTAGE_PAD :: 18.0;
+	ABILITY_STACK_Y_OFFSET :: 230.0;
+
+	center := safe->bottom_right_rect()->offset(-SABOTAGE_HALF_SIZE - SABOTAGE_PAD, SABOTAGE_HALF_SIZE + SABOTAGE_PAD + ABILITY_STACK_Y_OFFSET);
+	btn_rect := center->grow(SABOTAGE_HALF_SIZE);
+
+	UI.push_id("sabotage_map");
+	defer UI.pop_id();
+
+	bs: Button_Settings = .{};
+	rr_ui_apply_button_click_sound(ref bs);
+	interact := UI.button(btn_rect, bs, .{}, "");
+
+	icon := get_asset(Texture_Asset, "ui/sabotage.png");
+	if icon == null {
+		icon = get_asset(Texture_Asset, "sprites/icons/doors_lock.png");
+	}
+	if icon != null {
+		icon_rect := btn_rect->inset(6);
+		UI.quad(icon_rect->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
+	}
+
+	label_rect := btn_rect->bottom_center_rect()->offset(0.0, -10.0)->grow(12.0, 80.0, 12.0, 80.0);
+	label_ts := UI.default_text_settings();
+	label_ts.size = 22;
+	label_ts.color = v4.{1, 1, 1, 1};
+	label_ts.halign = .CENTER;
+	label_ts.valign = .CENTER;
+	label_ts.do_outline = true;
+	label_ts.outline_thickness = 2;
+	label_ts.outline_color = v4.{0, 0, 0, 1};
+	UI.text(label_rect, label_ts, "Sabotage");
+
+	if interact.clicked {
+		player.show_minimap = true;
 	}
 }
 

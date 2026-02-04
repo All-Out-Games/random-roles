@@ -129,7 +129,7 @@ Kill_Ability :: class : Ability_Base {
 				if Game.is_server() && player != null && player.player_type == Player_Type.TRAITOR {
 					sfx := SFX.default_sfx_desc();
 					sfx->set_position(closest_alive_player.entity.world_position);
-					sfx.volume = 0.9;
+					sfx.volume = 0.35;
 					sfx.volume_perturb = 0.08;
 					sfx.speed_perturb = 0.06;
 					// Global SFX mix: everything at 25% volume.
@@ -1572,9 +1572,13 @@ Vote_Ability :: class : Ability_Base {
 		screen := UI.get_safe_screen_rect();
 		white := get_asset(Texture_Asset, "$AO/white.png");
 
+		// Match voting screen layer (above all gameplay UI).
+		UI.push_layer(20000);
+		defer UI.pop_layer();
+
 		UI.quad(screen, white, v4.{0, 0, 0, 0.82});
 
-		panel_rect := screen->center_rect()->grow(240, 520, 240, 520);
+		panel_rect := screen->center_rect()->grow(470, 860, 470, 860);
 		rr_ui_draw_modal_panel(panel_rect);
 
 		content := panel_rect->inset(26);
@@ -1638,6 +1642,9 @@ Vote_Ability :: class : Ability_Base {
         screen := UI.get_safe_screen_rect();
 
         white := get_asset(Texture_Asset, "$AO/white.png");
+		// Match voting screen layer (above all gameplay UI).
+		UI.push_layer(20000);
+		defer UI.pop_layer();
 		// Slide-in animation (left -> center)
 		now := get_time();
 		t := 1.0;
@@ -1650,7 +1657,7 @@ Vote_Ability :: class : Ability_Base {
 
         UI.quad(screen, white, v4.{0, 0, 0, overlay_alpha});
 
-        panel_rect := screen->center_rect()->grow(380, 560, 380, 560)->offset(x_off, 0);
+        panel_rect := screen->center_rect()->grow(470, 860, 470, 860)->offset(x_off, 0);
         rr_ui_draw_modal_panel(panel_rect);
 
         content := panel_rect->inset(24);
@@ -2214,11 +2221,6 @@ Vote_Ability :: class : Ability_Base {
             defer UI.pop_disabled();
             UI.push_color_multiplier(v4.{1, 1, 1, 0.55});
             defer UI.pop_color_multiplier();
-        }
-
-        // If the local player already chose skip, add a subtle highlight.
-        if local_player.voted_skip {
-            UI.quad(btn_rect, white, v4.{0.20, 0.90, 0.45, 0.12});
         }
 
         // Ensure the rect matches the sprite aspect so it never squishes.

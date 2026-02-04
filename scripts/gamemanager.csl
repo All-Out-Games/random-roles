@@ -238,12 +238,6 @@ rr_lockdown_triggered_by_id: u64;
 rr_lockdown_cooldown_ends_at: float;
 rr_lockdown_ends_at: float;
 
-// --- Client-side SFX edges (avoid server-side playback) ---
-rr_prev_power_outage_active_client: bool;
-rr_prev_lockdown_active_client: bool;
-rr_prev_power_outage_started_at_client: float;
-rr_power_outage_sfx_played_client: bool;
-
 rr_power_outage_add_generator_task_to_player :: proc(player: Player) {
 	if player == null return;
 	// Traitors should never be tasked with fixing sabotages.
@@ -858,6 +852,19 @@ rr_try_start_lockdown :: proc(caller: Player) {
 	// Match meeting behavior: force doors closed/locked.
 	close_all_doors();
 
+	// Server-authoritative SFX (play once for everyone).
+	sfx := SFX.default_sfx_desc();
+	if caller != null {
+		sfx->set_position(caller.entity.world_position);
+	}
+	sfx.volume = 0.9;
+	sfx.volume_perturb = 0.05;
+	sfx.speed_perturb = 0.05;
+	// Global SFX mix: everything at 25% volume.
+	sfx.volume *= 0.25;
+	sfx.volume_perturb *= 0.25;
+	SFX.play(get_asset(SFX_Asset, "sfx/door_sabotage.wav"), sfx);
+
 	// Notify everyone
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
@@ -1338,34 +1345,6 @@ ao_start :: proc() {
   }
 
 ao_update :: proc(dt: float) {
-	// Client-side SFX for sabotage state changes (server owns the state; clients play audio).
-	if !Game.is_server() {
-		local_player: Player = null;
-		foreach p: component_iterator(Player) {
-			if p != null && #alive(p.entity) && p->is_local() {
-				local_player = p;
-				break;
-			}
-		}
-
-		if !rr_prev_lockdown_active_client && rr_lockdown_active {
-			sfx := SFX.default_sfx_desc();
-			if local_player != null {
-				sfx->set_position(local_player.entity.world_position);
-			}
-			sfx.volume = 0.9;
-			sfx.volume_perturb = 0.05;
-			sfx.speed_perturb = 0.05;
-			// Global SFX mix: everything at 25% volume.
-			sfx.volume *= 0.25;
-			sfx.volume_perturb *= 0.25;
-			SFX.play(get_asset(SFX_Asset, "sfx/door_sabotage.wav"), sfx);
-		}
-
-		rr_prev_power_outage_active_client = rr_power_outage_active;
-		rr_prev_lockdown_active_client = rr_lockdown_active;
-	}
-
 	// Keep timed sabotages progressing regardless of game_state (e.g., lockdown during voting).
 	rr_update_lockdown();
 
