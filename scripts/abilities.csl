@@ -148,6 +148,128 @@ Kill_Ability :: class : Ability_Base {
 	}
 }
 
+// --- Drag Body (Traitor utility) ---
+DRAG_BODY_GRAB_RANGE :: 2.5;
+DRAG_BODY_FOLLOW_DISTANCE :: 0.3;
+
+rr_drag_body_get_closest_draggable_corpse :: proc(player: Player) -> Corpse {
+	if player == null return null;
+	if player.player_state != Player_State.ALIVE return null;
+	if game_state != Game_State.INGAME return null;
+
+	finder := make_finder(Corpse, player.entity.world_position, DRAG_BODY_GRAB_RANGE);
+	foreach corpse: component_iterator(Corpse) {
+		if corpse == null continue;
+		if !#alive(corpse.entity) continue;
+		if corpse.has_been_reported continue;
+
+		// Only allow dragging corpses for players that are currently dead.
+		owner := get_player_by_entity_id(corpse.owner_player_entity_id);
+		if owner == null continue;
+		if owner.player_state != Player_State.DEAD continue;
+
+		// Don't allow two traitors to drag the same body.
+		if corpse.dragged_by_player_entity_id != 0 && corpse.dragged_by_player_entity_id != player.entity.id {
+			continue;
+		}
+
+		finder->check(corpse, corpse.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_drag_body_find_corpse_by_entity_id :: proc(corpse_entity_id: u64) -> Corpse {
+	if corpse_entity_id == 0 return null;
+	foreach corpse: component_iterator(Corpse) {
+		if corpse == null continue;
+		if !#alive(corpse.entity) continue;
+		if corpse.entity.id == corpse_entity_id {
+			return corpse;
+		}
+	}
+	return null;
+}
+
+Drag_Body_Ability :: class : Ability_Base {
+	NAME :: "Drag";
+
+	on_init :: proc(instance: Drag_Body_Ability) {
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/drag_body_icon.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+		if player.player_type != Player_Type.TRAITOR return false;
+
+		// Allow button to stay enabled while already dragging (so you can drop).
+		if player.dragging_corpse_entity_id != 0 return true;
+		return rr_drag_body_get_closest_draggable_corpse(player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		dragging := player != null && player.dragging_corpse_entity_id != 0;
+
+		// Toggle grab/drop.
+		if params.clicked && params.can_use && Game.is_server() {
+			if dragging {
+				rr_drag_body_force_drop_for_player(player);
+				return;
+			}
+
+			corpse := rr_drag_body_get_closest_draggable_corpse(player);
+			if corpse == null return;
+
+			player.dragging_corpse_entity_id = corpse.entity.id;
+			corpse.dragged_by_player_entity_id = player.entity.id;
+
+			// Start loop SFX while dragging (server-authoritative).
+			if player != null {
+				if player.drag_body_sfx_id != 0 {
+					SFX.stop(player.drag_body_sfx_id);
+					player.drag_body_sfx_id = 0;
+				}
+				sound := get_asset(SFX_Asset, "sfx/drag_body_loop.wav");
+				if sound != null {
+					sfx := SFX.default_sfx_desc();
+					sfx.entity_to_follow = player.entity.id;
+					sfx.volume = 0.55;
+					sfx.volume_perturb = 0.03;
+					sfx.speed_perturb = 0.02;
+					// Global SFX mix: everything at 25% volume.
+					sfx.volume *= 0.25;
+					sfx.volume_perturb *= 0.25;
+					player.drag_body_sfx_id = SFX.play(sound, sfx);
+				}
+			}
+		}
+
+		// Follow update while dragging.
+		if dragging {
+			corpse := rr_drag_body_find_corpse_by_entity_id(player.dragging_corpse_entity_id);
+			if corpse == null {
+				// Corpse got deleted (reported / destroyed) while dragging.
+				if Game.is_server() {
+					player.dragging_corpse_entity_id = 0;
+					if player.drag_body_sfx_id != 0 {
+						SFX.stop(player.drag_body_sfx_id);
+						player.drag_body_sfx_id = 0;
+					}
+					player->set_trigger("RESET");
+				}
+				return;
+			}
+
+			// Corpse follow is handled server-side in `Corpse.ao_update` (with smoothing).
+		}
+	}
+
+	on_draw_button :: proc(instance: Drag_Body_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Drag_Body_Ability.NAME);
+	}
+}
+
 // --- Werewolf (Traitor role) ---
 WEREWOLF_DEVOUR_COOLDOWN_SECONDS :: 60.0;
 WEREWOLF_INFECT_COOLDOWN_SECONDS :: 60.0;

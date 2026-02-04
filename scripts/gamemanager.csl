@@ -241,6 +241,8 @@ rr_lockdown_ends_at: float;
 // --- Client-side SFX edges (avoid server-side playback) ---
 rr_prev_power_outage_active_client: bool;
 rr_prev_lockdown_active_client: bool;
+rr_prev_power_outage_started_at_client: float;
+rr_power_outage_sfx_played_client: bool;
 
 rr_power_outage_add_generator_task_to_player :: proc(player: Player) {
 	if player == null return;
@@ -346,6 +348,82 @@ Player_Role :: enum {
 	PIRATE;
 	HITMAN;
 	WEREWOLF;
+}
+
+rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
+	switch role {
+		case .SHERIFF:      return Player_Type.CIVILIAN;
+		case .DOCTOR:       return Player_Type.CIVILIAN;
+		case .PRESIDENT:    return Player_Type.CIVILIAN;
+		case .MOVIE_STAR:   return Player_Type.CIVILIAN;
+		case .CORONER:      return Player_Type.CIVILIAN;
+		case .PORTAL_MAKER: return Player_Type.CIVILIAN;
+		case .PRANKSTER:    return Player_Type.ANARCHIST;
+		case .PYROMANIAC:   return Player_Type.ANARCHIST;
+		case .PIRATE:       return Player_Type.TRAITOR;
+		case .HITMAN:       return Player_Type.TRAITOR;
+		case .WEREWOLF:     return Player_Type.TRAITOR;
+		case .NONE:         return Player_Type.CIVILIAN;
+	}
+	return Player_Type.CIVILIAN;
+}
+
+rr_get_role_display_name :: proc(role: Player_Role) -> string {
+	switch role {
+		case .SHERIFF:      return "sheriff";
+		case .DOCTOR:       return "doctor";
+		case .PRESIDENT:    return "president";
+		case .MOVIE_STAR:   return "movie_star";
+		case .CORONER:      return "coroner";
+		case .PORTAL_MAKER: return "portal_maker";
+		case .PRANKSTER:    return "prankster";
+		case .PYROMANIAC:   return "pyromaniac";
+		case .PIRATE:       return "pirate";
+		case .HITMAN:       return "hitman";
+		case .WEREWOLF:     return "werewolf";
+		case .NONE:         return "none";
+	}
+	return "none";
+}
+
+rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
+	if role_name == "none" || role_name == "None" {
+		return Player_Role.NONE, true;
+	}
+	if role_name == "sheriff" || role_name == "Sheriff" {
+		return Player_Role.SHERIFF, true;
+	}
+	if role_name == "doctor" || role_name == "Doctor" {
+		return Player_Role.DOCTOR, true;
+	}
+	if role_name == "president" || role_name == "President" {
+		return Player_Role.PRESIDENT, true;
+	}
+	if role_name == "movie_star" || role_name == "movie star" || role_name == "Movie_Star" || role_name == "Movie Star" {
+		return Player_Role.MOVIE_STAR, true;
+	}
+	if role_name == "coroner" || role_name == "Coroner" {
+		return Player_Role.CORONER, true;
+	}
+	if role_name == "portal_maker" || role_name == "portal maker" || role_name == "Portal_Maker" || role_name == "Portal Maker" {
+		return Player_Role.PORTAL_MAKER, true;
+	}
+	if role_name == "prankster" || role_name == "Prankster" {
+		return Player_Role.PRANKSTER, true;
+	}
+	if role_name == "pyromaniac" || role_name == "Pyromaniac" {
+		return Player_Role.PYROMANIAC, true;
+	}
+	if role_name == "pirate" || role_name == "Pirate" {
+		return Player_Role.PIRATE, true;
+	}
+	if role_name == "hitman" || role_name == "Hitman" {
+		return Player_Role.HITMAN, true;
+	}
+	if role_name == "werewolf" || role_name == "Werewolf" {
+		return Player_Role.WEREWOLF, true;
+	}
+	return Player_Role.NONE, false;
 }
 
 Hitman_Kill_Style :: enum {
@@ -649,6 +727,21 @@ rr_try_start_power_outage :: proc(caller: Player) {
 	rr_power_outage_started_at = get_time();
 	rr_power_outage_triggered_by_id = caller.entity.id;
 	rr_power_outage_cooldown_ends_at = get_time() + POWER_OUTAGE_SABOTAGE_COOLDOWN_SECONDS;
+
+	// One-shot SFX on server (replicated to clients).
+	sfx := SFX.default_sfx_desc();
+	if caller != null && #alive(caller.entity) {
+		sfx->set_position(caller.entity.world_position);
+	}
+	sfx.loop = false;
+	sfx.loop_timeout = 0.0;
+	sfx.volume = 0.9;
+	sfx.volume_perturb = 0.05;
+	sfx.speed_perturb = 0.05;
+	// Global SFX mix: everything at 25% volume.
+	sfx.volume *= 0.25;
+	sfx.volume_perturb *= 0.25;
+	SFX.play(get_asset(SFX_Asset, "sfx/turn_off_power.wav"), sfx);
 
 	// Inject the generator task for all alive non-traitors (traitors shouldn't be instructed to fix sabotages).
 	for i: 0..players.elements.count-1 {
@@ -1043,7 +1136,17 @@ setup_lobby :: proc() {
 	rr_pyro_extinguish_all_fires();
 	// Reset sabotages
 	rr_power_outage_active = false;
+	rr_power_outage_started_at = 0.0;
+	rr_power_outage_triggered_by_id = 0;
+	rr_power_outage_cooldown_ends_at = 0.0;
+	if rr_power_outage_generator_entity != null && #alive(rr_power_outage_generator_entity) {
+		rr_power_outage_generator_entity->destroy();
+	}
+	rr_power_outage_generator_entity = null;
 	rr_comms_outage_active = false;
+	rr_comms_outage_started_at = 0.0;
+	rr_comms_outage_triggered_by_id = 0;
+	rr_comms_outage_cooldown_ends_at = 0.0;
 	rr_lockdown_active = false;
 	rr_lockdown_started_at = 0.0;
 	rr_lockdown_triggered_by_id = 0;
@@ -1051,6 +1154,8 @@ setup_lobby :: proc() {
 	rr_lockdown_ends_at = 0.0;
 	fake_meeting_cooldown_ends_at = 0.0;
 	foreach player: component_iterator(Player) {
+		rr_power_outage_remove_generator_task_from_player(player);
+		rr_comms_outage_remove_enable_comms_task_from_player(player);
 		on_player_go_passive(player);
 		// Lobby reset: everyone can hear & speak to everyone.
 		player->apply_voice_chat_masks_for_current_state();
@@ -1086,7 +1191,23 @@ setup_ingame :: proc() {
 	}
 	// Start-of-round: comms are functional.
 	rr_comms_outage_active = false;
+	rr_comms_outage_started_at = 0.0;
+	rr_comms_outage_triggered_by_id = 0;
+	rr_comms_outage_cooldown_ends_at = 0.0;
 	rr_update_comms_lever_visuals();
+	rr_power_outage_active = false;
+	rr_power_outage_started_at = 0.0;
+	rr_power_outage_triggered_by_id = 0;
+	rr_power_outage_cooldown_ends_at = 0.0;
+	if rr_power_outage_generator_entity != null && #alive(rr_power_outage_generator_entity) {
+		rr_power_outage_generator_entity->destroy();
+	}
+	rr_power_outage_generator_entity = null;
+	// Clear any lingering sabotage tasks from previous round.
+	foreach player: component_iterator(Player) {
+		rr_power_outage_remove_generator_task_from_player(player);
+		rr_comms_outage_remove_enable_comms_task_from_player(player);
+	}
 	jester_win_active = false;
 	jester_win_player_id = 0;
 	jester_win_start_time = 0.0;
@@ -1227,19 +1348,6 @@ ao_update :: proc(dt: float) {
 			}
 		}
 
-		if !rr_prev_power_outage_active_client && rr_power_outage_active {
-			sfx := SFX.default_sfx_desc();
-			if local_player != null {
-				sfx->set_position(local_player.entity.world_position);
-			}
-			sfx.volume = 0.9;
-			sfx.volume_perturb = 0.05;
-			sfx.speed_perturb = 0.05;
-			// Global SFX mix: everything at 25% volume.
-			sfx.volume *= 0.25;
-			sfx.volume_perturb *= 0.25;
-			SFX.play(get_asset(SFX_Asset, "sfx/turn_off_power.wav"), sfx);
-		}
 		if !rr_prev_lockdown_active_client && rr_lockdown_active {
 			sfx := SFX.default_sfx_desc();
 			if local_player != null {
@@ -1470,12 +1578,52 @@ force_start_lobby_game :: proc() {
 force_start :: proc(player: Player) {
 	// Only valid from lobby.
 	if game_state != Game_State.LOBBY {
-		Notifier.notify(player, "Can only force start from the lobby.");
+		Chat.server_send_message("Can only force start from the lobby.", player);
 		return;
 	}
 
 	// Reuse the same flow as the lobby UI button.
 	force_start_lobby_game();
+} @chat_command @youtuber
+
+// Chat command: /r werewolf
+// Force a role for the next round (applies once, then clears).
+r :: proc(player: Player, role_name: string) {
+	role, ok := rr_parse_role_name(role_name);
+	if !ok {
+		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, portal_maker, prankster, pyromaniac, pirate, hitman, werewolf, none.", player);
+		return;
+	}
+
+	player.forced_role_next_round = role;
+	if role == Player_Role.NONE {
+		Chat.server_send_message("Cleared forced role.", player);
+		return;
+	}
+	Chat.server_send_message(format_string("Forced role set for next round: %", .{rr_get_role_display_name(role)}), player);
+} @chat_command @youtuber
+
+// Chat command: /end
+// Ends the current round and shows victory (default: civilians).
+end :: proc(player: Player) {
+	if game_state == Game_State.LOBBY {
+		Chat.server_send_message("Already in lobby.", player);
+		return;
+	}
+	end_game_with_victor(Player_Type.CIVILIAN);
+} @chat_command @youtuber
+
+// Chat command: /restart
+// Resets to lobby and immediately starts a new round.
+restart :: proc(player: Player) {
+	setup_lobby();
+	force_start_lobby_game();
+} @chat_command @youtuber
+
+// Chat command: /music off
+// Temporary placeholder (no music system yet).
+music :: proc(player: Player, setting: string = "off") {
+	Chat.server_send_message("No music in this build yet.", player);
 } @chat_command @youtuber
 
 ao_update_ingame :: proc(dt: float) {
@@ -1909,11 +2057,16 @@ assign_players_to_types :: proc() {
 	for i: 0..players.elements.count-1 {
 		if i < type_list.count {
 			on_player_go_alive(players.elements[i]);
-			players.elements[i].player_type = type_list[i];
+			forced_role := players.elements[i].forced_role_next_round;
+			if forced_role != Player_Role.NONE {
+				players.elements[i].player_type = rr_get_role_type(forced_role);
+			} else {
+				players.elements[i].player_type = type_list[i];
+			}
 			
 			// Clear old tasks and assign new tasks to civilians
 			players.elements[i].active_tasks = List(Task_Base).{};
-			if type_list[i] == Player_Type.CIVILIAN {
+			if players.elements[i].player_type == Player_Type.CIVILIAN {
 				players.elements[i].active_tasks = get_random_task_list(5, players.elements[i]);
 			}
 		}
@@ -1970,6 +2123,15 @@ assign_players_to_types :: proc() {
 	}
 	for i: 0..tr_roles.elements.count-1 {
 		tr_players.elements[i].player_role = tr_roles.elements[i];
+	}
+
+	// Apply forced roles for this round (one-time).
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if p.forced_role_next_round == Player_Role.NONE continue;
+		p.player_role = p.forced_role_next_round;
+		p.forced_role_next_round = Player_Role.NONE;
 	}
 
 	// Assign role-specific tasks / objectives

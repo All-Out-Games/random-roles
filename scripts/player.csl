@@ -8,10 +8,22 @@ ALIVE_CHANNEL :: 1u64 << 0;
 DEAD_CHANNEL  :: 1u64 << 1;
 ALL_VOICE_CHANNELS :: ALIVE_CHANNEL | DEAD_CHANNEL;
 
+// --- Local vision / LOS ---
+PLAYER_LIGHT_BASE_INNER_RADIUS :: 9;
+PLAYER_LIGHT_BASE_OUTER_RADIUS :: 12;
+PLAYER_LIGHT_POWER_OUTAGE_MULTIPLIER :: 0.45;
+PLAYER_LIGHT_PIRATE_FOG_MULTIPLIER :: 0.55;
+PLAYER_LIGHT_MIN_INNER_RADIUS :: 0.75;
+PLAYER_LIGHT_MIN_OUTER_RADIUS :: 1.25;
+PLAYER_LIGHT_INTENSITY :: 1.0;
+PLAYER_LIGHT_COLOR := v4.{1.0, 1.0, 1.0, 1.0};
+
 Player :: class : Player_Base {
     player_type: Player_Type;
     player_state: Player_State;
     player_role: Player_Role;
+	// Optional admin cheat: force a role for the next round only.
+	forced_role_next_round: Player_Role;
     voted_for: Player;  // Who this player voted for (null if no vote yet)
     has_voted: bool;    // True if this player has cast a ballot this meeting (including skip)
     voted_skip: bool;   // True if this player voted to skip
@@ -23,6 +35,12 @@ Player :: class : Player_Base {
 	show_minimap: bool;
 	chat_mode_inited: bool;
 	chat_mode_last_applied: Chat.Mode;
+
+	// Local-only LOS light (viewer-specific).
+	local_light_entity: Entity;
+	local_light: Light;
+	local_light_caster: LOS_Caster;
+
 
 	// --- Ghost QoL ---
 	// Local-only camera zoom so dead players can see more of the map.
@@ -102,6 +120,22 @@ Player :: class : Player_Base {
 	// Cosmetic: skin switching timing (used for transform animations).
 	werewolf_skin_enable_at: float;   // 0 = none, otherwise game-time to enable werewolf skin
 	werewolf_skin_disable_at: float;  // 0 = none, otherwise game-time to disable werewolf skin
+
+	// --- Drag Body (traitor utility) ---
+	// Entity id of the corpse currently being dragged (0 = none).
+	dragging_corpse_entity_id: u64;
+	// True when the player is facing right (used by corpse side offset + drag anim selection).
+	drag_body_is_right: bool;
+	// Server-authoritative looping SFX while dragging.
+	drag_body_sfx_id: u64;
+	// Client/local movement sampling for drag animation direction.
+	drag_body_last_pos_inited: bool;
+	drag_body_last_pos: v2;
+	// Movement speed override while dragging.
+	drag_body_speed_active: bool;
+	drag_body_speed_original: float;
+	// Track drag end to reset animations.
+	drag_body_was_dragging: bool;
 
     is_frozen: bool;
 
@@ -230,6 +264,8 @@ Player :: class : Player_Base {
 	}
 
     ao_end :: proc(using this: Player) {
+		// Release any corpse this player was dragging (disconnect cleanup).
+		rr_drag_body_force_drop_for_player(this);
 		// Clean up portal maker portals on disconnect.
 		rr_portal_maker_cleanup_for_player(this);
         // Player entity is being destroyed (typically disconnect). Clean up any corpses they spawned.
@@ -237,6 +273,16 @@ Player :: class : Player_Base {
 		// Clean up any pirate dig-spots they spawned.
 		destroy_pirate_dig_spots_for_player(this.entity.id);
         unordered_remove_by_value(ref players, this);
+
+		// Local-only: destroy LOS light.
+		if this->is_local() {
+			if local_light_entity != null && #alive(local_light_entity) {
+				local_light_entity->destroy();
+			}
+			local_light_entity = null;
+			local_light = null;
+			local_light_caster = null;
+		}
     }
 
     ao_update :: proc(using this: Player, delta_time: float) {
@@ -246,6 +292,7 @@ Player :: class : Player_Base {
 			if this->is_local() {
             	this->setup_player_colors();
 				this->update_chat_mode();
+				this->update_local_vision_light();
 			}
 			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
 			rr_draw_power_outage_overlay_if_needed(this);
@@ -272,6 +319,9 @@ Player :: class : Player_Base {
 
 		// Cosmetic: apply scheduled skin toggles on all clients.
 		rr_werewolf_update_skins(this);
+
+		// Drag body animation state (runs on all clients).
+		rr_drag_body_update_anim_state(this, delta_time);
     }
 
 	update_chat_mode :: proc(using this: Player) {
@@ -286,6 +336,87 @@ Player :: class : Player_Base {
 		Chat.set_mode(desired);
 		chat_mode_last_applied = desired;
 		chat_mode_inited = true;
+	}
+
+	is_in_pirate_fog :: proc(using this: Player) -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player_state != Player_State.ALIVE return false;
+		if !this->is_local() return false;
+
+		foreach fog: component_iterator(Black_Flag) {
+			if fog == null continue;
+			if !#alive(fog.entity) continue;
+			distance := length(this.entity.world_position - fog.entity.world_position);
+			if distance < BLACK_FLAG_RADIUS {
+				is_owner := #alive(fog.owner_entity) && fog.owner_entity == this.entity;
+				if !is_owner {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	get_local_light_radii :: proc(using this: Player) -> v2 {
+		radii := v2.{PLAYER_LIGHT_BASE_INNER_RADIUS, PLAYER_LIGHT_BASE_OUTER_RADIUS};
+
+		// Power outage reduces visibility for non-traitors.
+		if game_state == Game_State.INGAME && player_state == Player_State.ALIVE {
+			if rr_power_outage_active && rr_power_outage_affects_player(this) {
+				radii.x *= PLAYER_LIGHT_POWER_OUTAGE_MULTIPLIER;
+				radii.y *= PLAYER_LIGHT_POWER_OUTAGE_MULTIPLIER;
+			}
+			if this->is_in_pirate_fog() {
+				radii.x *= PLAYER_LIGHT_PIRATE_FOG_MULTIPLIER;
+				radii.y *= PLAYER_LIGHT_PIRATE_FOG_MULTIPLIER;
+			}
+		}
+
+		// Clamp to avoid a zero/negative radius.
+		radii.x = max(radii.x, PLAYER_LIGHT_MIN_INNER_RADIUS);
+		radii.y = max(radii.y, PLAYER_LIGHT_MIN_OUTER_RADIUS);
+		if radii.x > radii.y {
+			radii.x = radii.y;
+		}
+		return radii;
+	}
+
+	ensure_local_vision_light :: proc(using this: Player) {
+		if local_light_entity != null && #alive(local_light_entity) return;
+
+		local_light_entity = Scene.create_entity();
+		local_light_entity->set_parent(this.entity, false);
+		local_light_entity->set_local_enabled(true);
+		local_light_entity->set_local_position(v2.{0.0, 0.0});
+		local_light_entity->set_local_rotation(0.0);
+		local_light_entity->set_local_scale(v2.{1.0, 1.0});
+
+		local_light = local_light_entity->add_component(Light);
+		local_light.color = PLAYER_LIGHT_COLOR;
+		local_light.intensity = PLAYER_LIGHT_INTENSITY;
+		local_light.radii = v2.{PLAYER_LIGHT_BASE_INNER_RADIUS, PLAYER_LIGHT_BASE_OUTER_RADIUS};
+
+		local_light_caster = local_light_entity->add_component(LOS_Caster);
+		local_light_caster.radii = local_light.radii;
+	}
+
+	update_local_vision_light :: proc(using this: Player) {
+		if !this->is_local() return;
+		if !#alive(this.entity) return;
+
+		this->ensure_local_vision_light();
+
+		if local_light == null && local_light_entity != null {
+			local_light = local_light_entity->get_component(Light);
+		}
+		if local_light_caster == null && local_light_entity != null {
+			local_light_caster = local_light_entity->get_component(LOS_Caster);
+		}
+		if local_light == null || local_light_caster == null return;
+
+		radii := this->get_local_light_radii();
+		local_light.radii = radii;
+		local_light_caster.radii = radii;
 	}
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
@@ -366,6 +497,10 @@ Player :: class : Player_Base {
                         	draw_ability_button(this, Kill_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
+
+						// All traitors can drag bodies.
+						draw_ability_button(this, Drag_Body_Ability, abilityIndex);
+						abilityIndex += 1;
                         
                         // Pirate gets Shoot and Black Flag abilities
                         if player_role == Player_Role.PIRATE {
@@ -534,6 +669,8 @@ Player :: class : Player_Base {
 
 	kill_with_killer_and_corpse :: proc(using this: Player, killer_player_entity_id: u64, spawn_corpse: bool) {
         //freeze_player = true;
+		// If we were dragging a body, drop it immediately.
+		rr_drag_body_force_drop_for_player(this);
 		// If this player was temporarily resurrected, clear the flag so tasks/UI don't get stuck.
 		this.is_temporarily_resurrected = false;
 		this.temporarily_resurrected_until = 0.0;
@@ -1205,6 +1342,38 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 		layer->create_global_transition(pirate_dig_for_treasure_state, false)->create_trigger_condition(pirate_dig_for_treasure_var);
 		layer->create_transition(pirate_dig_for_treasure_state, idle_state, true);
 
+		// --- Drag Body (traitor utility) ---
+		// Inject drag locomotion states; driven by bools set in `Drag_Body_Ability`.
+		drag_enabled_var := sm->create_variable("drag_body_enabled", State_Machine_Variable.Kind.BOOL);
+		drag_moving_var := sm->create_variable("drag_body_moving", State_Machine_Variable.Kind.BOOL);
+		drag_right_var := sm->create_variable("drag_body_right", State_Machine_Variable.Kind.BOOL);
+
+		drag_idle_left := layer->create_state("004RAND/drag_body_idle", true, 0.0);
+		drag_idle_right := layer->create_state("004RAND/drag_body_idle_right", true, 0.0);
+		drag_walk_left := layer->create_state("004RAND/drag_body_walk", true, 0.0);
+		drag_walk_right := layer->create_state("004RAND/drag_body_walk_right", true, 0.0);
+
+		// Mutually-exclusive global transitions.
+		to_drag_idle_left := layer->create_global_transition(drag_idle_left, false);
+		to_drag_idle_left->create_bool_condition(drag_enabled_var, true);
+		to_drag_idle_left->create_bool_condition(drag_moving_var, false);
+		to_drag_idle_left->create_bool_condition(drag_right_var, false);
+
+		to_drag_idle_right := layer->create_global_transition(drag_idle_right, false);
+		to_drag_idle_right->create_bool_condition(drag_enabled_var, true);
+		to_drag_idle_right->create_bool_condition(drag_moving_var, false);
+		to_drag_idle_right->create_bool_condition(drag_right_var, true);
+
+		to_drag_walk_left := layer->create_global_transition(drag_walk_left, false);
+		to_drag_walk_left->create_bool_condition(drag_enabled_var, true);
+		to_drag_walk_left->create_bool_condition(drag_moving_var, true);
+		to_drag_walk_left->create_bool_condition(drag_right_var, false);
+
+		to_drag_walk_right := layer->create_global_transition(drag_walk_right, false);
+		to_drag_walk_right->create_bool_condition(drag_enabled_var, true);
+		to_drag_walk_right->create_bool_condition(drag_moving_var, true);
+		to_drag_walk_right->create_bool_condition(drag_right_var, true);
+
 		sm_inited = true;
         log_info("State machine initialized");
 	}
@@ -1246,6 +1415,86 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 		}
 		return false;
 	}
+}
+
+rr_drag_body_force_drop_for_player :: proc(player: Player) {
+	if player == null return;
+	if player.dragging_corpse_entity_id == 0 return;
+
+	// Clear corpse ownership if it still exists.
+	foreach corpse: component_iterator(Corpse) {
+		if corpse == null continue;
+		if !#alive(corpse.entity) continue;
+		if corpse.entity.id != player.dragging_corpse_entity_id continue;
+		if corpse.dragged_by_player_entity_id == player.entity.id {
+			corpse.dragged_by_player_entity_id = 0;
+		}
+		break;
+	}
+
+	player.dragging_corpse_entity_id = 0;
+	// Stop loop SFX if active.
+	if Game.is_server() && player.drag_body_sfx_id != 0 {
+		SFX.stop(player.drag_body_sfx_id);
+		player.drag_body_sfx_id = 0;
+	}
+	// Ensure we snap back to base locomotion immediately.
+	player->set_trigger("RESET");
+}
+
+rr_drag_body_update_anim_state :: proc(player: Player, dt: float) {
+	if player == null return;
+	if player.animator == null || player.animator.instance == null || player.animator.instance.state_machine == null {
+		return;
+	}
+	if player.agent == null return;
+
+	dragging := player.dragging_corpse_entity_id != 0;
+	moving := false;
+	// Use facing from scale sign (positive = right, negative = left).
+	desired_right := player.drag_body_is_right;
+	scale_x := player.entity.world_scale.x;
+	if abs(scale_x) > 0.0001 {
+		desired_right = scale_x > 0.0;
+	}
+
+	// Movement detection from position delta.
+	pos := player.entity.world_position;
+	if player.drag_body_last_pos_inited {
+		delta := pos - player.drag_body_last_pos;
+		if dragging {
+			moving = abs(delta.x) > 0.01 || abs(delta.y) > 0.01;
+		}
+	} else {
+		player.drag_body_last_pos_inited = true;
+	}
+	player.drag_body_last_pos = pos;
+
+	// Apply 50% movement speed while dragging.
+	if dragging {
+		if !player.drag_body_speed_active {
+			player.drag_body_speed_original = player.agent.movement_speed;
+			player.drag_body_speed_active = true;
+		}
+		player.agent.movement_speed = player.drag_body_speed_original * 0.5;
+	} else if player.drag_body_speed_active {
+		player.agent.movement_speed = player.drag_body_speed_original;
+		player.drag_body_speed_active = false;
+	}
+
+	// If drag just ended, reset to base locomotion state.
+	if player.drag_body_was_dragging && !dragging {
+		player->set_trigger("RESET");
+	}
+	player.drag_body_was_dragging = dragging;
+
+	// Server-authoritative side used by corpse follow.
+	if Game.is_server() {
+		player.drag_body_is_right = desired_right;
+	}
+	player.animator.instance.state_machine->set_bool("drag_body_enabled", dragging);
+	player.animator.instance.state_machine->set_bool("drag_body_moving", moving);
+	player.animator.instance.state_machine->set_bool("drag_body_right", true);
 }
 
 Task_Interactable :: class : Component {
@@ -1431,6 +1680,62 @@ Corpse :: class : Component {
 	pyro_has_been_burned: bool;
 	// Pirate can only loot one treasure map per corpse.
 	pirate_map_taken: bool;
+
+	// --- Drag Body ---
+	// 0 = not being dragged; otherwise entity id of the dragging player.
+	dragged_by_player_entity_id: u64;
+	// Original death animation chosen at spawn (so we can restore after dragging).
+	death_anim: string;
+
+	// Local state (synced but small) used to avoid restarting animations every frame.
+	last_dragged_by_player_entity_id: u64;
+
+	ao_update :: method(dt: float) {
+		if !#alive(entity) return;
+
+		spine := entity->get_component(Spine_Animator);
+		if spine == null return;
+		spine->awaken();
+		if spine.instance == null return;
+
+		// Detect drag state changes to avoid restarting the drag animation every frame.
+		if dragged_by_player_entity_id != last_dragged_by_player_entity_id {
+			if dragged_by_player_entity_id != 0 {
+				// Dragging: play the dedicated drag-loop.
+				spine.instance->set_animation("004RAND/dead_body_drag", true, 0);
+			} else {
+				// Dropped: restore the original corpse pose by fast-forwarding the death anim.
+				restore := death_anim.count > 0 ? death_anim : "Death_No_HP";
+				spine.instance->set_animation(restore, false, 0, 1000.0);
+			}
+			last_dragged_by_player_entity_id = dragged_by_player_entity_id;
+		}
+
+		// Follow with slight smoothing to avoid jitter.
+		if dragged_by_player_entity_id != 0 {
+			dragger := get_player_by_entity_id(dragged_by_player_entity_id);
+			if dragger == null || !#alive(dragger.entity) {
+				// Dragging player vanished; drop the corpse.
+				dragged_by_player_entity_id = 0;
+				return;
+			}
+
+			scale_x := dragger.entity.world_scale.x;
+			// Keep corpse on the "grab side" (opposite facing).
+			sign := scale_x >= 0.0 ? -1.0 : 1.0;
+			target := dragger.entity.world_position + v2.{sign * DRAG_BODY_FOLLOW_DISTANCE, -0.15};
+			cur := entity.world_position;
+			alpha := clamp(dt * 6.0, 0.0, 1.0); // smoother follow (less jitter)
+			new_pos := v2.{lerp(cur.x, target.x, alpha), lerp(cur.y, target.y, alpha)};
+
+			entity->set_local_position(new_pos);
+			entity->set_local_rotation(dragger.entity.world_rotation);
+			// Flip corpse via scale instead of rotation.
+			corpse_scale := dragger.entity.world_scale;
+			corpse_scale.x = -corpse_scale.x;
+			entity->set_local_scale(corpse_scale);
+		}
+	}
 }
 
 draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
