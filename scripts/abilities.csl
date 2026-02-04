@@ -1758,7 +1758,7 @@ Vote_Ability :: class : Ability_Base {
 
         // Use kit modal textures and draw them with nine-slice so borders/corners don't stretch.
         // Use transp_black1 as base for tinting (it has nice rounded corners and no color override).
-        kit_panel := get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/transp_black1.png");
+        kit_panel := get_asset(Texture_Asset, "ui/voting/modal_backing.png");
         if kit_panel == null { kit_panel = get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/modal_simple_black1.png"); }
         if kit_panel == null { kit_panel = white; }
 
@@ -1779,6 +1779,8 @@ Vote_Ability :: class : Ability_Base {
         if gun_icon == null { gun_icon = get_asset(Texture_Asset, "sprites/icons/revolver.png"); }
         plus_icon := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/plus_button2.png");
         if plus_icon == null { plus_icon = get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/plus_button.png"); }
+        call_meeting_icon := get_asset(Texture_Asset, "sprites/icons/call_meeting_icon.png");
+        timer_texture := get_asset(Texture_Asset, "ui/voting/timer.png");
         // Dead should use the skull icon.
         dead_icon := vote_dead_icon;
         if dead_icon == null { dead_icon = get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/red_cross.png"); }
@@ -1836,26 +1838,29 @@ Vote_Ability :: class : Ability_Base {
         if pct < 0.0 { pct = 0.0; }
         if pct > 1.0 { pct = 1.0; }
 
-        title_row := header->cut_top(58);
+        title_row := header->cut_top(64);
+        title_full := title_row;
         // Use unscaled cuts when using computed widths (avoid scale-factor mismatch).
+        called_by_w := min(320.0, title_row->width() * 0.33);
+        called_by_area := title_row->cut_left_unscaled(called_by_w)->inset(6, 6, 6, 6);
         timer_w := min(310.0, title_row->width() * 0.33);
         timer_area := title_row->cut_right_unscaled(timer_w);
-        title_rect := title_row;
+        title_rect := title_full;
 
         title_ts := UI.default_text_settings();
         title_ts.size = 58;
         title_ts.color = c_text;
-        title_ts.halign = .LEFT;
+        title_ts.halign = .CENTER;
         title_ts.valign = .CENTER;
         title_ts.do_outline = true;
         title_ts.outline_thickness = 4;
         title_ts.outline_color = v4.{0, 0, 0, 1};
         UI.text(title_rect, title_ts, "Voting Screen");
 
-        // Timer box + bar (no grow() so it can't exceed header bounds)
-        timer_box := timer_area->inset(8, 10, 8, 10);
-        UI.quad(timer_box, white, v4.{0, 0, 0, 0.55});
-        UI.quad(timer_box->inset(2), white, v4.{0.10, 0.12, 0.16, 0.80});
+        // Timer box + bar (rounded corners, no grow() so it can't exceed header bounds)
+        timer_box := timer_area->inset(12, 18, 12, 18);
+        timer_panel_color := v4.{0.14, 0.26, 0.55, 0.92}; // blue background
+        UI.quad(timer_box, white, timer_panel_color);
 
         // Number
         t_color := c_text;
@@ -1864,7 +1869,18 @@ Vote_Ability :: class : Ability_Base {
         } else if remaining <= 30.0 {
             t_color = v4.{1.0, 0.85, 0.25, 1.0};
         }
-        num_rect := timer_box->cut_top_unscaled(timer_box->height() * 0.65);
+        // Overlapping timer badge (half overlap to the left)
+        badge_size := timer_box->height() * 2;
+        badge_rect := timer_box->left_center_rect()->grow_unscaled(badge_size * 0.5, badge_size * 0.5, badge_size * 0.5, badge_size * 0.5);
+        badge_rect = badge_rect->offset_unscaled(-badge_size * 0.3, 0.2);
+        if timer_texture != null {
+            badge_draw := badge_rect->fit_aspect(timer_texture->get_aspect());
+            UI.quad(badge_draw, timer_texture, v4.{1, 1, 1, 1});
+        } else {
+            UI.quad(badge_rect, white, v4.{0.12, 0.16, 0.25, 1});
+        }
+
+        num_rect := badge_rect->inset(12);
         num_ts := UI.default_text_settings();
         num_ts.size = 42;
         num_ts.color = t_color;
@@ -1875,38 +1891,54 @@ Vote_Ability :: class : Ability_Base {
         num_ts.outline_color = v4.{0, 0, 0, 1};
 
         // Bar (line timer)
-        bar_rect := timer_box->inset(14, 14, 14, 14)->cut_bottom_unscaled(12);
-        UI.quad(bar_rect, white, v4.{0, 0, 0, 0.55});
+        bar_rect := timer_box->inset(12, 16, 12, 16)->cut_bottom_unscaled(8);
+        UI.quad(bar_rect, white, v4.{0.20, 0.45, 0.85, 0.95});
         fill := bar_rect->inset(2)->subrect(0, 0, pct, 1);
-        UI.quad(fill, white, t_color);
+        UI.quad(fill, white, v4.{0.95, 0.20, 0.20, 1});
 
         // Draw text after bar so it renders on top
         UI.text(num_rect, num_ts, format_string("%", .{format_float(remaining, decimals=0)}));
 
-        // --- Optional meeting info row (kept compact; no chat bubble) ---
-        info_row := header;
-        info_row = info_row->inset(0, 0, 12, 0);
-        UI.quad(info_row, white, v4.{0.06, 0.08, 0.11, 0.55});
+        // --- Called by (top-left, icon + label + name) ---
+        icon_rect := called_by_area->cut_left_unscaled(64);
+        label_rect := called_by_area->cut_top_unscaled(24);
+        name_rect := called_by_area;
 
-        info_ts := UI.default_text_settings();
-        info_ts.size = 22;
-        info_ts.color = c_muted;
-        info_ts.halign = .LEFT;
-        info_ts.valign = .CENTER;
-        info_ts.do_drop_shadow = true;
-        info_ts.drop_shadow_offset = v2.{1, -1};
-        info_ts.drop_shadow_color = v4.{0, 0, 0, 1};
+        label_ts := UI.default_text_settings();
+        label_ts.size = 22;
+        label_ts.color = c_muted;
+        label_ts.halign = .LEFT;
+        label_ts.valign = .CENTER;
+        label_ts.do_drop_shadow = true;
+        label_ts.drop_shadow_offset = v2.{1, -1};
+        label_ts.drop_shadow_color = v4.{0, 0, 0, 1};
+
+        name_ts := UI.default_text_settings();
+        name_ts.size = 36;
+        name_ts.color = c_text;
+        name_ts.halign = .LEFT;
+        name_ts.valign = .CENTER;
+        name_ts.do_outline = true;
+        name_ts.outline_thickness = 3;
+        name_ts.outline_color = v4.{0, 0, 0, 1};
 
         initiator_str := "";
+        caller_name := "";
         if meeting_initiator_id != 0 {
             caller := get_player_by_entity_id(meeting_initiator_id);
-            caller_name := "Unknown";
+            caller_name = "Unknown";
             if caller != null { caller_name = caller.entity->get_name(); }
-            initiator_str = format_string("Called by: %", .{caller_name});
+            initiator_str = "Called by:";
         }
-        voted_str := build_voted_list();
-        if voted_str.count <= 0 { voted_str = "-"; }
-        UI.text(info_row->inset(14, 14, 14, 14), info_ts, format_string("%   Voted: %", .{initiator_str, voted_str}));
+        if initiator_str.count > 0 {
+            if call_meeting_icon != null {
+                icon_draw := icon_rect->fit_aspect(call_meeting_icon->get_aspect());
+                icon_draw = icon_draw->scale(-1.0, 1.0);
+                UI.quad(icon_draw, call_meeting_icon, v4.{1, 1, 1, 1});
+            }
+            UI.text(label_rect, label_ts, initiator_str);
+            UI.text(name_rect, name_ts, caller_name);
+        }
 
         // --- Grid of players (alive + dead) ---
         // We keep a fixed 4x3 grid like the reference so tiles never stretch.
