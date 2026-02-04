@@ -19,6 +19,8 @@ rr_refresh_rng_state :: proc() {
 	rr_rng_state.value = rng_seed((get_real_time() * 1000000000).(u64));
 }
 
+
+
 // --- Hitman (Traitor role) ---
 HITMAN_MINE_UNLOCK_KILLS :: 1;
 HITMAN_SNIPER_UNLOCK_KILLS :: 2;
@@ -27,6 +29,12 @@ HITMAN_SNIPER_UNLOCK_KILLS :: 2;
 // Dead players move faster and see more of the map while spectating.
 GHOST_SPEED_MULTIPLIER :: 1.5;
 GHOST_CAMERA_ZOOMED_OUT_SIZE :: 9.0;
+VOTE_EJECT_CAMERA_ZOOMED_IN_SIZE :: 5.0;
+
+// --- Vote ejection cinematic ---
+RR_VOTE_EJECT_TEXT_SECONDS :: 3.0;
+RR_VOTE_EJECT_CAMERA_ZOOM_SECONDS :: 1.0;
+RR_VOTE_EJECT_ANIM_SECONDS :: 4.6;
 
 // How strongly contracts affect the Hitman's kill cooldown.
 // Negative reduces cooldown; positive increases it.
@@ -309,6 +317,7 @@ Game_State :: enum {
 	ANIM_BODY_FOUND;
 	ANIM_MEETING_CALLED;
 	VOTING;
+	ANIM_VOTE_EJECT;
 	ANIM_JESTER_WIN;
 	ANIM_PYRO_WIN;
 	ANIM_VICTORY;
@@ -679,6 +688,14 @@ deaths_since_last_meeting: List(u64);
 rr_last_vote_result_time: float;     // 0 = none yet; otherwise game-time the result was set
 rr_last_vote_ejected_player_id: u64; // 0 = no one ejected; otherwise entity id of ejected player
 
+// --- Vote ejection cinematic ---
+rr_vote_eject_start_time: float;
+rr_vote_eject_player_id: u64;
+rr_vote_eject_anim_started: bool;
+rr_vote_eject_anim_start_time: float;
+rr_vote_eject_text_sfx_played: bool;
+rr_vote_eject_anim_sfx_played: bool;
+
 u64_list_contains :: proc(list: List(u64), value: u64) -> bool {
 	for i: 0..list.elements.count-1 {
 		if list.elements[i] == value return true;
@@ -1010,6 +1027,22 @@ prankster_check_unlock_jester_win :: proc(player: Player) {
 	}
 }
 
+start_vote_eject_cinematic :: proc(player: Player) {
+	if player == null return;
+	if player.player_state != Player_State.ALIVE return;
+	if !Game.is_server() return;
+
+	rr_vote_eject_start_time = get_time();
+	rr_vote_eject_player_id = player.entity.id;
+	rr_vote_eject_anim_started = false;
+	rr_vote_eject_anim_start_time = 0.0;
+	rr_vote_eject_text_sfx_played = false;
+	rr_vote_eject_anim_sfx_played = false;
+
+	game_state = Game_State.ANIM_VOTE_EJECT;
+	close_all_doors();
+}
+
 start_jester_win_cinematic :: proc(caller: Player) {
 	if caller == null return;
 	if caller.player_state != Player_State.ALIVE return;
@@ -1130,6 +1163,10 @@ setup_lobby :: proc() {
 	rr_end_game_pending_victor = Player_Type.CIVILIAN;
 	rr_vote_results_active = false;
 	rr_vote_results_end_time = 0.0;
+	rr_vote_eject_start_time = 0.0;
+	rr_vote_eject_player_id = 0;
+	rr_vote_eject_anim_started = false;
+	rr_vote_eject_anim_start_time = 0.0;
 	meeting_cooldown_ends_at = 0.0;
 	post_meeting_kill_lockout_ends_at = 0.0;
 	meeting_initiator_id = 0;
@@ -1360,6 +1397,8 @@ ao_update :: proc(dt: float) {
 		ao_update_meeting_called(dt);
 	} else if(game_state == Game_State.VOTING) {
 		ao_update_voting(dt);
+	} else if(game_state == Game_State.ANIM_VOTE_EJECT) {
+		ao_update_vote_eject(dt);
 	} else if(game_state == Game_State.ANIM_JESTER_WIN) {
 		ao_update_jester_win(dt);
 	} else if(game_state == Game_State.ANIM_PYRO_WIN) {
@@ -1599,11 +1638,6 @@ restart :: proc(player: Player) {
 	force_start_lobby_game();
 } @chat_command @youtuber
 
-// Chat command: /music off
-// Temporary placeholder (no music system yet).
-music :: proc(player: Player, setting: string = "off") {
-	Chat.server_send_message("No music in this build yet.", player);
-} @chat_command @youtuber
 
 ao_update_ingame :: proc(dt: float) {
 	update_temporary_resurrections();
@@ -1825,6 +1859,81 @@ ao_update_voting :: proc(dt: float) {
 	}
 }
 
+ao_update_vote_eject :: proc(dt: float) {
+	if rr_vote_eject_start_time <= 0.0 return;
+	elapsed := get_time() - rr_vote_eject_start_time;
+
+	if Game.is_server() && !rr_vote_eject_text_sfx_played {
+		rr_vote_eject_text_sfx_played = true;
+		p := get_player_by_entity_id(rr_vote_eject_player_id);
+		if p != null && #alive(p.entity) {
+			sfx := SFX.default_sfx_desc();
+			sfx.entity_to_follow = p.entity.id;
+			sfx.volume = 0.9;
+			sfx.volume_perturb = 0.05;
+			sfx.speed_perturb = 0.05;
+			// Global SFX mix: everything at 25% volume.
+			sfx.volume *= 0.25;
+			sfx.volume_perturb *= 0.25;
+			SFX.play(get_asset(SFX_Asset, "sfx/voteout.wav"), sfx);
+		}
+	}
+
+	// Wait for the text reveal window to finish before zoom/throw.
+	if elapsed < RR_VOTE_EJECT_TEXT_SECONDS {
+		return;
+	}
+
+	anim_start_at := RR_VOTE_EJECT_TEXT_SECONDS + RR_VOTE_EJECT_CAMERA_ZOOM_SECONDS;
+	if !rr_vote_eject_anim_started && elapsed >= anim_start_at {
+		rr_vote_eject_anim_started = true;
+		rr_vote_eject_anim_start_time = get_time();
+		if Game.is_server() {
+			p := get_player_by_entity_id(rr_vote_eject_player_id);
+			if p != null && #alive(p.entity) {
+				p->set_facing_right(true);
+				p->set_trigger("death_vote2");
+			}
+		}
+		if Game.is_server() && !rr_vote_eject_anim_sfx_played {
+			rr_vote_eject_anim_sfx_played = true;
+			p := get_player_by_entity_id(rr_vote_eject_player_id);
+			if p != null && #alive(p.entity) {
+				sfx := SFX.default_sfx_desc();
+				sfx.entity_to_follow = p.entity.id;
+				sfx.volume = 0.9;
+				sfx.volume_perturb = 0.05;
+				sfx.speed_perturb = 0.05;
+				// Global SFX mix: everything at 25% volume.
+				sfx.volume *= 0.25;
+				sfx.volume_perturb *= 0.25;
+				SFX.play(get_asset(SFX_Asset, "sfx/cm_dragged_down.wav"), sfx);
+			}
+		}
+	}
+
+	if !rr_vote_eject_anim_started || (get_time() - rr_vote_eject_anim_start_time) < RR_VOTE_EJECT_ANIM_SECONDS {
+		return;
+	}
+
+	if Game.is_server() {
+		p := get_player_by_entity_id(rr_vote_eject_player_id);
+		if p != null && #alive(p.entity) {
+			p->set_trigger("RESET");
+			on_player_go_dead(p);
+		}
+
+		rr_vote_eject_start_time = 0.0;
+		rr_vote_eject_player_id = 0;
+		rr_vote_eject_anim_started = false;
+		rr_vote_eject_anim_start_time = 0.0;
+		rr_vote_eject_text_sfx_played = false;
+		rr_vote_eject_anim_sfx_played = false;
+
+		finalize_voting();
+	}
+}
+
 end_voting :: proc() {
 	// Server-authoritative.
 	if !Game.is_server() return;
@@ -1902,10 +2011,11 @@ end_voting :: proc() {
 		} else {
 			// Eject the unique top-voted player.
 			rr_register_player_death(max_player.entity.id);
-			on_player_go_dead(max_player);
-
 			rr_last_vote_result_time = get_time();
 			rr_last_vote_ejected_player_id = max_player.entity.id;
+			rr_vote_results_active = false;
+			rr_vote_results_end_time = 0.0;
+			start_vote_eject_cinematic(max_player);
 		}
 	}
 

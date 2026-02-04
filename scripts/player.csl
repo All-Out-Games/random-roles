@@ -2,6 +2,26 @@ import "core:ao"
 
 players: List(Player);
 
+rr_ambience_sfx_id: u64;
+rr_restart_ambience :: proc() {
+	// Server-authoritative loop (replicated to clients).
+	if !Game.is_server() return;
+
+	if rr_ambience_sfx_id != 0 {
+		SFX.stop(rr_ambience_sfx_id);
+		rr_ambience_sfx_id = 0;
+	}
+
+	sfx := SFX.default_sfx_desc();
+	sfx.channel = SFX_Channel.MUSIC;
+	sfx.loop = true;
+	sfx.loop_timeout = 0.0;
+	sfx.volume = 0.175;
+	sfx.volume_perturb = 0.0;
+	sfx.speed_perturb = 0.0;
+	rr_ambience_sfx_id = SFX.play(get_asset(SFX_Asset, "sfx/ambience_v3.wav"), sfx);
+}
+
 // --- Voice chat channels ---
 // Bitmask-based channels for voice routing.
 ALIVE_CHANNEL :: 1u64 << 0;
@@ -67,6 +87,8 @@ Player :: class : Player_Base {
 	prankster_jester_unlocked_time: float; // 0 = locked, otherwise time it unlocked
 	sm_inited: bool;
 	jester_win_camera_override_active: bool;
+	vote_eject_camera_override_active: bool;
+	vote_eject_camera_original_size: float;
 
 	// --- Doctor ---
 	doctor_resurrects_used: int; // resets each round
@@ -180,6 +202,7 @@ Player :: class : Player_Base {
         // We use separate reasons so popups and tasks don't accidentally unfreeze each other.
         should_freeze_for_popup :=
             game_state == Game_State.ANIM_INTRO ||
+			game_state == Game_State.ANIM_VOTE_EJECT ||
 			game_state == Game_State.ANIM_JESTER_WIN ||
             game_state == Game_State.ANIM_VICTORY;
 
@@ -218,6 +241,8 @@ Player :: class : Player_Base {
     
     //Server Only!
     ao_start :: proc(using this: Player) {
+		// Restart ambience so late-joiners hear it (single loop).
+		rr_restart_ambience();
         append(ref players, this);
 
 		this->ensure_anim_state_machine();
@@ -303,8 +328,11 @@ Player :: class : Player_Base {
 			rr_draw_pirate_treasure_guidance_if_needed(this);
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			draw_player_role_hud(this);
-			if game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
+			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
 				this->draw_letterbox_bars();
+			}
+			if game_state == Game_State.ANIM_VOTE_EJECT {
+				this->draw_vote_eject_cinematic_ui();
 			}
             if game_state == Game_State.ANIM_INTRO {
                 intro_popup->set_local_player(this);
@@ -457,6 +485,32 @@ Player :: class : Player_Base {
 			if jester_win_camera_override_active && game_state != Game_State.ANIM_JESTER_WIN && game_state != Game_State.ANIM_PYRO_WIN {
 				this.camera.follow_player = true;
 				jester_win_camera_override_active = false;
+			}
+
+			// Restore camera after vote ejection cinematic.
+			if vote_eject_camera_override_active && game_state != Game_State.ANIM_VOTE_EJECT {
+				this.camera.follow_player = true;
+				this.camera.size = vote_eject_camera_original_size;
+				vote_eject_camera_override_active = false;
+			}
+
+			// During vote ejection, lock camera to the ejected player and zoom in.
+			if game_state == Game_State.ANIM_VOTE_EJECT {
+				elapsed := get_time() - rr_vote_eject_start_time;
+				if elapsed >= RR_VOTE_EJECT_TEXT_SECONDS && this->is_local() {
+					if !vote_eject_camera_override_active {
+						vote_eject_camera_original_size = this.camera.size;
+						this.camera.follow_player = false;
+						vote_eject_camera_override_active = true;
+					}
+					target := get_player_by_entity_id(rr_vote_eject_player_id);
+					if target != null && #alive(target.entity) {
+						this.camera.position = target.entity.world_position;
+					}
+					t := clamp((elapsed - RR_VOTE_EJECT_TEXT_SECONDS) / RR_VOTE_EJECT_CAMERA_ZOOM_SECONDS, 0.0, 1.0);
+					this.camera.size = lerp(vote_eject_camera_original_size, VOTE_EJECT_CAMERA_ZOOMED_IN_SIZE, t);
+				}
+				return;
 			}
 
 			// During win cinematics, keep the camera locked to the cinematic actor every frame.
@@ -1254,6 +1308,12 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 		layer->create_global_transition(jester_win_state, false)->create_trigger_condition(jester_win_var);
 		layer->create_transition(jester_win_state, idle_state, true);
 
+		// vote_eject (trigger var -> one-shot anim state -> back to Idle)
+		vote_eject_var := sm->create_variable("death_vote2", State_Machine_Variable.Kind.TRIGGER);
+		vote_eject_state := layer->create_state("004RAND/death_vote2", false, RR_VOTE_EJECT_ANIM_SECONDS);
+		layer->create_global_transition(vote_eject_state, false)->create_trigger_condition(vote_eject_var);
+		layer->create_transition(vote_eject_state, idle_state, true);
+
 		// --- Movie Star ---
 		// write_place_autograph (trigger var -> one-shot anim state -> back to Idle)
 		write_autograph_var := sm->create_variable("write_place_autograph", State_Machine_Variable.Kind.TRIGGER);
@@ -1388,8 +1448,38 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 		bg := get_asset(Texture_Asset, "$AO/white.png");
 		UI.push_layer(2000);
 		defer UI.pop_layer();
-		UI.quad(screen->subrect(0.0, 0.90, 1.0, 1.0), bg, .{0, 0, 0, 1});
-		UI.quad(screen->subrect(0.0, 0.0, 1.0, 0.10), bg, .{0, 0, 0, 1});
+		UI.quad(screen->subrect(0.0, 0.85, 1.0, 1.0), bg, .{0, 0, 0, 1});
+		UI.quad(screen->subrect(0.0, 0.0, 1.0, 0.15), bg, .{0, 0, 0, 1});
+	}
+
+	draw_vote_eject_cinematic_ui :: proc(using this: Player) {
+		if rr_vote_eject_start_time <= 0.0 return;
+		elapsed := get_time() - rr_vote_eject_start_time;
+		if elapsed > RR_VOTE_EJECT_TEXT_SECONDS return;
+
+		screen := UI.get_safe_screen_rect();
+		UI.push_layer(20010);
+		defer UI.pop_layer();
+
+		panel_rect := screen->center_rect()->grow(90, 320, 90, 320);
+		rr_ui_draw_modal_panel(panel_rect);
+
+		name := "Someone";
+		target := get_player_by_entity_id(rr_vote_eject_player_id);
+		if target != null {
+			name = target.entity->get_name();
+		}
+		message := format_string("% got voted out", .{name});
+
+		ts := UI.default_text_settings();
+		ts.size = 52;
+		ts.color = v4.{1, 1, 1, 1};
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 3;
+		ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(panel_rect->inset(18), ts, message);
 	}
 
 	try_focus_camera_on_jester :: proc(using this: Player) {
@@ -1789,6 +1879,55 @@ rr_rects_overlap :: proc(a: Rect, b: Rect) -> bool {
 	return true;
 }
 
+rr_draw_task_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, color: v4) {
+	p_ui := rr_minimap_world_to_ui(map_rect, world_pos);
+	size := map_rect->height() * 0.022;
+	if size < 10.0 { size = 10.0; }
+	if size > 26.0 { size = 26.0; }
+
+	outer := Rect{p_ui, p_ui}->grow_unscaled(size, size, size, size);
+	UI.quad(outer, core_globals.white_sprite, v4.{0, 0, 0, 0.65});
+
+	inner_size := size * 0.65;
+	inner := Rect{p_ui, p_ui}->grow_unscaled(inner_size, inner_size, inner_size, inner_size);
+	UI.quad(inner, core_globals.white_sprite, color);
+}
+
+rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
+	if player == null return;
+	if !player->is_local() return;
+
+	if rr_power_outage_active && player.player_type != Player_Type.TRAITOR {
+		rr_draw_task_marker_on_minimap(map_rect, rr_get_power_outage_generator_pos(), v4.{1.0, 0.45, 0.2, 0.95});
+		return;
+	}
+
+	if rr_comms_outage_active && player.player_type != Player_Type.TRAITOR {
+		if world_references != null && world_references.rr_comms_lever_entity != null && #alive(world_references.rr_comms_lever_entity) {
+			rr_draw_task_marker_on_minimap(map_rect, world_references.rr_comms_lever_entity.world_position, v4.{0.35, 0.75, 1.0, 0.95});
+		}
+		return;
+	}
+
+	is_civilian_like := player.player_type == Player_Type.CIVILIAN ||
+		player.player_role == Player_Role.PRANKSTER ||
+		player.player_role == Player_Role.PYROMANIAC ||
+		player.werewolf_infected;
+	if !is_civilian_like return;
+
+	for t: 0..player.active_tasks.elements.count-1 {
+		task := player.active_tasks.elements[t];
+		if task == null continue;
+		if task.completed || task.started continue;
+
+		rr_refresh_task_destinations_for_task(task);
+
+		for d: 0..task.destinations.elements.count-1 {
+			rr_draw_task_marker_on_minimap(map_rect, task.destinations.elements[d], v4.{1.0, 0.85, 0.25, 0.95});
+		}
+	}
+}
+
 update_minimap_ui :: proc(player: Player) {
 	// Allow minimap during voting and for ghosts (after reveal).
 	if game_state != Game_State.INGAME && game_state != Game_State.VOTING {
@@ -1940,6 +2079,9 @@ update_minimap_ui :: proc(player: Player) {
 			UI.quad(dot, core_globals.white_sprite, v4.{0.2, 0.9, 0.3, 0.95});
 		}
 	}
+
+	// Task markers for the local player (when map is open).
+	rr_draw_task_markers_on_minimap(player, map_rect);
 
 	// Pirate treasure dig spots (local-only).
 	if player->is_local() && player.player_role == Player_Role.PIRATE {

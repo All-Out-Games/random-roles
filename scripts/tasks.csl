@@ -420,19 +420,6 @@ update_tasks_ui :: proc(player: Player) {
 
 	// --- Power outage override: show ONLY the generator task for non-traitors ---
 	if rr_power_outage_active && player.player_type != Player_Type.TRAITOR {
-		// Draw objective arrow to the generator for local player.
-		if player->is_local() {
-			tutorial_arrow_options := Tutorial_Arrow.default_options();
-			dist := length(player.entity.world_position - rr_get_power_outage_generator_pos());
-			tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-			tutorial_arrow_options.far = true;
-			tutorial_arrow_options.near = true;
-			tutorial_arrow_options.bob_scale = 0.5;
-			tutorial_arrow_options.bob_bias = 1.5;
-
-			Tutorial_Arrow.draw(player, rr_get_power_outage_generator_pos(), tutorial_arrow_options);
-		}
-
 		// Find generator task state (should be injected for everyone by the server).
 		gen_task: Task_Base;
 		for i: 0..player.active_tasks.elements.count-1 {
@@ -501,18 +488,6 @@ update_tasks_ui :: proc(player: Player) {
 
 	// --- Comms outage override: show ONLY the comms restore task for non-traitors ---
 	if rr_comms_outage_active && player.player_type != Player_Type.TRAITOR {
-		// Draw objective arrow to the comms lever for local player.
-		if player->is_local() {
-			tutorial_arrow_options := Tutorial_Arrow.default_options();
-			dist := length(player.entity.world_position - world_references.rr_comms_lever_entity.world_position);
-			tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-			tutorial_arrow_options.far = true;
-			tutorial_arrow_options.near = true;
-			tutorial_arrow_options.bob_scale = 0.5;
-			tutorial_arrow_options.bob_bias = 1.5;
-			Tutorial_Arrow.draw(player, world_references.rr_comms_lever_entity.world_position, tutorial_arrow_options);
-		}
-
 		// Find comms task state (should be injected for everyone by the server).
 		comms_task: Task_Base;
 		for i: 0..player.active_tasks.elements.count-1 {
@@ -584,34 +559,6 @@ update_tasks_ui :: proc(player: Player) {
 		return;
 	}
 
-	if(player->is_local()) {
-		tutorial_arrow_options := Tutorial_Arrow.default_options();
-		// Show objective arrows both near and far, and keep them readable.
-		tutorial_arrow_options.far = true;
-		tutorial_arrow_options.near = true;
-		tutorial_arrow_options.bob_scale = 0.5;
-		tutorial_arrow_options.bob_bias = 1.5;
-
-		// Draw objective arrows toward each task's destination(s).
-		for t: 0..player.active_tasks.elements.count-1 {
-			task := player.active_tasks.elements[t];
-			if task == null {
-				continue;
-			}
-			if task.completed || task.started {
-				continue;
-			}
-
-			rr_refresh_task_destinations_for_task(task);
-
-			for d: 0..task.destinations.elements.count-1 {
-				dist := length(player.entity.world_position - task.destinations.elements[d]);
-				tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-				Tutorial_Arrow.draw(player, task.destinations.elements[d], tutorial_arrow_options);
-			}
-		}
-	}
-	
 	screen := UI.get_safe_screen_rect();
 
 	// Player task completion stats

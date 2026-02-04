@@ -5,7 +5,7 @@
   "name": "Min",
   "local_enabled": true,
   "local_position": {
-    "X": -28.1768856048583984,
+    "X": -29.6018581390380859,
     "Y": -18.7861423492431641
   },
   "local_rotation": 0,
