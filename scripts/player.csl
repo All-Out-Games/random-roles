@@ -35,6 +35,8 @@ Player :: class : Player_Base {
 	show_minimap: bool;
 	chat_mode_inited: bool;
 	chat_mode_last_applied: Chat.Mode;
+	task_list_inited: bool;
+	task_list_open: bool;
 
 	// Local-only LOS light (viewer-specific).
 	local_light_entity: Entity;
@@ -1846,11 +1848,37 @@ update_minimap_ui :: proc(player: Player) {
 			if rr_power_outage_active || rr_comms_outage_active {
 				task_panel_rect = layout_safe->cut_left(320)->inset(250, 0, 250, 10);
 			} else {
-				task_panel_rect = layout_safe->cut_left(300)->inset(350, 0, 300, 20);
+				// Mirror `update_tasks_ui` layout for overlap checks.
+				PANEL_W :: 300.0;
+				PROGRESS_H :: 52.0;
+				HEADER_H :: 36.0;
+				ROW_H :: 32.0;
+				LIST_PAD :: 10.0;
+				PROGRESS_EXTRA_W :: 120.0;
+				PROGRESS_GAP :: 10.0;
+				PANEL_Y_OFFSET :: -20.0;
+
+				list_h := (player.active_tasks.elements.count.(float)) * ROW_H + (LIST_PAD * 2.0);
+				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
+
+				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				progress_rect := header_rect->top_left_rect()->offset(0.0, PROGRESS_GAP)->grow(0.0, PANEL_W + PROGRESS_EXTRA_W, PROGRESS_H, 0.0);
+
+				// Bounding box for overlap (progress bar can extend wider).
+				min_y := progress_rect.min.y;
+				max_y := header_rect.max.y;
+				if player.task_list_open {
+					max_y = list_rect.max.y;
+				}
+				task_panel_rect = Rect{
+					v2.{panel_anchor.min.x, min_y},
+					v2.{panel_anchor.min.x + PANEL_W + PROGRESS_EXTRA_W, max_y}
+				};
 			}
 
 			if rr_rects_overlap(btn_rect, task_panel_rect) {
-				btn_rect = btn_rect->offset(290.0, 0.0);
+				btn_rect = btn_rect->offset(295.0, -54.0);
 			}
 		}
 	}
