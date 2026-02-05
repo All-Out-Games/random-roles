@@ -144,6 +144,10 @@ Player :: class : Player_Base {
 	werewolf_skin_disable_at: float;  // 0 = none, otherwise game-time to disable werewolf skin
 	werewolf_skin_active: bool;       // cached flag – avoids get_skins() every frame
 
+	// --- Meeting cooldown pause ---
+	// Saved ability cooldowns when a meeting starts so they can be restored afterwards.
+	meeting_saved_cooldowns: [..]float;
+
 	// --- Drag Body (traitor utility) ---
 	// Entity id of the corpse currently being dragged (0 = none).
 	dragging_corpse_entity_id: u64;
@@ -1799,14 +1803,25 @@ Call_Meeting_Interactable :: class : Component {
         interactable->set_listener(this);
     }
 
+    ao_update :: proc(using this: Call_Meeting_Interactable, dt: float) {
+        now := get_time();
+        if now < meeting_cooldown_ends_at {
+            remaining := (meeting_cooldown_ends_at - now).(int) + 1;
+            interactable->set_text(format_string("Call Meeting (%s)", {remaining}));
+        } else {
+            interactable->set_text("Call Meeting");
+        }
+    }
+
     on_interact :: proc(using this: Call_Meeting_Interactable, player: Player) {
+        // Block interaction while on cooldown.
+        if get_time() < meeting_cooldown_ends_at return;
         start_meeting(false, player);
     }
 
     can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
         if player.player_state != Player_State.ALIVE return false;
-        // Respect meeting cooldown so the interaction prompt doesn't show during cooldown.
-        if get_time() < meeting_cooldown_ends_at return false;
+        // Always show the interactable; cooldown text + on_interact guard handle the rest.
         return true;
     }
 }
@@ -1850,9 +1865,11 @@ Report_Corpse_Interactable :: class : Interactable {
 	}
 
 	on_interact :: method(player: Player) {
-		corpse := entity->get_component(Corpse);
-		if corpse != null {
-			corpse.has_been_reported = true;
+		// Mark ALL existing corpses as reported so they can't trigger another meeting.
+		foreach c: component_iterator(Corpse) {
+			if c == null continue;
+			if !#alive(c.entity) continue;
+			c.has_been_reported = true;
 		}
 		// Body stays in the world after reporting (shows "Already reported" when approached).
 		// Start the meeting.

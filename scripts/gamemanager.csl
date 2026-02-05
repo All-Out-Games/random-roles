@@ -226,6 +226,10 @@ FAKE_MEETING_COOLDOWN_SECONDS :: 120.0;
 // After a meeting/voting ends, briefly lock out killing abilities to prevent instant spawn-kills.
 POST_MEETING_KILL_LOCKOUT_SECONDS :: 5.0;
 
+// At the start of each round, all player-affecting abilities (kill, stun, etc.)
+// are locked out for this many seconds so players have time to spread out.
+INITIAL_ROUND_ATTACK_LOCKOUT_SECONDS :: 20.0;
+
 // --- Sabotage: Power Outage ---
 rr_power_outage_active: bool;
 rr_power_outage_started_at: float;
@@ -1222,7 +1226,8 @@ setup_ingame :: proc() {
 	rr_vote_results_active = false;
 	rr_vote_results_end_time = 0.0;
 	meeting_cooldown_ends_at = 0.0;
-	post_meeting_kill_lockout_ends_at = 0.0;
+	// Lock out all player-affecting abilities (kill, stun, etc.) for the first 20s of each round.
+	post_meeting_kill_lockout_ends_at = get_time() + INITIAL_ROUND_ATTACK_LOCKOUT_SECONDS;
 	meeting_initiator_id = 0;
 	meeting_initiator_from_body = false;
 	deaths_since_last_meeting = List(u64).{};
@@ -1350,6 +1355,15 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 
 		// Play meeting-call SFX once (server authoritative).
 		rr_play_call_meeting_sound(caller);
+	}
+
+	// Save every player's ability cooldowns so they can be restored after the meeting.
+	// This effectively pauses cooldowns for the entire meeting duration.
+	foreach p: component_iterator(Player) {
+		p.meeting_saved_cooldowns->clear();
+		for i: 0..p.abilities.count-1 {
+			p.meeting_saved_cooldowns->append(p.abilities[i].current_cooldown);
+		}
 	}
 
 	if from_body {
@@ -1699,6 +1713,21 @@ ao_update_ingame :: proc(dt: float) {
 		rr_queue_end_game_with_victor(Player_Type.TRAITOR);
 		return;
 	}
+	// -- Traitor: 1v1 against a civilian who can't fight back (not Sheriff)
+	// In a 1v1, non-sheriff civilians have no combat ability, so the traitor wins inevitably.
+	if traitor_count == 1 && alive_count == 2 && civilian_count == 1 {
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+			if !#alive(p.entity) continue;
+			if p.player_state != Player_State.ALIVE continue;
+			if p.player_type != Player_Type.CIVILIAN continue;
+			if p.player_role != Player_Role.SHERIFF {
+				rr_queue_end_game_with_victor(Player_Type.TRAITOR);
+				return;
+			}
+		}
+	}
 	// -- Civilian: Only civilians alive
 	if civilian_count > 0 && civilian_count == alive_count {
 		rr_queue_end_game_with_victor(Player_Type.CIVILIAN);
@@ -2026,6 +2055,18 @@ end_voting :: proc() {
 finalize_voting :: proc() {
 	// Server-authoritative.
 	if !Game.is_server() return;
+
+	// Restore saved ability cooldowns (paused during the meeting).
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		for j: 0..p.abilities.count-1 {
+			if j < p.meeting_saved_cooldowns.count {
+				p.abilities[j].current_cooldown = p.meeting_saved_cooldowns[j];
+			}
+		}
+		p.meeting_saved_cooldowns->clear();
+	}
 
 	// Reset votes
 	for i: 0..players.elements.count-1 {

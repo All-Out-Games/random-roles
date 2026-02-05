@@ -1042,6 +1042,7 @@ Hitman_Mine_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
 		// Unlock after 1 kill.
@@ -1050,6 +1051,11 @@ Hitman_Mine_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / round-start lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
 			if player != null && player.player_role == Player_Role.HITMAN && player.hitman_kills < HITMAN_MINE_UNLOCK_KILLS {
@@ -2367,6 +2373,7 @@ Shoot_Ability :: class : Ability_Base {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
         if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		// Sheriff only gets 1 shot.
 		if player.player_type == Player_Type.CIVILIAN && player.player_role == Player_Role.SHERIFF {
 			if player.sheriff_gun_ammo <= 0 return false;
@@ -2384,6 +2391,11 @@ Shoot_Ability :: class : Ability_Base {
     }
 
     on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / round-start lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
         activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
         icon = get_icon(this, player.player_role);
         if params.can_use {
@@ -2548,6 +2560,7 @@ Black_Flag_Ability :: class : Ability_Base {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
         if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
         if player.player_role != Player_Role.PIRATE return false;
 		// Auto-unlock based on current treasure amount (treasure is not spent).
 		if player.pirate_treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST return false;
@@ -2555,6 +2568,11 @@ Black_Flag_Ability :: class : Ability_Base {
     }
     
     on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / round-start lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
         // If pressed while locked, explain unlock requirement.
         if params.clicked && !params.can_use {
             if player != null && player.player_role == Player_Role.PIRATE && player.pirate_treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
@@ -3278,6 +3296,7 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 		if p == null return false;
 		if p.player_state != Player_State.ALIVE return false;
 		if p->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if p.player_type != Player_Type.ANARCHIST return false;
 		if p.player_role != Player_Role.PYROMANIAC return false;
 		if p.pyro_on_fire return false;
@@ -3286,6 +3305,11 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / round-start lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			// Server authoritative: spawns gameplay-relevant fire instance.
 			if Game.is_server() {
@@ -3507,10 +3531,16 @@ Prank_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if instance.player.player_state != Player_State.ALIVE return false;
 		if instance.player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		return instance->get_closest_prankable_player(instance.player) != null;
 	}
 
 	on_update :: proc(instance: Prank_Ability, params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / round-start lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		instance.current_cooldown = max(instance.current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			target := instance->get_closest_prankable_player(instance.player);
 			if target == null {
@@ -3772,12 +3802,18 @@ Autograph_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.CIVILIAN return false;
 		if player.player_role != Player_Role.MOVIE_STAR return false;
 		return true;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / round-start lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			// Prevent double-clicks from stacking multiple writers/traps.
 			current_cooldown = MOVIE_STAR_AUTOGRAPH_COOLDOWN_SECONDS;
