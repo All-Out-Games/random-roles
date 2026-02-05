@@ -106,6 +106,48 @@ Door :: class : Component {
     }
 }
 
+// --- Door Unlock Interactable (1 per player, moves to nearest closed door) ---
+DOOR_UNLOCK_HOLD_TIME :: 3.0;
+DOOR_UNLOCK_INTERACT_RADIUS :: 3.0;
+DOOR_UNLOCK_SEARCH_RADIUS :: 6.0;
+
+Door_Unlock_Interactable :: class : Interactable {
+	owner_player: Player;
+	target_door: Door;
+
+	ao_start :: method() {
+		this->set_listener(this);
+		this->set_text("Open Door");
+		this->set_hold_text("Opening...");
+		radius = DOOR_UNLOCK_INTERACT_RADIUS;
+		required_hold_time = DOOR_UNLOCK_HOLD_TIME;
+		prompt_offset = v2.{0, 1.5};
+		priority = 20;
+	}
+
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		// Only the owning player can use this interactable.
+		if owner_player == null return false;
+		if player != owner_player return false;
+		if target_door == null return false;
+		if !#alive(target_door.entity) return false;
+		if target_door.is_open return false;
+		return true;
+	}
+
+	on_interact :: method(player: Player) {
+		if target_door == null return;
+		if !#alive(target_door.entity) return;
+		if target_door.is_open return;
+
+		target_door->open_door();
+		rebuild_game_world_navmesh();
+	}
+}
+
 world_references: World_References;
 
 World_References :: class : Component {

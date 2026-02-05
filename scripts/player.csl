@@ -112,6 +112,10 @@ Player :: class : Player_Base {
 	portal_standing_seconds: float;
 	portal_blocked_portal: Entity; // prevents instant teleport back until leaving the destination portal
 
+	// Door unlock interactable (1 per player, repositioned to nearest closed door)
+	door_unlock_entity: Entity;
+	door_unlock_interactable: Door_Unlock_Interactable;
+
 	// --- Hitman ---
 	// Kills credited to this player (used for Mine/Sniper unlocks).
 	hitman_kills: int;
@@ -302,6 +306,8 @@ Player :: class : Player_Base {
         destroy_corpses_for_player(this.entity.id);
 		// Clean up any pirate dig-spots they spawned.
 		destroy_pirate_dig_spots_for_player(this.entity.id);
+		// Clean up door unlock interactable.
+		rr_cleanup_door_unlock_interactable(this);
         unordered_remove_by_value(ref players, this);
 
 		// Local-only: destroy LOS light.
@@ -344,6 +350,7 @@ Player :: class : Player_Base {
         }
         update_tasks(this);
 		rr_update_portal_teleport_for_player(this, delta_time);
+		rr_update_door_unlock_interactable(this);
 
 		// Server-authoritative werewolf transform timing.
 		if Game.is_server() {
@@ -2462,5 +2469,66 @@ destroy_pirate_dig_spots_for_player :: proc(player_entity_id: u64) {
 			e->destroy();
 		}
 	}
+}
+
+// --- Door Unlock Interactable: per-player update ---
+// Creates the interactable entity if needed, then repositions it to the nearest
+// closed door each frame. When no closed door is nearby the entity is parked
+// off-screen so the engine won't show a prompt.
+rr_update_door_unlock_interactable :: proc(player: Player) {
+	if player == null return;
+	if !#alive(player.entity) return;
+
+	// Lazy-create the entity + component once.
+	if player.door_unlock_entity == null || !#alive(player.door_unlock_entity) {
+		player.door_unlock_entity = Scene.create_entity();
+		player.door_unlock_entity->set_local_position(v2.{-9999, -9999});
+		player.door_unlock_interactable = player.door_unlock_entity->add_component(Door_Unlock_Interactable);
+		player.door_unlock_interactable.owner_player = player;
+	}
+
+	interactable := player.door_unlock_interactable;
+	if interactable == null return;
+
+	// Only snap to doors during active gameplay.
+	if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
+		interactable.target_door = null;
+		player.door_unlock_entity->set_local_position(v2.{-9999, -9999});
+		return;
+	}
+
+	// Find the nearest closed door within search radius.
+	player_pos := player.entity.world_position;
+	best_door: Door = null;
+	best_dist_sq := DOOR_UNLOCK_SEARCH_RADIUS * DOOR_UNLOCK_SEARCH_RADIUS;
+
+	foreach door: component_iterator(Door) {
+		if door == null continue;
+		if !#alive(door.entity) continue;
+		if door.is_open continue;
+
+		dist_sq := length_squared(door.entity.world_position - player_pos);
+		if dist_sq < best_dist_sq {
+			best_dist_sq = dist_sq;
+			best_door = door;
+		}
+	}
+
+	if best_door != null {
+		interactable.target_door = best_door;
+		player.door_unlock_entity->set_local_position(best_door.entity.world_position);
+	} else {
+		interactable.target_door = null;
+		player.door_unlock_entity->set_local_position(v2.{-9999, -9999});
+	}
+}
+
+rr_cleanup_door_unlock_interactable :: proc(player: Player) {
+	if player == null return;
+	if player.door_unlock_entity != null && #alive(player.door_unlock_entity) {
+		player.door_unlock_entity->destroy();
+	}
+	player.door_unlock_entity = null;
+	player.door_unlock_interactable = null;
 }
 
