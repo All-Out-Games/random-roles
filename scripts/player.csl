@@ -144,6 +144,7 @@ Player :: class : Player_Base {
 	// Cosmetic: skin switching timing (used for transform animations).
 	werewolf_skin_enable_at: float;   // 0 = none, otherwise game-time to enable werewolf skin
 	werewolf_skin_disable_at: float;  // 0 = none, otherwise game-time to disable werewolf skin
+	werewolf_skin_active: bool;       // cached flag – avoids get_skins() every frame
 
 	// --- Drag Body (traitor utility) ---
 	// Entity id of the corpse currently being dragged (0 = none).
@@ -836,23 +837,37 @@ draw_player_role_hud :: proc(player: Player) {
 
 		safe := UI.get_safe_screen_rect();
 
-		// Align this panel with the task list height (see `update_tasks_ui` in `scripts/tasks.csl`).
-		panel := safe->top_left_rect()->grow(40, 360, 160, 0)->offset(20, -250);
-		rr_ui_draw_modal_panel(panel);
+		PANEL_W :: 300.0;
+		HEADER_H :: 36.0;
+		ROW_H :: 32.0;
+		LIST_PAD :: 10.0;
+		DROPDOWN_SLICE_PX :: 16.0;
 
-		content := panel->inset(14);
-		header := content->cut_top(34);
-		body := content;
+		row_count := 4;
+		list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 
-		h_ts := UI.default_text_settings();
-		h_ts.size = 26;
-		h_ts.color = v4.{1.0, 0.85, 0.25, 1.0};
-		h_ts.halign = .LEFT;
-		h_ts.valign = .CENTER;
-		h_ts.do_outline = true;
-		h_ts.outline_thickness = 2;
-		h_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(header, h_ts, "CONTRACT");
+		panel_anchor := safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
+		header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+
+		header_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown.png");
+		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
+		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
+		checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
+
+		rr_ui_draw_nine_slice_panel(header_rect, header_bg, DROPDOWN_SLICE_PX);
+		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
+
+		header_content := header_rect->inset(4, 10, 4, 10);
+		header_ts := UI.default_text_settings();
+		header_ts.size = 24;
+		header_ts.color = v4.{1, 1, 1, 1};
+		header_ts.halign = .LEFT;
+		header_ts.valign = .CENTER;
+		header_ts.do_outline = true;
+		header_ts.outline_thickness = 2;
+		header_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(header_content, header_ts, "CONTRACT");
 
 		target_name := "None";
 		if player.hitman_contract_target_id != 0 {
@@ -862,30 +877,64 @@ draw_player_role_hud :: proc(player: Player) {
 			}
 		}
 
-		name_rect := body->cut_top(48);
-		n_ts := UI.default_text_settings();
-		n_ts.size = 36;
-		n_ts.color = v4.{1.0, 1.0, 1.0, 1.0};
-		n_ts.halign = .LEFT;
-		n_ts.valign = .CENTER;
-		n_ts.do_outline = true;
-		n_ts.outline_thickness = 2;
-		n_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(name_rect, n_ts, target_name);
+		base_ts := UI.default_text_settings();
+		base_ts.size = 24;
+		base_ts.halign = .LEFT;
+		base_ts.valign = .CENTER;
+		base_ts.do_outline = true;
+		base_ts.outline_thickness = 4;
+		base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
 
-		body->cut_top(8);
-		line_ts := UI.default_text_settings();
-		line_ts.size = 22;
-		line_ts.color = v4.{0.9, 0.92, 0.98, 1};
-		line_ts.halign = .LEFT;
-		line_ts.valign = .CENTER;
-		line_ts.do_drop_shadow = true;
-		line_ts.drop_shadow_offset = v2.{1, -1};
-		line_ts.drop_shadow_color = v4.{0, 0, 0, 1};
-
-		UI.text(body->cut_top(26), line_ts, format_string("Kills: %", .{player.hitman_kills}));
-		UI.text(body->cut_top(26), line_ts, format_string("Mine: %/%", .{min(player.hitman_kills, HITMAN_MINE_UNLOCK_KILLS), HITMAN_MINE_UNLOCK_KILLS}));
-		UI.text(body->cut_top(26), line_ts, format_string("Sniper: %/%", .{min(player.hitman_kills, HITMAN_SNIPER_UNLOCK_KILLS), HITMAN_SNIPER_UNLOCK_KILLS}));
+		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			entry_content->cut_left(24.0);
+			row_ts := base_ts;
+			row_ts.color = v4.{1, 1, 1, 1};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Target: %", .{target_name}));
+		}
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			entry_content->cut_left(24.0);
+			row_ts := base_ts;
+			row_ts.color = v4.{1, 1, 1, 1};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{player.hitman_kills}));
+		}
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content->cut_left(24.0);
+			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			mine_unlocked := player.hitman_kills >= HITMAN_MINE_UNLOCK_KILLS;
+			if mine_unlocked {
+				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			} else {
+				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			}
+			row_ts := base_ts;
+			row_ts.color = mine_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Mine: %/%", .{min(player.hitman_kills, HITMAN_MINE_UNLOCK_KILLS), HITMAN_MINE_UNLOCK_KILLS}));
+		}
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content->cut_left(24.0);
+			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			sniper_unlocked := player.hitman_kills >= HITMAN_SNIPER_UNLOCK_KILLS;
+			if sniper_unlocked {
+				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			} else {
+				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			}
+			row_ts := base_ts;
+			row_ts.color = sniper_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Sniper: %/%", .{min(player.hitman_kills, HITMAN_SNIPER_UNLOCK_KILLS), HITMAN_SNIPER_UNLOCK_KILLS}));
+		}
 	}
 
 	// Coroner vial count: right side around mid-screen (local-only).
@@ -933,48 +982,97 @@ draw_player_role_hud :: proc(player: Player) {
 		count_ts.outline_color = v4.{0, 0, 0, 1};
 		UI.text(icon_rect, count_ts, format_string("%", .{player.pirate_treasure}));
 
-		// Left-side panel with unlock progress (same layout as other role HUD panels).
+		// Left-side panel with unlock progress (task list style).
 		safe := UI.get_safe_screen_rect();
 
-		// Align this panel with the task list height (see `update_tasks_ui` in `scripts/tasks.csl`).
-		panel := safe->top_left_rect()->grow(40, 360, 140, 0)->offset(20, -250);
-		rr_ui_draw_modal_panel(panel);
+		PANEL_W :: 300.0;
+		HEADER_H :: 36.0;
+		ROW_H :: 32.0;
+		LIST_PAD :: 10.0;
+		DROPDOWN_SLICE_PX :: 16.0;
 
-		content := panel->inset(14);
-		header := content->cut_top(34);
-		body := content;
+		row_count := 3;
+		list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 
-		h_ts := UI.default_text_settings();
-		h_ts.size = 26;
-		h_ts.color = v4.{1.0, 0.85, 0.25, 1.0};
-		h_ts.halign = .LEFT;
-		h_ts.valign = .CENTER;
-		h_ts.do_outline = true;
-		h_ts.outline_thickness = 2;
-		h_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(header, h_ts, "TREASURE");
+		panel_anchor := safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
+		header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
 
-		line_ts := UI.default_text_settings();
-		line_ts.size = 22;
-		line_ts.color = v4.{0.9, 0.92, 0.98, 1};
-		line_ts.halign = .LEFT;
-		line_ts.valign = .CENTER;
-		line_ts.do_drop_shadow = true;
-		line_ts.drop_shadow_offset = v2.{1, -1};
-		line_ts.drop_shadow_color = v4.{0, 0, 0, 1};
+		header_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown.png");
+		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
+		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
+		checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
 
-		UI.text(body->cut_top(26), line_ts, format_string("Treasure: %", .{player.pirate_treasure}));
+		rr_ui_draw_nine_slice_panel(header_rect, header_bg, DROPDOWN_SLICE_PX);
+		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
 
-		if player.pirate_treasure >= PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
-			UI.text(body->cut_top(26), line_ts, "Black Flag: UNLOCKED");
-		} else {
-			UI.text(body->cut_top(26), line_ts, format_string("Black Flag: %/%", .{min(player.pirate_treasure, PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST), PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST}));
+		header_content := header_rect->inset(4, 10, 4, 10);
+		header_ts := UI.default_text_settings();
+		header_ts.size = 24;
+		header_ts.color = v4.{1, 1, 1, 1};
+		header_ts.halign = .LEFT;
+		header_ts.valign = .CENTER;
+		header_ts.do_outline = true;
+		header_ts.outline_thickness = 2;
+		header_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(header_content, header_ts, "TREASURE");
+
+		base_ts := UI.default_text_settings();
+		base_ts.size = 24;
+		base_ts.halign = .LEFT;
+		base_ts.valign = .CENTER;
+		base_ts.do_outline = true;
+		base_ts.outline_thickness = 4;
+		base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+
+		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			entry_content->cut_left(24.0);
+			row_ts := base_ts;
+			row_ts.color = v4.{1, 1, 1, 1};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Treasure: %", .{player.pirate_treasure}));
 		}
-
-		if player.pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
-			UI.text(body->cut_top(26), line_ts, "Powder Keg: UNLOCKED");
-		} else {
-			UI.text(body->cut_top(26), line_ts, format_string("Powder Keg: %/%", .{min(player.pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST), PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content->cut_left(24.0);
+			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			black_flag_unlocked := player.pirate_treasure >= PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST;
+			if black_flag_unlocked {
+				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			} else {
+				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			}
+			row_ts := base_ts;
+			row_ts.color = black_flag_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+			if black_flag_unlocked {
+				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Black Flag: UNLOCKED");
+			} else {
+				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Black Flag: %/%", .{min(player.pirate_treasure, PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST), PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST}));
+			}
+		}
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content->cut_left(24.0);
+			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			powder_keg_unlocked := player.pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST;
+			if powder_keg_unlocked {
+				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			} else {
+				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			}
+			row_ts := base_ts;
+			row_ts.color = powder_keg_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+			if powder_keg_unlocked {
+				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Powder Keg: UNLOCKED");
+			} else {
+				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Powder Keg: %/%", .{min(player.pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST), PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
+			}
 		}
 	}
 
@@ -984,25 +1082,43 @@ draw_player_role_hud :: proc(player: Player) {
 		defer UI.pop_layer();
 
 		safe := UI.get_safe_screen_rect();
-		bg2 := get_asset(Texture_Asset, "$AO/white.png");
 
-		// Align this panel with the task list height (see `update_tasks_ui` in `scripts/tasks.csl`).
-		panel := safe->top_left_rect()->grow(40, 360, 140, 0)->offset(20, -250);
-		rr_ui_draw_modal_panel(panel);
+		PANEL_W :: 300.0;
+		HEADER_H :: 36.0;
+		ROW_H :: 32.0;
+		LIST_PAD :: 10.0;
+		DROPDOWN_SLICE_PX :: 16.0;
+		PROGRESS_SLICE_PX :: 18.0;
+		BAR_H :: 26.0;
+		BAR_GAP :: 10.0;
 
-		content := panel->inset(14);
-		header := content->cut_top(34);
-		body := content;
+		row_count := 3;
+		list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0) + BAR_H + BAR_GAP;
 
-		h_ts := UI.default_text_settings();
-		h_ts.size = 26;
-		h_ts.color = v4.{1.0, 0.85, 0.25, 1.0};
-		h_ts.halign = .LEFT;
-		h_ts.valign = .CENTER;
-		h_ts.do_outline = true;
-		h_ts.outline_thickness = 2;
-		h_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(header, h_ts, "TRANSFORMATION");
+		panel_anchor := safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
+		header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+
+		header_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown.png");
+		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
+		progress_back := get_asset(Texture_Asset, "ui/task list/task_progress_back.png");
+		progress_fill := get_asset(Texture_Asset, "ui/task list/task_progress_fill.png");
+		progress_segment := get_asset(Texture_Asset, "ui/task list/task_progress_segment.png");
+		solid := get_asset(Texture_Asset, "$AO/white.png");
+
+		rr_ui_draw_nine_slice_panel(header_rect, header_bg, DROPDOWN_SLICE_PX);
+		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
+
+		header_content := header_rect->inset(4, 10, 4, 10);
+		header_ts := UI.default_text_settings();
+		header_ts.size = 24;
+		header_ts.color = v4.{1, 1, 1, 1};
+		header_ts.halign = .LEFT;
+		header_ts.valign = .CENTER;
+		header_ts.do_outline = true;
+		header_ts.outline_thickness = 2;
+		header_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(header_content, header_ts, "TRANSFORMATION");
 
 		// Phase + remaining
 		phase := "SCHLEEM";
@@ -1016,52 +1132,78 @@ draw_player_role_hud :: proc(player: Player) {
 		if remaining < 0.0 { remaining = 0.0; }
 		remaining_s := (remaining + 0.999).(int);
 
-		name_rect := body->cut_top(40);
-		n_ts := UI.default_text_settings();
-		n_ts.size = 36;
-		n_ts.color = phase_col;
-		n_ts.halign = .LEFT;
-		n_ts.valign = .CENTER;
-		n_ts.do_outline = true;
-		n_ts.outline_thickness = 2;
-		n_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(name_rect, n_ts, phase);
+		base_ts := UI.default_text_settings();
+		base_ts.size = 24;
+		base_ts.halign = .LEFT;
+		base_ts.valign = .CENTER;
+		base_ts.do_outline = true;
+		base_ts.outline_thickness = 4;
+		base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
 
-		body->cut_top(6);
-		line_ts := UI.default_text_settings();
-		line_ts.size = 22;
-		line_ts.color = v4.{0.9, 0.92, 0.98, 1};
-		line_ts.halign = .LEFT;
-		line_ts.valign = .CENTER;
-		line_ts.do_drop_shadow = true;
-		line_ts.drop_shadow_offset = v2.{1, -1};
-		line_ts.drop_shadow_color = v4.{0, 0, 0, 1};
-
-		status := "ACTIVE";
-		if game_state != Game_State.INGAME {
-			status = "PAUSED (MEETING)";
-		} else if get_time() < player.werewolf_grace_until {
-			status = "PAUSED (GRACE)";
+		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			entry_content->cut_left(24.0);
+			row_ts := base_ts;
+			row_ts.color = phase_col;
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Phase: %", .{phase}));
 		}
-		UI.text(body->cut_top(26), line_ts, status);
-		UI.text(body->cut_top(26), line_ts, format_string("Time: %s", .{remaining_s}));
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			entry_content->cut_left(24.0);
+			status := "ACTIVE";
+			if game_state != Game_State.INGAME {
+				status = "PAUSED (MEETING)";
+			} else if get_time() < player.werewolf_grace_until {
+				status = "PAUSED (GRACE)";
+			}
+			row_ts := base_ts;
+			row_ts.color = v4.{0.9, 0.92, 0.98, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, status);
+		}
+		{
+			entry_rect := list_content->cut_top(ROW_H);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			entry_content->cut_left(24.0);
+			row_ts := base_ts;
+			row_ts.color = v4.{0.9, 0.92, 0.98, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Time: %s", .{remaining_s}));
+		}
 
-		body->cut_top(10);
+		list_content->cut_top(BAR_GAP);
+		bar := list_content->cut_top(BAR_H);
+		rr_ui_draw_nine_slice_panel(bar, progress_back, PROGRESS_SLICE_PX);
 
-		// Two-phase bar with marker.
-		bar := body->cut_top(18);
-		UI.quad(bar, bg2, v4.{0.0, 0.0, 0.0, 0.35});
+		fill_rect := bar->inset(6.0, 6.0, 6.0, 6.0);
 		sch_ratio := WEREWOLF_SCHLEEM_SECONDS / WEREWOLF_CYCLE_TOTAL_SECONDS;
-		UI.quad(bar->subrect(0.0, 0.0, sch_ratio, 1.0), bg2, v4.{0.6, 0.6, 0.6, 0.55});
-		UI.quad(bar->subrect(sch_ratio, 0.0, 1.0, 1.0), bg2, v4.{1.0, 0.25, 0.25, 0.55});
+		if sch_ratio < 0.0 { sch_ratio = 0.0; }
+		if sch_ratio > 1.0 { sch_ratio = 1.0; }
+		UI.quad(fill_rect->subrect(0.0, 0.0, sch_ratio, 1.0), progress_fill, v4.{0.6, 0.6, 0.6, 0.65});
+		UI.quad(fill_rect->subrect(sch_ratio, 0.0, 1.0, 1.0), progress_fill, v4.{1.0, 0.25, 0.25, 0.65});
+
+		seg_w := max(3.0, fill_rect->height() * 0.18);
+		sep_x := lerp(fill_rect.min.x, fill_rect.max.x, sch_ratio);
+		sep_rect := Rect{v2.{sep_x - (seg_w * 0.5), fill_rect.min.y}, v2.{sep_x + (seg_w * 0.5), fill_rect.max.y}};
+		UI.quad(sep_rect, progress_segment, v4.{1, 1, 1, 1});
 
 		marker_ratio := 0.0;
 		if WEREWOLF_CYCLE_TOTAL_SECONDS > 0.001 {
 			marker_ratio = clamp(player.werewolf_cycle_t / WEREWOLF_CYCLE_TOTAL_SECONDS, 0.0, 1.0);
 		}
-		mx := lerp(bar.min.x, bar.max.x, marker_ratio);
-		marker := Rect{v2.{mx, bar.min.y}, v2.{mx, bar.max.y}}->grow_unscaled(0.0, 2.0, 0.0, 2.0);
-		UI.quad(marker, bg2, v4.{1, 1, 1, 0.9});
+		marker_w := max(4.0, fill_rect->height() * 0.22);
+		mx := lerp(fill_rect.min.x, fill_rect.max.x, marker_ratio);
+		marker_rect := Rect{v2.{mx - (marker_w * 0.5), fill_rect.min.y}, v2.{mx + (marker_w * 0.5), fill_rect.max.y}};
+		marker_outline := marker_rect->grow_unscaled(0.0, 1.0, 0.0, 1.0);
+		if solid != null {
+			UI.quad(marker_outline, solid, v4.{0, 0, 0, 0.85});
+			UI.quad(marker_rect, solid, v4.{1, 1, 1, 0.95});
+		} else {
+			UI.quad(marker_rect, progress_segment, v4.{1, 1, 1, 1});
+		}
 	}
 }
 
@@ -1142,8 +1284,9 @@ rr_werewolf_update_skins :: proc(player: Player) {
 	if !rr_werewolf_should_look_werewolf(player) {
 		player.werewolf_skin_enable_at = 0.0;
 		player.werewolf_skin_disable_at = 0.0;
-		if rr_player_has_skin(player, WEREWOLF_SKIN_NAME) {
+		if player.werewolf_skin_active {
 			rr_player_set_skin_enabled(player, WEREWOLF_SKIN_NAME, false);
+			player.werewolf_skin_active = false;
 		}
 		return;
 	}
@@ -1153,6 +1296,7 @@ rr_werewolf_update_skins :: proc(player: Player) {
 		player.werewolf_skin_disable_at = 0.0;
 		player.werewolf_skin_enable_at = 0.0;
 		rr_player_set_skin_enabled(player, WEREWOLF_SKIN_NAME, false);
+		player.werewolf_skin_active = false;
 		return;
 	}
 
@@ -1160,11 +1304,13 @@ rr_werewolf_update_skins :: proc(player: Player) {
 	if player.werewolf_skin_enable_at > 0.0 && now >= player.werewolf_skin_enable_at {
 		player.werewolf_skin_enable_at = 0.0;
 		rr_player_set_skin_enabled(player, WEREWOLF_SKIN_NAME, true);
+		player.werewolf_skin_active = true;
 	}
 
 	// Safety: if we should look werewolf but no enable is pending and skin isn't on, force it on.
-	if player.werewolf_skin_enable_at <= 0.0 && !rr_player_has_skin(player, WEREWOLF_SKIN_NAME) {
+	if player.werewolf_skin_enable_at <= 0.0 && !player.werewolf_skin_active {
 		rr_player_set_skin_enabled(player, WEREWOLF_SKIN_NAME, true);
+		player.werewolf_skin_active = true;
 	}
 }
 
@@ -1422,7 +1568,7 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 		drag_walk_left := layer->create_state("004RAND/drag_body_walk", true, 0.0);
 		drag_walk_right := layer->create_state("004RAND/drag_body_walk_right", true, 0.0);
 
-		// Mutually-exclusive global transitions.
+		// Mutually-exclusive global transitions (enter drag states).
 		to_drag_idle_left := layer->create_global_transition(drag_idle_left, false);
 		to_drag_idle_left->create_bool_condition(drag_enabled_var, true);
 		to_drag_idle_left->create_bool_condition(drag_moving_var, false);
@@ -1442,6 +1588,19 @@ rr_werewolf_update_cycle :: proc(player: Player, dt: float) {
 		to_drag_walk_right->create_bool_condition(drag_enabled_var, true);
 		to_drag_walk_right->create_bool_condition(drag_moving_var, true);
 		to_drag_walk_right->create_bool_condition(drag_right_var, true);
+
+		// Exit transitions: return to idle when drag ends.
+		exit_drag_idle_left := layer->create_transition(drag_idle_left, idle_state, false);
+		exit_drag_idle_left->create_bool_condition(drag_enabled_var, false);
+
+		exit_drag_idle_right := layer->create_transition(drag_idle_right, idle_state, false);
+		exit_drag_idle_right->create_bool_condition(drag_enabled_var, false);
+
+		exit_drag_walk_left := layer->create_transition(drag_walk_left, idle_state, false);
+		exit_drag_walk_left->create_bool_condition(drag_enabled_var, false);
+
+		exit_drag_walk_right := layer->create_transition(drag_walk_right, idle_state, false);
+		exit_drag_walk_right->create_bool_condition(drag_enabled_var, false);
 
 		sm_inited = true;
         log_info("State machine initialized");
@@ -1581,19 +1740,22 @@ rr_drag_body_update_anim_state :: proc(player: Player, dt: float) {
 		player.drag_body_speed_active = false;
 	}
 
+	// Server-authoritative side used by corpse follow.
+	if Game.is_server() {
+		player.drag_body_is_right = desired_right;
+	}
+
+	// Update state machine bools BEFORE firing RESET so the exit transitions
+	// (drag_body_enabled == false) are already active when the state machine evaluates.
+	player.animator.instance.state_machine->set_bool("drag_body_enabled", dragging);
+	player.animator.instance.state_machine->set_bool("drag_body_moving", moving);
+	player.animator.instance.state_machine->set_bool("drag_body_right", true);
+
 	// If drag just ended, reset to base locomotion state.
 	if player.drag_body_was_dragging && !dragging {
 		player->set_trigger("RESET");
 	}
 	player.drag_body_was_dragging = dragging;
-
-	// Server-authoritative side used by corpse follow.
-	if Game.is_server() {
-		player.drag_body_is_right = desired_right;
-	}
-	player.animator.instance.state_machine->set_bool("drag_body_enabled", dragging);
-	player.animator.instance.state_machine->set_bool("drag_body_moving", moving);
-	player.animator.instance.state_machine->set_bool("drag_body_right", true);
 }
 
 Task_Interactable :: class : Component {
@@ -1709,7 +1871,10 @@ Call_Meeting_Interactable :: class : Component {
     }
 
     can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
-        return player.player_state == Player_State.ALIVE;
+        if player.player_state != Player_State.ALIVE return false;
+        // Respect meeting cooldown so the interaction prompt doesn't show during cooldown.
+        if get_time() < meeting_cooldown_ends_at return false;
+        return true;
     }
 }
 
@@ -1917,17 +2082,26 @@ rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 		player.player_role == Player_Role.PRANKSTER ||
 		player.player_role == Player_Role.PYROMANIAC ||
 		player.werewolf_infected;
-	if !is_civilian_like return;
 
-	for t: 0..player.active_tasks.elements.count-1 {
-		task := player.active_tasks.elements[t];
-		if task == null continue;
-		if task.completed || task.started continue;
+	if is_civilian_like {
+		// Civilians see only their own incomplete task destinations.
+		for t: 0..player.active_tasks.elements.count-1 {
+			task := player.active_tasks.elements[t];
+			if task == null continue;
+			if task.completed || task.started continue;
 
-		rr_refresh_task_destinations_for_task(task);
+			rr_refresh_task_destinations_for_task(task);
 
-		for d: 0..task.destinations.elements.count-1 {
-			rr_draw_task_marker_on_minimap(map_rect, task.destinations.elements[d], v4.{1.0, 0.85, 0.25, 0.95});
+			for d: 0..task.destinations.elements.count-1 {
+				rr_draw_task_marker_on_minimap(map_rect, task.destinations.elements[d], v4.{1.0, 0.85, 0.25, 0.95});
+			}
+		}
+	} else {
+		// Non-civilians see ALL task locations to help identify where players might be.
+		for i: 0..rr_task_destination_entries.elements.count-1 {
+			e := rr_task_destination_entries.elements[i];
+			if e == null continue;
+			rr_draw_task_marker_on_minimap(map_rect, e.pos, v4.{1.0, 0.85, 0.25, 0.95});
 		}
 	}
 }
@@ -1988,20 +2162,36 @@ update_minimap_ui :: proc(player: Player) {
 			}
 		}
 
+		layout_safe := safe;
+
+		// Always consider the civilian progress bar overlap (it is always visible).
+		{
+			PANEL_W :: 300.0;
+			PROGRESS_H :: 52.0;
+			HEADER_H :: 36.0;
+			PROGRESS_EXTRA_W :: 120.0;
+			PANEL_Y_OFFSET :: -20.0;
+
+			panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
+			header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+			progress_rect := header_rect->top_left_rect()->offset(0.0, 48.0)->grow(0.0, PANEL_W + PROGRESS_EXTRA_W, PROGRESS_H, 0.0);
+
+			if rr_rects_overlap(btn_rect, progress_rect) {
+				btn_rect = btn_rect->offset(295.0, -54.0);
+			}
+		}
+
 		if should_show_task_panel {
-			layout_safe := safe;
 			task_panel_rect: Rect;
 			if rr_power_outage_active || rr_comms_outage_active {
 				task_panel_rect = layout_safe->cut_left(320)->inset(250, 0, 250, 10);
 			} else {
 				// Mirror `update_tasks_ui` layout for overlap checks.
 				PANEL_W :: 300.0;
-				PROGRESS_H :: 52.0;
 				HEADER_H :: 36.0;
 				ROW_H :: 32.0;
 				LIST_PAD :: 10.0;
 				PROGRESS_EXTRA_W :: 120.0;
-				PROGRESS_GAP :: 10.0;
 				PANEL_Y_OFFSET :: -20.0;
 
 				list_h := (player.active_tasks.elements.count.(float)) * ROW_H + (LIST_PAD * 2.0);
@@ -2009,21 +2199,59 @@ update_minimap_ui :: proc(player: Player) {
 
 				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
 				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
-				progress_rect := header_rect->top_left_rect()->offset(0.0, PROGRESS_GAP)->grow(0.0, PANEL_W + PROGRESS_EXTRA_W, PROGRESS_H, 0.0);
 
-				// Bounding box for overlap (progress bar can extend wider).
-				min_y := progress_rect.min.y;
-				max_y := header_rect.max.y;
-				if player.task_list_open {
-					max_y = list_rect.max.y;
-				}
+				// Bounding box for overlap.
 				task_panel_rect = Rect{
-					v2.{panel_anchor.min.x, min_y},
-					v2.{panel_anchor.min.x + PANEL_W + PROGRESS_EXTRA_W, max_y}
+					v2.{panel_anchor.min.x, list_rect.min.y},
+					v2.{panel_anchor.min.x + PANEL_W + PROGRESS_EXTRA_W, header_rect.max.y}
 				};
 			}
 
 			if rr_rects_overlap(btn_rect, task_panel_rect) {
+				btn_rect = btn_rect->offset(295.0, -54.0);
+			}
+		}
+
+		// Role-specific panels (hitman/pirate/werewolf) use task-list style panels.
+		if player.player_state == Player_State.ALIVE {
+			PANEL_W :: 300.0;
+			HEADER_H :: 36.0;
+			ROW_H :: 32.0;
+			LIST_PAD :: 10.0;
+			PANEL_Y_OFFSET :: -20.0;
+
+			role_panel_rect: Rect;
+			has_role_panel := false;
+
+			if player.player_role == Player_Role.HITMAN {
+				row_count := 4;
+				list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
+				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
+				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				role_panel_rect = Rect{v2.{panel_anchor.min.x, list_rect.min.y}, v2.{panel_anchor.min.x + PANEL_W, header_rect.max.y}};
+				has_role_panel = true;
+			} else if player.player_role == Player_Role.PIRATE {
+				row_count := 3;
+				list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
+				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
+				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				role_panel_rect = Rect{v2.{panel_anchor.min.x, list_rect.min.y}, v2.{panel_anchor.min.x + PANEL_W, header_rect.max.y}};
+				has_role_panel = true;
+			} else if player.player_role == Player_Role.WEREWOLF {
+				BAR_H :: 26.0;
+				BAR_GAP :: 10.0;
+				row_count := 3;
+				list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0) + BAR_H + BAR_GAP;
+				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
+				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				role_panel_rect = Rect{v2.{panel_anchor.min.x, list_rect.min.y}, v2.{panel_anchor.min.x + PANEL_W, header_rect.max.y}};
+				has_role_panel = true;
+			}
+
+			if has_role_panel && rr_rects_overlap(btn_rect, role_panel_rect) {
 				btn_rect = btn_rect->offset(295.0, -54.0);
 			}
 		}

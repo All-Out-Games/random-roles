@@ -1291,6 +1291,16 @@ Save_Game_Int :: struct {
     value: s64;
 }
 
+Value_Kind :: enum {
+    INT;
+    STRING;
+}
+
+Save_Game_Key :: struct {
+    key: string;
+    kind: Value_Kind;
+}
+
 Save :: struct {
     set_string :: proc(player: Player, key: string, value: string)             #foreign "save_set_string";
     get_string :: proc(player: Player, key: string, default: string) -> string #foreign "save_get_string";
@@ -1319,6 +1329,7 @@ Save :: struct {
     get_game_int          :: proc(key: string, default: s64) -> s64                                #foreign "save_get_game_int";
     get_all_game_strings  :: proc() -> []Save_Game_String                                          #foreign "save_get_all_game_strings";
     get_all_game_ints     :: proc() -> []Save_Game_Int                                             #foreign "save_get_all_game_ints";
+    get_all_game_keys     :: proc() -> []Save_Game_Key                                             #foreign "save_get_all_game_keys";
 
     ordered_set     :: proc(document: string, key: string, value: f64) #foreign "save_ordered_set";
     ordered_get     :: proc(document: string, key: string, default: f64, userdata: Object, callback: proc(entry: Ordered_Save_Entry, userdata: Object)) #foreign "save_ordered_get";
@@ -2351,6 +2362,7 @@ Tutorial_Arrow :: struct {
         near: bool;
         bob_scale: float;
         bob_bias: float;
+        arrow_sprite_override: Texture_Asset;
     }
 
     default_options :: proc() -> Tutorial_Arrow_Options {
@@ -2360,6 +2372,7 @@ Tutorial_Arrow :: struct {
         result.near = true;
         result.bob_scale = 0.5;
         result.bob_bias = 1.5;
+        result.arrow_sprite_override = null;
         return result;
     }
 
@@ -2370,7 +2383,6 @@ Tutorial_Arrow :: struct {
         max_distance := player.camera.size * 0.8;
         offset_to_target := normalize_vector_to_radius(target_position - player.entity.world_position, max_distance) * max_distance;
         arrow_position := player.entity.world_position + offset_to_target;
-        arrow_rect := Rect{arrow_position, arrow_position}->grow(0.5);
 
         aim_d := dot(player.last_aim_direction, normalize(target_position - player.entity.world_position));
         alpha_t := linear_step(0.85, 1.0, aim_d);
@@ -2379,6 +2391,13 @@ Tutorial_Arrow :: struct {
 
         UI.push_color_multiplier({1, 1, 1, alpha});
         defer UI.pop_color_multiplier();
+
+        arrow_sprite := options.arrow_sprite_override;
+        if arrow_sprite == null {
+            arrow_sprite = core_globals.tutorial_arrow;
+        }
+
+        arrow_rect := Rect{arrow_position, arrow_position}->grow(0.5)->fit_aspect(arrow_sprite->get_aspect());
 
         if length_squared(arrow_position - target_position) > 0.1 {
             if options.far {
@@ -2389,7 +2408,7 @@ Tutorial_Arrow :: struct {
                 rads := atan2(dir.y, dir.x);
                 UI.push_matrix(Matrix4.rotate_about_point(arrow_rect->center(), to_degrees(rads)));
                 defer UI.pop_matrix();
-                UI.quad(arrow_rect, core_globals.tutorial_arrow);
+                UI.quad(arrow_rect, arrow_sprite);
             }
         }
         else {
@@ -2401,7 +2420,7 @@ Tutorial_Arrow :: struct {
                 arrow_rect = arrow_rect->offset(0, options.bob_bias + y);
                 UI.push_matrix(Matrix4.rotate_about_point(arrow_rect->center(), 270));
                 defer UI.pop_matrix();
-                UI.quad(arrow_rect, core_globals.tutorial_arrow);
+                UI.quad(arrow_rect, arrow_sprite);
             }
         }
     }

@@ -2236,12 +2236,11 @@ Vote_Ability :: class : Ability_Base {
         skip_ts.outline_thickness = 3;
         skip_ts.outline_color = v4.{0, 0, 0, 1};
 
-        // Disabled once you've voted (votes are locked).
-        if local_player.has_voted {
+        // Disabled once you've voted or skipped (votes are locked).
+        skip_disabled := local_player.has_voted;
+        if skip_disabled {
             UI.push_disabled(true);
-            defer UI.pop_disabled();
             UI.push_color_multiplier(v4.{1, 1, 1, 0.55});
-            defer UI.pop_color_multiplier();
         }
 
         // Ensure the rect matches the sprite aspect so it never squishes.
@@ -2263,6 +2262,11 @@ Vote_Ability :: class : Ability_Base {
 				sfx.volume_perturb *= 0.25;
 				rr_play_sfx("sfx/cast_vote.wav", sfx);
 			}
+        }
+
+        if skip_disabled {
+            UI.pop_color_multiplier();
+            UI.pop_disabled();
         }
     }
 
