@@ -332,6 +332,8 @@ Player :: class : Player_Base {
 			}
 			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
 			rr_draw_power_outage_overlay_if_needed(this);
+			// Global civilian progress bar – always visible at top-center (except lobby/cinematics).
+			rr_draw_civilian_progress_bar(this);
             update_tasks_ui(this);
 			update_minimap_ui(this);
 			rr_draw_pirate_treasure_guidance_if_needed(this);
@@ -779,7 +781,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .PRESIDENT:  return "PRESIDENT";
 		case .MOVIE_STAR: return "MOVIE STAR";
 		case .CORONER:    return "CORONER";
-		case .PORTAL_MAKER: return "PORTAL MAKER";
+		case .PORTAL_MAKER: return "WARPER";
 		case .PRANKSTER:  return "PRANKSTER";
 		case .PYROMANIAC: return "PYROMANIAC";
 		case .PIRATE:     return "PIRATE";
@@ -826,36 +828,16 @@ draw_player_role_hud :: proc(player: Player) {
 		accent = v4.{1.0, 0.55, 0.25, 1};
 	}
 
-	// Role icon (task UI). This replaces the old "ROLE: ..." title pill.
-	// Positioning:
-	// - Default: top-left of the safe screen.
-	// - If chat is open: offset right by the chat rect so it doesn't overlap.
-	icon := player_role_to_icon_texture(player.player_role);
-	if icon != null {
-		ICON_HALF_SIZE :: 50.0;
-		PAD :: 20.0;
+	// Role icon is now drawn inside the task list header (rr_draw_task_list_header).
 
-		anchor := screen->top_left_rect()->offset(ICON_HALF_SIZE + PAD, -ICON_HALF_SIZE - PAD);
-		if player->is_chat_open() {
-			chat_rect := player->get_chat_rect();
-			anchor = anchor->offset_unscaled(chat_rect->width(), 0.0);
-		} else {
-			// Handle map button
-			anchor = anchor->offset(120.0, 0.0);
-		}
-		icon_rect := anchor->grow(ICON_HALF_SIZE);
-		UI.quad(icon_rect->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
-	}
-
-	// Hitman contract HUD (local-only).
-	if player.player_role == Player_Role.HITMAN && player->is_local() {
+	// Hitman contract HUD.
+	if player.player_role == Player_Role.HITMAN && player->is_local_or_server() {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
 		safe := UI.get_safe_screen_rect();
 
 		PANEL_W :: 300.0;
-		HEADER_H :: 36.0;
 		ROW_H :: 32.0;
 		LIST_PAD :: 10.0;
 		DROPDOWN_SLICE_PX :: 16.0;
@@ -863,28 +845,16 @@ draw_player_role_hud :: proc(player: Player) {
 		row_count := 4;
 		list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 
-		panel_anchor := safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
-		header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+		header_rect := rr_draw_task_list_header(safe, false, player);
+
+		if player.task_list_open {
 		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
 
-		header_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown.png");
 		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
 		checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
 
-		rr_ui_draw_nine_slice_panel(header_rect, header_bg, DROPDOWN_SLICE_PX);
 		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
-
-		header_content := header_rect->inset(4, 10, 4, 10);
-		header_ts := UI.default_text_settings();
-		header_ts.size = 24;
-		header_ts.color = v4.{1, 1, 1, 1};
-		header_ts.halign = .LEFT;
-		header_ts.valign = .CENTER;
-		header_ts.do_outline = true;
-		header_ts.outline_thickness = 2;
-		header_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(header_content, header_ts, "CONTRACT");
 
 		target_name := "None";
 		if player.hitman_contract_target_id != 0 {
@@ -952,6 +922,7 @@ draw_player_role_hud :: proc(player: Player) {
 			row_ts.color = sniper_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
 			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Sniper: %/%", .{min(player.hitman_kills, HITMAN_SNIPER_UNLOCK_KILLS), HITMAN_SNIPER_UNLOCK_KILLS}));
 		}
+		} // end task_list_open
 	}
 
 	// Coroner vial count: right side around mid-screen (local-only).
@@ -976,8 +947,8 @@ draw_player_role_hud :: proc(player: Player) {
 		UI.text(icon_rect, count_ts, format_string("%", .{player.coroner_dna_vials.count}));
 	}
 
-	// Pirate treasure + unlock progress (local-only).
-	if player.player_role == Player_Role.PIRATE && player->is_local() {
+	// Pirate treasure + unlock progress.
+	if player.player_role == Player_Role.PIRATE && player->is_local_or_server() {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
@@ -1003,7 +974,6 @@ draw_player_role_hud :: proc(player: Player) {
 		safe := UI.get_safe_screen_rect();
 
 		PANEL_W :: 300.0;
-		HEADER_H :: 36.0;
 		ROW_H :: 32.0;
 		LIST_PAD :: 10.0;
 		DROPDOWN_SLICE_PX :: 16.0;
@@ -1011,28 +981,16 @@ draw_player_role_hud :: proc(player: Player) {
 		row_count := 3;
 		list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 
-		panel_anchor := safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
-		header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+		header_rect := rr_draw_task_list_header(safe, false, player);
+
+		if player.task_list_open {
 		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
 
-		header_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown.png");
 		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
 		checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
 
-		rr_ui_draw_nine_slice_panel(header_rect, header_bg, DROPDOWN_SLICE_PX);
 		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
-
-		header_content := header_rect->inset(4, 10, 4, 10);
-		header_ts := UI.default_text_settings();
-		header_ts.size = 24;
-		header_ts.color = v4.{1, 1, 1, 1};
-		header_ts.halign = .LEFT;
-		header_ts.valign = .CENTER;
-		header_ts.do_outline = true;
-		header_ts.outline_thickness = 2;
-		header_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(header_content, header_ts, "TREASURE");
 
 		base_ts := UI.default_text_settings();
 		base_ts.size = 24;
@@ -1091,17 +1049,17 @@ draw_player_role_hud :: proc(player: Player) {
 				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Powder Keg: %/%", .{min(player.pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST), PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
 			}
 		}
+		} // end task_list_open
 	}
 
-	// Werewolf ability unlock progress: left side (local-only).
-	if player.player_role == Player_Role.WEREWOLF && player->is_local() {
+	// Werewolf ability unlock progress: left side.
+	if player.player_role == Player_Role.WEREWOLF && player->is_local_or_server() {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
 		safe := UI.get_safe_screen_rect();
 
 		PANEL_W :: 300.0;
-		HEADER_H :: 36.0;
 		ROW_H :: 32.0;
 		LIST_PAD :: 10.0;
 		DROPDOWN_SLICE_PX :: 16.0;
@@ -1109,28 +1067,16 @@ draw_player_role_hud :: proc(player: Player) {
 		row_count := 4;
 		list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 
-		panel_anchor := safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
-		header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+		header_rect := rr_draw_task_list_header(safe, false, player);
+
+		if player.task_list_open {
 		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
 
-		header_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown.png");
 		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
 		checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
 
-		rr_ui_draw_nine_slice_panel(header_rect, header_bg, DROPDOWN_SLICE_PX);
 		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
-
-		header_content := header_rect->inset(4, 10, 4, 10);
-		header_ts := UI.default_text_settings();
-		header_ts.size = 24;
-		header_ts.color = v4.{1, 1, 1, 1};
-		header_ts.halign = .LEFT;
-		header_ts.valign = .CENTER;
-		header_ts.do_outline = true;
-		header_ts.outline_thickness = 2;
-		header_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(header_content, header_ts, "ABILITIES");
 
 		base_ts := UI.default_text_settings();
 		base_ts.size = 24;
@@ -1198,6 +1144,7 @@ draw_player_role_hud :: proc(player: Player) {
 			row_ts.color = claw_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
 			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Claw: %/%", .{min(player.werewolf_kills, WEREWOLF_CLAW_UNLOCK_KILLS), WEREWOLF_CLAW_UNLOCK_KILLS}));
 		}
+		} // end task_list_open
 	}
 }
 
@@ -2128,17 +2075,16 @@ update_minimap_ui :: proc(player: Player) {
 
 	safe := UI.get_safe_screen_rect();
 
-	// Top-left "MAP" button
+	// Top-right "MAP" button
 	// Keep minimap UI above the comms "deaf" icons (layer 5200).
 	UI.push_layer(5600);
 	defer UI.pop_layer();
 	
-	chat_height := player->is_chat_open() ? player->get_chat_rect()->height() : 0.0;
 	// Map button should be about the same size as the role icon.
 	MAP_HALF_SIZE :: 55.0; // role icon uses 50.0
 	MAP_PAD :: 20.0;
-	btn_center := safe->top_left_rect()->offset(MAP_HALF_SIZE + MAP_PAD, -MAP_HALF_SIZE - MAP_PAD);
-	btn_rect := btn_center->grow(MAP_HALF_SIZE)->offset_unscaled(0.0, -chat_height);
+	btn_center := safe->top_right_rect()->offset(-MAP_HALF_SIZE - MAP_PAD, -MAP_HALF_SIZE - MAP_PAD - 25.0);
+	btn_rect := btn_center->grow(MAP_HALF_SIZE);
 
 	if game_state == Game_State.INGAME && player->is_chat_open() {
 		// Mirror `update_tasks_ui` panel layout (see `scripts/tasks.csl`).

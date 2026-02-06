@@ -220,6 +220,10 @@ update_tasks :: proc(player: Player) {
 		return;
 	}
 
+	// Task UIs should render above the progress bar / task list (layer 100).
+	UI.push_layer(9700);
+	defer UI.pop_layer();
+
 	i := 0;
 	while i < player.active_tasks.elements.count {
 		task := player.active_tasks.elements[i];
@@ -386,7 +390,17 @@ rr_ui_draw_nine_slice_panel :: proc(rect: Rect, tex: Texture_Asset, slice_px: fl
 	UI.begin_button(rect, bs, {}, ""); { defer UI.end_button(); }
 }
 
-rr_draw_civilian_progress_bar :: proc(screen: Rect, player_total_tasks: int) {
+rr_draw_civilian_progress_bar :: proc(player: Player) {
+	if !player->is_local_or_server() return;
+
+	// Visible during gameplay & voting, hidden in lobby and cinematics.
+	if game_state == Game_State.LOBBY       return;
+	if game_state == Game_State.ANIM_INTRO  return;
+	if game_state == Game_State.ANIM_VOTE_EJECT  return;
+	if game_state == Game_State.ANIM_JESTER_WIN  return;
+	if game_state == Game_State.ANIM_PYRO_WIN    return;
+	if game_state == Game_State.ANIM_VICTORY     return;
+
 	// Global civilian task progress (win condition).
 	total_tasks := 0;
 	remaining_tasks := 0;
@@ -402,28 +416,28 @@ rr_draw_civilian_progress_bar :: proc(screen: Rect, player_total_tasks: int) {
 	progress01 = clamp(progress01, 0.0, 1.0);
 	progress_pct := (progress01 * 100.0).(int);
 
-	// Layout (matches task list anchor).
-	PANEL_W :: 300.0;
-	PROGRESS_H :: 52.0;
-	HEADER_H :: 36.0;
-	PROGRESS_EXTRA_W :: 120.0;
-	PROGRESS_SLICE_PX :: 18.0;
-	PROGRESS_LABEL_Y_OFFSET :: 8.0;
+	player_total_tasks := player.active_tasks.elements.count;
 
-	panel_anchor := screen->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
-	header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
-	progress_w := PANEL_W + PROGRESS_EXTRA_W;
-	progress_rect := header_rect->top_left_rect()->offset(0.0, 48)->grow(0.0, progress_w, PROGRESS_H, 0.0);
+	// Layout – centered at top of screen.
+	PROGRESS_W :: 380.0;
+	PROGRESS_H :: 40.0;
+	PROGRESS_SLICE_PX :: 18.0;
+	TOP_MARGIN :: 35.0;
+
+	screen := UI.get_safe_screen_rect();
+	progress_rect := screen->top_rect()->center_rect()->offset(0.0, -TOP_MARGIN)->grow(0.0, PROGRESS_W * 0.5, PROGRESS_H, PROGRESS_W * 0.5);
+
+	UI.push_layer(100);
+	defer UI.pop_layer();
 
 	progress_back := get_asset(Texture_Asset, "ui/task list/task_progress_back.png");
 	progress_fill := get_asset(Texture_Asset, "ui/task list/task_progress_fill.png");
 	progress_segment := get_asset(Texture_Asset, "ui/task list/task_progress_segment.png");
-	progress_label := get_asset(Texture_Asset, "ui/task list/progress_text.png");
 
-	// Progress bar
+	// Progress bar background
 	rr_ui_draw_nine_slice_panel(progress_rect, progress_back, PROGRESS_SLICE_PX);
 
-	fill_rect := progress_rect->inset(7.0, 7.0, 7.0, 7.0);
+	fill_rect := progress_rect->inset(3.0, 3.0, 3.0, 3.0);
 	if progress01 > 0.0 {
 		fill_subrect := fill_rect->subrect(0.0, 0.0, progress01, 1.0);
 		UI.quad(fill_subrect, progress_fill, v4.{1, 1, 1, 1});
@@ -441,20 +455,154 @@ rr_draw_civilian_progress_bar :: proc(screen: Rect, player_total_tasks: int) {
 		}
 	}
 
-	label_h := 24.0;
-	label_w := label_h * progress_label->get_aspect();
-	label_rect := progress_rect->top_left_rect()->offset(10.0, PROGRESS_LABEL_Y_OFFSET)->grow(0.0, label_w, label_h, 0.0);
-	UI.quad(label_rect->fit_aspect(progress_label->get_aspect()), progress_label, v4.{1, 1, 1, 1});
+	// "TOTAL PROGRESS" label – top center, above the bar
+	label_ts := UI.default_text_settings();
+	label_ts.size = 26;
+	label_ts.spacing_multiplier = 1.1;
+	label_ts.color = v4.{1, 1, 1, 1};
+	label_ts.halign = .CENTER;
+	label_ts.valign = .BOTTOM;
+	label_ts.do_outline = true;
+	label_ts.outline_thickness = 6;
+	label_ts.outline_color = v4.{0, 0, 0, 1};
+	label_rect := progress_rect->top_rect()->offset(0.0, -12.0)->grow(24, 0, 0, 0);
+	UI.text(label_rect, label_ts, "TOTAL PROGRESS");
 
+	// Percentage – bottom center, below the bar
 	pct_ts := UI.default_text_settings();
-	pct_ts.size = 28;
+	pct_ts.size = 24;
 	pct_ts.color = v4.{1, 1, 1, 1};
-	pct_ts.halign = .RIGHT;
-	pct_ts.valign = .CENTER;
+	pct_ts.halign = .CENTER;
+	pct_ts.valign = .TOP;
 	pct_ts.do_outline = true;
 	pct_ts.outline_thickness = 6;
 	pct_ts.outline_color = v4.{0, 0, 0, 1};
-	UI.text(progress_rect->inset(4, 12, 0, 12)->offset(0,-5), pct_ts, format_string("%0%%", .{progress_pct}));
+	pct_rect := progress_rect->bottom_rect()->offset(0.0, 0.0)->grow(0, 0, 20, 0);
+	UI.text(pct_rect, pct_ts, format_string("%0%%", .{progress_pct}));
+}
+
+// Shared header for all task-list-style panels (tasks, sabotage, role ability panels).
+// Draws the task_backing image and label text. Returns the header rect.
+// Callers position the list below using: header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0).
+rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player) -> Rect {
+	PANEL_W :: 310.0;
+	HEADER_H :: 46.0;
+	EXTRA_LEFT :: 10.0;
+
+	header_bg := get_asset(Texture_Asset, "ui/task list/task_backing.png");
+
+	// Anchor: top-left of safe screen, offset down when chat is open.
+	chat_offset := 0.0;
+	if player != null && player->is_chat_open() {
+		chat_offset = player->get_chat_rect()->height();
+	}
+	anchor := screen->top_left_rect()->offset(0.0, -30.0)->offset_unscaled(0.0, -chat_offset);
+
+	// Header extends past left edge for visual flair.
+	header_rect := anchor->grow(0.0, PANEL_W, HEADER_H, EXTRA_LEFT);
+	header_rect = header_rect->fit_aspect(header_bg->get_aspect(), .KEEP_WIDTH);
+
+	UI.quad(header_rect, header_bg);
+
+	// Text content (pushed right of the extra-left bleed).
+	header_content := header_rect->inset(4, 4, 4, 4);
+
+	ts := UI.default_text_settings();
+	ts.size = 24;
+	ts.halign = .LEFT;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 2;
+	ts.outline_color = v4.{0, 0, 0, 1};
+
+	if is_sabotage {
+		ts.color = v4.{1, 0.3, 0.3, 1};
+		UI.text(header_content, ts, "SABOTAGE");
+	} else {
+		// Role name in all caps, colored by team.
+		role_name := "CREW";
+		role_icon: Texture_Asset;
+		if player != null {
+			switch player.player_role {
+				case .NONE:         role_name = "CREW";
+				case .SHERIFF:      { role_name = "SHERIFF";      role_icon = get_asset(Texture_Asset, "sprites/icons/roles/sheriff_icon.png"); }
+				case .DOCTOR:       { role_name = "DOCTOR";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles/doctor_icon.png"); }
+				case .PRESIDENT:    { role_name = "PRESIDENT";    role_icon = get_asset(Texture_Asset, "sprites/icons/roles/president_icon.png"); }
+				case .MOVIE_STAR:   { role_name = "MOVIE STAR";   role_icon = get_asset(Texture_Asset, "sprites/icons/roles/moviestar_icon.png"); }
+				case .CORONER:      { role_name = "CORONER";      role_icon = get_asset(Texture_Asset, "sprites/icons/roles/coroner_icon.png"); }
+				case .PORTAL_MAKER: { role_name = "WARPER"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles/portalmaker_icon.png"); }
+				case .PRANKSTER:    { role_name = "PRANKSTER";    role_icon = get_asset(Texture_Asset, "sprites/icons/roles/trickster_icon.png"); }
+				case .PYROMANIAC:   { role_name = "PYROMANIAC";   role_icon = get_asset(Texture_Asset, "sprites/icons/roles/pyromaniac_icon.png"); }
+				case .PIRATE:       { role_name = "PIRATE";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles/pirate_icon.png"); }
+				case .HITMAN:       { role_name = "HITMAN";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles/hitman_icon.png"); }
+				case .WEREWOLF:     { role_name = "WEREWOLF";     role_icon = get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png"); }
+			}
+		}
+
+		role_color := v4.{0.1, 1.0, 0.3, 1.0};
+		if player != null {
+			if player.player_type == Player_Type.TRAITOR {
+				role_color = v4.{0.9, 0.2, 0.2, 1.0};
+			} else if player.player_type == Player_Type.ANARCHIST {
+				role_color = v4.{0.9, 0.6, 0.1, 1.0};
+			}
+		}
+
+		// Role icon to the left of the text (slightly bigger than the header).
+		text_start := header_content;
+		if role_icon != null {
+			ICON_SIZE :: 32.0;
+			ICON_OFFSET :: ICON_SIZE + 12.0;
+			text_start->cut_left(ICON_OFFSET * 2);
+			icon_rect := header_rect->left_rect()->center_rect()->offset(ICON_OFFSET, 0.0)->grow(ICON_SIZE);
+			UI.quad(icon_rect->fit_aspect(role_icon->get_aspect()), role_icon, v4.{1, 1, 1, 1});
+		}
+
+		ts.color = role_color;
+		role_actual := UI.text_sync(text_start, ts, role_name);
+		tasks_rect := text_start->offset_unscaled(role_actual->width() + 6.0, 0.0);
+		ts.color = v4.{1, 1, 1, 1};
+		UI.text(tasks_rect, ts, "Tasks");
+	}
+
+	// Dropdown arrow on the right side of the header.
+	if player != null {
+		arrow_tex := get_asset(Texture_Asset, "ui/task list/dropdown_arrow.png");
+		if arrow_tex != null {
+			ARROW_HALF :: 10.0;
+			arrow_rect := header_rect->right_rect()->center_rect()->offset(-16.0, 0.0)->grow(ARROW_HALF);
+			arrow_rect = arrow_rect->fit_aspect(arrow_tex->get_aspect());
+
+			// Rotate arrow: down when closed, up when open.
+			if player.task_list_open {
+				UI.push_matrix(Matrix4.rotate_about_point(arrow_rect->center(), 180.0));
+				defer UI.pop_matrix();
+			}
+			UI.quad(arrow_rect, arrow_tex, v4.{1, 1, 1, 1});
+		}
+
+		// Clickable overlay on the entire header for toggling.
+		UI.push_id("task_list_dropdown");
+		defer UI.pop_id();
+
+		toggle_bs := UI.default_button_settings();
+		toggle_bs.sprite = core_globals.white_sprite;
+		toggle_bs.press_scaling = 1.0;
+		toggle_bs.color = v4.{0, 0, 0, 0};
+		toggle_bs.hovered_color = v4.{0, 0, 0, 0};
+		toggle_bs.pressed_color = v4.{0, 0, 0, 0};
+		toggle_bs.disabled_color = v4.{0, 0, 0, 0};
+		toggle_bs.background_color_multiplier = v4.{0, 0, 0, 0};
+
+		toggle_result := UI.begin_button(header_rect, toggle_bs, {}, ""); {
+			defer UI.end_button();
+		}
+		if toggle_result.clicked {
+			player.task_list_open = !player.task_list_open;
+		}
+	}
+
+	return header_rect;
 }
 
 update_tasks_ui :: proc(player: Player) {
@@ -478,12 +626,16 @@ update_tasks_ui :: proc(player: Player) {
 		rr_cancel_all_task_attempts(player);
 	}
 
-	// Always draw tasks UI above blackout.
-	UI.push_layer(9600);
+	// Draw tasks UI at a low layer so it sits behind popups/modals.
+	UI.push_layer(100);
 	defer UI.pop_layer();
 
 	screen := UI.get_safe_screen_rect();
-	rr_draw_civilian_progress_bar(screen, player.active_tasks.elements.count);
+
+	if !player.task_list_inited {
+		player.task_list_inited = true;
+		player.task_list_open = true;
+	}
 
 	if player.player_state != Player_State.ALIVE && player.player_type != Player_Type.CIVILIAN {
 		return;
@@ -538,7 +690,6 @@ update_tasks_ui :: proc(player: Player) {
 		}
 
 		PANEL_W :: 300.0;
-		HEADER_H :: 36.0;
 		ROW_H :: 32.0;
 		LIST_PAD :: 10.0;
 		DROPDOWN_SLICE_PX :: 16.0;
@@ -546,28 +697,15 @@ update_tasks_ui :: proc(player: Player) {
 
 		list_h := ROW_H + HELP_H + (LIST_PAD * 2.0);
 
-		panel_anchor := screen->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
-		header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+		header_rect := rr_draw_task_list_header(screen, true, player);
+		if !player.task_list_open { return; }
 		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
 
-		header_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown.png");
 		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
 		checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
 
-		rr_ui_draw_nine_slice_panel(header_rect, header_bg, DROPDOWN_SLICE_PX);
 		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
-
-		header_content := header_rect->inset(4, 10, 4, 10);
-		header_ts := UI.default_text_settings();
-		header_ts.size = 24;
-		header_ts.color = v4.{1, 0.3, 0.3, 1};
-		header_ts.halign = .LEFT;
-		header_ts.valign = .CENTER;
-		header_ts.do_outline = true;
-		header_ts.outline_thickness = 2;
-		header_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(header_content, header_ts, "SABOTAGE");
 
 		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 		{
@@ -650,7 +788,6 @@ update_tasks_ui :: proc(player: Player) {
 		}
 
 		PANEL_W :: 300.0;
-		HEADER_H :: 36.0;
 		ROW_H :: 32.0;
 		LIST_PAD :: 10.0;
 		DROPDOWN_SLICE_PX :: 16.0;
@@ -658,28 +795,15 @@ update_tasks_ui :: proc(player: Player) {
 
 		list_h := ROW_H + HELP_H + (LIST_PAD * 2.0);
 
-		panel_anchor := screen->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
-		header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+		header_rect := rr_draw_task_list_header(screen, true, player);
+		if !player.task_list_open { return; }
 		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
 
-		header_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown.png");
 		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
 		checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
 
-		rr_ui_draw_nine_slice_panel(header_rect, header_bg, DROPDOWN_SLICE_PX);
 		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
-
-		header_content := header_rect->inset(4, 10, 4, 10);
-		header_ts := UI.default_text_settings();
-		header_ts.size = 24;
-		header_ts.color = v4.{1, 0.3, 0.3, 1};
-		header_ts.halign = .LEFT;
-		header_ts.valign = .CENTER;
-		header_ts.do_outline = true;
-		header_ts.outline_thickness = 2;
-		header_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(header_content, header_ts, "SABOTAGE");
 
 		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 		{
@@ -769,77 +893,20 @@ update_tasks_ui :: proc(player: Player) {
 		}
 	}
 
-	if !player.task_list_inited {
-		player.task_list_inited = true;
-		player.task_list_open = true;
-	}
-
 	// Panel sizing
 	PANEL_W :: 300.0;
-	HEADER_H :: 36.0;
 	ROW_H :: 32.0;
 	LIST_PAD :: 10.0;
 	DROPDOWN_SLICE_PX :: 16.0;
-	HEADER_OVERLAP_UP :: 4.0;
-	TASKS_VALUE_OFFSET :: 72.0;
 
 	list_h := (player_total_tasks.(float)) * ROW_H + (LIST_PAD * 2.0);
 
-	// Match previous task panel position (left side).
-	panel_anchor := screen->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, -20.0);
+	header_rect := rr_draw_task_list_header(screen, false, player);
+	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
 
-	header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
-	list_anchor := header_rect->bottom_left_rect();
-	list_rect := list_anchor->grow(0.0, PANEL_W, list_h, 0.0);
-
-	header_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown.png");
 	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
 	checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
-
-	// Header (dropdown toggle)
-	UI.push_id("task_list_dropdown");
-	defer UI.pop_id();
-
-	header_bs := UI.default_button_settings();
-	header_bs.sprite = header_bg;
-	header_bs.press_scaling = 1.0;
-	header_bs.color = v4.{1, 1, 1, 1};
-	header_bs.hovered_color = header_bs.color;
-	header_bs.pressed_color = header_bs.color;
-	header_bs.disabled_color = header_bs.color;
-	header_bs.background_color_multiplier = v4.{1, 1, 1, 1};
-	header_bs.nine_slice_data.slice = v4.{DROPDOWN_SLICE_PX, DROPDOWN_SLICE_PX, DROPDOWN_SLICE_PX, DROPDOWN_SLICE_PX};
-	header_bs.nine_slice_data.slice_scale = 1.0;
-
-	header_interact := UI.begin_button(header_rect, header_bs, {}, ""); {
-		defer UI.end_button();
-	}
-	if header_interact.clicked {
-		player.task_list_open = !player.task_list_open;
-	}
-
-	header_content := header_rect->inset(4, 10, 4, 10);
-	header_ts := UI.default_text_settings();
-	header_ts.size = 24;
-	header_ts.color = v4.{1, 1, 1, 1};
-	header_ts.halign = .LEFT;
-	header_ts.valign = .CENTER;
-	header_ts.do_outline = true;
-	header_ts.outline_thickness = 2;
-	header_ts.outline_color = v4.{0, 0, 0, 1};
-
-	label_actual := UI.text_sync(header_content, header_ts, "Tasks:");
-	value_rect := header_content->offset(TASKS_VALUE_OFFSET, 0.0);
-	count_ts := header_ts;
-	count_ts.color = v4.{0.6275, 0.9451, 0.1529, 1.0};
-	count_actual := UI.text_sync(value_rect, count_ts, format_string("%", .{player_completed_tasks}));
-	slash_rect := value_rect->offset(count_actual->width() + 4.0, 0.0);
-	slash_ts := header_ts;
-	slash_ts.color = v4.{0.6, 0.6, 0.6, 1.0};
-	slash_actual := UI.text_sync(slash_rect, slash_ts, "/");
-	total_rect := slash_rect->offset(slash_actual->width() + 4.0, 0.0);
-	UI.text(total_rect, slash_ts, format_string("%", .{player_total_tasks}));
 
 	if !player.task_list_open {
 		return;
@@ -1139,11 +1206,6 @@ Task_Repair_Laptop :: class : Task_Base {
 			window = window->fit_aspect(table_texture->get_aspect(), .KEEP_BIGGER);
 		}
 
-		// Close button
-		if draw_task_close_button(window, player, this) {
-			return;
-		}
-
 		// Layout
 		art_rect := window;
 		// Place laptop near top, leaving table space below for loose parts.
@@ -1216,6 +1278,11 @@ Task_Repair_Laptop :: class : Task_Base {
 		// Draw the overlay that should appear above components.
 		if highest_parts_texture != null {
 			UI.quad(laptop_rect, highest_parts_texture, .{1, 1, 1, 1});
+		}
+
+		// Close button (drawn after art so it renders on top).
+		if draw_task_close_button(window, player, this) {
+			return;
 		}
 
 		// Draw + interact with loose parts (drag & drop).

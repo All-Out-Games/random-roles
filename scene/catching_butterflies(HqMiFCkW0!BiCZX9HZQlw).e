@@ -5,8 +5,8 @@
   "name": "catching_butterflies",
   "local_enabled": true,
   "local_position": {
-    "X": -10.9324522018432617,
-    "Y": -18.7338218688964844
+    "X": -10.5402908325195312,
+    "Y": -18.3808765411376953
   },
   "local_rotation": 0,
   "local_scale": {

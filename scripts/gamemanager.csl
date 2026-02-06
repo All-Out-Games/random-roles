@@ -417,7 +417,7 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	if role_name == "coroner" || role_name == "Coroner" {
 		return Player_Role.CORONER, true;
 	}
-	if role_name == "portal_maker" || role_name == "portal maker" || role_name == "Portal_Maker" || role_name == "Portal Maker" {
+	if role_name == "portal_maker" || role_name == "portal maker" || role_name == "Portal_Maker" || role_name == "Portal Maker" || role_name == "warper" || role_name == "Warper" || role_name == "WARPER" {
 		return Player_Role.PORTAL_MAKER, true;
 	}
 	if role_name == "prankster" || role_name == "Prankster" {
@@ -1636,7 +1636,7 @@ start :: proc(player: Player) {
 r :: proc(player: Player, role_name: string) {
 	role, ok := rr_parse_role_name(role_name);
 	if !ok {
-		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, portal_maker, prankster, pyromaniac, pirate, hitman, werewolf, none.", player);
+		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, warper, prankster, pyromaniac, pirate, hitman, werewolf, none.", player);
 		return;
 	}
 
@@ -1664,6 +1664,21 @@ restart :: proc(player: Player) {
 	setup_lobby();
 	force_start_lobby_game();
 } @chat_command @youtuber
+
+// Chat command: /kill
+// /kill — kill yourself. /kill <player> — kill a specific player.
+kill :: proc(player: Player, target: Player = null) {
+	if game_state != Game_State.INGAME {
+		Chat.server_send_message("You can only use /kill during a round.", player);
+		return;
+	}
+	victim := target != null ? target : player;
+	if victim.player_state != Player_State.ALIVE {
+		Chat.server_send_message("That player is already dead.", player);
+		return;
+	}
+	victim->kill();
+} @chat_command
 
 
 ao_update_ingame :: proc(dt: float) {
