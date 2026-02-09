@@ -9,9 +9,31 @@ Door :: class : Component {
 
     is_open: bool;
 
+    // Cache the base bone positions so we can re-apply spacing every frame
+    // without accumulating offsets.
+    spacing_upper_base: v2;
+    spacing_lower_base: v2;
+    spacing_bases_cached: bool;
+
     ao_start :: proc(using this: Door) {
         collider_entity->set_local_enabled(force_locked);
         this->setup_spine_animator();
+    }
+
+    ao_update :: proc(using this: Door, dt: float) {
+        // Re-apply spacing offset every frame so Spine animations don't override it.
+        if spacing > 0 && spine_animator != null {
+            spine_animator->awaken();
+            if spine_animator.instance != null {
+                if !spacing_bases_cached {
+                    spacing_upper_base = spine_animator.instance->get_bone_local_position("vertical_upper_root");
+                    spacing_lower_base = spine_animator.instance->get_bone_local_position("vertical_lower_root");
+                    spacing_bases_cached = true;
+                }
+                spine_animator.instance->set_bone_local_position("vertical_upper_root", spacing_upper_base + v2.{0.0, spacing});
+                spine_animator.instance->set_bone_local_position("vertical_lower_root", spacing_lower_base + v2.{0.0, -spacing});
+            }
+        }
     }
 
     setup_spine_animator :: method() {
@@ -32,11 +54,13 @@ Door :: class : Component {
             return;
         }
 
-        if(spacing > 0) {
-            left_bone := spine_animator.instance->get_bone_local_position("vertical_upper_root");
-            right_bone := spine_animator.instance->get_bone_local_position("vertical_lower_root");
-            spine_animator.instance->set_bone_local_position("vertical_upper_root", left_bone + v2.{0.0, spacing});
-            spine_animator.instance->set_bone_local_position("vertical_lower_root", right_bone + v2.{0.0, -spacing});
+        // Cache base bone positions for spacing (applied every frame in ao_update).
+        if spacing > 0 {
+            spacing_upper_base = spine_animator.instance->get_bone_local_position("vertical_upper_root");
+            spacing_lower_base = spine_animator.instance->get_bone_local_position("vertical_lower_root");
+            spacing_bases_cached = true;
+            spine_animator.instance->set_bone_local_position("vertical_upper_root", spacing_upper_base + v2.{0.0, spacing});
+            spine_animator.instance->set_bone_local_position("vertical_lower_root", spacing_lower_base + v2.{0.0, -spacing});
         }
 
         state_machine := State_Machine.create();
@@ -219,9 +243,6 @@ World_References :: class : Component {
 
         spine_Animator := corpse->get_component(Spine_Animator);
         if spine_Animator != null && spine_Animator.instance != null && player.animator != null && player.animator.instance != null {
-            // Note: color replace API is on the Spine instance (not the component).
-            spine_Animator.instance->set_color_replace_color(player.avatar_color);
-
             death_anim := "Death_No_HP";
 
             spine_Animator.instance->disable_all_skins();
@@ -230,6 +251,9 @@ World_References :: class : Component {
                 spine_Animator.instance->enable_skin(player_skins[i]);
             }
             spine_Animator.instance->refresh_skins();
+
+            // Set color AFTER refresh_skins so the skin rebuild doesn't reset it.
+            spine_Animator.instance->set_color_replace_color(player.avatar_color);
 
 			// Hitman kill-specific corpse deaths (animations are integrated into the player rig).
 			killer := get_player_by_entity_id(killer_player_entity_id);

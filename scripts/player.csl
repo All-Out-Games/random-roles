@@ -264,6 +264,11 @@ Player :: class : Player_Base {
         } else if game_state == Game_State.VOTING {
             on_player_go_dead(this);
             world_references->teleport_to_voting(this);
+        } else {
+			// Any other state (ANIM_INTRO, ANIM_BODY_FOUND, ANIM_MEETING_CALLED,
+			// ANIM_VOTE_EJECT, ANIM_JESTER_WIN, ANIM_PYRO_WIN, ANIM_VICTORY):
+			// the round is already in progress so late-joiners must be ghosts.
+			on_player_go_dead(this);
         }
     }
 
@@ -400,6 +405,19 @@ Player :: class : Player_Base {
 	}
 
 	get_local_light_radii :: proc(using this: Player) -> v2 {
+		// During animations/cinematics, expand radii so LOS shadows don't hide content.
+		is_anim_state :=
+			game_state == Game_State.ANIM_INTRO ||
+			game_state == Game_State.ANIM_BODY_FOUND ||
+			game_state == Game_State.ANIM_MEETING_CALLED ||
+			game_state == Game_State.ANIM_VOTE_EJECT ||
+			game_state == Game_State.ANIM_JESTER_WIN ||
+			game_state == Game_State.ANIM_PYRO_WIN ||
+			game_state == Game_State.ANIM_VICTORY;
+		if is_anim_state {
+			return v2.{999.0, 999.0};
+		}
+
 		radii := v2.{PLAYER_LIGHT_BASE_INNER_RADIUS, PLAYER_LIGHT_BASE_OUTER_RADIUS};
 
 		// Power outage reduces visibility for non-traitors.
@@ -584,28 +602,42 @@ Player :: class : Player_Base {
                         if player_role == Player_Role.PIRATE {
                             draw_ability_button(this, Shoot_Ability, abilityIndex);
                             abilityIndex += 1;
-                            draw_ability_button(this, Black_Flag_Ability, abilityIndex);
-                            abilityIndex += 1;
-							draw_ability_button(this, Powder_Keg_Ability, abilityIndex);
-							abilityIndex += 1;
+							// Only show Black Flag once unlocked.
+							if this.pirate_treasure >= PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
+								draw_ability_button(this, Black_Flag_Ability, abilityIndex);
+								abilityIndex += 1;
+							}
+							// Only show Powder Keg once unlocked.
+							if this.pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+								draw_ability_button(this, Powder_Keg_Ability, abilityIndex);
+								abilityIndex += 1;
+							}
 							draw_ability_button(this, Pirate_Treasure_Map_Ability, abilityIndex);
 							abilityIndex += 1;
                         }
 
-						// Hitman gets Mine + Sniper (unlock in ability logic).
+						// Hitman gets Mine + Sniper (only show once unlocked).
 						if player_role == Player_Role.HITMAN {
-							draw_ability_button(this, Hitman_Mine_Ability, abilityIndex);
-							abilityIndex += 1;
-							draw_ability_button(this, Hitman_Sniper_Ability, abilityIndex);
-							abilityIndex += 1;
+							if this.hitman_kills >= HITMAN_MINE_UNLOCK_KILLS {
+								draw_ability_button(this, Hitman_Mine_Ability, abilityIndex);
+								abilityIndex += 1;
+							}
+							if this.hitman_kills >= HITMAN_SNIPER_UNLOCK_KILLS {
+								draw_ability_button(this, Hitman_Sniper_Ability, abilityIndex);
+								abilityIndex += 1;
+							}
 						}
 
-						// Werewolf gets Infect + Claw while in wolf form (unlock in ability logic).
+						// Werewolf gets Infect + Claw while in wolf form (only show once unlocked).
 						if player_role == Player_Role.WEREWOLF && this.werewolf_is_wolf_form {
-							draw_ability_button(this, Werewolf_Infecting_Bite_Ability, abilityIndex);
-							abilityIndex += 1;
-							draw_ability_button(this, Werewolf_Claw_Slash_Ability, abilityIndex);
-							abilityIndex += 1;
+							if this.werewolf_kills >= WEREWOLF_INFECT_UNLOCK_KILLS {
+								draw_ability_button(this, Werewolf_Infecting_Bite_Ability, abilityIndex);
+								abilityIndex += 1;
+							}
+							if this.werewolf_kills >= WEREWOLF_CLAW_UNLOCK_KILLS {
+								draw_ability_button(this, Werewolf_Claw_Slash_Ability, abilityIndex);
+								abilityIndex += 1;
+							}
 						}
 
 						// Traitor quick-access map (sabotage icon) above abilities.
@@ -640,16 +672,22 @@ Player :: class : Player_Base {
 						abilityIndex += 1;
 						draw_ability_button(this, Fake_Meeting_Ability, abilityIndex);
 						abilityIndex += 1;
-						draw_ability_button(this, Jester_Win_Ability, abilityIndex);
-						abilityIndex += 1;
+						// Only show Jester Win once unlocked.
+						if this.prankster_jester_unlocked_time > 0.0 {
+							draw_ability_button(this, Jester_Win_Ability, abilityIndex);
+							abilityIndex += 1;
+						}
 					}
 					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PYROMANIAC {
 						draw_ability_button(this, Pyromaniac_Light_Fire_Ability, abilityIndex);
 						abilityIndex += 1;
 						draw_ability_button(this, Pyromaniac_Light_Corpse_Ability, abilityIndex);
 						abilityIndex += 1;
-						draw_ability_button(this, Pyromaniac_World_Fire_Ability, abilityIndex);
-						abilityIndex += 1;
+						// Only show World Fire once unlocked.
+						if this.pyro_world_fire_unlocked_time > 0.0 {
+							draw_ability_button(this, Pyromaniac_World_Fire_Ability, abilityIndex);
+							abilityIndex += 1;
+						}
 					}
                 }
             } else if game_state == Game_State.LOBBY {
@@ -947,28 +985,10 @@ draw_player_role_hud :: proc(player: Player) {
 		UI.text(icon_rect, count_ts, format_string("%", .{player.coroner_dna_vials.count}));
 	}
 
-	// Pirate treasure + unlock progress.
+	// Pirate unlock progress.
 	if player.player_role == Player_Role.PIRATE && player->is_local_or_server() {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
-
-		// Treasure count icon on the right.
-		icon := get_asset(Texture_Asset, "sprites/icons/pirate/dig_for_treasure.png");
-		anchor := screen->right_center_rect()->offset(-70.0, -90.0);
-		icon_rect := anchor->grow(60.0); // big icon
-		if icon != null {
-			UI.quad(icon_rect->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
-		}
-
-		count_ts := UI.default_text_settings();
-		count_ts.size = 44;
-		count_ts.color = v4.{1, 1, 1, 1};
-		count_ts.halign = .CENTER;
-		count_ts.valign = .CENTER;
-		count_ts.do_outline = true;
-		count_ts.outline_thickness = 3;
-		count_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(icon_rect, count_ts, format_string("%", .{player.pirate_treasure}));
 
 		// Left-side panel with unlock progress (task list style).
 		safe := UI.get_safe_screen_rect();
@@ -1770,11 +1790,18 @@ Call_Meeting_Interactable :: class : Component {
     on_interact :: proc(using this: Call_Meeting_Interactable, player: Player) {
         // Block interaction while on cooldown.
         if get_time() < meeting_cooldown_ends_at return;
+		// Block meetings while any sabotage is active.
+		if rr_power_outage_active || rr_comms_outage_active || rr_lockdown_active {
+			player->Notify("Can't call a meeting during a sabotage!");
+			return;
+		}
         start_meeting(false, player);
     }
 
     can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
         if player.player_state != Player_State.ALIVE return false;
+		// Disable when any sabotage is active.
+		if rr_power_outage_active || rr_comms_outage_active || rr_lockdown_active return false;
         // Always show the interactable; cooldown text + on_interact guard handle the rest.
         return true;
     }
@@ -1801,7 +1828,9 @@ Report_Corpse_Interactable :: class : Interactable {
 
 		corpse := entity->get_component(Corpse);
 		if corpse == null return false;
-		if corpse.has_been_reported return false;
+
+		// Still show the interactable for already-reported bodies (on_interact will notify).
+		if corpse.has_been_reported return true;
 
 		// If only 1 player is alive, don't allow reporting — the game should end naturally.
 		alive_count := 0;
@@ -1819,6 +1848,13 @@ Report_Corpse_Interactable :: class : Interactable {
 	}
 
 	on_interact :: method(player: Player) {
+		// If already reported, just notify the player and don't start a meeting.
+		corpse := entity->get_component(Corpse);
+		if corpse != null && corpse.has_been_reported {
+			player->Notify("This body has already been reported.");
+			return;
+		}
+
 		// Mark ALL existing corpses as reported so they can't trigger another meeting.
 		foreach c: component_iterator(Corpse) {
 			if c == null continue;
@@ -1891,11 +1927,11 @@ Corpse :: class : Component {
 					text_rect := Rect{text_pos, text_pos}->grow(0.15, 1.5, 0.15, 1.5);
 					ts := UI.default_text_settings();
 					ts.size = 0.30;
-					ts.color = v4.{0.8, 0.8, 0.8, 0.9};
+					ts.color = v4.{1.0, 0.85, 0.25, 1.0};
 					ts.halign = .CENTER;
 					ts.valign = .CENTER;
 					ts.do_outline = true;
-					ts.outline_thickness = 1;
+					ts.outline_thickness = 3;
 					ts.outline_color = v4.{0, 0, 0, 1};
 					UI.text(text_rect, ts, "Already reported");
 				}
@@ -2236,7 +2272,7 @@ update_minimap_ui :: proc(player: Player) {
 	UI.quad(screen, bg, v4.{0.0, 0.0, 0.0, 0.75});
 
 	map_tex := get_asset(Texture_Asset, "sprites/map.png");
-	content := screen->inset(80.0);
+	content := screen->inset(40.0, 80.0, 120.0, 80.0);
 	map_rect := content->fit_aspect(map_tex->get_aspect());
 	UI.quad(map_rect, map_tex, v4.{1, 1, 1, 1});
 
@@ -2318,7 +2354,7 @@ draw_traitor_sabotage_map_button :: proc(player: Player) {
 
 	SABOTAGE_HALF_SIZE :: 48.0;
 	SABOTAGE_PAD :: 18.0;
-	ABILITY_STACK_Y_OFFSET :: 280.0;
+	ABILITY_STACK_Y_OFFSET :: 420.0;
 
 	center := safe->bottom_right_rect()->offset(-SABOTAGE_HALF_SIZE - SABOTAGE_PAD, SABOTAGE_HALF_SIZE + SABOTAGE_PAD + ABILITY_STACK_Y_OFFSET);
 	btn_rect := center->grow(SABOTAGE_HALF_SIZE);

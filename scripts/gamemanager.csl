@@ -220,8 +220,7 @@ FIRST_ROUND_LOBBY_COUNTDOWN_SECONDS :: 30.0;
 NORMAL_LOBBY_COUNTDOWN_SECONDS :: 10.0;
 
 // Non-body-report meetings (button/fake meetings) cooldown to prevent spam.
-MEETING_COOLDOWN_SECONDS :: 30.0;
-FAKE_MEETING_COOLDOWN_SECONDS :: 120.0;
+MEETING_COOLDOWN_SECONDS :: 60.0;
 
 // After a meeting/voting ends, briefly lock out killing abilities to prevent instant spawn-kills.
 POST_MEETING_KILL_LOCKOUT_SECONDS :: 5.0;
@@ -1004,15 +1003,8 @@ start_fake_meeting :: proc(caller: Player) {
 	if caller == null return;
 	if caller.player_state != Player_State.ALIVE return;
 
-	now := get_time();
-	if now < fake_meeting_cooldown_ends_at {
-		remaining := fake_meeting_cooldown_ends_at - now;
-		caller->Notify(format_string("Fake meeting on cooldown: %s", .{format_float(remaining, decimals=0)}));
-		return;
-	}
-
 	// Use the normal meeting flow (meeting called popup -> voting).
-	// Respect meeting cooldown (only applies to non-body meetings).
+	// Fake meetings share the same cooldown as real meetings (checked inside start_meeting).
 	rr_suppress_meeting_initiator = true;
 	started := start_meeting(false, caller);
 	rr_suppress_meeting_initiator = false;
@@ -1021,7 +1013,6 @@ start_fake_meeting :: proc(caller: Player) {
 	fake_meeting_active = true;
 	fake_meeting_caller_id = caller.entity.id;
 	caller.prankster_fake_meetings_called += 1;
-	fake_meeting_cooldown_ends_at = now + FAKE_MEETING_COOLDOWN_SECONDS;
 }
 
 prankster_check_unlock_jester_win :: proc(player: Player) {
@@ -1097,6 +1088,10 @@ on_player_go_dead :: proc(player: Player) {
 	// If the player was mid-task when they died, close the task UI so death feedback/cinematics
 	// aren't obscured. Ghost civilians can still reopen and continue tasks afterwards.
 	rr_cancel_all_task_attempts(player);
+
+	// Release any corpse this player was dragging (covers all death paths: kill, vote eject, etc.).
+	// Safe to call even if already dropped (guard inside checks dragging_corpse_entity_id == 0).
+	rr_drag_body_force_drop_for_player(player);
 
 	player.player_state = Player_State.DEAD;
 	// Safety: temporary resurrection should always end when dead.
@@ -1362,6 +1357,18 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 
 		// Play meeting-call SFX once (server authoritative).
 		rr_play_call_meeting_sound(caller);
+	}
+
+	// Release any carried bodies before the meeting starts.
+	foreach p: component_iterator(Player) {
+		rr_drag_body_force_drop_for_player(p);
+	}
+
+	// Clear active light sabotage (power outage) when entering a meeting/cutscene.
+	// The meeting teleports players to a well-lit voting area, so the sabotage effect
+	// should not persist through the meeting.
+	if rr_power_outage_active {
+		rr_end_power_outage(null);
 	}
 
 	// Save every player's ability cooldowns so they can be restored after the meeting.
@@ -1755,6 +1762,11 @@ ao_update_ingame :: proc(dt: float) {
 				return;
 			}
 		}
+	}
+	// -- Civilian: All traitors are dead
+	if traitor_count == 0 {
+		rr_queue_end_game_with_victor(Player_Type.CIVILIAN);
+		return;
 	}
 	// -- Civilian: Only civilians alive
 	if civilian_count > 0 && civilian_count == alive_count {
