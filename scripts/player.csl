@@ -257,8 +257,18 @@ Player :: class : Player_Base {
 		// Voice chat: ensure late-joiners get the correct routing immediately.
 		this->apply_voice_chat_masks_for_current_state();
 
+		// If a new player joins while in solo test mode (mid-round), end the stale
+		// round and return to lobby so everyone starts fresh.
+		if rr_started_solo_test_mode && game_state != Game_State.LOBBY && game_state != Game_State.ANIM_VICTORY {
+			setup_lobby();
+			return;
+		}
+
         if game_state == Game_State.LOBBY {
             world_references->teleport_near_lobby(this);
+        } else if game_state == Game_State.ANIM_VICTORY {
+			// Victory screen: round is over, treat as passive (not ghost).
+			on_player_go_passive(this);
         } else if game_state == Game_State.INGAME {
             on_player_go_dead(this);
         } else if game_state == Game_State.VOTING {
@@ -266,7 +276,7 @@ Player :: class : Player_Base {
             world_references->teleport_to_voting(this);
         } else {
 			// Any other state (ANIM_INTRO, ANIM_BODY_FOUND, ANIM_MEETING_CALLED,
-			// ANIM_VOTE_EJECT, ANIM_JESTER_WIN, ANIM_PYRO_WIN, ANIM_VICTORY):
+			// ANIM_VOTE_EJECT, ANIM_JESTER_WIN, ANIM_PYRO_WIN):
 			// the round is already in progress so late-joiners must be ghosts.
 			on_player_go_dead(this);
         }
