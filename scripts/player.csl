@@ -873,6 +873,10 @@ draw_player_role_hud :: proc(player: Player) {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
+		// Mobile scale boost (no-op on PC).
+		_pushed_scale := rr_push_mobile_ui_scale(player);
+		defer rr_pop_mobile_ui_scale(_pushed_scale);
+
 		safe := UI.get_safe_screen_rect();
 
 		PANEL_W :: 300.0;
@@ -909,6 +913,9 @@ draw_player_role_hud :: proc(player: Player) {
 		base_ts.do_outline = true;
 		base_ts.outline_thickness = 4;
 		base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+		base_ts.do_autofit = true;
+		base_ts.autofit_min_size = 14;
+		base_ts.autofit_max_size = 24;
 
 		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 		{
@@ -990,6 +997,10 @@ draw_player_role_hud :: proc(player: Player) {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
+		// Mobile scale boost (no-op on PC).
+		_pushed_scale := rr_push_mobile_ui_scale(player);
+		defer rr_pop_mobile_ui_scale(_pushed_scale);
+
 		// Left-side panel with unlock progress (task list style).
 		safe := UI.get_safe_screen_rect();
 
@@ -1019,6 +1030,9 @@ draw_player_role_hud :: proc(player: Player) {
 		base_ts.do_outline = true;
 		base_ts.outline_thickness = 4;
 		base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+		base_ts.do_autofit = true;
+		base_ts.autofit_min_size = 14;
+		base_ts.autofit_max_size = 24;
 
 		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 		{
@@ -1077,6 +1091,10 @@ draw_player_role_hud :: proc(player: Player) {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
+		// Mobile scale boost (no-op on PC).
+		_pushed_scale := rr_push_mobile_ui_scale(player);
+		defer rr_pop_mobile_ui_scale(_pushed_scale);
+
 		safe := UI.get_safe_screen_rect();
 
 		PANEL_W :: 300.0;
@@ -1105,6 +1123,9 @@ draw_player_role_hud :: proc(player: Player) {
 		base_ts.do_outline = true;
 		base_ts.outline_thickness = 4;
 		base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+		base_ts.do_autofit = true;
+		base_ts.autofit_min_size = 14;
+		base_ts.autofit_max_size = 24;
 
 		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 		{
@@ -2270,6 +2291,22 @@ update_minimap_ui :: proc(player: Player) {
 	screen := UI.get_screen_rect();
 	bg := get_asset(Texture_Asset, "$AO/white.png");
 	UI.quad(screen, bg, v4.{0.0, 0.0, 0.0, 0.75});
+
+	// Tap anywhere on the dark overlay to dismiss the map (drawn first so map
+	// buttons drawn later take priority for clicks).
+	{
+		UI.push_id("minimap_dismiss");
+		defer UI.pop_id();
+		dismiss_bs: Button_Settings = .{};
+		dismiss_bs.sprite = core_globals.white_sprite;
+		dismiss_bs.color = v4.{0, 0, 0, 0};
+		dismiss_bs.hovered_color = v4.{0, 0, 0, 0};
+		dismiss_bs.pressed_color = v4.{0, 0, 0, 0};
+		dismiss_bs.background_color_multiplier = v4.{0, 0, 0, 0};
+		if UI.button(screen, dismiss_bs, .{}, "").clicked {
+			player.show_minimap = false;
+		}
+	}
 
 	map_tex := get_asset(Texture_Asset, "sprites/map.png");
 	content := screen->inset(40.0, 80.0, 120.0, 80.0);

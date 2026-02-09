@@ -1,5 +1,30 @@
 import "core:ao"
 
+// Mobile UI: push a higher scale factor on phones/tablets so HUD elements
+// are readable without changing the base layout for PC players.
+// On PC nothing is pushed, so the existing scale is left untouched.
+RR_MOBILE_UI_SCALE_PHONE  :: 1.35;
+RR_MOBILE_UI_SCALE_TABLET :: 1.15;
+
+rr_push_mobile_ui_scale :: proc(player: Player) -> bool {
+	if player == null return false;
+	if player.device_kind == .PHONE {
+		UI.push_scale_factor(RR_MOBILE_UI_SCALE_PHONE);
+		return true;
+	}
+	if player.device_kind == .TABLET {
+		UI.push_scale_factor(RR_MOBILE_UI_SCALE_TABLET);
+		return true;
+	}
+	return false;
+}
+
+rr_pop_mobile_ui_scale :: proc(pushed: bool) {
+	if pushed {
+		UI.pop_scale_factor();
+	}
+}
+
 NUM_TASKS: int : 10;
 
 // --- Task destinations (registered by Task_Interactable in `scripts/player.csl`) ---
@@ -401,6 +426,10 @@ rr_draw_civilian_progress_bar :: proc(player: Player) {
 	if game_state == Game_State.ANIM_PYRO_WIN    return;
 	if game_state == Game_State.ANIM_VICTORY     return;
 
+	// Mobile scale boost (no-op on PC).
+	_pushed_scale := rr_push_mobile_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
 	// Global civilian task progress (win condition).
 	total_tasks := 0;
 	remaining_tasks := 0;
@@ -465,6 +494,9 @@ rr_draw_civilian_progress_bar :: proc(player: Player) {
 	label_ts.do_outline = true;
 	label_ts.outline_thickness = 6;
 	label_ts.outline_color = v4.{0, 0, 0, 1};
+	label_ts.do_autofit = true;
+	label_ts.autofit_min_size = 14;
+	label_ts.autofit_max_size = 26;
 	label_rect := progress_rect->top_rect()->offset(0.0, -12.0)->grow(24, 0, 0, 0);
 	UI.text(label_rect, label_ts, "TOTAL PROGRESS");
 
@@ -477,6 +509,9 @@ rr_draw_civilian_progress_bar :: proc(player: Player) {
 	pct_ts.do_outline = true;
 	pct_ts.outline_thickness = 6;
 	pct_ts.outline_color = v4.{0, 0, 0, 1};
+	pct_ts.do_autofit = true;
+	pct_ts.autofit_min_size = 14;
+	pct_ts.autofit_max_size = 24;
 	pct_rect := progress_rect->bottom_rect()->offset(0.0, 0.0)->grow(0, 0, 20, 0);
 	UI.text(pct_rect, pct_ts, format_string("%0%%", .{progress_pct}));
 }
@@ -514,6 +549,9 @@ rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player
 	ts.do_outline = true;
 	ts.outline_thickness = 2;
 	ts.outline_color = v4.{0, 0, 0, 1};
+	ts.do_autofit = true;
+	ts.autofit_min_size = 14;
+	ts.autofit_max_size = 24;
 
 	if is_sabotage {
 		ts.color = v4.{1, 0.3, 0.3, 1};
@@ -632,6 +670,10 @@ update_tasks_ui :: proc(player: Player) {
 	UI.push_layer(100);
 	defer UI.pop_layer();
 
+	// Mobile scale boost (no-op on PC).
+	_pushed_scale := rr_push_mobile_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
 	screen := UI.get_safe_screen_rect();
 
 	if !player.task_list_inited {
@@ -735,6 +777,9 @@ update_tasks_ui :: proc(player: Player) {
 			task_ts.do_outline = true;
 			task_ts.outline_thickness = 4;
 			task_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+			task_ts.do_autofit = true;
+			task_ts.autofit_min_size = 14;
+			task_ts.autofit_max_size = 24;
 			UI.text(entry_content->inset(0, 4, 0, 4), task_ts, task_name);
 		}
 
@@ -833,6 +878,9 @@ update_tasks_ui :: proc(player: Player) {
 			task_ts.do_outline = true;
 			task_ts.outline_thickness = 4;
 			task_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+			task_ts.do_autofit = true;
+			task_ts.autofit_min_size = 14;
+			task_ts.autofit_max_size = 24;
 			UI.text(entry_content->inset(0, 4, 0, 4), task_ts, task_name);
 		}
 
@@ -979,6 +1027,9 @@ update_tasks_ui :: proc(player: Player) {
 		task_ts.do_outline = true;
 		task_ts.outline_thickness = 4;
 		task_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+		task_ts.do_autofit = true;
+		task_ts.autofit_min_size = 14;
+		task_ts.autofit_max_size = 24;
 		UI.text(text_rect->inset(0, 4, 0, 4), task_ts, task_name);
 	}
 }

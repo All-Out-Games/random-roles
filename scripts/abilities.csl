@@ -1220,42 +1220,23 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 			}
 		}
 
-		// Click-to-target: click ability to enter aim mode, then click to fire (right-click to cancel).
-		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
-		targeting := targeted.targeting;
+		// Use the standard targeted-aimed helper for PC + mobile compatibility.
+		// PC: click button -> aim mode -> click to fire (right-click cancel).
+		// Mobile: press-drag-release to aim and fire.
+		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
 
-		// Prevent targeting mode while on cooldown / otherwise unusable.
-		if targeting && !params.can_use {
-			player.active_ability = null;
-			this->cleanup_targeting();
-			return;
-		}
+		// Camera zoom while targeting (the helper sets player.active_ability during aim mode).
+		targeting := player.active_ability != null;
+		this->set_camera_zoom(targeting);
 
-		// Handle targeting transitions.
-		if targeting && !was_targeting {
-			activated_this_session = false;
-			was_targeting = true;
-		}
+		// Reset tracking state when not targeting.
 		if !targeting {
-			if was_targeting {
-				this->cleanup_targeting();
-			}
-			return;
+			activated_this_session = false;
 		}
 
-		this->set_camera_zoom(true);
-
-		aiming := Ability_Utilities.update_aiming_ability(player, ref params);
-		if aiming.cancel {
-			player.active_ability = null;
-			this->cleanup_targeting();
-			return;
-		}
-
-		// Preview
-		target_pos := get_mouse_world_position();
-		draw_aiming_line(player.entity.world_position, aiming.aim_direction, 1.0 / player.camera.size * 6);
-		if player->is_local() {
+		// Crosshair on cursor/touch point (local visual).
+		if targeting && player->is_local() {
+			target_pos := get_mouse_world_position();
 			UI.push_world_draw_context();
 			defer UI.pop_draw_context();
 			UI.push_z(target_pos.y);
@@ -1267,13 +1248,14 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 			return;
 		}
 
-		if aiming.activate && params.can_use {
+		if activation.activate {
 			activated_this_session = true;
 
-			// Pick target under cursor (global snipe).
+			// Pick target under cursor/touch point (global snipe).
+			target_pos := get_mouse_world_position();
 			target := get_closest_alive_target_at_point(this, player, target_pos, 1.5);
 			if target == null {
-				// Stay in targeting mode if they missed.
+				// Missed - allow retrying.
 				activated_this_session = false;
 				return;
 			}
@@ -1284,8 +1266,8 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 			target->kill_with_killer(player.entity.id);
 			current_cooldown = HITMAN_SNIPER_COOLDOWN_SECONDS;
 
-			player.active_ability = null;
-			this->cleanup_targeting();
+			this->set_camera_zoom(false);
+			activated_this_session = false;
 		}
 	}
 
