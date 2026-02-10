@@ -5,8 +5,8 @@
   "name": "Max",
   "local_enabled": true,
   "local_position": {
-    "X": 31.7412014007568359,
-    "Y": 17.2881984710693359
+    "X": 34.0893554687500000,
+    "Y": 20.0836486816406250
   },
   "local_rotation": 0,
   "local_scale": {

@@ -2150,8 +2150,9 @@ update_minimap_ui :: proc(player: Player) {
 	
 	// Map button should be about the same size as the role icon.
 	MAP_HALF_SIZE :: 55.0; // role icon uses 50.0
-	MAP_PAD :: 20.0;
-	btn_center := safe->top_right_rect()->offset(-MAP_HALF_SIZE - MAP_PAD, -MAP_HALF_SIZE - MAP_PAD - 25.0);
+	MAP_PAD_X :: 20;
+	MAP_PAD_Y :: 250;
+	btn_center := safe->top_right_rect()->offset(-MAP_HALF_SIZE - MAP_PAD_X, -MAP_HALF_SIZE - MAP_PAD_Y);
 	btn_rect := btn_center->grow(MAP_HALF_SIZE);
 
 	if game_state == Game_State.INGAME && player->is_chat_open() {
@@ -2270,6 +2271,12 @@ update_minimap_ui :: proc(player: Player) {
 
 	UI.push_id("minimap_toggle");
 	defer UI.pop_id();
+
+	// Tab key toggle (raw input, works regardless of UI layers).
+	if player.device_kind == .PC && get_input_down(Input.TAB, true) {
+		player.show_minimap = !player.show_minimap;
+	}
+
 	map_icon := get_asset(Texture_Asset, "sprites/icons/map_icon.png");
 	btn_bs: Button_Settings = .{};
 	rr_ui_apply_button_click_sound(ref btn_bs);
