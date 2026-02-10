@@ -64,6 +64,11 @@ Player :: class : Player_Base {
 	local_light_caster: LOS_Caster;
 
 
+	// --- Camera ---
+	// Saved once at start so we can restore it at the beginning of each round.
+	camera_default_size: float;
+	camera_default_size_saved: bool;
+
 	// --- Ghost QoL ---
 	// Local-only camera zoom so dead players can see more of the map.
 	ghost_camera_zoom_active: bool;
@@ -147,6 +152,15 @@ Player :: class : Player_Base {
 	werewolf_skin_enable_at: float;   // 0 = none, otherwise game-time to enable werewolf skin
 	werewolf_skin_disable_at: float;  // 0 = none, otherwise game-time to disable werewolf skin
 	werewolf_skin_active: bool;       // cached flag – avoids get_skins() every frame
+	// Saved cosmetic skins before wolf form (restored on revert).
+	werewolf_saved_cosmetic_skins: [..]string;
+	werewolf_saved_avatar_color: Color_Replace_Color;
+	// Speed boost while in wolf form.
+	werewolf_speed_boost_active: bool;
+	werewolf_speed_original: float;
+	// Delayed infected transform: game-time at which to fire the "werewolf_infected_transform" trigger.
+	// 0 = no pending trigger.
+	werewolf_infected_transform_trigger_at: float;
 
 	// --- Meeting cooldown pause ---
 	// Saved ability cooldowns when a meeting starts so they can be restored afterwards.
@@ -354,6 +368,10 @@ Player :: class : Player_Base {
 			rr_draw_pirate_treasure_guidance_if_needed(this);
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			draw_player_role_hud(this);
+			// Draw resurrection timer above any temporarily resurrected players' heads.
+			if this->is_local() {
+				rr_draw_temp_resurrect_timers();
+			}
 			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
 				this->draw_letterbox_bars();
 			}
@@ -498,6 +516,27 @@ Player :: class : Player_Base {
 			// - Only the local player has a camera.
 			// - Avoid fighting win cinematics (handled by the early return below).
 			if this->is_local() {
+				// Save the engine-default camera size once so we can restore it each round.
+				if !camera_default_size_saved {
+					camera_default_size = this.camera.size;
+					camera_default_size_saved = true;
+				}
+
+				// Reset camera zoom to default at the start of each round (intro or lobby).
+				if game_state == Game_State.ANIM_INTRO || game_state == Game_State.LOBBY {
+					if ghost_camera_zoom_active {
+						ghost_camera_zoom_active = false;
+					}
+					if vote_eject_camera_override_active {
+						vote_eject_camera_override_active = false;
+					}
+					if jester_win_camera_override_active {
+						jester_win_camera_override_active = false;
+					}
+					this.camera.follow_player = true;
+					this.camera.size = camera_default_size;
+				}
+
 				in_cinematic :=
 					game_state == Game_State.ANIM_JESTER_WIN ||
 					game_state == Game_State.ANIM_PYRO_WIN;
@@ -638,13 +677,13 @@ Player :: class : Player_Base {
 							}
 						}
 
-						// Werewolf gets Infect + Claw while in wolf form (only show once unlocked).
-						if player_role == Player_Role.WEREWOLF && this.werewolf_is_wolf_form {
+						// Werewolf gets Infect (any form) + Claw (wolf form only), once unlocked.
+						if player_role == Player_Role.WEREWOLF {
 							if this.werewolf_kills >= WEREWOLF_INFECT_UNLOCK_KILLS {
 								draw_ability_button(this, Werewolf_Infecting_Bite_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
-							if this.werewolf_kills >= WEREWOLF_CLAW_UNLOCK_KILLS {
+							if this.werewolf_is_wolf_form && this.werewolf_kills >= WEREWOLF_CLAW_UNLOCK_KILLS {
 								draw_ability_button(this, Werewolf_Claw_Slash_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
@@ -808,6 +847,7 @@ Player :: class : Player_Base {
 		// Ensure visuals revert immediately.
 		this.werewolf_skin_enable_at = 0.0;
 		this.werewolf_skin_disable_at = get_time();
+		this.werewolf_infected_transform_trigger_at = 0.0;
 
 		// Track death for the next meeting's recap UI.
 		rr_register_player_death(this.entity.id);
@@ -854,6 +894,51 @@ player_role_to_icon_texture :: proc(role: Player_Role) -> Texture_Asset {
 		case .WEREWOLF:     return get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png");
 	}
 	return null;
+}
+
+// Draw a countdown timer above every temporarily resurrected player's head.
+// Called once per frame from the local player's ao_update.
+rr_draw_temp_resurrect_timers :: proc() {
+	if game_state != Game_State.INGAME return;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+
+	foreach p: component_iterator(Player) {
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if !p.is_temporarily_resurrected continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.temporarily_resurrected_until <= 0.0 continue;
+
+		remaining := p.temporarily_resurrected_until - get_time();
+		if remaining < 0.0 { remaining = 0.0; }
+		remaining_i := (remaining + 0.999).(int);
+		if remaining_i < 0 { remaining_i = 0; }
+
+		text_pos := p.entity.world_position + v2.{0, 1.8};
+
+		UI.push_z(text_pos.y);
+		defer UI.pop_z();
+
+		text_rect := Rect{text_pos, text_pos}->grow(0.15, 1.5, 0.15, 1.5);
+
+		ts := UI.default_text_settings();
+		ts.size = 0.30;
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 3;
+		ts.outline_color = v4.{0, 0, 0, 1};
+		// Pulsing red when running low.
+		if remaining < 3.0 {
+			ts.color = v4.{1.0, 0.3, 0.3, 1.0};
+		} else {
+			ts.color = v4.{0.3, 1.0, 0.5, 1.0};
+		}
+
+		UI.text(text_rect, ts, format_string("%s", .{remaining_i}));
+	}
 }
 
 draw_player_role_hud :: proc(player: Player) {
@@ -1204,6 +1289,8 @@ draw_player_role_hud :: proc(player: Player) {
 
 // --- Werewolf skins (merged player rig) ---
 WEREWOLF_SKIN_NAME :: "004RAND/werewolf";
+WEREWOLF_NAME_INVIS_REASON :: "werewolf_transform";
+WEREWOLF_WOLF_FORM_SPEED_MULTIPLIER :: 1.35;
 WEREWOLF_HOWL_TOTAL_SECONDS :: 2.0;
 WEREWOLF_HOWL_HALF_SECONDS :: WEREWOLF_HOWL_TOTAL_SECONDS * 0.5;
 WEREWOLF_INFECTED_TRANSFORM_TOTAL_SECONDS :: 2.0;
@@ -1248,6 +1335,64 @@ rr_player_has_skin :: proc(player: Player, skin: string) -> bool {
 	return false;
 }
 
+// Enables the full werewolf look: saves current cosmetic skins, strips them, enables only the
+// werewolf skin, and forces dark brown color.
+rr_werewolf_enable_wolf_look :: proc(player: Player) {
+	if player == null return;
+	if player.animator == null return;
+	if player.animator.instance == null return;
+
+	// Save current skins so we can restore later.
+	player.werewolf_saved_cosmetic_skins->clear();
+	skins := player.animator.instance->get_skins();
+	for i: 0..skins.count-1 {
+		if skins[i] != WEREWOLF_SKIN_NAME {
+			player.werewolf_saved_cosmetic_skins->append(skins[i]);
+		}
+	}
+	player.werewolf_saved_avatar_color = player.avatar_color;
+
+	// Strip all skins and enable only the werewolf skin.
+	player.animator.instance->disable_all_skins();
+	player.animator.instance->enable_skin(WEREWOLF_SKIN_NAME);
+	player.animator.instance->refresh_skins();
+
+	// Force dark brown color (server-only so it replicates to all clients).
+	if Game.is_server() {
+		player.animator.instance->set_color_replace_color(Color_Replace_Color.BROWN1);
+	}
+
+	// Hide the player's name tag while in wolf form.
+	player->add_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
+
+	player.werewolf_skin_active = true;
+}
+
+// Restores the player's original cosmetic skins and avatar color after wolf form ends.
+rr_werewolf_disable_wolf_look :: proc(player: Player) {
+	if player == null return;
+	if player.animator == null return;
+	if player.animator.instance == null return;
+
+	// Disable werewolf skin and restore saved cosmetics.
+	player.animator.instance->disable_all_skins();
+	for i: 0..player.werewolf_saved_cosmetic_skins.count-1 {
+		player.animator.instance->enable_skin(player.werewolf_saved_cosmetic_skins[i]);
+	}
+	player.animator.instance->refresh_skins();
+
+	// Restore original avatar color (server-only so it replicates to all clients).
+	if Game.is_server() {
+		player.animator.instance->set_color_replace_color(player.werewolf_saved_avatar_color);
+	}
+
+	// Restore name tag visibility.
+	player->remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
+
+	player.werewolf_skin_active = false;
+	player.werewolf_saved_cosmetic_skins->clear();
+}
+
 rr_werewolf_should_look_werewolf :: proc(player: Player) -> bool {
 	if player == null return false;
 	if player.entity == null return false;
@@ -1269,14 +1414,22 @@ rr_werewolf_update_skins :: proc(player: Player) {
 
 	now := get_time();
 
+	// Process delayed infected-transform animation trigger.
+	if player.werewolf_infected_transform_trigger_at > 0.0 && now >= player.werewolf_infected_transform_trigger_at {
+		player.werewolf_infected_transform_trigger_at = 0.0;
+		player->set_trigger("werewolf_infected_transform");
+	}
+
 	// Hard-forces back to schleem look if we're not supposed to be werewolf-looking.
 	if !rr_werewolf_should_look_werewolf(player) {
 		player.werewolf_skin_enable_at = 0.0;
 		player.werewolf_skin_disable_at = 0.0;
+		player.werewolf_infected_transform_trigger_at = 0.0;
 		if player.werewolf_skin_active {
-			rr_player_set_skin_enabled(player, WEREWOLF_SKIN_NAME, false);
-			player.werewolf_skin_active = false;
+			rr_werewolf_disable_wolf_look(player);
 		}
+		// Always clear name invisibility even if skin wasn't active (safety for lobby/reset).
+		player->remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
 		return;
 	}
 
@@ -1284,22 +1437,19 @@ rr_werewolf_update_skins :: proc(player: Player) {
 	if player.werewolf_skin_disable_at > 0.0 && now >= player.werewolf_skin_disable_at {
 		player.werewolf_skin_disable_at = 0.0;
 		player.werewolf_skin_enable_at = 0.0;
-		rr_player_set_skin_enabled(player, WEREWOLF_SKIN_NAME, false);
-		player.werewolf_skin_active = false;
+		rr_werewolf_disable_wolf_look(player);
 		return;
 	}
 
-	// Process scheduled enable.
+	// Process scheduled enable (strips cosmetics, forces dark brown + werewolf-only skin).
 	if player.werewolf_skin_enable_at > 0.0 && now >= player.werewolf_skin_enable_at {
 		player.werewolf_skin_enable_at = 0.0;
-		rr_player_set_skin_enabled(player, WEREWOLF_SKIN_NAME, true);
-		player.werewolf_skin_active = true;
+		rr_werewolf_enable_wolf_look(player);
 	}
 
 	// Safety: if we should look werewolf but no enable is pending and skin isn't on, force it on.
 	if player.werewolf_skin_enable_at <= 0.0 && !player.werewolf_skin_active {
-		rr_player_set_skin_enabled(player, WEREWOLF_SKIN_NAME, true);
-		player.werewolf_skin_active = true;
+		rr_werewolf_enable_wolf_look(player);
 	}
 }
 
@@ -1348,6 +1498,16 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		player->set_trigger("RESET");
 		player.werewolf_skin_enable_at = 0.0;
 		player.werewolf_skin_disable_at = now;
+	}
+
+	// Speed boost: apply on enter, remove on exit.
+	if player.werewolf_is_wolf_form && !player.werewolf_speed_boost_active {
+		player.werewolf_speed_original = player.agent.movement_speed;
+		player.werewolf_speed_boost_active = true;
+		player.agent.movement_speed = player.werewolf_speed_original * WEREWOLF_WOLF_FORM_SPEED_MULTIPLIER;
+	} else if !player.werewolf_is_wolf_form && player.werewolf_speed_boost_active {
+		player.agent.movement_speed = player.werewolf_speed_original;
+		player.werewolf_speed_boost_active = false;
 	}
 }
 
@@ -1831,6 +1991,8 @@ Call_Meeting_Interactable :: class : Component {
 
     can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
         if player.player_state != Player_State.ALIVE return false;
+		// Temporarily resurrected players should not be able to call meetings.
+		if player.is_temporarily_resurrected return false;
 		// Disable when any sabotage is active.
 		if rr_power_outage_active || rr_comms_outage_active || rr_lockdown_active return false;
         // Always show the interactable; cooldown text + on_interact guard handle the rest.
@@ -1860,8 +2022,8 @@ Report_Corpse_Interactable :: class : Interactable {
 		corpse := entity->get_component(Corpse);
 		if corpse == null return false;
 
-		// Still show the interactable for already-reported bodies (on_interact will notify).
-		if corpse.has_been_reported return true;
+		// Already-reported bodies should not show the report prompt at all.
+		if corpse.has_been_reported return false;
 
 		// If only 1 player is alive, don't allow reporting — the game should end naturally.
 		alive_count := 0;

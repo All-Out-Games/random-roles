@@ -741,11 +741,14 @@ rr_try_start_power_outage :: proc(caller: Player) {
 
 	if rr_power_outage_active return;
 	if get_time() < rr_power_outage_cooldown_ends_at return;
+	// Global shared sabotage cooldown.
+	if get_time() < rr_global_sabotage_cooldown_ends_at return;
 
 	rr_power_outage_active = true;
 	rr_power_outage_started_at = get_time();
 	rr_power_outage_triggered_by_id = caller.entity.id;
 	rr_power_outage_cooldown_ends_at = get_time() + POWER_OUTAGE_SABOTAGE_COOLDOWN_SECONDS;
+	rr_global_sabotage_cooldown_ends_at = get_time() + GLOBAL_SABOTAGE_COOLDOWN_SECONDS;
 
 	// One-shot SFX on server (replicated to clients). No position — global event.
 	sfx := SFX.default_sfx_desc();
@@ -828,11 +831,14 @@ rr_try_start_comms_outage :: proc(caller: Player) {
 
 	if rr_comms_outage_active return;
 	if get_time() < rr_comms_outage_cooldown_ends_at return;
+	// Global shared sabotage cooldown.
+	if get_time() < rr_global_sabotage_cooldown_ends_at return;
 
 	rr_comms_outage_active = true;
 	rr_comms_outage_started_at = get_time();
 	rr_comms_outage_triggered_by_id = caller.entity.id;
 	rr_comms_outage_cooldown_ends_at = get_time() + COMMS_OUTAGE_SABOTAGE_COOLDOWN_SECONDS;
+	rr_global_sabotage_cooldown_ends_at = get_time() + GLOBAL_SABOTAGE_COOLDOWN_SECONDS;
 
 	// Inject the fix task for all alive non-traitors (traitors shouldn't be instructed to fix sabotages).
 	for i: 0..players.elements.count-1 {
@@ -868,12 +874,15 @@ rr_try_start_lockdown :: proc(caller: Player) {
 
 	if rr_lockdown_active return;
 	if get_time() < rr_lockdown_cooldown_ends_at return;
+	// Global shared sabotage cooldown.
+	if get_time() < rr_global_sabotage_cooldown_ends_at return;
 
 	rr_lockdown_active = true;
 	rr_lockdown_started_at = get_time();
 	rr_lockdown_triggered_by_id = caller.entity.id;
 	rr_lockdown_ends_at = get_time() + LOCKDOWN_DURATION_SECONDS;
 	rr_lockdown_cooldown_ends_at = get_time() + LOCKDOWN_SABOTAGE_COOLDOWN_SECONDS;
+	rr_global_sabotage_cooldown_ends_at = get_time() + GLOBAL_SABOTAGE_COOLDOWN_SECONDS;
 
 	// Match meeting behavior: force doors closed/locked.
 	close_all_doors();
@@ -1119,6 +1128,22 @@ on_player_go_passive :: proc(player: Player) {
 	// Safety: passive/lobby players should never remain in temporary-resurrect state.
 	player.is_temporarily_resurrected = false;
 	player.temporarily_resurrected_until = 0.0;
+	// Safety: clear werewolf visual state so players don't stay invisible/wolf-colored in lobby.
+	// Reset all werewolf state; the next frame's rr_werewolf_update_skins will handle skin cleanup
+	// because rr_werewolf_should_look_werewolf returns false for PASSIVE players.
+	player->remove_name_invisibility_reason("werewolf_transform");
+	player.werewolf_infected = false;
+	player.werewolf_infected_from_id = 0;
+	player.werewolf_is_wolf_form = false;
+	player.werewolf_transform_ends_at = 0.0;
+	player.werewolf_skin_enable_at = 0.0;
+	player.werewolf_skin_disable_at = 0.0;
+	player.werewolf_infected_transform_trigger_at = 0.0;
+	player.werewolf_saved_tasks_active = false;
+	if player.werewolf_speed_boost_active {
+		player.agent.movement_speed = player.werewolf_speed_original;
+		player.werewolf_speed_boost_active = false;
+	}
 	world_references->teleport_near_lobby(player);
 	player->remove_ghost_reason("spectator");
 	// Restore baseline speed when leaving ghost mode.
@@ -1202,6 +1227,7 @@ setup_lobby :: proc() {
 	rr_lockdown_triggered_by_id = 0;
 	rr_lockdown_cooldown_ends_at = 0.0;
 	rr_lockdown_ends_at = 0.0;
+	rr_global_sabotage_cooldown_ends_at = 0.0;
 	fake_meeting_cooldown_ends_at = 0.0;
 	foreach player: component_iterator(Player) {
 		rr_power_outage_remove_generator_task_from_player(player);
@@ -1247,6 +1273,7 @@ setup_ingame :: proc() {
 	rr_comms_outage_triggered_by_id = 0;
 	// Sabotages start on cooldown for the same duration as abilities.
 	rr_comms_outage_cooldown_ends_at = get_time() + INITIAL_ROUND_ATTACK_LOCKOUT_SECONDS;
+	rr_global_sabotage_cooldown_ends_at = get_time() + INITIAL_ROUND_ATTACK_LOCKOUT_SECONDS;
 	rr_update_comms_lever_visuals();
 	rr_power_outage_active = false;
 	rr_power_outage_started_at = 0.0;
@@ -1336,6 +1363,16 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 		return false;
 	}
 
+	// Only alive players can start meetings.
+	if caller != null && caller.player_state != Player_State.ALIVE {
+		return false;
+	}
+
+	// Temporarily resurrected players cannot start meetings.
+	if caller != null && caller.is_temporarily_resurrected {
+		return false;
+	}
+
 	// Capture meeting metadata for the upcoming voting UI.
 	// (Fake meetings suppress this capture and will leave initiator_id = 0.)
 	meeting_initiator_id = 0;
@@ -1387,6 +1424,7 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 	rr_saved_power_outage_cooldown_remaining = max(0.0, rr_power_outage_cooldown_ends_at - now);
 	rr_saved_comms_outage_cooldown_remaining = max(0.0, rr_comms_outage_cooldown_ends_at - now);
 	rr_saved_lockdown_cooldown_remaining = max(0.0, rr_lockdown_cooldown_ends_at - now);
+	rr_saved_global_sabotage_cooldown_remaining = max(0.0, rr_global_sabotage_cooldown_ends_at - now);
 
 	if from_body {
 		game_state = Game_State.ANIM_BODY_FOUND;
@@ -1799,6 +1837,16 @@ update_temporary_resurrections :: proc() {
 
 		// Time's up: return them to dead state and spawn a new corpse at their current position.
 		p->kill();
+
+		// The new corpse should be pre-marked as reported so it can't trigger another meeting
+		// (this is the same death, the original corpse was already known about).
+		foreach corpse: component_iterator(Corpse) {
+			if corpse == null continue;
+			if !#alive(corpse.entity) continue;
+			if corpse.owner_player_entity_id == p.entity.id {
+				corpse.has_been_reported = true;
+			}
+		}
 	}
 }
 
@@ -2153,9 +2201,13 @@ finalize_voting :: proc() {
 	if rr_saved_lockdown_cooldown_remaining > 0.0 {
 		rr_lockdown_cooldown_ends_at = restore_now + rr_saved_lockdown_cooldown_remaining;
 	}
+	if rr_saved_global_sabotage_cooldown_remaining > 0.0 {
+		rr_global_sabotage_cooldown_ends_at = restore_now + rr_saved_global_sabotage_cooldown_remaining;
+	}
 	rr_saved_power_outage_cooldown_remaining = 0.0;
 	rr_saved_comms_outage_cooldown_remaining = 0.0;
 	rr_saved_lockdown_cooldown_remaining = 0.0;
+	rr_saved_global_sabotage_cooldown_remaining = 0.0;
 
 	// Reset votes
 	for i: 0..players.elements.count-1 {

@@ -290,8 +290,9 @@ WEREWOLF_CLAW_PROJECTILE_LIFETIME :: 0.45;
 
 WEREWOLF_INFECTION_STUN_REASON :: "werewolf_infection_stun";
 WEREWOLF_INFECTION_STUN_SECONDS :: 1.0;
-// Delay before applying the werewolf skin on infected targets (halfway through transform anim).
-WEREWOLF_INFECTED_SKIN_DELAY_SECONDS :: 1.0;
+// Delay before applying the werewolf skin on infected targets.
+// The target stays looking normal for this long before the transformation visual kicks in.
+WEREWOLF_INFECTED_SKIN_DELAY_SECONDS :: 10.0;
 WEREWOLF_INFECT_TO_CURE_TASK_ID :: "werewolf_infect_to_cure";
 
 rr_werewolf_apply_infected_task_override :: proc(target: Player) {
@@ -360,10 +361,11 @@ rr_werewolf_apply_infection :: proc(infector: Player, target: Player) {
 	target.werewolf_infected = true;
 	target.werewolf_infected_from_id = infector.entity.id;
 
-	// Merged rig handles animations; trigger bite + transform.
+	// Bite animation plays immediately on the infector.
 	infector->set_trigger("werewolf_infection_bite");
-	target->set_trigger("werewolf_infected_transform");
-	// Enable werewolf skin halfway through the victim's transform animation.
+	// The victim's transform animation + skin change is delayed so they look normal for a while.
+	// The animation trigger fires 1s before the skin swap so the howl/transform anim leads into it.
+	target.werewolf_infected_transform_trigger_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS - 1.0;
 	target.werewolf_skin_enable_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS;
 	target.werewolf_skin_disable_at = 0.0;
 
@@ -400,11 +402,12 @@ rr_werewolf_pass_infection :: proc(biter: Player, new_target: Player) {
 	new_target.werewolf_infected_from_id = from_id;
 	rr_werewolf_apply_infected_task_override(new_target);
 
-	// Restore the cured player's look, and trigger transform on the new infected player.
+	// Restore the cured player's look, and schedule delayed transform on the new infected player.
 	biter->set_trigger("RESET");
 	biter.werewolf_skin_enable_at = 0.0;
 	biter.werewolf_skin_disable_at = get_time();
-	new_target->set_trigger("werewolf_infected_transform");
+	biter.werewolf_infected_transform_trigger_at = 0.0;
+	new_target.werewolf_infected_transform_trigger_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS - 1.0;
 	new_target.werewolf_skin_enable_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS;
 	new_target.werewolf_skin_disable_at = 0.0;
 
@@ -482,8 +485,8 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			target := rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true);
 			if target != null {
-				// Devour should leave a corpse behind (used for report/doctor/coroner/pyro, etc.).
-				target->kill_with_killer(player.entity.id);
+				// Devour consumes the target entirely — no corpse left behind.
+				target->kill_with_killer_no_corpse(player.entity.id);
 				current_cooldown = WEREWOLF_DEVOUR_COOLDOWN_SECONDS;
 			}
 		}
@@ -508,7 +511,7 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.WEREWOLF return false;
-		if !player.werewolf_is_wolf_form return false;
+		// Usable in both human and wolf form.
 		// Unlock after 1 kill.
 		if player.werewolf_kills < WEREWOLF_INFECT_UNLOCK_KILLS return false;
 		return rr_werewolf_find_melee_target(player, WEREWOLF_INFECT_RANGE, true) != null;
@@ -542,7 +545,7 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 	on_draw_button :: proc(instance: Werewolf_Infecting_Bite_Ability, rect: Rect) {
 		draw_ability_name_label(rect, Werewolf_Infecting_Bite_Ability.NAME);
 
-		// Locked overlay (shown while in wolf form until unlocked).
+		// Locked overlay (shown until unlocked).
 		p := instance.player;
 		if p != null && p.player_role == Player_Role.WEREWOLF && p.werewolf_kills < WEREWOLF_INFECT_UNLOCK_KILLS {
 			ts := UI.default_text_settings();
@@ -1253,7 +1256,7 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 
 			// Pick target under cursor/touch point (global snipe).
 			target_pos := get_mouse_world_position();
-			target := get_closest_alive_target_at_point(this, player, target_pos, 1.5);
+			target := get_closest_alive_target_at_point(this, player, target_pos, 3.0);
 			if target == null {
 				// Missed - allow retrying.
 				activated_this_session = false;
@@ -2356,10 +2359,6 @@ Shoot_Ability :: class : Ability_Base {
         if player.player_state != Player_State.ALIVE return false;
         if player->has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
-		// Sheriff only gets 1 shot.
-		if player.player_type == Player_Type.CIVILIAN && player.player_role == Player_Role.SHERIFF {
-			if player.sheriff_gun_ammo <= 0 return false;
-		}
         return true;
     }
 
@@ -2392,48 +2391,13 @@ Shoot_Ability :: class : Ability_Base {
 				sfx.volume_perturb *= 0.25;
                 rr_play_sfx("sfx/shoot.wav", sfx);
 
-				is_sheriff := player.player_type == Player_Type.CIVILIAN && player.player_role == Player_Role.SHERIFF;
-
-				// Consume sheriff ammo on fire (disables ability after first shot).
-				if is_sheriff {
-					player.sheriff_gun_ammo -= 1;
-					if player.sheriff_gun_ammo < 0 { player.sheriff_gun_ammo = 0; }
-				}
-
-				// No need to apply cooldown if Sheriff is out of bullets.
-				if is_sheriff && player.sheriff_gun_ammo <= 0 {
-					current_cooldown = 0.0;
-				} else {
-					current_cooldown = 30.0;
-				}
+				current_cooldown = 30.0;
             }
         }
     }
 
 	on_draw_button :: proc(instance: Shoot_Ability, rect: Rect) {
 		draw_ability_name_label(rect, instance.name);
-
-		// Sheriff gun ammo overlay (1 shot total): show a big number in top-right.
-		if instance.player != null && instance.player.player_type == Player_Type.CIVILIAN && instance.player.player_role == Player_Role.SHERIFF {
-			ammo := instance.player.sheriff_gun_ammo;
-			if ammo < 0 { ammo = 0; }
-			if ammo > 1 { ammo = 1; }
-
-			bg := get_asset(Texture_Asset, "$AO/white.png");
-			content := rect->inset(8);
-			ammo_rect := content->top_right_rect()->offset(-18, -18)->grow(18);
-			UI.quad(ammo_rect, bg, v4.{0, 0, 0, 0.55});
-
-			ts := UI.default_text_settings();
-			ts.size = 30;
-			ts.color = (ammo > 0) ? v4.{1, 1, 1, 1} : v4.{0.8, 0.8, 0.8, 0.9};
-			ts.halign = .CENTER;
-			ts.valign = .CENTER;
-			ts.do_outline = true;
-			ts.outline_thickness = 2;
-			ts.outline_color = v4.{0, 0, 0, 1};
-			UI.text(ammo_rect, ts, format_string("%", .{ammo}));
-		}
 	}
 }
 

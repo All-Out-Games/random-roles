@@ -1,5 +1,11 @@
 import "core:ao"
 
+// --- Global shared sabotage cooldown ---
+// After ANY sabotage is triggered, all sabotages share this cooldown.
+GLOBAL_SABOTAGE_COOLDOWN_SECONDS :: 90.0;
+rr_global_sabotage_cooldown_ends_at: float;
+rr_saved_global_sabotage_cooldown_remaining: float;
+
 // --- Traitor sabotage: Power Outage ---
 
 POWER_OUTAGE_SABOTAGE_COOLDOWN_SECONDS :: 180.0;
@@ -59,6 +65,8 @@ rr_minimap_world_to_ui :: proc(map_rect: Rect, world_pos: v2) -> v2 {
 
 rr_power_outage_affects_player :: proc(player: Player) -> bool {
 	if player == null return false;
+	// Ghosts (dead players) are not affected by sabotages.
+	if player.player_state == Player_State.DEAD return false;
 	// Spec: civilians + anarchists affected; traitors see normally.
 	return player.player_type != Player_Type.TRAITOR;
 }
@@ -270,9 +278,14 @@ rr_draw_sabotages_next_to_minimap :: proc(
 	comms_icon := get_asset(Texture_Asset, "sprites/icons/communication_outage_icon.png");
 	lock_icon := get_asset(Texture_Asset, "sprites/icons/doors_lock.png");
 
-	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", power_icon, "POWER", rr_power_outage_active, rr_power_outage_cooldown_ends_at);
-	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", comms_icon, "COMMS", comms_down, comms_cooldown_ends_at);
-	lockdown_clicked = rr_draw_sabotage_button(btn3, "sabotage_lockdown", lock_icon, "LOCKDOWN", rr_lockdown_active, rr_lockdown_cooldown_ends_at);
+	// Each button uses the latest of its own cooldown and the shared global sabotage cooldown.
+	power_cd := max(rr_power_outage_cooldown_ends_at, rr_global_sabotage_cooldown_ends_at);
+	comms_cd := max(comms_cooldown_ends_at, rr_global_sabotage_cooldown_ends_at);
+	lock_cd := max(rr_lockdown_cooldown_ends_at, rr_global_sabotage_cooldown_ends_at);
+
+	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", power_icon, "POWER", rr_power_outage_active, power_cd);
+	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", comms_icon, "COMMS", comms_down, comms_cd);
+	lockdown_clicked = rr_draw_sabotage_button(btn3, "sabotage_lockdown", lock_icon, "LOCKDOWN", rr_lockdown_active, lock_cd);
 
 	// Labels under icons.
 	label_h := size * 0.26;
