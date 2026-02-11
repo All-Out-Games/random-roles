@@ -1650,6 +1650,14 @@ rr_queue_end_game_with_victor :: proc(victor: Player_Type) {
 ao_update_lobby :: proc(dt: float) {
 	current_time := get_time();
 	player_count := players.elements.count;
+
+	// Safety: lobby should always run on the player navmesh.
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		p.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
+	}
 	
 	// Check if we're waiting for restart timer (1 minute)
 	if waiting_for_restart {
@@ -1821,7 +1829,13 @@ ao_update_ingame :: proc(dt: float) {
 	anarchist_count := get_player_count(Player_Type.ANARCHIST);
 
 	if rr_started_solo_test_mode {
-		// If the solo player left, no one is alive — return to lobby so the server isn't stuck.
+		// Test mode is only valid while there are <=2 players.
+		// If someone new joins mid-round, immediately bounce back to lobby for a fresh start.
+		if players.elements.count > 2 {
+			setup_lobby();
+			return;
+		}
+		// If everyone left/died, return to lobby so the server isn't stuck.
 		if alive_count == 0 {
 			setup_lobby();
 		}
@@ -2387,11 +2401,11 @@ assign_players_to_types :: proc() {
 
 	// Capture round start count for special-case behaviors.
 	rr_round_start_player_count = player_count;
-	rr_started_solo_test_mode = (player_count == 1);
+	rr_started_solo_test_mode = (player_count <= 2);
 	if rr_started_solo_test_mode {
 		for i: 0..players.elements.count-1 {
 			if players.elements[i] != null {
-				players.elements[i]->Notify("Solo test mode: game will not end automatically.");
+				players.elements[i]->Notify("Test mode: game will not end automatically.");
 			}
 		}
 	}
@@ -2401,9 +2415,9 @@ assign_players_to_types :: proc() {
 	target_an: int;
 	target_tr: int;
 
-	if player_count == 1 {
-		// Special case: solo testing should always be civilian.
-		target_civ = 1;
+	if player_count <= 2 {
+		// Special case: small-player test mode should always be civilian.
+		target_civ = player_count;
 		target_an = 0;
 		target_tr = 0;
 	} else if player_count < 5 {
