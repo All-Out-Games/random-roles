@@ -112,11 +112,13 @@ rr_hitman_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_e
 	if killer.player_state != Player_State.ALIVE return;
 	if !killer->is_local_or_server() return;
 
-	// Track kills for unlocks.
-	killer.hitman_kills += 1;
+	is_contract := (killer.hitman_contract_target_id != 0 && killer.hitman_contract_target_id == victim_player_entity_id);
+	// Only contract kills count toward Hitman unlock progress.
+	if is_contract {
+		killer.hitman_kills += 1;
+	}
 
 	// Professional: adjust kill cooldown based on whether the victim was the contract.
-	is_contract := (killer.hitman_contract_target_id != 0 && killer.hitman_contract_target_id == victim_player_entity_id);
 	if is_contract {
 		killer.hitman_kill_cooldown_adjust_seconds += HITMAN_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS;
 	} else {
@@ -462,6 +464,9 @@ Hitman_Mine_Entry :: class {
 	pos: v2;
 	owner_entity_id: u64;
 	mine_entity: Entity;
+	trigger_target_entity_id: u64;
+	detonate_at: float;
+	is_triggered: bool;
 }
 
 hitman_mines: List(Hitman_Mine_Entry);
@@ -470,6 +475,23 @@ hitman_mines: List(Hitman_Mine_Entry);
 HITMAN_MINE_VISUAL_SCALE :: 0.6;
 HITMAN_MINE_VISUAL_LAYER :: 0;
 HITMAN_MINE_VISUAL_DEPTH_OFFSET :: 1.0;
+HITMAN_MINE_PRE_EXPLODE_SECONDS :: 0.7;
+
+Hitman_Mine_Visibility :: class : Component {
+	owner_entity_id: u64;
+	reveal_to_all: bool;
+
+	is_visible_to_local_player :: method() -> bool {
+		if reveal_to_all return true;
+		local_player, ok := Game.get_local_player();
+		if !ok return false;
+		return local_player.player_type == Player_Type.TRAITOR;
+	}
+
+	ao_on_state_sync :: method() {
+		entity->set_local_enabled(is_visible_to_local_player());
+	}
+}
 
 rr_hitman_clear_mines :: proc() {
 	// Server authoritative
@@ -503,6 +525,9 @@ rr_hitman_place_mine :: proc(owner: Player, pos: v2) {
 	entry := new(Hitman_Mine_Entry);
 	entry.pos = clamped;
 	entry.owner_entity_id = owner.entity.id;
+	entry.trigger_target_entity_id = 0;
+	entry.detonate_at = 0.0;
+	entry.is_triggered = false;
 
 	// World visual
 	mine_e := Scene.create_entity();
@@ -516,6 +541,11 @@ rr_hitman_place_mine :: proc(owner: Player, pos: v2) {
 		sprite.layer = HITMAN_MINE_VISUAL_LAYER;
 		sprite.depth_offset = HITMAN_MINE_VISUAL_DEPTH_OFFSET;
 		sprite.color = v4.{1, 1, 1, 0.95};
+	}
+	visibility := mine_e->add_component(Hitman_Mine_Visibility);
+	if visibility != null {
+		visibility.owner_entity_id = owner.entity.id;
+		visibility.reveal_to_all = false;
 	}
 	entry.mine_entity = mine_e;
 
@@ -545,34 +575,60 @@ update_hitman_mines :: proc() {
 			continue;
 		}
 
-		// Trigger: first alive player (not owner) who walks over it.
-		triggered := false;
-		for p_i: 0..players.elements.count-1 {
-			p := players.elements[p_i];
-			if p == null continue;
-			if !#alive(p.entity) continue;
-			if p.player_state != Player_State.ALIVE continue;
-			if p.entity.id == m.owner_entity_id continue;
+		if !m.is_triggered {
+			// Arm when someone steps on it, then reveal shortly before detonation.
+			for p_i: 0..players.elements.count-1 {
+				p := players.elements[p_i];
+				if p == null continue;
+				if !#alive(p.entity) continue;
+				if p.player_state != Player_State.ALIVE continue;
+				if p.entity.id == m.owner_entity_id continue;
 
-			if in_range(p.entity.world_position - m.pos, HITMAN_MINE_TRIGGER_RADIUS) {
-				// Explode + fling
+				if in_range(p.entity.world_position - m.pos, HITMAN_MINE_TRIGGER_RADIUS) {
+					m.is_triggered = true;
+					m.trigger_target_entity_id = p.entity.id;
+					m.detonate_at = get_time() + HITMAN_MINE_PRE_EXPLODE_SECONDS;
+
+					if m.mine_entity != null && #alive(m.mine_entity) {
+						visibility := m.mine_entity->get_component(Hitman_Mine_Visibility);
+						if visibility != null {
+							visibility.reveal_to_all = true;
+						}
+					}
+					break;
+				}
+			}
+		}
+
+		if m.is_triggered && get_time() >= m.detonate_at {
+			target := get_player_by_entity_id(m.trigger_target_entity_id);
+			if target == null || !#alive(target.entity) || target.player_state != Player_State.ALIVE || target.entity.id == m.owner_entity_id {
+				target = null;
+				for p_i: 0..players.elements.count-1 {
+					p := players.elements[p_i];
+					if p == null continue;
+					if !#alive(p.entity) continue;
+					if p.player_state != Player_State.ALIVE continue;
+					if p.entity.id == m.owner_entity_id continue;
+					if !in_range(p.entity.world_position - m.pos, HITMAN_MINE_TRIGGER_RADIUS) continue;
+					target = p;
+					break;
+				}
+			}
+
+			if target != null {
 				rr_refresh_rng_state();
 				angle := rng_range_float(ref rr_rng_state.value, 0.0, 6.28318);
 				dir := v2.{cos(angle), sin(angle)};
 				if length_squared(dir) < 0.001 { dir = v2.{1, 0}; }
 
-				fling := p.entity->get_component(Hitman_Mine_Fling);
+				fling := target.entity->get_component(Hitman_Mine_Fling);
 				if fling == null {
-					fling = p.entity->add_component(Hitman_Mine_Fling);
+					fling = target.entity->add_component(Hitman_Mine_Fling);
 				}
 				fling->arm(HITMAN_MINE_MAX_FLING_SECONDS, dir, HITMAN_MINE_FLING_SPEED);
-
-				triggered = true;
-				break;
 			}
-		}
 
-		if triggered {
 			if m.mine_entity != null && #alive(m.mine_entity) {
 				m.mine_entity->destroy();
 			}
@@ -672,6 +728,8 @@ rr_vote_hurry_deadline: float; // 0 = not active; otherwise game-time when votin
 round_number: int;
 meeting_cooldown_ends_at: float;
 post_meeting_kill_lockout_ends_at: float;
+// One-shot override for next-round traitor team size. -1 means disabled.
+forced_traitor_count_next_round: int = -1;
 
 // --- Single-player test mode ---
 // If a round is started with only one player (via force start), we disable all end-game win triggers.
@@ -1864,6 +1922,105 @@ set_lobby_timer_paused :: proc(paused: bool) {
 	lobby_timer_paused_at = 0.0;
 }
 
+RR_UNSTUCK_REASON_REMOVE_PASSES :: 12;
+
+rr_remove_movement_reason_all :: proc(player: Player, reason: string) {
+	if player == null return;
+	// Defensive: drain duplicates in case a reason was accidentally stacked.
+	for _i: 0..RR_UNSTUCK_REASON_REMOVE_PASSES-1 {
+		player->remove_disable_movement_input_reason(reason);
+	}
+}
+
+rr_unstuck_player :: proc(player: Player) {
+	if player == null return;
+	if player.entity == null return;
+	if !#alive(player.entity) return;
+
+	// Disable active temporary effect components first so they don't re-apply locks next frame.
+	werewolf_stun := player.entity->get_component(Werewolf_Infection_Stun);
+	if werewolf_stun != null {
+		werewolf_stun.active = false;
+	}
+	werewolf_devour := player.entity->get_component(Werewolf_Devour_Lock);
+	if werewolf_devour != null {
+		werewolf_devour.active = false;
+	}
+	hitman_mine_stun := player.entity->get_component(Hitman_Mine_Stun);
+	if hitman_mine_stun != null {
+		hitman_mine_stun.active = false;
+	}
+	hitman_snap_lock := player.entity->get_component(Hitman_Neck_Snap_Lock);
+	if hitman_snap_lock != null {
+		hitman_snap_lock.active = false;
+	}
+	hitman_fling := player.entity->get_component(Hitman_Mine_Fling);
+	if hitman_fling != null {
+		hitman_fling.active = false;
+	}
+	pirate_dig := player.entity->get_component(Pirate_Dig_Lock);
+	if pirate_dig != null {
+		pirate_dig.active = false;
+		pirate_dig->clear_spot_digging_flag();
+	}
+	powder_knockback := player.entity->get_component(Powder_Keg_Knockback);
+	if powder_knockback != null {
+		powder_knockback.active = false;
+	}
+	pranked := player.entity->get_component(Pranked_Effect);
+	if pranked != null {
+		pranked.phase = 2;
+		pranked.stun_end_time = 0.0;
+	}
+	autograph_write := player.entity->get_component(Movie_Star_Write_Autograph);
+	if autograph_write != null {
+		autograph_write.done = true;
+	}
+	autograph_stun := player.entity->get_component(Stunned_By_Autograph_Effect);
+	if autograph_stun != null {
+		autograph_stun.active = false;
+	}
+
+	// Clear pyromaniac fire status through its own cleanup path.
+	fire_status := player.entity->get_component(RR_Player_On_Fire_Status);
+	if fire_status != null {
+		fire_status->clear(false);
+	}
+
+	// Clear werewolf infection state/effects.
+	if player.werewolf_infected {
+		player.werewolf_infected = false;
+		player.werewolf_infected_from_id = 0;
+		rr_werewolf_clear_infected_task_override(player);
+	}
+	player.werewolf_infected_transform_trigger_at = 0.0;
+
+	// Clear temp resurrection state.
+	player.is_temporarily_resurrected = false;
+	player.temporarily_resurrected_until = 0.0;
+
+	// Always reset local animation and velocity.
+	player->set_trigger("RESET");
+	player.agent.velocity = v2.{0, 0};
+	rr_force_reset_hitman_sniper_zoom(player);
+
+	// Remove all known movement-disable reasons, including global freeze.
+	rr_remove_movement_reason_all(player, "frozen");
+	rr_remove_movement_reason_all(player, WEREWOLF_INFECTION_STUN_REASON);
+	rr_remove_movement_reason_all(player, WEREWOLF_DEVOUR_LOCK_REASON);
+	rr_remove_movement_reason_all(player, HITMAN_MINE_STUN_REASON);
+	rr_remove_movement_reason_all(player, HITMAN_NECK_SNAP_LOCK_REASON);
+	rr_remove_movement_reason_all(player, HITMAN_MINE_FLING_REASON);
+	rr_remove_movement_reason_all(player, PIRATE_TREASURE_DIG_REASON);
+	rr_remove_movement_reason_all(player, POWDER_KEG_KNOCKBACK_REASON);
+	rr_remove_movement_reason_all(player, PRANK_STUN_REASON);
+	rr_remove_movement_reason_all(player, MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
+	rr_remove_movement_reason_all(player, MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+
+	// Keep visual state coherent after force-clears.
+	player->remove_name_invisibility_reason("werewolf_transform");
+}
+
 // Chat command: /start
 // Server-only by default (no @any annotation).
 start :: proc(player: Player) {
@@ -1892,6 +2049,19 @@ r :: proc(player: Player, role_name: string) {
 		return;
 	}
 	Chat.server_send_message(format_string("Forced role set for next round: %", .{rr_get_role_display_name(role)}), player);
+} @chat_command @youtuber
+
+// Chat command: /traitors 2
+// Force traitor count for the next round only. Use /traitors -1 to clear.
+traitors :: proc(player: Player, count: int = -1) {
+	if count < 0 {
+		forced_traitor_count_next_round = -1;
+		Chat.server_send_message("Cleared forced traitor count.", player);
+		return;
+	}
+
+	forced_traitor_count_next_round = count;
+	Chat.server_send_message(format_string("Forced traitor count set for next round: % (one round only, clamped if needed).", {count}), player);
 } @chat_command @youtuber
 
 // Chat command: /end
@@ -1981,6 +2151,13 @@ cd :: proc(player: Player) {
 	fake_meeting_cooldown_ends_at = 0.0;
 
 	Chat.server_send_message("Ability cooldown timers reset (including shared meeting/lockout timers).", player);
+} @chat_command @youtuber
+
+// Chat command: /unstuck
+// Clears active temporary effects and movement locks on yourself.
+unstuck :: proc(player: Player) {
+	rr_unstuck_player(player);
+	Chat.server_send_message("Unstuck applied: cleared active effects and movement locks.", player);
 } @chat_command @youtuber
 
 
@@ -2623,6 +2800,13 @@ assign_players_to_types :: proc() {
 		target_civ = player_count - 4;
 		target_an = 2;
 		target_tr = 2;
+	}
+
+	// One-shot admin override: force traitor target for this round only, then clear.
+	if forced_traitor_count_next_round >= 0 {
+		target_tr = clamp(forced_traitor_count_next_round, 0, max(0, player_count - target_an));
+		target_civ = max(0, player_count - target_an - target_tr);
+		forced_traitor_count_next_round = -1;
 	}
 
 	// Count forced roles and subtract them from the targets so the final distribution

@@ -9,6 +9,7 @@ KILL_COOLDOWN_SECONDS :: 30.0;
 HITMAN_NECK_SNAP_COOLDOWN_SECONDS :: 60.0;
 HITMAN_SNIPER_COOLDOWN_SECONDS :: 90.0;
 HITMAN_MINE_COOLDOWN_SECONDS :: 60.0;
+HITMAN_SNIPER_TARGET_PICKUP_RADIUS :: 10.0;
 
 HITMAN_NECK_SNAP_RANGE :: 2.0;
 HITMAN_MINE_TRIGGER_RADIUS :: 0.8;
@@ -430,12 +431,13 @@ Werewolf_Infection_Stun :: class : Component {
 	arm :: proc(using this: Werewolf_Infection_Stun, seconds: float) {
 		if seconds <= 0.0 { seconds = 0.1; }
 		end_time = get_time() + seconds;
-		active = true;
-
 		p := entity->get_component(Player);
 		if p != null {
+			// Ensure this reason does not stack if arm() is called repeatedly.
+			p->remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
 			p->add_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
 		}
+		active = true;
 	}
 
 	ao_update :: proc(using this: Werewolf_Infection_Stun, dt: float) {
@@ -458,6 +460,15 @@ Werewolf_Infection_Stun :: class : Component {
 			active = false;
 		}
 	}
+
+	ao_end :: proc(using this: Werewolf_Infection_Stun) {
+		if !active return;
+		p := entity->get_component(Player);
+		if p != null {
+			p->remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
+		}
+		active = false;
+	}
 }
 
 Werewolf_Devour_Lock :: class : Component {
@@ -467,12 +478,13 @@ Werewolf_Devour_Lock :: class : Component {
 	arm :: proc(using this: Werewolf_Devour_Lock, seconds: float) {
 		if seconds <= 0.0 { seconds = 0.1; }
 		end_time = get_time() + seconds;
-		active = true;
-
 		p := entity->get_component(Player);
 		if p != null {
+			// Ensure this reason does not stack if arm() is called repeatedly.
+			p->remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
 			p->add_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
 		}
+		active = true;
 	}
 
 	ao_update :: proc(using this: Werewolf_Devour_Lock, dt: float) {
@@ -494,6 +506,15 @@ Werewolf_Devour_Lock :: class : Component {
 			p->remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
 			active = false;
 		}
+	}
+
+	ao_end :: proc(using this: Werewolf_Devour_Lock) {
+		if !active return;
+		p := entity->get_component(Player);
+		if p != null {
+			p->remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
+		}
+		active = false;
 	}
 }
 
@@ -1306,7 +1327,7 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 
 			// Pick target under cursor/touch point (global snipe).
 			target_pos := get_mouse_world_position();
-			target := get_closest_alive_target_at_point(this, player, target_pos, 3.0);
+			target := get_closest_alive_target_at_point(this, player, target_pos, HITMAN_SNIPER_TARGET_PICKUP_RADIUS);
 			if target == null {
 				// Missed - allow retrying.
 				activated_this_session = false;
