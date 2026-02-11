@@ -1339,6 +1339,24 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 	}
 }
 
+rr_force_reset_hitman_sniper_zoom :: proc(player: Player) {
+	if player == null return;
+
+	for i: 0..player.abilities.count-1 {
+		ability := player.abilities[i];
+		if ability == null continue;
+
+		if ability.#type == Hitman_Sniper_Ability {
+			sniper := ability.(Hitman_Sniper_Ability);
+			sniper->cleanup_targeting();
+		}
+	}
+
+	if player.active_ability != null && player.active_ability.#type == Hitman_Sniper_Ability {
+		player.active_ability = null;
+	}
+}
+
 Resurrect_Ability :: class : Ability_Base {
     NAME :: "Resurrect";
 
@@ -2449,8 +2467,13 @@ Shoot_Ability :: class : Ability_Base {
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
-        activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
         icon = get_icon(this, player.player_role);
+		// Hide the aim line while unusable (cooldown/lockout/etc).
+		if !params.can_use {
+			return;
+		}
+
+        activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
         if params.can_use {
             if activation.activate {
                 sfx := SFX.default_sfx_desc();

@@ -1380,6 +1380,7 @@ setup_lobby :: proc() {
 	foreach player: component_iterator(Player) {
 		rr_power_outage_remove_generator_task_from_player(player);
 		rr_comms_outage_remove_enable_comms_task_from_player(player);
+		rr_force_reset_hitman_sniper_zoom(player);
 		on_player_go_passive(player);
 		// Lobby reset: everyone can hear & speak to everyone.
 		player->apply_voice_chat_masks_for_current_state();
@@ -1958,6 +1959,9 @@ kill :: proc(player: Player, target: Player = null) {
 // Chat command: /cd
 // Clears this player's ability cooldown timers.
 cd :: proc(player: Player) {
+	// If player was mid-sniper targeting, force camera + targeting cleanup as part of cooldown reset.
+	rr_force_reset_hitman_sniper_zoom(player);
+
 	for i: 0..player.abilities.count-1 {
 		player.abilities[i].current_cooldown = 0.0;
 	}
