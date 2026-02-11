@@ -3237,6 +3237,9 @@ Task_Catching_Butterflies :: class : Task_Base {
 	net_rest_len: float;
 	net_angle_offset: float; // degrees, 0 = straight up
 	net_angle_vel: float;    // degrees / second
+	last_swing_sfx_time: float;
+	swing_sfx_armed: bool;
+	swing_sfx_below_rearm_since: float;
 
 	start_attempt :: proc(using this: Task_Catching_Butterflies, player: Player) {
 		if started {
@@ -3248,6 +3251,9 @@ Task_Catching_Butterflies :: class : Task_Base {
 		rng_initialized = false;
 		last_update_time = 0.0;
 		success_time = 0.0;
+		last_swing_sfx_time = -10.0;
+		swing_sfx_armed = true;
+		swing_sfx_below_rearm_since = -1.0;
 	}
 
 	init_textures :: proc(using this: Task_Catching_Butterflies) {
@@ -3515,7 +3521,44 @@ Task_Catching_Butterflies :: class : Task_Base {
 
 		// Only catch if the player is actually moving/sweeping the net a bit (X-only).
 		min_sweep_vx := h * 0.12; // px/s
-		net_sweeping := abs(handle_vel.x) >= min_sweep_vx;
+		sweep_vx := abs(handle_vel.x);
+		net_sweeping := sweep_vx >= min_sweep_vx;
+		// Net swing SFX should only play on larger sweeps, not tiny motion.
+		min_swing_sfx_vx := h * 0.22; // px/s
+		min_swing_sfx_rearm_vx := h * 0.10; // px/s
+		swing_sfx_cooldown := 0.14;
+		swing_sfx_rearm_hold_time := 0.10;
+		if player != null && player->is_local() {
+			if swing_sfx_armed && sweep_vx >= min_swing_sfx_vx && (now - last_swing_sfx_time) >= swing_sfx_cooldown {
+				sfx := SFX.default_sfx_desc();
+				sfx->set_position(player.entity.world_position);
+				sfx.volume = 0.40;
+				sfx.volume_perturb = 0.08;
+				sfx.speed_perturb = 0.08;
+				// Global SFX mix: everything at 25% volume.
+				sfx.volume *= 0.25;
+				sfx.volume_perturb *= 0.25;
+				rr_play_sfx("sfx/swing_net.wav", sfx);
+				last_swing_sfx_time = now;
+				swing_sfx_armed = false;
+				swing_sfx_below_rearm_since = -1.0;
+			}
+			// Re-arm only after speed stays low for a short hold time,
+			// so quick forward/back micro-corrections don't double-trigger.
+			if !swing_sfx_armed {
+				if sweep_vx <= min_swing_sfx_rearm_vx {
+					if swing_sfx_below_rearm_since < 0.0 {
+						swing_sfx_below_rearm_since = now;
+					}
+					if (now - swing_sfx_below_rearm_since) >= swing_sfx_rearm_hold_time {
+						swing_sfx_armed = true;
+						swing_sfx_below_rearm_since = -1.0;
+					}
+				} else {
+					swing_sfx_below_rearm_since = -1.0;
+				}
+			}
+		}
 
 		hoop_radius := net_w * 0.18;
 		if hoop_radius < h * 0.05 {
