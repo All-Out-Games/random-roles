@@ -652,6 +652,8 @@ update_autograph_traps :: proc() {
 game_state: Game_State;
 countdown_start_time: float;
 countdown_active: bool;
+lobby_timer_paused: bool;
+lobby_timer_paused_at: float;
 game_end_time: float;
 waiting_for_restart: bool;
 voting_start_time: float;
@@ -723,10 +725,18 @@ rr_is_round_running :: proc() -> bool {
 	return game_state != Game_State.LOBBY && game_state != Game_State.ANIM_VICTORY;
 }
 
+rr_get_lobby_timer_now :: proc() -> float {
+	if game_state == Game_State.LOBBY && lobby_timer_paused {
+		return lobby_timer_paused_at;
+	}
+	return get_time();
+}
+
 rr_lobby_seconds_until_round_start :: proc() -> float {
 	// "Very far in the future" sentinel for states where a round is not imminent.
 	if game_state != Game_State.LOBBY return 999999.0;
 	if players.elements.count < MIN_NUMBER_OF_PLAYERS return 999999.0;
+	now := rr_get_lobby_timer_now();
 
 	countdown_seconds := NORMAL_LOBBY_COUNTDOWN_SECONDS;
 	if round_number == 0 {
@@ -734,13 +744,13 @@ rr_lobby_seconds_until_round_start :: proc() -> float {
 	}
 
 	if waiting_for_restart {
-		wait_remaining := 60.0 - (get_time() - game_end_time);
+		wait_remaining := 60.0 - (now - game_end_time);
 		if wait_remaining < 0.0 wait_remaining = 0.0;
 		return wait_remaining + countdown_seconds;
 	}
 
 	if countdown_active {
-		remaining := countdown_seconds - (get_time() - countdown_start_time);
+		remaining := countdown_seconds - (now - countdown_start_time);
 		if remaining < 0.0 remaining = 0.0;
 		return remaining;
 	}
@@ -1322,6 +1332,8 @@ setup_lobby :: proc() {
 	game_state = Game_State.LOBBY;
 	countdown_active = false;
 	countdown_start_time = 0.0;
+	lobby_timer_paused = false;
+	lobby_timer_paused_at = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
 	rr_end_game_pending = false;
@@ -1381,6 +1393,8 @@ setup_ingame :: proc() {
 	game_state = Game_State.INGAME;
 	countdown_active = false;
 	countdown_start_time = 0.0;
+	lobby_timer_paused = false;
+	lobby_timer_paused_at = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
 	rr_end_game_pending = false;
@@ -1717,7 +1731,7 @@ rr_queue_end_game_with_victor :: proc(victor: Player_Type) {
 }
 
 ao_update_lobby :: proc(dt: float) {
-	current_time := get_time();
+	current_time := rr_get_lobby_timer_now();
 	player_count := players.elements.count;
 
 	// Safety: lobby should always run on the player navmesh.
@@ -1752,7 +1766,11 @@ ao_update_lobby :: proc(dt: float) {
 			ts.halign = .CENTER;
 			ts.valign = .CENTER;
 			
-			UI.text(rect, ts, "Next round in: %:%", {format_int(minutes, leading_zeroes=2), format_int(seconds, leading_zeroes=2)});
+			msg := "Next round in: %:%";
+			if lobby_timer_paused {
+				msg = "Next round paused: %:%";
+			}
+			UI.text(rect, ts, msg, {format_int(minutes, leading_zeroes=2), format_int(seconds, leading_zeroes=2)});
 			return;
 		}
 	}
@@ -1793,7 +1811,11 @@ ao_update_lobby :: proc(dt: float) {
 			ts.halign = .CENTER;
 			ts.valign = .CENTER;
 			
-			UI.text(rect, ts, "Game starting in: %:%", {format_int(minutes, leading_zeroes=2), format_int(seconds, leading_zeroes=2)});
+			msg := "Game starting in: %:%";
+			if lobby_timer_paused {
+				msg = "Game start paused: %:%";
+			}
+			UI.text(rect, ts, msg, {format_int(minutes, leading_zeroes=2), format_int(seconds, leading_zeroes=2)});
 		}
 	} else {
 		// Player count dropped below threshold, reset countdown
@@ -1814,6 +1836,31 @@ force_start_lobby_game :: proc() {
 	countdown_active = false;
 	countdown_start_time = 0.0;
 	assign_players_to_types();
+}
+
+set_lobby_timer_paused :: proc(paused: bool) {
+	if game_state != Game_State.LOBBY return;
+	if paused == lobby_timer_paused return;
+
+	if paused {
+		lobby_timer_paused = true;
+		lobby_timer_paused_at = get_time();
+		return;
+	}
+
+	paused_duration := get_time() - lobby_timer_paused_at;
+	if paused_duration < 0.0 {
+		paused_duration = 0.0;
+	}
+	if waiting_for_restart {
+		game_end_time += paused_duration;
+	}
+	if countdown_active {
+		countdown_start_time += paused_duration;
+	}
+
+	lobby_timer_paused = false;
+	lobby_timer_paused_at = 0.0;
 }
 
 // Chat command: /start
@@ -1863,6 +1910,36 @@ restart :: proc(player: Player) {
 	force_start_lobby_game();
 } @chat_command @youtuber
 
+// Chat command: /pause
+// Pauses lobby timers (restart wait + round-start countdown).
+pause :: proc(player: Player) {
+	if game_state != Game_State.LOBBY {
+		Chat.server_send_message("Can only pause timers in the lobby.", player);
+		return;
+	}
+	if lobby_timer_paused {
+		Chat.server_send_message("Lobby timer is already paused.", player);
+		return;
+	}
+	set_lobby_timer_paused(true);
+	Chat.server_send_message("Lobby timer paused. Use /unpause to resume.", player);
+} @chat_command @youtuber
+
+// Chat command: /unpause
+// Resumes lobby timers from where they were paused.
+unpause :: proc(player: Player) {
+	if game_state != Game_State.LOBBY {
+		Chat.server_send_message("Can only unpause timers in the lobby.", player);
+		return;
+	}
+	if !lobby_timer_paused {
+		Chat.server_send_message("Lobby timer is not paused.", player);
+		return;
+	}
+	set_lobby_timer_paused(false);
+	Chat.server_send_message("Lobby timer resumed.", player);
+} @chat_command @youtuber
+
 // Chat command: /kill
 // /kill — kill yourself. /kill <player> — kill a specific player.
 kill :: proc(player: Player, target: Player = null) {
@@ -1877,6 +1954,30 @@ kill :: proc(player: Player, target: Player = null) {
 	}
 	victim->kill();
 } @chat_command
+
+// Chat command: /cd
+// Clears this player's ability cooldown timers.
+cd :: proc(player: Player) {
+	for i: 0..player.abilities.count-1 {
+		player.abilities[i].current_cooldown = 0.0;
+	}
+
+	// If a meeting cooldown snapshot exists for this player, keep it aligned.
+	for i: 0..player.meeting_saved_cooldowns.count-1 {
+		player.meeting_saved_cooldowns[i] = 0.0;
+	}
+
+	// Clear deferred per-player cooldown modifiers.
+	player.hitman_kill_cooldown_adjust_seconds = 0.0;
+
+	// These shared timers also gate ability usage (Fake Meeting + post-meeting attack lockout).
+	// We clear them here so /cd behaves like a true "all ability timers" reset in test sessions.
+	post_meeting_kill_lockout_ends_at = 0.0;
+	meeting_cooldown_ends_at = 0.0;
+	fake_meeting_cooldown_ends_at = 0.0;
+
+	Chat.server_send_message("Ability cooldown timers reset (including shared meeting/lockout timers).", player);
+} @chat_command @youtuber
 
 
 ao_update_ingame :: proc(dt: float) {
