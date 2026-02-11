@@ -16,7 +16,7 @@ rr_restart_ambience :: proc() {
 	sfx.channel = SFX_Channel.MUSIC;
 	sfx.loop = true;
 	sfx.loop_timeout = 0.0;
-	sfx.volume = 0.175;
+	sfx.volume = 0.35;
 	sfx.volume_perturb = 0.0;
 	sfx.speed_perturb = 0.0;
 	rr_ambience_sfx_id = rr_play_sfx("sfx/ambience_v3.wav", sfx);
@@ -80,6 +80,7 @@ Player :: class : Player_Base {
 	// Prankster progress (server-driven, shown locally via tasks UI)
 	prankster_prank_count: int;
 	prankster_fake_meetings_called: int;
+	prankster_fake_meeting_target_id: u64; // entity id of the player the prankster must get voted out
 
 	// --- Pyromaniac ---
 	// True while this player is currently "on fire" (status effect).
@@ -99,6 +100,7 @@ Player :: class : Player_Base {
 	doctor_resurrects_used: int; // resets each round
 	is_temporarily_resurrected: bool;
 	temporarily_resurrected_until: float;
+	was_corpse_reported_before_resurrect: bool; // true if the body had been reported before the doctor revived them
 
 	// --- Sheriff ---
 	// Sheriff gun has 1 ammo per round; after firing once, Shoot is disabled.
@@ -610,8 +612,9 @@ Player :: class : Player_Base {
                     draw_ability_button(this, Vote_Ability, abilityIndex);
                 } else if game_state == Game_State.INGAME {
 					// Mini-werewolf infection: suppress ALL normal abilities until they pass the bite.
-					// (They still get voting UI in Game_State.VOTING via the branch above.)
-					if this.werewolf_infected {
+					// Only show after the transformation has revealed (skin active = wolf look applied).
+					// During the 10s delay the player keeps their normal abilities so nothing looks different.
+					if this.werewolf_infected && this.werewolf_skin_active {
 						draw_ability_button(this, Werewolf_Pass_Bite_Ability, 0);
 						return;
 					}
@@ -1357,9 +1360,9 @@ rr_werewolf_enable_wolf_look :: proc(player: Player) {
 	player.animator.instance->enable_skin(WEREWOLF_SKIN_NAME);
 	player.animator.instance->refresh_skins();
 
-	// Force dark brown color (server-only so it replicates to all clients).
+	// Force dark color (server-only so it replicates to all clients).
 	if Game.is_server() {
-		player.animator.instance->set_color_replace_color(Color_Replace_Color.BROWN1);
+		player.animator.instance->set_color_replace_color(Color_Replace_Color.BLACK);
 	}
 
 	// Hide the player's name tag while in wolf form.
@@ -1373,6 +1376,9 @@ rr_werewolf_disable_wolf_look :: proc(player: Player) {
 	if player == null return;
 	if player.animator == null return;
 	if player.animator.instance == null return;
+
+	// Safety: if wolf look was never enabled, don't strip skins (nothing to restore from).
+	if !player.werewolf_skin_active return;
 
 	// Disable werewolf skin and restore saved cosmetics.
 	player.animator.instance->disable_all_skins();
@@ -1415,9 +1421,22 @@ rr_werewolf_update_skins :: proc(player: Player) {
 	now := get_time();
 
 	// Process delayed infected-transform animation trigger.
+	// This is the moment the infection "reveals" — everything before this is invisible.
 	if player.werewolf_infected_transform_trigger_at > 0.0 && now >= player.werewolf_infected_transform_trigger_at {
 		player.werewolf_infected_transform_trigger_at = 0.0;
 		player->set_trigger("werewolf_infected_transform");
+
+		// Server-authoritative: apply all the reveal effects now (notification, task swap, stun).
+		if Game.is_server() {
+			player->Notify("You were bitten! Pass it on to return to normal.");
+			rr_werewolf_apply_infected_task_override(player);
+
+			stun := player.entity->get_component(Werewolf_Infection_Stun);
+			if stun == null {
+				stun = player.entity->add_component(Werewolf_Infection_Stun);
+			}
+			stun->arm(WEREWOLF_INFECTION_STUN_SECONDS);
+		}
 	}
 
 	// Hard-forces back to schleem look if we're not supposed to be werewolf-looking.
@@ -1458,12 +1477,15 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 	prev_is_wolf := player.werewolf_is_wolf_form;
 	now := get_time();
 
-	// Non-werewolf: reset.
+	// Non-werewolf: reset transform state, but don't clobber skin schedules for infected civilians
+	// (their skin enable/disable is managed by the infection system, not the transform timer).
 	if player.player_role != Player_Role.WEREWOLF || player.player_type != Player_Type.TRAITOR {
 		player.werewolf_is_wolf_form = false;
 		player.werewolf_transform_ends_at = 0.0;
-		player.werewolf_skin_enable_at = 0.0;
-		player.werewolf_skin_disable_at = now;
+		if !player.werewolf_infected {
+			player.werewolf_skin_enable_at = 0.0;
+			player.werewolf_skin_disable_at = now;
+		}
 		return;
 	}
 
@@ -1515,6 +1537,24 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
         //freeze_player = false;
         this->set_trigger("RESET");
     }
+
+	// Immediately restores werewolf visuals + clears all skin/transform state.
+	// Safe to call even if the player is not in wolf form (no-ops if skin not active).
+	reset_werewolf_visuals :: proc(using this: Player) {
+		rr_werewolf_disable_wolf_look(this);
+		this->remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
+		this.werewolf_infected = false;
+		this.werewolf_infected_from_id = 0;
+		this.werewolf_is_wolf_form = false;
+		this.werewolf_transform_ends_at = 0.0;
+		this.werewolf_skin_enable_at = 0.0;
+		this.werewolf_skin_disable_at = 0.0;
+		this.werewolf_infected_transform_trigger_at = 0.0;
+		if this.werewolf_speed_boost_active {
+			this.agent.movement_speed = this.werewolf_speed_original;
+			this.werewolf_speed_boost_active = false;
+		}
+	}
 
     set_trigger :: proc(using this: Player, trigger: string) {
         if this.animator.instance != null {
@@ -1993,6 +2033,8 @@ Call_Meeting_Interactable :: class : Component {
         if player.player_state != Player_State.ALIVE return false;
 		// Temporarily resurrected players should not be able to call meetings.
 		if player.is_temporarily_resurrected return false;
+		// Infected players should not be able to call meetings.
+		if player.werewolf_infected return false;
 		// Disable when any sabotage is active.
 		if rr_power_outage_active || rr_comms_outage_active || rr_lockdown_active return false;
         // Always show the interactable; cooldown text + on_interact guard handle the rest.
@@ -2018,6 +2060,8 @@ Report_Corpse_Interactable :: class : Interactable {
 		if game_state != Game_State.INGAME return false;
 		// Only alive players can report bodies.
 		if player.player_state != Player_State.ALIVE return false;
+		// Infected players cannot report bodies (they can't call meetings).
+		if player.werewolf_infected return false;
 
 		corpse := entity->get_component(Corpse);
 		if corpse == null return false;

@@ -324,7 +324,7 @@ get_task_display_name :: proc(task_id: string) -> string {
 		case "prank_3_people":
 			return "Prank 3 people";
 		case "call_fake_meeting":
-			return "Call 1 fake meeting";
+			return "Vote out target";
 		case "pyro_burn_1_corpse":
 			return "Burn 1 corpse";
 		case "pyro_ignite_5_props":
@@ -949,7 +949,17 @@ update_tasks_ui :: proc(player: Player) {
 	LIST_PAD :: 10.0;
 	DROPDOWN_SLICE_PX :: 16.0;
 
-	list_h := (player_total_tasks.(float)) * ROW_H + (LIST_PAD * 2.0);
+	// Fake meeting task gets an extra sub-row for the "in a fake meeting" subtitle.
+	SUBTITLE_ROW_H :: 18.0;
+	extra_h := 0.0;
+	for i: 0..player.active_tasks.elements.count-1 {
+		t := player.active_tasks.elements[i];
+		if t == null continue;
+		if t.id == "call_fake_meeting" {
+			extra_h += SUBTITLE_ROW_H;
+		}
+	}
+	list_h := (player_total_tasks.(float)) * ROW_H + extra_h + (LIST_PAD * 2.0);
 
 	header_rect := rr_draw_task_list_header(screen, false, player);
 	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
@@ -993,6 +1003,13 @@ update_tasks_ui :: proc(player: Player) {
 			}
 			case Task_Call_Fake_Meeting: {
 				task_progress = format_string("%/1", .{player.prankster_fake_meetings_called});
+				// Show the target name as the main text.
+				if !task.completed && player.prankster_fake_meeting_target_id != 0 {
+					target := get_player_by_entity_id(player.prankster_fake_meeting_target_id);
+					if target != null && #alive(target.entity) {
+						task_name = format_string("Vote out %", .{target.entity->get_name()});
+					}
+				}
 			}
 		}
 		if task.id == WEREWOLF_INFECT_TO_CURE_TASK_ID {
@@ -1040,6 +1057,22 @@ update_tasks_ui :: proc(player: Player) {
 		task_ts.autofit_min_size = 14;
 		task_ts.autofit_max_size = 24;
 		UI.text(text_rect->inset(0, 4, 0, 4), task_ts, task_name);
+
+		// Fake meeting task: draw "in a fake meeting" subtitle on a second line.
+		if task.id == "call_fake_meeting" {
+			subtitle_rect := list_content->cut_top(SUBTITLE_ROW_H);
+			// Indent to align with the task text (past the checkbox column).
+			subtitle_content := subtitle_rect->inset(0.0, 00.0, 0.0, 50.0);
+			sub_ts := UI.default_text_settings();
+			sub_ts.size = 18;
+			sub_ts.color = v4.{0.65, 0.65, 0.7, 1};
+			sub_ts.halign = .LEFT;
+			sub_ts.valign = .TOP;
+			sub_ts.do_outline = true;
+			sub_ts.outline_thickness = 3;
+			sub_ts.outline_color = v4.{0.1, 0.1, 0.15, 1};
+			UI.text(subtitle_content, sub_ts, "in a fake meeting");
+		}
 	}
 }
 

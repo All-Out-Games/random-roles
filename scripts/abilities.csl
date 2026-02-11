@@ -288,6 +288,9 @@ WEREWOLF_CLAW_UNLOCK_KILLS :: 2;
 WEREWOLF_CLAW_PROJECTILE_SPEED :: 12.0;
 WEREWOLF_CLAW_PROJECTILE_LIFETIME :: 0.45;
 
+WEREWOLF_DEVOUR_LOCK_REASON :: "werewolf_devour_lock";
+WEREWOLF_DEVOUR_LOCK_SECONDS :: 1.2; // matches Infection_Bite animation duration
+
 WEREWOLF_INFECTION_STUN_REASON :: "werewolf_infection_stun";
 WEREWOLF_INFECTION_STUN_SECONDS :: 1.0;
 // Delay before applying the werewolf skin on infected targets.
@@ -364,20 +367,14 @@ rr_werewolf_apply_infection :: proc(infector: Player, target: Player) {
 	// Bite animation plays immediately on the infector.
 	infector->set_trigger("werewolf_infection_bite");
 	// The victim's transform animation + skin change is delayed so they look normal for a while.
+	// For the full delay period nothing visible happens to the victim — no stun, no notification,
+	// no task swap. Everything reveals at the transform moment.
 	// The animation trigger fires 1s before the skin swap so the howl/transform anim leads into it.
 	target.werewolf_infected_transform_trigger_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS - 1.0;
 	target.werewolf_skin_enable_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS;
 	target.werewolf_skin_disable_at = 0.0;
-
-	target->Notify("You were bitten! Pass it on to return to normal.");
-	rr_werewolf_apply_infected_task_override(target);
-
-	// Brief "fall" stun for readability.
-	stun := target.entity->get_component(Werewolf_Infection_Stun);
-	if stun == null {
-		stun = target.entity->add_component(Werewolf_Infection_Stun);
-	}
-	stun->arm(WEREWOLF_INFECTION_STUN_SECONDS);
+	// Notification, task override, and stun are deferred to transform time
+	// (handled in rr_werewolf_update_skins when the transform trigger fires).
 }
 
 rr_werewolf_pass_infection :: proc(biter: Player, new_target: Player) {
@@ -400,25 +397,30 @@ rr_werewolf_pass_infection :: proc(biter: Player, new_target: Player) {
 
 	new_target.werewolf_infected = true;
 	new_target.werewolf_infected_from_id = from_id;
-	rr_werewolf_apply_infected_task_override(new_target);
 
-	// Restore the cured player's look, and schedule delayed transform on the new infected player.
+	// Restore the cured player's look.
 	biter->set_trigger("RESET");
 	biter.werewolf_skin_enable_at = 0.0;
 	biter.werewolf_skin_disable_at = get_time();
 	biter.werewolf_infected_transform_trigger_at = 0.0;
-	new_target.werewolf_infected_transform_trigger_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS - 1.0;
-	new_target.werewolf_skin_enable_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS;
+
+	// Civilian-to-civilian pass is instant — no stealth delay.
+	// Fire transform animation now and skin swap 1s later (animation duration).
+	new_target.werewolf_infected_transform_trigger_at = get_time();
+	new_target.werewolf_skin_enable_at = get_time() + 1.0;
 	new_target.werewolf_skin_disable_at = 0.0;
 
-	biter->Notify("You passed the bite. You're back to normal.");
+	// Apply effects immediately (notification, task override, stun).
 	new_target->Notify("You were bitten! Pass it on to return to normal.");
+	rr_werewolf_apply_infected_task_override(new_target);
 
 	stun := new_target.entity->get_component(Werewolf_Infection_Stun);
 	if stun == null {
 		stun = new_target.entity->add_component(Werewolf_Infection_Stun);
 	}
 	stun->arm(WEREWOLF_INFECTION_STUN_SECONDS);
+
+	biter->Notify("You passed the bite. You're back to normal.");
 }
 
 Werewolf_Infection_Stun :: class : Component {
@@ -458,6 +460,43 @@ Werewolf_Infection_Stun :: class : Component {
 	}
 }
 
+Werewolf_Devour_Lock :: class : Component {
+	active: bool;
+	end_time: float;
+
+	arm :: proc(using this: Werewolf_Devour_Lock, seconds: float) {
+		if seconds <= 0.0 { seconds = 0.1; }
+		end_time = get_time() + seconds;
+		active = true;
+
+		p := entity->get_component(Player);
+		if p != null {
+			p->add_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
+		}
+	}
+
+	ao_update :: proc(using this: Werewolf_Devour_Lock, dt: float) {
+		if !active return;
+		p := entity->get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		// Safety: exit if gameplay ended or player died.
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p->remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
+			active = false;
+			return;
+		}
+
+		if get_time() >= end_time {
+			p->remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
+			active = false;
+		}
+	}
+}
+
 Werewolf_Devour_Ability :: class : Ability_Base {
 	NAME :: "Devour";
 
@@ -485,6 +524,17 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			target := rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true);
 			if target != null {
+				// Lock movement so the bite animation plays before control returns.
+				lock := player.entity->get_component(Werewolf_Devour_Lock);
+				if lock == null {
+					lock = player.entity->add_component(Werewolf_Devour_Lock);
+				}
+				lock->arm(WEREWOLF_DEVOUR_LOCK_SECONDS);
+
+				// Face the target and play bite animation.
+				player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
+				player->set_trigger("werewolf_infection_bite");
+
 				// Devour consumes the target entirely — no corpse left behind.
 				target->kill_with_killer_no_corpse(player.entity.id);
 				current_cooldown = WEREWOLF_DEVOUR_COOLDOWN_SECONDS;
@@ -1329,6 +1379,10 @@ Resurrect_Ability :: class : Ability_Base {
 
             revive_pos := corpse.entity.world_position;
 
+            // Remember whether this body had already been reported before we destroy it.
+            // If it wasn't reported, the new corpse (after re-death) should still be reportable.
+            target.was_corpse_reported_before_resurrect = corpse.has_been_reported;
+
             // Consume a use.
            instance.player.doctor_resurrects_used += 1;
 
@@ -1662,10 +1716,22 @@ Vote_Ability :: class : Ability_Base {
 		title_ts.do_outline = true;
 		title_ts.outline_thickness = 3;
 		title_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(header, title_ts, "VOTE RESULT");
+
+		if rr_last_vote_was_fake_meeting {
+			title_ts.color = v4.{0.9, 0.6, 0.1, 1};
+			UI.text(header, title_ts, "FAKE MEETING");
+		} else {
+			UI.text(header, title_ts, "VOTE RESULT");
+		}
 
 		message := "No one was ejected.";
-		if rr_last_vote_ejected_player_id != 0 {
+		if rr_last_vote_was_fake_meeting {
+			if rr_last_vote_prankster_got_voted {
+				message = "Fake meeting! You got played by the prankster!";
+			} else {
+				message = "It was a fake meeting!";
+			}
+		} else if rr_last_vote_ejected_player_id != 0 {
 			p := get_player_by_entity_id(rr_last_vote_ejected_player_id);
 			name := "Someone";
 			if p != null {
@@ -1879,10 +1945,16 @@ Vote_Ability :: class : Ability_Base {
 
         // --- Timer (top-right) ---
         current_time := get_time();
-        elapsed := current_time - voting_start_time;
-        remaining := 60.0 - elapsed;
+        // Compute effective deadline respecting the hurry timer.
+        vote_deadline := voting_start_time + 60.0;
+        if rr_vote_hurry_deadline > 0.0 && rr_vote_hurry_deadline < vote_deadline {
+            vote_deadline = rr_vote_hurry_deadline;
+        }
+        remaining := vote_deadline - current_time;
         if remaining < 0.0 { remaining = 0.0; }
-        pct := remaining / 60.0;
+        total_duration := vote_deadline - voting_start_time;
+        if total_duration < 1.0 { total_duration = 1.0; }
+        pct := remaining / total_duration;
         if pct < 0.0 { pct = 0.0; }
         if pct > 1.0 { pct = 1.0; }
 
