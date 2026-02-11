@@ -217,7 +217,7 @@ MIN_NUMBER_OF_PLAYERS: int : 4;
 
 // Lobby countdown: first round after server start is longer to let players join.
 FIRST_ROUND_LOBBY_COUNTDOWN_SECONDS :: 30.0;
-NORMAL_LOBBY_COUNTDOWN_SECONDS :: 10.0;
+NORMAL_LOBBY_COUNTDOWN_SECONDS :: 25.0;
 
 // Non-body-report meetings (button/fake meetings) cooldown to prevent spam.
 MEETING_COOLDOWN_SECONDS :: 60.0;
@@ -655,6 +655,9 @@ countdown_active: bool;
 game_end_time: float;
 waiting_for_restart: bool;
 voting_start_time: float;
+rr_server_queue_name: string = "default";
+rr_server_available_initialized: bool;
+rr_last_server_available: bool;
 
 // After voting completes, keep the game in VOTING briefly to reveal the result.
 RR_VOTE_RESULTS_REVEAL_SECONDS :: 2.5;
@@ -708,6 +711,65 @@ rr_vote_eject_start_time: float;
 rr_vote_eject_player_id: u64;
 rr_vote_eject_anim_started: bool;
 rr_vote_eject_anim_start_time: float;
+
+rr_set_server_available :: proc(available: bool) {
+	if rr_server_available_initialized && rr_last_server_available == available return;
+	Server.queue_set_server_available(rr_server_queue_name, available);
+	rr_last_server_available = available;
+	rr_server_available_initialized = true;
+}
+
+rr_is_round_running :: proc() -> bool {
+	return game_state != Game_State.LOBBY && game_state != Game_State.ANIM_VICTORY;
+}
+
+rr_lobby_seconds_until_round_start :: proc() -> float {
+	// "Very far in the future" sentinel for states where a round is not imminent.
+	if game_state != Game_State.LOBBY return 999999.0;
+	if players.elements.count < MIN_NUMBER_OF_PLAYERS return 999999.0;
+
+	countdown_seconds := NORMAL_LOBBY_COUNTDOWN_SECONDS;
+	if round_number == 0 {
+		countdown_seconds = FIRST_ROUND_LOBBY_COUNTDOWN_SECONDS;
+	}
+
+	if waiting_for_restart {
+		wait_remaining := 60.0 - (get_time() - game_end_time);
+		if wait_remaining < 0.0 wait_remaining = 0.0;
+		return wait_remaining + countdown_seconds;
+	}
+
+	if countdown_active {
+		remaining := countdown_seconds - (get_time() - countdown_start_time);
+		if remaining < 0.0 remaining = 0.0;
+		return remaining;
+	}
+
+	// Enough players but countdown hasn't started this frame yet.
+	return countdown_seconds;
+}
+
+rr_update_server_queue_availability :: proc() {
+	player_count := players.elements.count;
+	running := rr_is_round_running();
+	available := true;
+
+	// Explicit busy case from product rules.
+	if player_count > 4 && running {
+		available = false;
+	}
+	// Explicit open case from product rules.
+	else if player_count < 4 {
+		available = true;
+	}
+	// Not currently running: only stay open if the next round is still >10s away.
+	else if !running {
+		available = rr_lobby_seconds_until_round_start() > 10.0;
+	}
+	// Running with exactly 4 players keeps previous "open" behavior unless told otherwise.
+
+	rr_set_server_available(available);
+}
 rr_vote_eject_text_sfx_played: bool;
 rr_vote_eject_anim_sfx_played: bool;
 
@@ -1517,6 +1579,7 @@ intro_popup: Intro_Popup;
 victory_popup: Victory_Popup;
 
 ao_start :: proc() {
+	rr_set_server_available(true);
 	rr_refresh_rng_state();
 	setup_lobby();
 	body_found_popup = new();
@@ -1530,6 +1593,8 @@ ao_start :: proc() {
   }
 
 ao_update :: proc(dt: float) {
+	rr_update_server_queue_availability();
+
 	// Keep timed sabotages progressing regardless of game_state (e.g., lockdown during voting).
 	rr_update_lockdown();
 
