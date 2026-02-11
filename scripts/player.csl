@@ -32,6 +32,7 @@ ALL_VOICE_CHANNELS :: ALIVE_CHANNEL | DEAD_CHANNEL;
 PLAYER_LIGHT_BASE_INNER_RADIUS :: 9;
 PLAYER_LIGHT_BASE_OUTER_RADIUS :: 12;
 PLAYER_LIGHT_POWER_OUTAGE_MULTIPLIER :: 0.15;
+PLAYER_LIGHT_POWER_OUTAGE_TRAITOR_MULTIPLIER :: 0.5;
 PLAYER_LIGHT_PIRATE_FOG_MULTIPLIER :: 0.3;
 PLAYER_LIGHT_MIN_INNER_RADIUS :: 0.75;
 PLAYER_LIGHT_MIN_OUTER_RADIUS :: 1.25;
@@ -451,11 +452,16 @@ Player :: class : Player_Base {
 
 		radii := v2.{PLAYER_LIGHT_BASE_INNER_RADIUS, PLAYER_LIGHT_BASE_OUTER_RADIUS};
 
-		// Power outage reduces visibility for non-traitors.
+		// Power outage reduces visibility for everyone, but traitors keep better sight.
 		if game_state == Game_State.INGAME && player_state == Player_State.ALIVE {
-			if rr_power_outage_active && rr_power_outage_affects_player(this) {
-				radii.x *= PLAYER_LIGHT_POWER_OUTAGE_MULTIPLIER;
-				radii.y *= PLAYER_LIGHT_POWER_OUTAGE_MULTIPLIER;
+			if rr_power_outage_active {
+				if this.player_type == Player_Type.TRAITOR {
+					radii.x *= PLAYER_LIGHT_POWER_OUTAGE_TRAITOR_MULTIPLIER;
+					radii.y *= PLAYER_LIGHT_POWER_OUTAGE_TRAITOR_MULTIPLIER;
+				} else if rr_power_outage_affects_player(this) {
+					radii.x *= PLAYER_LIGHT_POWER_OUTAGE_MULTIPLIER;
+					radii.y *= PLAYER_LIGHT_POWER_OUTAGE_MULTIPLIER;
+				}
 			}
 			if this->is_in_pirate_fog() {
 				radii.x *= PLAYER_LIGHT_PIRATE_FOG_MULTIPLIER;
@@ -508,6 +514,14 @@ Player :: class : Player_Base {
 		radii := this->get_local_light_radii();
 		local_light.radii = radii;
 		local_light_caster.radii = radii;
+		// Disable LOS occlusion during lights-out so players are not fully hidden by shadows.
+		disable_los_occlusion :=
+			rr_power_outage_disable_los_occlusion &&
+			rr_power_outage_active &&
+			game_state == Game_State.INGAME &&
+			player_state == Player_State.ALIVE &&
+			player_type == Player_Type.TRAITOR;
+		local_light_caster.enabled = !disable_los_occlusion;
 	}
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
