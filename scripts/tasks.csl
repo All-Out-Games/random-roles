@@ -308,7 +308,7 @@ get_task_display_name :: proc(task_id: string) -> string {
 		case "cypher":
 			return "Solve the Cypher";
 		case "anagram_puzzle":
-			return "Solve the Anagram";
+			return "Restart System";
 		case "reroute_power":
 			return "Reroute Power";
 		case "guide_the_electron":
@@ -4344,28 +4344,10 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		return true;
 	}
 
-	scramble_string :: proc(using task: Task_Anagram_Puzzle, word: string) -> string {
-		len := word.count;
-		if len <= 1 {
-			return word;
-		}
-
-		indices: List(int);
-		for i: 0..len-1 {
-			append(ref indices, i);
-		}
-
-		// Fisher-Yates shuffle on indices
-		for i: 0..indices.elements.count-1 {
-			j := rng_range_int(ref rr_rng_state.value, i, indices.elements.count-1);
-			tmp := indices.elements[i];
-			indices.elements[i] = indices.elements[j];
-			indices.elements[j] = tmp;
-		}
-
+	uppercase_word :: proc(using task: Task_Anagram_Puzzle, word: string) -> string {
 		out := "";
-		for i: 0..indices.elements.count-1 {
-			ch := word[indices.elements[i]];
+		for i: 0..word.count-1 {
+			ch := word[i];
 			out = format_string("%0%", .{out, task->char_to_string(ch)});
 		}
 		return out;
@@ -4429,10 +4411,10 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		decoy_2_idx := pick_random_word_of_length(lengths.elements[1], target_idx, decoy_1_idx, -1);
 		decoy_3_idx := pick_random_word_of_length(lengths.elements[2], target_idx, decoy_1_idx, decoy_2_idx);
 
-		note_1_word = scramble_string(this, target_word);
-		note_2_word = scramble_string(this, get_word(decoy_1_idx));
-		note_3_word = scramble_string(this, get_word(decoy_2_idx));
-		note_4_word = scramble_string(this, get_word(decoy_3_idx));
+		note_1_word = uppercase_word(this, target_word);
+		note_2_word = uppercase_word(this, get_word(decoy_1_idx));
+		note_3_word = uppercase_word(this, get_word(decoy_2_idx));
+		note_4_word = uppercase_word(this, get_word(decoy_3_idx));
 
 		// Default note positions/angles (randomized a bit so you can tweak later)
 		// These are normalized within the window_rect. (0,0) bottom-left of window_rect.
@@ -4526,7 +4508,7 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		// Always derive from the actual word so the number of monitor lines matches the solve word exactly.
 		target_len := task.target_word.count;
 
-		// Draw the 4 scrambled note words (positions/angles are placeholders you can tweak)
+		// Draw the 4 note words (positions/angles are placeholders you can tweak)
 		task->draw_note_word(window_rect, task.note_1_pos, task.note_1_angle, task.note_1_word, 0.75);
 		task->draw_note_word(window_rect, task.note_2_pos, task.note_2_angle, task.note_2_word, 1);
 		task->draw_note_word(window_rect, task.note_3_pos, task.note_3_angle, task.note_3_word, 1);
@@ -4577,7 +4559,7 @@ Task_Anagram_Puzzle :: class : Task_Base {
 			success_ts.color = .{0.3, 1.0, 0.4, 1.0};
 			success_ts.halign = .CENTER;
 			success_ts.valign = .CENTER;
-			UI.text(success_rect, success_ts, "ANAGRAM SOLVED!");
+			UI.text(success_rect, success_ts, "SYSTEM RESTARTED!");
 			return;
 		}
 
@@ -5043,8 +5025,8 @@ Task_Cypher :: class : Task_Base {
 		lights_on_texture = get_asset(Texture_Asset, "sprites/tasks/cypher/light_green.png");
 
 		icon_ssundee = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_ssundee.png");
-		icon_sigils = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_sigils.png");
-		icon_garry = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_garry.png");
+		icon_sigils = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_burger.png");
+		icon_garry = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_pie.png");
 		icon_skull = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_skull.png");
 		icon_schleem = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_schleem.png");
 		icon_foot = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_foot.png");
@@ -5070,15 +5052,15 @@ Task_Cypher :: class : Task_Base {
 
 	get_hint_text :: proc(icon_idx: int) -> string {
 		switch icon_idx {
-			case 0: return "Boss";
-			case 1: return "Books";
-			case 2: return "100 Channels";
+			case 0: return "Youtuber";
+			case 1: return "Patty";
+			case 2: return "Pie";
 			case 3: return "Death";
 			case 4: return "All Out";
-			case 5: return "Dawgs";
+			case 5: return "Feet";
 			case 6: return "Sharp";
 			case 7: return "Juice";
-			case 8: return "Wave";
+			case 8: return "Hand";
 			case: return "???";
 		}
 	}

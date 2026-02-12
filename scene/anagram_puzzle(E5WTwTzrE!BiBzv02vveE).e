@@ -6,7 +6,7 @@
   "local_enabled": true,
   "local_position": {
     "X": -21.9781208038330078,
-    "Y": 12.5912418365478516
+    "Y": 12.0198602676391602
   },
   "local_rotation": 0,
   "local_scale": {
@@ -23,7 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Interactable",
   "data": {
-    "text": "Solve The Anagram"
+    "text": "Restart the system"
   }
 },
 {

@@ -60,6 +60,7 @@ Player :: class : Player_Base {
 	chat_mode_last_applied: Chat.Mode;
 	task_list_inited: bool;
 	task_list_open: bool;
+	lobby_waiting_since_time: float;
 
 	// Local-only LOS light (viewer-specific).
 	local_light_entity: Entity;
@@ -758,61 +759,43 @@ Player :: class : Player_Base {
 							abilityIndex += 1;
 						}
 					}
-                }
+					}
             } else if game_state == Game_State.LOBBY {
-                // Lobby-only UI must be driven from a player update.
-                // Offer a "Force Start" button when we don't have enough players yet.
-                if !waiting_for_restart && players.elements.count < MIN_NUMBER_OF_PLAYERS {
-                    screen := UI.get_safe_screen_rect();
+					if !waiting_for_restart && players.elements.count < MIN_NUMBER_OF_PLAYERS {
+						if lobby_waiting_since_time <= 0.0 {
+							lobby_waiting_since_time = get_time();
+						}
 
-                    // Use the 4-arg `subrect` overload for a stable layout (no offset ordering ambiguity).
-                    // Bottom banner panel that stays inside SafeRect across aspect ratios.
-                    panel_rect := screen->subrect(0.15, 0.05, 0.85, 0.27);
-                    rr_ui_draw_modal_panel(panel_rect);
+						elapsed := get_time() - lobby_waiting_since_time;
+						if elapsed < 0.0 { elapsed = 0.0; }
+						elapsed_i := elapsed.(int);
+						if elapsed_i < 0 { elapsed_i = 0; }
+						minutes := elapsed_i / 60;
+						seconds := elapsed_i - minutes * 60;
 
-                    content := panel_rect->inset(12, 12, 12, 12);
+						screen := UI.get_safe_screen_rect();
 
-                    title_rect := content->cut_top(38);
-                    title_ts := UI.default_text_settings();
-                    title_ts.size = 34;
-                    title_ts.color = .{1, 1, 1, 1};
-                    title_ts.halign = .CENTER;
-                    title_ts.valign = .CENTER;
-                    UI.text(title_rect, title_ts, "WAITING FOR PLAYERS");
+						title_rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -200, -30, -200, -30);
+						title_ts := UI.default_text_settings();
+						title_ts.size = 52;
+						title_ts.color = .{1, 1, 1, 1};
+						title_ts.halign = .CENTER;
+						title_ts.valign = .CENTER;
+						UI.text(title_rect, title_ts, "WAITING FOR PLAYERS");
 
-                    info_rect := content->cut_top(28);
-                    info_ts := UI.default_text_settings();
-                    info_ts.size = 28;
-                    info_ts.color = .{0.9, 0.9, 0.9, 1};
-                    info_ts.halign = .CENTER;
-                    info_ts.valign = .CENTER;
-                    info_text := format_string("Players: %/%", .{players.elements.count, MIN_NUMBER_OF_PLAYERS});
-                    UI.text(info_rect, info_ts, info_text);
-
-                    warn_rect := content->cut_top(22);
-                    warn_ts := UI.default_text_settings();
-                    warn_ts.size = 22;
-                    warn_ts.color = .{1, 0.8, 0.2, 1};
-                    warn_ts.halign = .CENTER;
-                    warn_ts.valign = .CENTER;
-                    UI.text(warn_rect, warn_ts, "Force Start will begin with fewer players");
-
-                    start_rect := content->cut_bottom(52)->inset(6, 20, 6, 20);
-                    bs := UI.default_button_settings();
-                    rr_ui_apply_button_click_sound(ref bs);
-                    start_ts := UI.default_text_settings();
-                    start_ts.size = 36;
-                    start_ts.color = .{1, 1, 1, 1};
-                    start_ts.halign = .CENTER;
-                    start_ts.valign = .CENTER;
-
-                    UI.push_id("force_start_lobby");
-                    defer UI.pop_id();
-                    if UI.button(start_rect, bs, start_ts, "FORCE START").clicked {
-                        force_start_lobby_game();
-                    }
-                }
-            }
+						timer_rect := title_rect->offset(0,-50);
+						timer_ts := UI.default_text_settings();
+						timer_ts.size = 36;
+						timer_ts.color = .{0.7, 0.7, 0.7, 1};
+						timer_ts.halign = .CENTER;
+						timer_ts.valign = .CENTER;
+						UI.text(timer_rect, timer_ts, "Waiting for: %:%", {format_int(minutes, leading_zeroes=2), format_int(seconds, leading_zeroes=2)});
+					} else {
+						lobby_waiting_since_time = 0.0;
+					}
+                } else {
+					lobby_waiting_since_time = 0.0;
+				}
         }
     }
 
