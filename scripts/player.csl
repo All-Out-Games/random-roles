@@ -773,23 +773,63 @@ Player :: class : Player_Base {
 						minutes := elapsed_i / 60;
 						seconds := elapsed_i - minutes * 60;
 
+						t := get_time();
 						screen := UI.get_safe_screen_rect();
+						area_rect := screen->center_rect()->offset(0, 30);
 
-						title_rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -200, -30, -200, -30);
-						title_ts := UI.default_text_settings();
-						title_ts.size = 52;
-						title_ts.color = .{1, 1, 1, 1};
-						title_ts.halign = .CENTER;
-						title_ts.valign = .CENTER;
-						UI.text(title_rect, title_ts, "WAITING FOR PLAYERS");
-
-						timer_rect := title_rect->offset(0,-50);
+						// --- Elapsed timer (top) ---
+						timer_rect := area_rect->grow(20, 240, 0, 240)->offset(0, 60);
 						timer_ts := UI.default_text_settings();
-						timer_ts.size = 36;
-						timer_ts.color = .{0.7, 0.7, 0.7, 1};
+						timer_ts.size = 30;
+						timer_ts.color = .{0.55, 0.55, 0.65, 1};
 						timer_ts.halign = .CENTER;
 						timer_ts.valign = .CENTER;
-						UI.text(timer_rect, timer_ts, "Waiting for: %:%", {format_int(minutes, leading_zeroes=2), format_int(seconds, leading_zeroes=2)});
+						timer_ts.do_outline = true;
+						timer_ts.outline_thickness = 4;
+						timer_ts.outline_color = .{0, 0, 0, 1};
+						timer_ts.spacing_multiplier = 1.1;
+						UI.text(timer_rect, timer_ts, "%:%", {format_int(minutes, leading_zeroes=2), format_int(seconds, leading_zeroes=2)});
+
+						// --- Animated title (middle): color-cycling + gentle bob ---
+						title_r := sin(t * 1.8) * 0.3 + 0.7;
+						title_g := sin(t * 1.8 + 2.094) * 0.3 + 0.7;
+						title_b := sin(t * 1.8 + 4.189) * 0.3 + 0.7;
+						bob_y := sin(t * 2.0) * 4.0;
+
+						title_rect := area_rect->grow(30, 240, 0, 240)->offset(0, 5 + bob_y);
+						title_ts := UI.default_text_settings();
+						title_ts.size = 48;
+						title_ts.color = .{title_r, title_g, title_b, 1};
+						title_ts.halign = .CENTER;
+						title_ts.valign = .CENTER;
+						title_ts.do_outline = true;
+						title_ts.outline_thickness = 6;
+						title_ts.outline_color = .{0, 0, 0, 1};
+						title_ts.spacing_multiplier = 1.2;
+
+						// Animated dots cycling: (none) . .. ...
+						dot_time := (t * 2.0).(int);
+						dot_phase := dot_time - (dot_time / 4) * 4;
+						dots := "";
+						if dot_phase == 1 { dots = "."; }
+						else if dot_phase == 2 { dots = ".."; }
+						else if dot_phase == 3 { dots = "..."; }
+						UI.text(title_rect, title_ts, "WAITING FOR PLAYERS%", {dots});
+
+						// --- Player count (bottom): X / MAX ---
+						player_count := players.elements.count;
+						pulse := sin(t * 3.0) * 0.15 + 0.85;
+						count_rect := area_rect->grow(25, 240, 0, 240)->offset(0, -55);
+						count_ts := UI.default_text_settings();
+						count_ts.size = 44;
+						count_ts.color = .{pulse, pulse * 0.85, 0.25, 1};
+						count_ts.halign = .CENTER;
+						count_ts.valign = .CENTER;
+						count_ts.do_outline = true;
+						count_ts.outline_thickness = 5;
+						count_ts.outline_color = .{0, 0, 0, 1};
+						count_ts.spacing_multiplier = 1.1;
+						UI.text(count_rect, count_ts, "% / %", {player_count, MIN_NUMBER_OF_PLAYERS});
 					} else {
 						lobby_waiting_since_time = 0.0;
 					}
