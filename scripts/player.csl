@@ -38,6 +38,8 @@ PLAYER_LIGHT_MIN_INNER_RADIUS :: 0.75;
 PLAYER_LIGHT_MIN_OUTER_RADIUS :: 1.25;
 PLAYER_LIGHT_INTENSITY :: 1.0;
 PLAYER_LIGHT_COLOR := v4.{1.0, 1.0, 1.0, 1.0};
+PIRATE_DIRT_PILE_TEXTURE_PATH :: "sprites/dirt_pile.png";
+PIRATE_DIRT_PILE_FALLBACK_TEXTURE_PATH :: "sprites/icons/pirate/dig_for_treasure.png";
 
 Player :: class : Player_Base {
     player_type: Player_Type;
@@ -2701,6 +2703,23 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 
 	target_pos, ok := rr_find_nearest_pirate_dig_spot_pos(player);
 	if !ok return;
+
+	dirt_texture := get_asset(Texture_Asset, PIRATE_DIRT_PILE_TEXTURE_PATH);
+	if dirt_texture == null {
+		dirt_texture = get_asset(Texture_Asset, PIRATE_DIRT_PILE_FALLBACK_TEXTURE_PATH);
+	}
+	if dirt_texture != null {
+		UI.push_world_draw_context();
+		defer UI.pop_draw_context();
+		UI.push_z(target_pos.y);
+		defer UI.pop_z();
+
+		// Local-only marker at the active dig spot so pirates can quickly identify it.
+		dirt_pos := target_pos + v2.{0.0, -0.08};
+		dirt_rect := Rect{dirt_pos, dirt_pos}->grow(0.58, 0.38, 0.58, 0.38);
+		pulse := 0.9 + 0.1 * sin(get_time() * 4.0);
+		UI.quad(dirt_rect->fit_aspect(dirt_texture->get_aspect()), dirt_texture, v4.{1, 1, 1, pulse});
+	}
 
 	tutorial_arrow_options := Tutorial_Arrow.default_options();
 	tutorial_arrow_options.far = true;
