@@ -43,3 +43,80 @@ rebuild_game_world_navmesh :: proc() {
 try_find_closest_point_on_navmesh :: proc(position: v2, point: ref v2, triangle_hint: ref s64) -> bool {
     return world_references.main_navmesh->try_find_closest_point_on_navmesh(position, ref point, ref triangle_hint);
 }
+
+// --- UI helpers ---
+// Standard kit modal panel (opaque) used for UI backpanels.
+RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX :: 96.0;
+
+RR_UI_BUTTON_CLICK_SOUND_PATH :: "sfx/button_click.wav";
+RR_UI_CALL_MEETING_SOUND_PATH :: "sfx/call_meeting.wav";
+RR_TUTORIAL_ARROW_SPRITE_PATH :: "sprites/Arrow Right Outline 64.png";
+
+rr_play_sfx :: proc(path: string, desc: SFX_Desc) -> u64 {
+    asset := get_asset(SFX_Asset, path);
+    if asset == null return 0;
+    return SFX.play(asset, desc);
+}
+
+rr_ui_apply_button_click_sound :: proc(bs: ref Button_Settings) {
+    bs.click_sound = get_asset(SFX_Asset, RR_UI_BUTTON_CLICK_SOUND_PATH);
+    bs.click_sound_desc.speed = 1.0;
+}
+
+rr_play_call_meeting_sound :: proc(caller: Player) {
+    // Server authoritative (sound should play once for everyone).
+    if !Game.is_server() return;
+
+    sfx := SFX.default_sfx_desc();
+    if caller != null {
+        sfx->set_position(caller.entity.world_position);
+    }
+    sfx.volume = 0.9;
+    sfx.volume_perturb = 0.05;
+    sfx.speed_perturb = 0.05;
+    // Global SFX mix: everything at 25% volume.
+    sfx.volume *= 0.25;
+    sfx.volume_perturb *= 0.25;
+    rr_play_sfx(RR_UI_CALL_MEETING_SOUND_PATH, sfx);
+}
+
+rr_ui_draw_modal_panel :: proc(rect: Rect) {
+    // Prefer kit modal sprite; fall back to a generic modal or solid color.
+    is_white_fallback := false;
+    tex := get_asset(Texture_Asset, "ui/voting/modal_backing.png");
+    if tex == null { tex = get_asset(Texture_Asset, "$AO/ui/kit/Modals/modal_windows/modal_simple_black1.png"); }
+    if tex == null { tex = get_asset(Texture_Asset, "$AO/white.png"); is_white_fallback = true; }
+
+    // Draw non-interactive 9-slice panel using the button renderer.
+    bs := UI.default_button_settings();
+    bs.sprite = tex;
+    bs.press_scaling = 1.0;
+
+    // Full opacity as requested (note: the texture itself may have transparency baked in).
+    tint := v4.{1, 1, 1, 1};
+    if is_white_fallback {
+        // Reasonable fallback if kit assets are missing.
+        tint = v4.{0.08, 0.08, 0.10, 1.0};
+    }
+
+    bs.color = tint;
+    bs.hovered_color = tint;
+    bs.pressed_color = tint;
+    bs.disabled_color = tint;
+    bs.background_color_multiplier = v4.{1, 1, 1, 1};
+
+    bs.nine_slice_data.slice = v4.{RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX, RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX, RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX, RR_UI_KIT_MODAL_PANEL_NINE_SLICE_PX};
+    bs.nine_slice_data.slice_scale = 1.0;
+
+    UI.push_disabled(true);
+    defer UI.pop_disabled();
+    UI.begin_button(rect, bs, {}, ""); { defer UI.end_button(); }
+}
+
+rr_draw_tutorial_arrow :: proc(player: Player, target_position: v2, options: Tutorial_Arrow.Tutorial_Arrow_Options) {
+	arrow := get_asset(Texture_Asset, RR_TUTORIAL_ARROW_SPRITE_PATH);
+	if arrow != null {
+		options.arrow_sprite_override = arrow;
+	}
+	Tutorial_Arrow.draw(player, target_position, options);
+}

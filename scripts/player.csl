@@ -38,6 +38,8 @@ Player :: class : Player_Base {
 	doctor_resurrects_used: int; // resets each round
 	is_temporarily_resurrected: bool;
 	temporarily_resurrected_until: float;
+    hub_camera_size_applied: bool;
+    hub_camera_original_size: float;
 
     is_frozen: bool;
 
@@ -100,6 +102,8 @@ Player :: class : Player_Base {
         // Hub game is its own Platform project (see `ao.project`).
         // Avoid initializing the Random Roles match systems when we're in the hub.
         if rr_is_hub_game() {
+            // Hub-only movement tuning.
+            this.agent.movement_speed *= HUB_WALK_SPEED_MULTIPLIER;
             this->ensure_anim_state_machine();
             this->apply_voice_chat_masks_for_current_state();
 
@@ -194,6 +198,8 @@ Player :: class : Player_Base {
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
         if rr_is_hub_game() {
+            this->apply_hub_camera_zoom_once();
+            this->draw_hub_portal_indicator();
             return;
         }
 
@@ -444,6 +450,43 @@ Player :: class : Player_Base {
 		}
 		return false;
 	}
+
+    apply_hub_camera_zoom_once :: proc(using this: Player) {
+        if !this->is_local() {
+            return;
+        }
+        if hub_camera_size_applied {
+            return;
+        }
+        hub_camera_original_size = this.camera.size;
+        this.camera.size = hub_camera_original_size * HUB_CAMERA_SIZE_MULTIPLIER;
+        hub_camera_size_applied = true;
+    }
+
+    draw_hub_portal_indicator :: proc(using this: Player) {
+        if !this->is_local() {
+            return;
+        }
+
+        portal_pos: v2;
+        if !rr_try_get_hub_portal_position(ref portal_pos) {
+            return;
+        }
+
+        to_portal := portal_pos - this.entity.world_position;
+        dist := length(to_portal);
+        if dist <= HUB_PORTAL_INDICATOR_MIN_DISTANCE {
+            return;
+        }
+        tutorial_arrow_options := Tutorial_Arrow.default_options();
+        tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
+        tutorial_arrow_options.far = true;
+        tutorial_arrow_options.near = true;
+        tutorial_arrow_options.bob_scale = 0.5;
+        tutorial_arrow_options.bob_bias = 1.5;
+
+        rr_draw_tutorial_arrow(this, portal_pos, tutorial_arrow_options);
+    }
 }
 
 Task_Interactable :: class : Component {

@@ -1,3 +1,14 @@
+hub_primary_portal_position: v2;
+hub_primary_portal_registered: bool;
+
+rr_try_get_hub_portal_position :: proc(out_position: ref v2) -> bool {
+    if !hub_primary_portal_registered {
+        return false;
+    }
+    out_position = hub_primary_portal_position;
+    return true;
+}
+
 Hub_Normal_Queue_Portal :: class : Interactable {
     ao_start :: method() {
         this->set_listener(this);
@@ -5,6 +16,12 @@ Hub_Normal_Queue_Portal :: class : Interactable {
         this->set_hold_text("");
         if radius <= 0.0 radius = 1.75;
         if priority == 0 priority = 100;
+
+        // Register the hub portal location once so local UI can point players to it.
+        if !hub_primary_portal_registered {
+            hub_primary_portal_position = entity.world_position;
+            hub_primary_portal_registered = true;
+        }
     }
 
     can_use :: method(player: Player) -> bool {
