@@ -19,7 +19,9 @@ HITMAN_MINE_FLING_SPEED :: 14.0;
 
 HITMAN_MINE_FLING_REASON :: "hitman_mine_fling";
 HITMAN_MINE_STUN_REASON :: "hitman_mine_stun";
-HITMAN_SNIPER_CAMERA_ZOOMED_OUT_SIZE :: 18.0;
+HITMAN_SNIPER_CAMERA_ZOOMED_OUT_SIZE :: 9.0;
+RETICLE_TEXTURE_PATH :: "sprites/reticle.png";
+GROUND_RETICLE_TEXTURE_PATH :: "sprites/ground_reticle.png";
 
 HITMAN_NECK_SNAP_LOCK_REASON :: "hitman_neck_snap_lock";
 HITMAN_NECK_SNAP_LOCK_SECONDS :: 1.1;
@@ -1315,7 +1317,9 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 			defer UI.pop_draw_context();
 			UI.push_z(target_pos.y);
 			defer UI.pop_z();
-			UI.quad(Rect{target_pos, target_pos}->grow(0.12, 0.12, 0.12, 0.12), core_globals.white_sprite, v4.{1, 0.2, 0.2, 0.9});
+			reticle := get_asset(Texture_Asset, RETICLE_TEXTURE_PATH);
+			reticle_rect := Rect{target_pos, target_pos}->grow(0.44, 0.44, 0.44, 0.44);
+			UI.quad(reticle_rect->fit_aspect(reticle->get_aspect()), reticle, v4.{1, 1, 1, 0.95});
 		}
 
 		if activated_this_session {
@@ -2470,6 +2474,7 @@ Shoot_Ability :: class : Ability_Base {
         if player.player_state != Player_State.ALIVE return false;
         if player->has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
+		if player.player_role == Player_Role.PIRATE && player.pirate_treasure < PIRATE_SHOOT_UNLOCK_TREASURE_COST return false;
         return true;
     }
 
@@ -2522,7 +2527,8 @@ BLACK_FLAG_RADIUS :: 5.0;
 BLACK_FLAG_DURATION :: 30.0;
 
 // Pirate unlock economy
-PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST :: 1;
+PIRATE_SHOOT_UNLOCK_TREASURE_COST :: 1;
+PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST :: 0;
 PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST :: 2;
 
 // Pirate treasure maps / digging
@@ -2535,6 +2541,7 @@ rr_pirate_refresh_unlocks :: proc(player: Player) {
 	if player.player_role != Player_Role.PIRATE return;
 
 	// Treasure is NOT consumed on unlock; abilities become usable once you have enough.
+	player.pirate_black_flag_unlocked = true;
 	if player.pirate_treasure >= PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
 		player.pirate_black_flag_unlocked = true;
 	}
@@ -2901,7 +2908,7 @@ Pirate_Treasure_Map_Ability :: class : Ability_Base {
 
 // --- Pirate: Powder Keg ---
 POWDER_KEG_COOLDOWN_SECONDS :: 90.0;
-POWDER_KEG_CAMERA_ZOOMED_OUT_SIZE :: 18.0;
+POWDER_KEG_CAMERA_ZOOMED_OUT_SIZE :: 9.0;
 POWDER_KEG_THROW_TRAVEL_TIME :: 0.75;
 POWDER_KEG_MAX_THROW_RANGE :: 10.0;
 POWDER_KEG_EXPLOSION_RADIUS :: 4.5;
@@ -3246,7 +3253,9 @@ Powder_Keg_Ability :: class : Ability_Base {
 			defer UI.pop_draw_context();
 			UI.push_z(target_pos.y);
 			defer UI.pop_z();
-			UI.quad(Rect{target_pos, target_pos}->grow(0.08, 0.08, 0.08, 0.08), core_globals.white_sprite, v4.{1, 0.6, 0.1, 0.9});
+			reticle := get_asset(Texture_Asset, GROUND_RETICLE_TEXTURE_PATH);
+			reticle_rect := Rect{target_pos, target_pos}->grow(0.80, 0.80, 0.80, 0.80);
+			UI.quad(reticle_rect->fit_aspect(reticle->get_aspect()), reticle, v4.{1, 1, 1, 0.95});
 		}
 
 		// Only allow one throw per targeting session (guards against odd input edge cases).
