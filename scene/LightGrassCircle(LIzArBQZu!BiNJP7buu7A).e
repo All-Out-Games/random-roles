@@ -5,8 +5,8 @@
   "name": "LightGrassCircle",
   "local_enabled": true,
   "local_position": {
-    "X": 0.0288925170898438,
-    "Y": 22.4867877960205078
+    "X": -0.2087097167968750,
+    "Y": 17.6515598297119141
   },
   "local_rotation": 0,
   "local_scale": {

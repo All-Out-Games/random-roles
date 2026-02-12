@@ -5,7 +5,7 @@
   "name": "StreetLamp.png",
   "local_enabled": true,
   "local_position": {
-    "X": -1.9611625671386719,
+    "X": -3.5778007507324219,
     "Y": 14.6736164093017578
   },
   "local_rotation": 0,

@@ -5,13 +5,13 @@
   "name": "Portal1",
   "local_enabled": true,
   "local_position": {
-    "X": 15.5530738830566406,
-    "Y": 14.8455648422241211
+    "X": 0.5501899719238281,
+    "Y": 17.3913040161132812
   },
   "local_rotation": 0,
   "local_scale": {
-    "X": 1,
-    "Y": 1
+    "X": 1.5000000000000000,
+    "Y": 1.5000000000000000
   },
   "previous_sibling": "3146734703340891:1769113725267695800",
   "next_sibling": "3163163229506057:1769117644170789800",
@@ -31,6 +31,7 @@
     "ordered_skins": [
       "Greyscale"
     ],
+    "depth_offset": 1.6354141235351562,
     "initial_animation": "Portal_Loop",
     "loop_initial_animation": true
   }

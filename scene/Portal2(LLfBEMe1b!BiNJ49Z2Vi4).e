@@ -3,10 +3,10 @@
 3146734703340891 1769113725267695800
 {
   "name": "Portal2",
-  "local_enabled": true,
+  "local_enabled": false,
   "local_position": {
-    "X": 19.0140762329101562,
-    "Y": 14.7490129470825195
+    "X": 2.7892417907714844,
+    "Y": 17.4644660949707031
   },
   "local_rotation": 0,
   "local_scale": {
