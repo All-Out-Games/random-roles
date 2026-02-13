@@ -35,24 +35,20 @@ Leaderboard :: class : Component {
         if bg_other  == null { bg_other  = get_asset(Texture_Asset, "leaderboard/RANK 4.png"); }
         if bg_me     == null { bg_me     = get_asset(Texture_Asset, "leaderboard/RANK ME.png"); }
 
-        if !Game.is_server() {
-            lb_refresh_entries(this);
-            lb_refresh_my_entry(this);
-            last_refresh_time = get_time();
-        }
+        lb_refresh_entries(this);
+        lb_refresh_my_entry(this);
+        last_refresh_time = get_time();
     }
 
+    // Data refresh only — drawing is done from Player.ao_late_update
+    // so the scroll view has the current camera and player interaction context.
     ao_late_update :: method(dt: float) {
-        if Game.is_server() return;
-
         now := get_time();
         if now - last_refresh_time > REFRESH_INTERVAL {
             last_refresh_time = now;
             lb_refresh_entries(this);
             lb_refresh_my_entry(this);
         }
-
-        lb_draw(this);
     }
 }
 
@@ -65,7 +61,7 @@ lb_refresh_entries :: proc(lb: Leaderboard) {
             e.user_id   = raw.key;
             e.score     = raw.value;
             e.placement = raw.position;
-            e.username  = Save.get_game_string(format_string("lb_%_name_%", {lb.leaderboard_id, raw.key}), "Unknown");
+            e.username  = "Any"; //TODO when added: switch to Game.LookupPlayerName(key)
             lb.entries->append(e);
         }
     });
@@ -122,7 +118,7 @@ lb_draw :: proc(lb: Leaderboard) {
     UI.push_id("lb_%", {lb.entity.id});
     defer UI.pop_id();
 
-    viewport_rect := Rect.{pos, pos}->grow(0.5, 1.6, 1.62, 1.6);
+    viewport_rect := Rect.{pos, pos}->grow(0.5, 1.4, 1.68, 1.4);
 
     if lb.board_texture != null {
         board_rect := Rect.{pos, pos}->grow(2.4, 2.6, 2.6, 2.6);
