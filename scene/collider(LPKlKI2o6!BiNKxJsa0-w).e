@@ -21,6 +21,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Circle_Collider",
   "data": {
-
+    "make_navmesh_loop": true,
+    "flip_navmesh_loop": true
   }
 }

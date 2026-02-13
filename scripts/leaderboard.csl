@@ -1,0 +1,311 @@
+Leaderboard_Entry :: struct {
+    user_id: string;
+    username: string;
+    score: f64;
+    placement: s64;
+}
+
+Leaderboard :: class : Component {
+    leaderboard_id: string @ao_serialize;
+    optional_title: string @ao_serialize;
+
+    bg_first:  Texture_Asset @ao_serialize;
+    bg_second: Texture_Asset @ao_serialize;
+    bg_third:  Texture_Asset @ao_serialize;
+    bg_other:  Texture_Asset @ao_serialize;
+    bg_me:     Texture_Asset @ao_serialize;
+
+    board_texture:  Texture_Asset;
+    shadow_texture: Texture_Asset;
+
+    entries: [..]Leaderboard_Entry;
+    my_entry: Leaderboard_Entry;
+    has_my_entry: bool;
+
+    last_refresh_time: float;
+    REFRESH_INTERVAL :: 5.0;
+
+    ao_start :: method() {
+        board_texture  = get_asset(Texture_Asset, "leaderboard/leaderboard.png");
+        shadow_texture = get_asset(Texture_Asset, "leaderboard/shadow.png");
+
+        if bg_first  == null { bg_first  = get_asset(Texture_Asset, "leaderboard/RANK 1.png"); }
+        if bg_second == null { bg_second = get_asset(Texture_Asset, "leaderboard/RANK 2.png"); }
+        if bg_third  == null { bg_third  = get_asset(Texture_Asset, "leaderboard/RANK 3.png"); }
+        if bg_other  == null { bg_other  = get_asset(Texture_Asset, "leaderboard/RANK 4.png"); }
+        if bg_me     == null { bg_me     = get_asset(Texture_Asset, "leaderboard/RANK ME.png"); }
+
+        if !Game.is_server() {
+            lb_refresh_entries(this);
+            lb_refresh_my_entry(this);
+            last_refresh_time = get_time();
+        }
+    }
+
+    ao_late_update :: method(dt: float) {
+        if Game.is_server() return;
+
+        now := get_time();
+        if now - last_refresh_time > REFRESH_INTERVAL {
+            last_refresh_time = now;
+            lb_refresh_entries(this);
+            lb_refresh_my_entry(this);
+        }
+
+        lb_draw(this);
+    }
+}
+
+lb_refresh_entries :: proc(lb: Leaderboard) {
+    Save.ordered_get_all(lb.leaderboard_id, 0, 50, lb, proc(raw_entries: []Ordered_Save_Entry, userdata: Object) {
+        lb := userdata.(Leaderboard);
+        lb.entries->clear();
+        for raw: raw_entries {
+            e: Leaderboard_Entry;
+            e.user_id   = raw.key;
+            e.score     = raw.value;
+            e.placement = raw.position;
+            e.username  = Save.get_game_string(format_string("lb_%_name_%", {lb.leaderboard_id, raw.key}), "Unknown");
+            lb.entries->append(e);
+        }
+    });
+}
+
+lb_refresh_my_entry :: proc(lb: Leaderboard) {
+    local_player, ok := Game.get_local_player();
+    if !ok return;
+    user_id := local_player->get_user_id();
+
+    Save.ordered_get(lb.leaderboard_id, user_id, 0, lb, proc(raw: Ordered_Save_Entry, userdata: Object) {
+        lb := userdata.(Leaderboard);
+        if raw.value > 0 {
+            lb.my_entry.user_id   = raw.key;
+            lb.my_entry.score     = raw.value;
+            lb.my_entry.placement = raw.position;
+            local_p, ok2 := Game.get_local_player();
+            if ok2 {
+                lb.my_entry.username = local_p->get_username();
+            } else {
+                lb.my_entry.username = "Me";
+            }
+            lb.has_my_entry = true;
+        } else {
+            lb.has_my_entry = false;
+        }
+    });
+}
+
+leaderboard_increment_score :: proc(player: Player, leaderboard_id: string, amount: f64) {
+    if !Game.is_server() return;
+    user_id := player->get_user_id();
+
+    save_key := format_string("lb_score_%", {leaderboard_id});
+    current := Save.get_f64(player, save_key, 0.0);
+    new_score := current + amount;
+    Save.set_f64(player, save_key, new_score);
+
+    Save.ordered_set(leaderboard_id, user_id, new_score);
+
+    name_key := format_string("lb_%_name_%", {leaderboard_id, user_id});
+    Save.set_game_string(name_key, player->get_username());
+}
+
+lb_draw :: proc(lb: Leaderboard) {
+    UI.push_world_draw_context();
+    defer UI.pop_draw_context();
+
+    pos := lb.entity.world_position;
+
+    UI.push_z(pos.y);
+    defer UI.pop_z();
+
+    UI.push_scale_factor(1.0);
+    defer UI.pop_scale_factor();
+
+    UI.push_id("lb_%", {lb.entity.id});
+    defer UI.pop_id();
+
+    viewport_rect := Rect.{pos, pos}->grow(0.5, 1.6, 1.62, 1.6);
+
+    if lb.board_texture != null {
+        board_rect := Rect.{pos, pos}->grow(2.4, 2.6, 2.6, 2.6);
+        board_rect = board_rect->fit_aspect(lb.board_texture->get_aspect());
+
+        if lb.shadow_texture != null {
+            shadow_rect := board_rect->grow(-0.4)->fit_aspect(lb.shadow_texture->get_aspect())->offset(0, -1.8);
+            UI.push_layer_relative(-1);
+            UI.quad(shadow_rect, lb.shadow_texture);
+            UI.pop_layer();
+        }
+
+        UI.quad(board_rect, lb.board_texture);
+    }
+
+    my_rect := viewport_rect->cut_bottom(0.3);
+    if lb.has_my_entry {
+        lb_draw_my_entry(lb, my_rect);
+    }
+
+    settings: Scroll_View_Settings;
+    settings.vertical   = true;
+    settings.horizontal = false;
+    settings.clip_padding = v4.{0, 0.1, 0, 0};
+
+    sv := UI.push_scroll_view(viewport_rect, "world_leaderboard", settings); {
+        defer UI.pop_scroll_view();
+
+        content_cut := sv.content_rect->top_rect();
+
+        for i: 0..49 {
+            h := 0.23;
+            if i == 0 { h = 0.55; }
+            if i == 1 { h = 0.375; }
+            if i == 2 { h = 0.375; }
+
+            entry_rect := content_cut->cut_top(h);
+            if i == 0 { entry_rect = entry_rect->grow(0, 0.075, 0, 0); }
+
+            lb_draw_entry(lb, entry_rect, i);
+            UI.expand_current_scroll_view(entry_rect);
+            content_cut->cut_top(0.05);
+        }
+    }
+
+    if lb.optional_title.count > 0 {
+        title_pos := pos + v2.{0, -2.0};
+        title_rect := Rect.{title_pos, title_pos};
+
+        title_ts := lb_make_text_settings();
+        title_ts.size       = 0.5;
+        title_ts.word_wrap  = false;
+
+        UI.text(title_rect, title_ts, lb.optional_title);
+    }
+}
+
+lb_draw_entry :: proc(lb: Leaderboard, entry_rect: Rect, i: int) {
+    display_name := "TBD";
+    score: f64 = 0;
+
+    if i < lb.entries.count {
+        display_name = lb.entries[i].username;
+        if display_name.count == 0 { display_name = "Unknown"; }
+        score = lb.entries[i].score;
+    }
+
+    tex := lb.bg_other;
+    if i == 0 { tex = lb.bg_first; }
+    if i == 1 { tex = lb.bg_second; }
+    if i == 2 { tex = lb.bg_third; }
+
+    if tex != null {
+        UI.quad(entry_rect, tex);
+    }
+
+    UI.push_layer_relative(1); {
+        defer UI.pop_layer();
+
+        text_size := 0.15;
+        if i < 3 { text_size = 0.215; }
+
+        rank_text_size := text_size * 1.5;
+
+        rank_color := v4.{41.0 / 255.0, 35.0 / 255.0, 39.0 / 255.0, 1.0};
+        if i == 0 { rank_color = v4.{184.0 / 255.0, 105.0 / 255.0, 0.0, 1.0}; }
+        if i == 1 { rank_color = v4.{63.0 / 255.0, 67.0 / 255.0, 79.0 / 255.0, 1.0}; }
+        if i == 2 { rank_color = v4.{126.0 / 255.0, 37.0 / 255.0, 16.0 / 255.0, 1.0}; }
+
+        ts := lb_make_text_settings();
+        ts.size    = rank_text_size;
+        ts.color   = rank_color;
+        ts.halign  = .LEFT;
+        ts.do_outline = false;
+
+        rank_rect := entry_rect->left_rect()->offset(0.2, 0);
+        if i == 0 { rank_rect = rank_rect->offset(0, -0.03); }
+
+        final_rank_rect := UI.text_sync(rank_rect, ts, "%", {i + 1});
+
+        suffix_ts := ts;
+        suffix_ts.size   = rank_text_size * 0.5;
+        suffix_ts.valign = .TOP;
+        suffix_rect := final_rank_rect->right_rect()->offset(0, -0.02);
+        UI.text(suffix_rect, suffix_ts, lb_ordinal_suffix(i));
+
+        name_ts := lb_make_text_settings();
+        name_ts.size   = text_size;
+        name_ts.halign = .LEFT;
+        name_rect := entry_rect->left_rect()->offset(1, 0);
+        if i == 0 { name_rect = name_rect->offset(0, -0.03); }
+        UI.text(name_rect, name_ts, display_name);
+
+        score_ts := lb_make_text_settings();
+        score_ts.size   = text_size;
+        score_ts.halign = .RIGHT;
+        score_rect := entry_rect->right_rect()->offset(-0.175, 0);
+        if i == 0 { score_rect = score_rect->offset(-0.075, -0.03); }
+        UI.text(score_rect, score_ts, "%", {score.(int)});
+    }
+}
+
+lb_draw_my_entry :: proc(lb: Leaderboard, my_rect: Rect) {
+    if lb.bg_me != null {
+        UI.quad(my_rect, lb.bg_me);
+    }
+
+    text_size      := 0.15;
+    rank_text_size := text_size * 1.5;
+    rank_color     := v4.{41.0 / 255.0, 35.0 / 255.0, 39.0 / 255.0, 1.0};
+
+    ts := lb_make_text_settings();
+    ts.size       = rank_text_size;
+    ts.color      = rank_color;
+    ts.halign     = .LEFT;
+    ts.do_outline = false;
+
+    rank_rect := my_rect->left_rect()->offset(0.2, 0);
+    placement := lb.my_entry.placement + 1;
+    final_rank_rect := UI.text_sync(rank_rect, ts, "%", {placement});
+
+    suffix_ts := ts;
+    suffix_ts.size   = rank_text_size * 0.5;
+    suffix_ts.valign = .TOP;
+    suffix_rect := final_rank_rect->right_rect()->offset(0, -0.02);
+    UI.text(suffix_rect, suffix_ts, lb_ordinal_suffix(lb.my_entry.placement.(int)));
+
+    name_ts := lb_make_text_settings();
+    name_ts.size   = text_size;
+    name_ts.halign = .LEFT;
+    name_rect := my_rect->left_rect()->offset(1, 0);
+    display_name := lb.my_entry.username;
+    if display_name.count == 0 { display_name = "Me"; }
+    UI.text(name_rect, name_ts, display_name);
+
+    score_ts := lb_make_text_settings();
+    score_ts.size   = text_size;
+    score_ts.halign = .RIGHT;
+    score_rect := my_rect->right_rect()->offset(-0.175, 0);
+    UI.text(score_rect, score_ts, "%", {lb.my_entry.score.(int)});
+}
+
+lb_make_text_settings :: proc() -> Text_Settings {
+    ts := UI.default_text_settings();
+    ts.size  = 0.15;
+    ts.color = v4.{1, 1, 1, 1};
+    ts.halign = .CENTER;
+    ts.valign = .CENTER;
+    ts.do_outline = true;
+    ts.outline_thickness = 3;
+    ts.outline_color = v4.{0, 0, 0, 1};
+    return ts;
+}
+
+lb_ordinal_suffix :: proc(index: int) -> string {
+    mod100 := index % 100;
+    if mod100 >= 10 && mod100 <= 12 return "th";
+    mod10 := index % 10;
+    if mod10 == 0 return "st";
+    if mod10 == 1 return "nd";
+    if mod10 == 2 return "rd";
+    return "th";
+}
