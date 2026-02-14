@@ -753,7 +753,6 @@ fake_meeting_cooldown_ends_at: float;
 // --- Meeting metadata (used by voting UI) ---
 meeting_initiator_id: u64;          // 0 = none / hidden (e.g. fake meeting)
 meeting_initiator_from_body: bool;  // true when triggered via Report
-rr_suppress_meeting_initiator: bool;
 
 // Player entity ids that died since the previous meeting ended.
 deaths_since_last_meeting: List(u64);
@@ -1154,9 +1153,7 @@ start_fake_meeting :: proc(caller: Player) {
 
 	// Use the normal meeting flow (meeting called popup -> voting).
 	// Fake meetings share the same cooldown as real meetings (checked inside start_meeting).
-	rr_suppress_meeting_initiator = true;
 	started := start_meeting(false, caller);
-	rr_suppress_meeting_initiator = false;
 	if !started return;
 
 	fake_meeting_active = true;
@@ -1586,10 +1583,9 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 	}
 
 	// Capture meeting metadata for the upcoming voting UI.
-	// (Fake meetings suppress this capture and will leave initiator_id = 0.)
 	meeting_initiator_id = 0;
 	meeting_initiator_from_body = false;
-	if caller != null && !rr_suppress_meeting_initiator {
+	if caller != null {
 		meeting_initiator_id = caller.entity.id;
 		meeting_initiator_from_body = from_body;
 	}

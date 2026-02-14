@@ -886,10 +886,10 @@ Player :: class : Player_Base {
 		this.is_temporarily_resurrected = false;
 		this.temporarily_resurrected_until = 0.0;
 		// Werewolf infection should never persist through death.
+		// Restore original tasks before clearing infection state.
+		rr_werewolf_clear_infected_task_override(this);
 		this.werewolf_infected = false;
 		this.werewolf_infected_from_id = 0;
-		this.werewolf_saved_tasks_active = false;
-		this.werewolf_saved_tasks = List(Task_Base).{};
 		// Ensure visuals revert immediately.
 		this.werewolf_skin_enable_at = 0.0;
 		this.werewolf_skin_disable_at = get_time();
@@ -1491,8 +1491,8 @@ rr_werewolf_should_look_werewolf :: proc(player: Player) -> bool {
 	if player.entity == null return false;
 	if !#alive(player.entity) return false;
 	if player.player_state != Player_State.ALIVE return false;
-	// Infected players always look werewolf-y.
-	if player.werewolf_infected return true;
+	// Infected players look werewolf only during gameplay (revert to human during meetings).
+	if player.werewolf_infected && game_state == Game_State.INGAME return true;
 	// Werewolf player looks werewolf only during wolf form while in game.
 	if player.player_role == Player_Role.WEREWOLF && player.player_type == Player_Type.TRAITOR && game_state == Game_State.INGAME {
 		return player.werewolf_is_wolf_form;
@@ -1704,11 +1704,11 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer->create_global_transition(write_autograph_state, false)->create_trigger_condition(write_autograph_var);
 		layer->create_transition(write_autograph_state, idle_state, true);
 
-		// stunned_by_autograph_loop (trigger var -> timed anim state -> back to Idle)
+		// stunned_by_autograph_loop (trigger var -> looping anim state -> back to Idle)
 		stunned_autograph_var := sm->create_variable("stunned_by_autograph_loop", State_Machine_Variable.Kind.TRIGGER);
-		stunned_autograph_state := layer->create_state("004RAND_movie_star/stunned_by_autograph_loop", false, 15.0);
+		stunned_autograph_state := layer->create_state("004RAND_movie_star/stunned_by_autograph_loop", true, 15.0);
 		layer->create_global_transition(stunned_autograph_state, false)->create_trigger_condition(stunned_autograph_var);
-		layer->create_transition(stunned_autograph_state, idle_state, true);
+		// This is a loop; exit via RESET (or another explicit transition), not state completion.
 
 		// --- Hitman ---
 		// Neck snap (killer animation)
