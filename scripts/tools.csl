@@ -131,3 +131,22 @@ rr_draw_tutorial_arrow :: proc(player: Player, target_position: v2, options: Tut
 	}
 	Tutorial_Arrow.draw(player, target_position, options);
 }
+
+Leaderboard_Increment_Data :: class {
+    leaderboard_id: string;
+    user_id: string;
+    amount: f64;
+}
+
+leaderboard_increment_score :: proc(player: Player, leaderboard_id: string, amount: f64) {
+    if !Game.is_server() return;
+    data := new(Leaderboard_Increment_Data);
+    data.leaderboard_id = leaderboard_id;
+    data.user_id = player->get_user_id();
+    data.amount = amount;
+    Save.ordered_get(leaderboard_id, data.user_id, 0.0, data, proc(entry: Ordered_Save_Entry, userdata: Object) {
+        d := userdata.(Leaderboard_Increment_Data);
+        new_score := entry.value + d.amount;
+        Save.ordered_set(d.leaderboard_id, d.user_id, new_score);
+    });
+}

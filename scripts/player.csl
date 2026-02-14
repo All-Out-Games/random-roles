@@ -160,7 +160,10 @@ Player :: class : Player_Base {
 	werewolf_skin_active: bool;       // cached flag – avoids get_skins() every frame
 	// Saved cosmetic skins before wolf form (restored on revert).
 	werewolf_saved_cosmetic_skins: [..]string;
+	// Round-start cosmetic baseline (captured once each round).
+	werewolf_round_start_cosmetic_skins: [..]string;
 	werewolf_saved_avatar_color: Color_Replace_Color;
+	werewolf_round_start_avatar_color: Color_Replace_Color;
 	// Speed boost while in wolf form.
 	werewolf_speed_boost_active: bool;
 	werewolf_speed_original: float;
@@ -1378,12 +1381,30 @@ rr_player_has_skin :: proc(player: Player, skin: string) -> bool {
 	return false;
 }
 
+rr_werewolf_capture_round_start_look :: proc(player: Player) {
+	if player == null return;
+	if player.animator == null return;
+	if player.animator.instance == null return;
+
+	player.werewolf_round_start_cosmetic_skins->clear();
+	skins := player.animator.instance->get_skins();
+	for i: 0..skins.count-1 {
+		if skins[i] != WEREWOLF_SKIN_NAME {
+			player.werewolf_round_start_cosmetic_skins->append(skins[i]);
+		}
+	}
+	player.werewolf_round_start_avatar_color = player.avatar_color;
+}
+
 // Enables the full werewolf look: saves current cosmetic skins, strips them, enables only the
 // werewolf skin, and forces dark brown color.
 rr_werewolf_enable_wolf_look :: proc(player: Player) {
 	if player == null return;
 	if player.animator == null return;
 	if player.animator.instance == null return;
+	// Idempotence guard: avoid clobbering the saved skin snapshot if a stale schedule
+	// causes enable to run again while wolf look is already active.
+	if player.werewolf_skin_active return;
 
 	// Save current skins so we can restore later.
 	player.werewolf_saved_cosmetic_skins->clear();
@@ -1394,6 +1415,16 @@ rr_werewolf_enable_wolf_look :: proc(player: Player) {
 		}
 	}
 	player.werewolf_saved_avatar_color = player.avatar_color;
+
+	// Extra safety: refresh our long-lived fallback baseline whenever we enter
+	// werewolf look from a valid non-werewolf snapshot.
+	if player.werewolf_saved_cosmetic_skins.count > 0 {
+		player.werewolf_round_start_cosmetic_skins->clear();
+		for i: 0..player.werewolf_saved_cosmetic_skins.count-1 {
+			player.werewolf_round_start_cosmetic_skins->append(player.werewolf_saved_cosmetic_skins[i]);
+		}
+		player.werewolf_round_start_avatar_color = player.werewolf_saved_avatar_color;
+	}
 
 	// Strip all skins and enable only the werewolf skin.
 	player.animator.instance->disable_all_skins();
@@ -1421,15 +1452,31 @@ rr_werewolf_disable_wolf_look :: proc(player: Player) {
 	if !player.werewolf_skin_active return;
 
 	// Disable werewolf skin and restore saved cosmetics.
-	player.animator.instance->disable_all_skins();
-	for i: 0..player.werewolf_saved_cosmetic_skins.count-1 {
-		player.animator.instance->enable_skin(player.werewolf_saved_cosmetic_skins[i]);
+	// Safety: if the per-transform snapshot is unexpectedly empty, fall back to the
+	// round-start baseline captured at game start.
+	if player.werewolf_saved_cosmetic_skins.count > 0 {
+		player.animator.instance->disable_all_skins();
+		for i: 0..player.werewolf_saved_cosmetic_skins.count-1 {
+			player.animator.instance->enable_skin(player.werewolf_saved_cosmetic_skins[i]);
+		}
+		player.animator.instance->refresh_skins();
+	} else if player.werewolf_round_start_cosmetic_skins.count > 0 {
+		player.animator.instance->disable_all_skins();
+		for i: 0..player.werewolf_round_start_cosmetic_skins.count-1 {
+			player.animator.instance->enable_skin(player.werewolf_round_start_cosmetic_skins[i]);
+		}
+		player.animator.instance->refresh_skins();
+	} else {
+		log_warning("rr_werewolf_disable_wolf_look: missing both saved and round-start cosmetic snapshots for player %.", {player.entity.id});
 	}
-	player.animator.instance->refresh_skins();
 
 	// Restore original avatar color (server-only so it replicates to all clients).
 	if Game.is_server() {
-		player.animator.instance->set_color_replace_color(player.werewolf_saved_avatar_color);
+		restore_color := player.werewolf_saved_avatar_color;
+		if player.werewolf_saved_cosmetic_skins.count <= 0 {
+			restore_color = player.werewolf_round_start_avatar_color;
+		}
+		player.animator.instance->set_color_replace_color(restore_color);
 	}
 
 	// Restore name tag visibility.
@@ -1594,6 +1641,10 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 			this.agent.movement_speed = this.werewolf_speed_original;
 			this.werewolf_speed_boost_active = false;
 		}
+	}
+
+	capture_werewolf_round_start_look :: proc(using this: Player) {
+		rr_werewolf_capture_round_start_look(this);
 	}
 
     set_trigger :: proc(using this: Player, trigger: string) {
