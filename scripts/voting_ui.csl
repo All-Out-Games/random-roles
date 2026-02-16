@@ -218,31 +218,6 @@ rr_draw_vote_reveal_overlay :: proc() {
 	two_x_ts.outline_thickness = 2;
 	two_x_ts.outline_color = v4.{0, 0, 0, 1};
 
-	get_vote_marker_tint :: proc(color: Color_Replace_Color) -> v4 {
-		switch color {
-			case .RED:         return v4.{1.00, 0.28, 0.28, 1.0};
-			case .RED2:        return v4.{1.00, 0.28, 0.28, 1.0};
-			case .CYAN:        return v4.{0.20, 0.80, 1.00, 1.0};
-			case .GREEN:       return v4.{0.30, 1.00, 0.45, 1.0};
-			case .GREEN3:      return v4.{0.30, 1.00, 0.45, 1.0};
-			case .LIGHT_GREEN: return v4.{0.30, 1.00, 0.45, 1.0};
-			case .BLUE2:       return v4.{0.33, 0.60, 1.00, 1.0};
-			case .PINK:        return v4.{1.00, 0.30, 0.78, 1.0};
-			case .PURPLE:      return v4.{0.78, 0.38, 1.00, 1.0};
-			case .PURPLE2:     return v4.{0.78, 0.38, 1.00, 1.0};
-			case .PURPLE3:     return v4.{0.78, 0.38, 1.00, 1.0};
-			case .YELLOW:      return v4.{1.00, 0.92, 0.25, 1.0};
-			case .ORANGE:      return v4.{1.00, 0.60, 0.15, 1.0};
-			case .ORANGE2:     return v4.{1.00, 0.60, 0.15, 1.0};
-			case .LIGHT_GRAY:  return v4.{0.78, 0.78, 0.78, 1.0};
-			case .WHITE1:      return v4.{0.95, 0.95, 0.95, 1.0};
-			case .BLACK:       return v4.{0.20, 0.20, 0.20, 1.0};
-			case .BLACK2:      return v4.{0.20, 0.20, 0.20, 1.0};
-			case .BROWN1:      return v4.{0.65, 0.45, 0.30, 1.0};
-		}
-		return v4.{1, 1, 1, 1};
-	}
-
 	// --- Draw player vote markers on target tiles ---
 	for i: 0..voters.count-1 {
 		appearance_time := i.(float) * stagger_seconds;
@@ -269,7 +244,8 @@ rr_draw_vote_reveal_overlay :: proc() {
 
 		tile_center := target_rect->center();
 		base_x := tile_center.x + slot.(float) * (marker_size + gap);
-		base_y := tile_center.y;
+		// Raise marker line so dots sit in the visual center of each vote tile.
+		base_y := tile_center.y + target_rect->height() * 0.10;
 
 		local_t := reveal_elapsed - appearance_time;
 		appear_t := clamp(local_t / appear_seconds, 0.0, 1.0);
@@ -282,12 +258,17 @@ rr_draw_vote_reveal_overlay :: proc() {
 			draw_rect = draw_rect->fit_aspect(vote_point->get_aspect());
 		}
 
-		marker_tint := get_vote_marker_tint(voters[i].avatar_color);
-		marker_tint.w = alpha;
+		voter := voters[i];
+		if voter != null {
+			UI.push_player_material(voter);
+		}
 		if vote_point != null {
-			UI.quad(draw_rect, vote_point, marker_tint);
+			UI.quad(draw_rect, vote_point, v4.{1, 1, 1, alpha});
 		} else {
-			UI.quad(draw_rect, white, marker_tint);
+			UI.quad(draw_rect, white, v4.{1, 1, 1, alpha});
+		}
+		if voter != null {
+			UI.pop_material();
 		}
 
 		if is_presidential_votes[i] {
@@ -336,12 +317,17 @@ rr_draw_vote_reveal_overlay :: proc() {
 				draw_rect = draw_rect->fit_aspect(vote_point->get_aspect());
 			}
 
-			marker_tint := get_vote_marker_tint(skip_voters[i].avatar_color);
-			marker_tint.w = alpha;
+			voter := skip_voters[i];
+			if voter != null {
+				UI.push_player_material(voter);
+			}
 			if vote_point != null {
-				UI.quad(draw_rect, vote_point, marker_tint);
+				UI.quad(draw_rect, vote_point, v4.{1, 1, 1, alpha});
 			} else {
-				UI.quad(draw_rect, white, marker_tint);
+				UI.quad(draw_rect, white, v4.{1, 1, 1, alpha});
+			}
+			if voter != null {
+				UI.pop_material();
 			}
 		}
 	}
