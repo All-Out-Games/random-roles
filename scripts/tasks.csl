@@ -2150,9 +2150,12 @@ Task_Reroute_Power :: class : Task_Base {
 	start_row: int; // 0..3 (TOP to BOTTOM)
 	end_row: int;   // 0..3 (TOP to BOTTOM)
 
-	revealed: [GRID_CELLS]bool;
-	tile_kind: [GRID_CELLS]int; // TILE_*
-	tile_rot: [GRID_CELLS]int;  // straight: 0=horiz,1=vert ; corner: 0..3 (rot*90)
+	revealed: [..]bool;
+	tile_kind: [..]int; // TILE_*
+	tile_rot: [..]int;  // straight: 0=horiz,1=vert ; corner: 0..3 (rot*90)
+	// Reused buffers to avoid large stack locals in hot paths.
+	connected_cache: [..]bool;
+	bfs_queue: [..]int;
 
 	dragging: bool;
 	drag_from: int;
@@ -2168,10 +2171,35 @@ Task_Reroute_Power :: class : Task_Base {
 			return;
 		}
 		started = true;
+		ensure_grid_buffers(this);
 		// Reset UI/puzzle state for a fresh attempt.
 		generated = false;
 		dragging = false;
 		success_time = 0.0;
+	}
+
+	ensure_grid_buffers :: proc(using this: Task_Reroute_Power) {
+		if revealed.count == GRID_CELLS &&
+			tile_kind.count == GRID_CELLS &&
+			tile_rot.count == GRID_CELLS &&
+			connected_cache.count == GRID_CELLS &&
+			bfs_queue.count == GRID_CELLS {
+			return;
+		}
+
+		revealed->clear();
+		tile_kind->clear();
+		tile_rot->clear();
+		connected_cache->clear();
+		bfs_queue->clear();
+
+		for i: 0..GRID_CELLS-1 {
+			revealed->append(false);
+			tile_kind->append(TILE_EMPTY);
+			tile_rot->append(0);
+			connected_cache->append(false);
+			bfs_queue->append(0);
+		}
 	}
 
 	init_textures :: proc(using this: Task_Reroute_Power) {
@@ -2361,6 +2389,7 @@ Task_Reroute_Power :: class : Task_Base {
 		if generated {
 			return;
 		}
+		ensure_grid_buffers(this);
 		if !rng_initialized {
 			rng_initialized = true;
 			rr_refresh_rng_state();
@@ -2371,9 +2400,9 @@ Task_Reroute_Power :: class : Task_Base {
 		generated = true;
 	}
 
-	compute_connected_from_left :: proc(using this: Task_Reroute_Power, connected: ref [GRID_CELLS]bool) -> bool {
+	compute_connected_from_left :: proc(using this: Task_Reroute_Power) -> bool {
 		for i: 0..GRID_CELLS-1 {
-			connected[i] = false;
+			connected_cache[i] = false;
 		}
 
 		start_idx := tile_index(0, start_row);
@@ -2387,16 +2416,15 @@ Task_Reroute_Power :: class : Task_Base {
 			return false;
 		}
 
-		queue: [GRID_CELLS]int;
 		q_head := 0;
 		q_tail := 0;
 
-		queue[q_tail] = start_idx;
+		bfs_queue[q_tail] = start_idx;
 		q_tail += 1;
-		connected[start_idx] = true;
+		connected_cache[start_idx] = true;
 
 		while q_head < q_tail {
-			cur := queue[q_head];
+			cur := bfs_queue[q_head];
 			q_head += 1;
 
 			cur_x: int;
@@ -2433,16 +2461,16 @@ Task_Reroute_Power :: class : Task_Base {
 					continue;
 				}
 
-				if !connected[nidx] {
-					connected[nidx] = true;
-					queue[q_tail] = nidx;
+				if !connected_cache[nidx] {
+					connected_cache[nidx] = true;
+					bfs_queue[q_tail] = nidx;
 					q_tail += 1;
 				}
 			}
 		}
 
 		// Solved if we can reach the end cell AND it has a right-facing connection.
-		if connected[end_idx] && (get_tile_mask(this, end_idx) & (1 << DIR_RIGHT)) != 0 {
+		if connected_cache[end_idx] && (get_tile_mask(this, end_idx) & (1 << DIR_RIGHT)) != 0 {
 			return true;
 		}
 		return false;
@@ -2522,14 +2550,13 @@ Task_Reroute_Power :: class : Task_Base {
 		wire_inset := cell_size * WIRE_INSET_FRAC;
 
 		// Connectivity highlight
-		connected: [GRID_CELLS]bool;
-		solved := compute_connected_from_left(this, ref connected);
+		solved := compute_connected_from_left(this);
 
 		// Connectors (always visible)
 		start_idx := tile_index(0, start_row);
 		end_idx := tile_index(GRID_W-1, end_row);
 
-		left_on := connected[start_idx];
+		left_on := connected_cache[start_idx];
 		right_on := solved;
 
 		conn_h := cell_h * 0.9;
@@ -2604,7 +2631,7 @@ Task_Reroute_Power :: class : Task_Base {
 
 					if is_wire_kind(tile_kind[idx]) {
 						piece_rect := cell->inset_unscaled(wire_inset, wire_inset, wire_inset, wire_inset);
-						draw_piece(this, piece_rect, tile_kind[idx], tile_rot[idx], connected[idx]);
+						draw_piece(this, piece_rect, tile_kind[idx], tile_rot[idx], connected_cache[idx]);
 					}
 				}
 			}
@@ -2666,7 +2693,7 @@ Task_Reroute_Power :: class : Task_Base {
 					// Draw wire if present (and not the one currently being dragged).
 					if is_wire_kind(tile_kind[idx]) {
 						piece_rect := cell->inset_unscaled(wire_inset, wire_inset, wire_inset, wire_inset);
-						draw_piece(this, piece_rect, tile_kind[idx], tile_rot[idx], connected[idx]);
+						draw_piece(this, piece_rect, tile_kind[idx], tile_rot[idx], connected_cache[idx]);
 					}
 
 					UI.pop_id();
@@ -2786,8 +2813,7 @@ Task_Reroute_Power :: class : Task_Base {
 		}
 
 		// Check completion after any move/reveal; set success_time when solved.
-		tmp: [GRID_CELLS]bool;
-		if compute_connected_from_left(this, ref tmp) {
+		if compute_connected_from_left(this) {
 			success_time = now;
 		}
 
@@ -2822,11 +2848,11 @@ Task_Guide_The_Electron :: class : Task_Base {
 	COLUMN_COUNT :: 5;
 	SEG_MAX :: 48;
 
-	column_x: [COLUMN_COUNT]float;            // world X positions
+	column_x: [..]float;            // world X positions
 	// Each column is a repeating list of segments; each segment wraps individually.
 	segment_count: int;
-	segment_y: [COLUMN_COUNT][SEG_MAX]float;  // world-space Y centers for each segment
-	hole_index: [COLUMN_COUNT]int;            // middle segment to omit (hole is one segment big)
+	segment_y: [..]float;  // world-space Y centers for each segment (flattened [COLUMN_COUNT * SEG_MAX])
+	hole_index: [..]int;            // middle segment to omit (hole is one segment big)
 
 	// Cached sizing for gameplay logic (set in init_layout)
 	play_rect_cached: Rect;
@@ -2868,6 +2894,31 @@ Task_Guide_The_Electron :: class : Task_Base {
 		wall_textures[2] = get_asset(Texture_Asset, "sprites/tasks/guide_the_electron/electric_wall+segment_3.png");
 	}
 
+	segment_index :: proc(using this: Task_Guide_The_Electron, column: int, segment: int) -> int {
+		return column * SEG_MAX + segment;
+	}
+
+	ensure_layout_buffers :: proc(using this: Task_Guide_The_Electron) {
+		required_segment_slots := COLUMN_COUNT * SEG_MAX;
+		if column_x.count == COLUMN_COUNT &&
+			hole_index.count == COLUMN_COUNT &&
+			segment_y.count == required_segment_slots {
+			return;
+		}
+
+		column_x->clear();
+		hole_index->clear();
+		segment_y->clear();
+
+		for i: 0..COLUMN_COUNT-1 {
+			column_x->append(0.0);
+			hole_index->append(0);
+		}
+		for i: 0..required_segment_slots-1 {
+			segment_y->append(0.0);
+		}
+	}
+
 	compute_play_rect :: proc(using this: Task_Guide_The_Electron, window_rect: Rect) -> Rect {
 		w := window_rect->width();
 		h := window_rect->height();
@@ -2895,6 +2946,7 @@ Task_Guide_The_Electron :: class : Task_Base {
 			rng_initialized = true;
 			rng = rng_seed_time();
 		}
+		ensure_layout_buffers(this);
 
 		play_rect_cached = compute_play_rect(this, window_rect);
 		pw := play_rect_cached->width();
@@ -2951,7 +3003,7 @@ Task_Guide_The_Electron :: class : Task_Base {
 
 			hole_index[c] = middle;
 			for i: 0..segment_count-1 {
-				segment_y[c][i] = start_y + i.(float) * seg_step;
+				segment_y[segment_index(this, c, i)] = start_y + i.(float) * seg_step;
 			}
 		}
 	}
@@ -3079,9 +3131,10 @@ Task_Guide_The_Electron :: class : Task_Base {
 		wrap_y := play_rect.max.y + seg_step * 1.5;
 		for c: 0..COLUMN_COUNT-1 {
 			for i: 0..segment_count-1 {
-				segment_y[c][i] += scroll_speed * dt;
-				if segment_y[c][i] > wrap_y {
-					segment_y[c][i] -= total_span;
+				idx := segment_index(this, c, i);
+				segment_y[idx] += scroll_speed * dt;
+				if segment_y[idx] > wrap_y {
+					segment_y[idx] -= total_span;
 				}
 			}
 		}
@@ -3134,7 +3187,7 @@ Task_Guide_The_Electron :: class : Task_Base {
 					continue; // one segment-sized hole
 				}
 
-				seg_y := segment_y[c][i];
+				seg_y := segment_y[segment_index(this, c, i)];
 
 				seg_center := v2.{column_x[c], seg_y};
 
@@ -3221,13 +3274,13 @@ Task_Catching_Butterflies :: class : Task_Base {
 	SUCCESS_DISPLAY_TIME :: 0.6;
 
 	// Butterflies (screen-space within the task window)
-	butterfly_pos: [BUTTERFLY_COUNT]v2;
-	butterfly_vel: [BUTTERFLY_COUNT]v2;
-	butterfly_angle: [BUTTERFLY_COUNT]float;
-	butterfly_color: [BUTTERFLY_COUNT]int; // 0=blue, 1=pink, 2=orange
-	butterfly_phase: [BUTTERFLY_COUNT]float;
-	butterfly_caught: [BUTTERFLY_COUNT]bool;
-	butterfly_catch_time: [BUTTERFLY_COUNT]float;
+	butterfly_pos: [..]v2;
+	butterfly_vel: [..]v2;
+	butterfly_angle: [..]float;
+	butterfly_color: [..]int; // 0=blue, 1=pink, 2=orange
+	butterfly_phase: [..]float;
+	butterfly_caught: [..]bool;
+	butterfly_catch_time: [..]float;
 
 	// Net physics
 	net_handle_pos: v2;
@@ -3287,6 +3340,36 @@ Task_Catching_Butterflies :: class : Task_Base {
 		}
 	}
 
+	ensure_butterfly_buffers :: proc(using this: Task_Catching_Butterflies) {
+		if butterfly_pos.count == BUTTERFLY_COUNT &&
+			butterfly_vel.count == BUTTERFLY_COUNT &&
+			butterfly_angle.count == BUTTERFLY_COUNT &&
+			butterfly_color.count == BUTTERFLY_COUNT &&
+			butterfly_phase.count == BUTTERFLY_COUNT &&
+			butterfly_caught.count == BUTTERFLY_COUNT &&
+			butterfly_catch_time.count == BUTTERFLY_COUNT {
+			return;
+		}
+
+		butterfly_pos->clear();
+		butterfly_vel->clear();
+		butterfly_angle->clear();
+		butterfly_color->clear();
+		butterfly_phase->clear();
+		butterfly_caught->clear();
+		butterfly_catch_time->clear();
+
+		for i: 0..BUTTERFLY_COUNT-1 {
+			butterfly_pos->append(v2.{0.0, 0.0});
+			butterfly_vel->append(v2.{0.0, 0.0});
+			butterfly_angle->append(0.0);
+			butterfly_color->append(0);
+			butterfly_phase->append(0.0);
+			butterfly_caught->append(false);
+			butterfly_catch_time->append(0.0);
+		}
+	}
+
 	init_layout :: proc(using this: Task_Catching_Butterflies, window_rect: Rect) {
 		if layout_initialized {
 			return;
@@ -3312,6 +3395,7 @@ Task_Catching_Butterflies :: class : Task_Base {
 			rng_initialized = true;
 			rr_refresh_rng_state();
 		}
+		ensure_butterfly_buffers(this);
 
 		for i: 0..BUTTERFLY_COUNT-1 {
 			px := window_rect.min.x + w * rng_range_float(ref rr_rng_state.value, 0.42, 0.92);
@@ -4315,19 +4399,35 @@ Task_Anagram_Puzzle :: class : Task_Base {
 	}
 
 	char_to_string :: proc(using task: Task_Anagram_Puzzle, ch: u8) -> string {
-		// NOTE: keep this as a local lookup table; the compiler does not accept the array-of-strings
-		// literal as a class-scope constant expression.
-		table := ([26]string){
-			"A","B","C","D","E","F","G","H","I","J","K","L","M",
-			"N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
-		};
-
 		c := uppercase_ascii(ch);
-		// Be extremely defensive here: if idx ever goes negative it will wrap to a huge value
-		// and crash the VM on array indexing.
-		idx: int = (c.(int)) - 65;
-		if idx >= 0 && idx < 26 {
-			return table[idx];
+		// Avoid per-call fixed-array allocation by mapping directly.
+		switch c {
+			case 65: return "A";
+			case 66: return "B";
+			case 67: return "C";
+			case 68: return "D";
+			case 69: return "E";
+			case 70: return "F";
+			case 71: return "G";
+			case 72: return "H";
+			case 73: return "I";
+			case 74: return "J";
+			case 75: return "K";
+			case 76: return "L";
+			case 77: return "M";
+			case 78: return "N";
+			case 79: return "O";
+			case 80: return "P";
+			case 81: return "Q";
+			case 82: return "R";
+			case 83: return "S";
+			case 84: return "T";
+			case 85: return "U";
+			case 86: return "V";
+			case 87: return "W";
+			case 88: return "X";
+			case 89: return "Y";
+			case 90: return "Z";
 		}
 		return "?";
 	}

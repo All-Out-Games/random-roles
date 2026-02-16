@@ -40,6 +40,7 @@ PLAYER_LIGHT_INTENSITY :: 1.0;
 PLAYER_LIGHT_COLOR := v4.{1.0, 1.0, 1.0, 1.0};
 PIRATE_DIRT_PILE_TEXTURE_PATH :: "sprites/dirt_pile.png";
 PIRATE_DIRT_PILE_FALLBACK_TEXTURE_PATH :: "sprites/icons/pirate/dig_for_treasure.png";
+RR_HUB_GAME_ID :: "692f424cd0b237adf50fdab0";
 
 Player :: class : Player_Base {
     player_type: Player_Type;
@@ -763,8 +764,9 @@ Player :: class : Player_Base {
 						}
 					}
 					}
-            } else if game_state == Game_State.LOBBY {
-					if !waiting_for_restart && players.elements.count < MIN_NUMBER_OF_PLAYERS {
+				} else if game_state == Game_State.LOBBY {
+					required_players := rr_get_lobby_required_player_count();
+					if !waiting_for_restart && players.elements.count < required_players {
 						if lobby_waiting_since_time <= 0.0 {
 							lobby_waiting_since_time = get_time();
 						}
@@ -832,7 +834,33 @@ Player :: class : Player_Base {
 						count_ts.outline_thickness = 5;
 						count_ts.outline_color = .{0, 0, 0, 1};
 						count_ts.spacing_multiplier = 1.1;
-						UI.text(count_rect, count_ts, "% / %", {player_count, MIN_NUMBER_OF_PLAYERS});
+						UI.text(count_rect, count_ts, "% / %", {player_count, required_players});
+
+						// Return-to-hub action while waiting for enough players.
+						button_pulse := sin(t * 3.2) * 0.07 + 0.93;
+						return_btn_rect := area_rect->grow(26, 160, 12, 160)->offset(0, -148);
+						return_bs := UI.default_button_settings();
+						return_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_5.png");
+						return_bs.press_scaling = 0.96;
+						return_bs.hover_offset = v2.{0, 2};
+						return_bs.background_color_multiplier = v4.{button_pulse * 0.92, button_pulse * 0.96, button_pulse, 1.0};
+						rr_ui_apply_button_click_sound(ref return_bs);
+
+						return_ts := UI.default_text_settings();
+						return_ts.size = 29;
+						return_ts.color = v4.{1, 1, 1, 1};
+						return_ts.halign = .CENTER;
+						return_ts.valign = .CENTER;
+						return_ts.do_outline = true;
+						return_ts.outline_thickness = 4;
+						return_ts.outline_color = v4.{0, 0, 0, 1};
+
+						if UI.button(return_btn_rect, return_bs, return_ts, "Return to Hub").clicked {
+							// Server-authoritative transfer.
+							if Game.is_server() {
+								Server.transfer_player_to_game(this, RR_HUB_GAME_ID);
+							}
+						}
 					} else {
 						lobby_waiting_since_time = 0.0;
 					}
