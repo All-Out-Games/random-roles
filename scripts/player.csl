@@ -783,7 +783,7 @@ Player :: class : Player_Base {
 						area_rect := screen->center_rect()->offset(0, 30);
 
 						// --- Elapsed timer (top) ---
-						timer_rect := area_rect->grow(20, 240, 0, 240)->offset(0, 60);
+						timer_rect := area_rect->grow(20, 240, 0, 240)->offset(0, 40);
 						timer_ts := UI.default_text_settings();
 						timer_ts.size = 30;
 						timer_ts.color = .{0.55, 0.55, 0.65, 1};
@@ -801,7 +801,7 @@ Player :: class : Player_Base {
 						title_b := sin(t * 1.8 + 4.189) * 0.3 + 0.7;
 						bob_y := sin(t * 2.0) * 4.0;
 
-						title_rect := area_rect->grow(30, 240, 0, 240)->offset(0, 5 + bob_y);
+						title_rect := area_rect->grow(30, 240, 0, 240)->offset(0, -15.0 + bob_y);
 						title_ts := UI.default_text_settings();
 						title_ts.size = 48;
 						title_ts.color = .{title_r, title_g, title_b, 1};
@@ -824,7 +824,7 @@ Player :: class : Player_Base {
 						// --- Player count (bottom): X / MAX ---
 						player_count := players.elements.count;
 						pulse := sin(t * 3.0) * 0.15 + 0.85;
-						count_rect := area_rect->grow(25, 240, 0, 240)->offset(0, -55);
+						count_rect := area_rect->grow(25, 240, 0, 240)->offset(0, -75);
 						count_ts := UI.default_text_settings();
 						count_ts.size = 44;
 						count_ts.color = .{pulse, pulse * 0.85, 0.25, 1};
@@ -837,28 +837,31 @@ Player :: class : Player_Base {
 						UI.text(count_rect, count_ts, "% / %", {player_count, required_players});
 
 						// Return-to-hub action while waiting for enough players.
-						button_pulse := sin(t * 3.2) * 0.07 + 0.93;
-						return_btn_rect := area_rect->grow(26, 160, 12, 160)->offset(0, -148);
-						return_bs := UI.default_button_settings();
-						return_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_5.png");
-						return_bs.press_scaling = 0.96;
-						return_bs.hover_offset = v2.{0, 2};
-						return_bs.background_color_multiplier = v4.{button_pulse * 0.92, button_pulse * 0.96, button_pulse, 1.0};
-						rr_ui_apply_button_click_sound(ref return_bs);
+						// Only show this after players have waited in lobby for 30s.
+						if elapsed >= 30.0 {
+							button_pulse := sin(t * 3.2) * 0.07 + 0.93;
+							return_btn_rect := area_rect->grow(26, 160, 12, 160)->offset(0, -148);
+							return_bs := UI.default_button_settings();
+							return_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_5.png");
+							return_bs.press_scaling = 0.96;
+							return_bs.hover_offset = v2.{0, 2};
+							return_bs.background_color_multiplier = v4.{button_pulse * 0.92, button_pulse * 0.96, button_pulse, 1.0};
+							rr_ui_apply_button_click_sound(ref return_bs);
 
-						return_ts := UI.default_text_settings();
-						return_ts.size = 29;
-						return_ts.color = v4.{1, 1, 1, 1};
-						return_ts.halign = .CENTER;
-						return_ts.valign = .CENTER;
-						return_ts.do_outline = true;
-						return_ts.outline_thickness = 4;
-						return_ts.outline_color = v4.{0, 0, 0, 1};
+							return_ts := UI.default_text_settings();
+							return_ts.size = 29;
+							return_ts.color = v4.{1, 1, 1, 1};
+							return_ts.halign = .CENTER;
+							return_ts.valign = .CENTER;
+							return_ts.do_outline = true;
+							return_ts.outline_thickness = 4;
+							return_ts.outline_color = v4.{0, 0, 0, 1};
 
-						if UI.button(return_btn_rect, return_bs, return_ts, "Return to Hub").clicked {
-							// Server-authoritative transfer.
-							if Game.is_server() {
-								Server.transfer_player_to_game(this, RR_HUB_GAME_ID);
+							if UI.button(return_btn_rect, return_bs, return_ts, "Return to Hub").clicked {
+								// Server-authoritative transfer.
+								if Game.is_server() {
+									Server.transfer_player_to_game(this, RR_HUB_GAME_ID);
+								}
 							}
 						}
 					} else {
