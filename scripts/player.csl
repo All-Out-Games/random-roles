@@ -2,463 +2,75 @@ import "core:ao"
 
 players: List(Player);
 
-// --- Voice chat channels ---
-// Bitmask-based channels for voice routing.
-ALIVE_CHANNEL :: 1u64 << 0;
-DEAD_CHANNEL  :: 1u64 << 1;
-ALL_VOICE_CHANNELS :: ALIVE_CHANNEL | DEAD_CHANNEL;
+// Hub routing keeps everyone in the same voice channel.
+HUB_VOICE_CHANNEL :: 1u64 << 0;
 
 Player :: class : Player_Base {
-    player_type: Player_Type;
-    player_state: Player_State;
-    player_role: Player_Role;
-    voted_for: Player;  // Who this player voted for (null if no vote yet)
-    has_voted: bool;    // True if this player has cast a ballot this meeting (including skip)
-    voted_skip: bool;   // True if this player voted to skip
-    votes_received: int;  // How many votes this player has received
-
-    active_tasks : List(Task_Base);
-
-	// Local UI state
-	show_minimap: bool;
-
-    // --- Hub (separate Platform project) ---
-    // No persistent hub queue state (hub portal transfer is instant).
-	
-	// Prankster progress (server-driven, shown locally via tasks UI)
-	prankster_prank_count: int;
-	prankster_fake_meetings_called: int;
-
-	// Jester Win (unlock + timer)
-	prankster_jester_unlocked_time: float; // 0 = locked, otherwise time it unlocked
-	sm_inited: bool;
-	jester_win_camera_override_active: bool;
-
-	// --- Doctor ---
-	doctor_resurrects_used: int; // resets each round
-	is_temporarily_resurrected: bool;
-	temporarily_resurrected_until: float;
     hub_camera_size_applied: bool;
     hub_camera_original_size: float;
-
-    is_frozen: bool;
-
-	// True when the local player has any task attempt currently open/in progress.
-	// Used to suppress ability input while interacting with task UI.
-	has_task_in_progress :: proc(using this: Player) -> bool {
-		for i: 0..this.active_tasks.elements.count-1 {
-			task := this.active_tasks.elements[i];
-			if task == null continue;
-			if task.started && !task.completed {
-				return true;
-			}
-		}
-		return false;
-	}
-
-    update_freeze_reasons :: proc(using this: Player) {
-        // Prevent player movement while global popups are on-screen, and while the local
-        // player is actively working on a task.
-        //
-        // We use separate reasons so popups and tasks don't accidentally unfreeze each other.
-        should_freeze_for_popup :=
-            game_state == Game_State.ANIM_INTRO ||
-			game_state == Game_State.ANIM_JESTER_WIN ||
-            game_state == Game_State.ANIM_VICTORY;
-
-        should_check_tasks :=
-            game_state == Game_State.INGAME &&
-            this.player_state == Player_State.ALIVE &&
-            this.player_type == Player_Type.CIVILIAN;
-
-        has_task_in_progress := false;
-        if should_check_tasks {
-			has_task_in_progress = this->has_task_in_progress();
-        }
-
-        should_be_frozen := should_freeze_for_popup || has_task_in_progress;
-
-        if(is_frozen == should_be_frozen) {
-            return;
-        }
-
-        if should_be_frozen {
-            this->add_disable_movement_input_reason("frozen");
-        } else {
-            this->remove_disable_movement_input_reason("frozen");
-        }
-
-        is_frozen = should_be_frozen;
-    }
 
     Notify :: proc(using this: Player, message: string) {
         if this->is_local_or_server() {
             Notifier.notify(message);
         }
     }
-    
-    //Server Only!
+
     ao_start :: proc(using this: Player) {
-        // Hub game is its own Platform project (see `ao.project`).
-        // Avoid initializing the Random Roles match systems when we're in the hub.
-        if rr_is_hub_game() {
-            // Hub-only movement tuning.
-            this.agent.movement_speed *= HUB_WALK_SPEED_MULTIPLIER;
-            this->ensure_anim_state_machine();
-            this->apply_voice_chat_masks_for_current_state();
-
-            // Spawn at the lobby spawn (via World_References in the hub scene).
-            if world_references != null {
-                world_references->teleport_near_lobby(this);
-            }
-			agent->set_navmesh_to_lock_to(world_references.main_navmesh);
-            return;
-        }
-
         append(ref players, this);
 
-		this->ensure_anim_state_machine();
+        this.comms_channel_listen_mask = HUB_VOICE_CHANNEL;
+        this.comms_channel_speak_mask = HUB_VOICE_CHANNEL;
 
-		// Voice chat: ensure late-joiners get the correct routing immediately.
-		this->apply_voice_chat_masks_for_current_state();
+        if rr_is_hub_game() {
+            this.agent.movement_speed *= HUB_WALK_SPEED_MULTIPLIER;
 
-        if game_state == Game_State.LOBBY {
-            world_references->teleport_near_lobby(this);
-        } else if game_state == Game_State.INGAME {
-            on_player_go_dead(this);
-        } else if game_state == Game_State.VOTING {
-            on_player_go_dead(this);
-            world_references->teleport_to_voting(this);
+            if world_references != null {
+                world_references->teleport_near_lobby(this);
+                this.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
+            }
         }
     }
 
-	apply_voice_chat_masks_for_current_state :: proc(using this: Player) {
-		// In-match: alive speaks to alive; ghosts/spectators speak to dead (but listen to all)
-		if this.player_state == Player_State.ALIVE {
-			this->apply_voice_chat_masks_alive();
-		} else {
-			this->apply_voice_chat_masks_ghost_or_passive();
-		}
-	}
-
-	apply_voice_chat_masks_alive :: proc(using this: Player) {
-        log_info("apply_voice_chat_masks_alive");
-		// Comms sabotage: alive players cannot hear/speak.
-		if rr_comms_outage_active {
-			comms_channel_listen_mask = 0;
-			comms_channel_speak_mask  = 0;
-			return;
-		}
-
-		// Alive can hear & speak on alive channel.
-		comms_channel_listen_mask = ALIVE_CHANNEL;
-		comms_channel_speak_mask  = ALIVE_CHANNEL;
-	}
-
-	apply_voice_chat_masks_ghost_or_passive :: proc(using this: Player) {
-        log_info("apply_voice_chat_masks_ghost_or_passive");
-		// Ghosts/spectators can hear everyone, but only speak to other ghosts.
-		comms_channel_listen_mask = ALL_VOICE_CHANNELS;
-		comms_channel_speak_mask  = DEAD_CHANNEL;
-	}
-
     ao_end :: proc(using this: Player) {
-        if rr_is_hub_game() {
-            return;
-        }
-
-        // Player entity is being destroyed (typically disconnect). Clean up any corpses they spawned.
         destroy_corpses_for_player(this.entity.id);
         unordered_remove_by_value(ref players, this);
     }
 
     ao_update :: proc(using this: Player, delta_time: float) {
-        if rr_is_hub_game() {
-            // Hub doesn't run tasks/minimap/role UI.
-            return;
-        }
-
-        if this->is_local_or_server() {
-            this->update_freeze_reasons();
-            this->setup_player_colors();
-			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
-			rr_draw_power_outage_overlay_if_needed(this);
-            update_tasks_ui(this);
-			update_minimap_ui(this);
-			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
-			if game_state == Game_State.ANIM_JESTER_WIN {
-				this->draw_letterbox_bars();
-			}
-            if game_state == Game_State.ANIM_INTRO {
-                intro_popup->set_local_player(this);
-                intro_popup->update(delta_time);
-            }
-        }
-        update_tasks(this);
+        // Hub-only runtime: no per-frame gameplay systems.
     }
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
-        if rr_is_hub_game() {
-            this->apply_hub_camera_zoom_once();
-            this->draw_hub_portal_indicator();
-
-            // World-space scroll views need the current camera for scissor rects,
-            // and interactions need a player context — draw leaderboards here.
-            if this->is_local_or_server() {
-                foreach lb: component_iterator(Leaderboard) {
-                    lb_draw(lb);
-                }
-            }
+        if !rr_is_hub_game() {
             return;
         }
 
+        this->apply_hub_camera_zoom_once();
+        this->draw_hub_portal_indicator();
+
+        // Draw world-space leaderboard UI from the player update context.
         if this->is_local_or_server() {
-			// If we were overriding the camera for the Jester Win cinematic and it ended,
-			// restore the normal follow behavior.
-			if jester_win_camera_override_active && game_state != Game_State.ANIM_JESTER_WIN {
-				this.camera.follow_player = true;
-				jester_win_camera_override_active = false;
-			}
-
-			// During the Jester Win cinematic, keep the camera locked to the jester every frame.
-			if game_state == Game_State.ANIM_JESTER_WIN {
-				// Turn off camera follow and set position ONCE to reduce per-frame camera work.
-				if !jester_win_camera_override_active {
-					if this->try_begin_jester_win_camera_override() {
-						jester_win_camera_override_active = true;
-					}
-				}
-				return;
-			}
-            if this.player_state == Player_State.ALIVE {
-                abilityIndex := 0;
-                
-                if game_state == Game_State.VOTING {
-                    // During voting, only show the vote ability
-                    draw_ability_button(this, Vote_Ability, abilityIndex);
-                } else if game_state == Game_State.INGAME {
-                    // During gameplay, show abilities based on type and role
-                    if player_type == Player_Type.TRAITOR {
-                        draw_ability_button(this, Kill_Ability, abilityIndex);
-                        abilityIndex += 1;
-                        
-                        // Pirate gets Shoot and Black Flag abilities
-                        if player_role == Player_Role.PIRATE {
-                            draw_ability_button(this, Shoot_Ability, abilityIndex);
-                            abilityIndex += 1;
-                            draw_ability_button(this, Black_Flag_Ability, abilityIndex);
-                            abilityIndex += 1;
-							draw_ability_button(this, Powder_Keg_Ability, abilityIndex);
-							abilityIndex += 1;
-                        }
-                    }
-                    if player_type == Player_Type.CIVILIAN && player_role == Player_Role.SHERIFF {
-                        draw_ability_button(this, Shoot_Ability, abilityIndex);
-                        abilityIndex += 1;
-                    }
-					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.DOCTOR {
-						draw_ability_button(this, Resurrect_Ability, abilityIndex);
-						abilityIndex += 1;
-					}
-					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.MOVIE_STAR {
-						draw_ability_button(this, Autograph_Ability, abilityIndex);
-						abilityIndex += 1;
-					}
-					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PRANKSTER {
-						draw_ability_button(this, Prank_Ability, abilityIndex);
-						abilityIndex += 1;
-						draw_ability_button(this, Fake_Meeting_Ability, abilityIndex);
-						abilityIndex += 1;
-						draw_ability_button(this, Jester_Win_Ability, abilityIndex);
-						abilityIndex += 1;
-					}
-                    draw_ability_button(this, Report_Ability, abilityIndex);
-                }
-            } else if game_state == Game_State.LOBBY {
-                // Lobby-only UI must be driven from a player update.
-                // Offer a "Force Start" button when we don't have enough players yet.
-                if !waiting_for_restart && players.elements.count < MIN_NUMBER_OF_PLAYERS {
-                    screen := UI.get_safe_screen_rect();
-                    bg_texture := get_asset(Texture_Asset, "$AO/white.png");
-
-                    // Use the 4-arg `subrect` overload for a stable layout (no offset ordering ambiguity).
-                    // Bottom banner panel that stays inside SafeRect across aspect ratios.
-                    panel_rect := screen->subrect(0.15, 0.05, 0.85, 0.27);
-                    UI.quad(panel_rect, bg_texture, .{0, 0, 0, 0.7});
-
-                    content := panel_rect->inset(12, 12, 12, 12);
-
-                    title_rect := content->cut_top(38);
-                    title_ts := UI.default_text_settings();
-                    title_ts.size = 34;
-                    title_ts.color = .{1, 1, 1, 1};
-                    title_ts.halign = .CENTER;
-                    title_ts.valign = .CENTER;
-                    UI.text(title_rect, title_ts, "WAITING FOR PLAYERS");
-
-                    info_rect := content->cut_top(28);
-                    info_ts := UI.default_text_settings();
-                    info_ts.size = 28;
-                    info_ts.color = .{0.9, 0.9, 0.9, 1};
-                    info_ts.halign = .CENTER;
-                    info_ts.valign = .CENTER;
-                    info_text := format_string("Players: %/%", .{players.elements.count, MIN_NUMBER_OF_PLAYERS});
-                    UI.text(info_rect, info_ts, info_text);
-
-                    warn_rect := content->cut_top(22);
-                    warn_ts := UI.default_text_settings();
-                    warn_ts.size = 22;
-                    warn_ts.color = .{1, 0.8, 0.2, 1};
-                    warn_ts.halign = .CENTER;
-                    warn_ts.valign = .CENTER;
-                    UI.text(warn_rect, warn_ts, "Force Start will begin with fewer players");
-
-                    start_rect := content->cut_bottom(52)->inset(6, 20, 6, 20);
-                    bs := UI.default_button_settings();
-                    start_ts := UI.default_text_settings();
-                    start_ts.size = 36;
-                    start_ts.color = .{1, 1, 1, 1};
-                    start_ts.halign = .CENTER;
-                    start_ts.valign = .CENTER;
-
-                    UI.push_id("force_start_lobby");
-                    defer UI.pop_id();
-                    if UI.button(start_rect, bs, start_ts, "FORCE START").clicked {
-                        force_start_lobby_game();
-                    }
-                }
+            foreach lb: component_iterator(Leaderboard) {
+                lb_draw(lb);
             }
-        }
-    }
-
-    setup_player_colors :: proc(using this: Player) {
-        if player_state != Player_State.ALIVE {
-            clear_player_colors(this);
-            return;
-        }
-        isTraitor := player_type == Player_Type.TRAITOR;
-        foreach player: component_iterator(Player) {
-            player.do_name_color_override = true;
-            if(isTraitor && this.player_type == player.player_type) {
-                player.name_color_override = .{1, 0, 0, 1};
-            } else {
-                player.name_color_override = .{1, 1, 1, 1};
-            }
-        }
-    }
-
-    clear_player_colors :: proc(using this: Player) {
-        foreach player: component_iterator(Player) {
-            player.do_name_color_override = false;
         }
     }
 
     kill :: proc(using this: Player) {
-        //freeze_player = true;
-		// If this player was temporarily resurrected, clear the flag so tasks/UI don't get stuck.
-		this.is_temporarily_resurrected = false;
-		this.temporarily_resurrected_until = 0.0;
-        on_player_go_dead(this);
-        world_references->spawn_corpse(this);
-        log(format_string("Player % killed", .{this.entity.id}));
+        if world_references != null {
+            world_references->spawn_corpse(this);
+        }
     }
 
     revive :: proc(using this: Player) {
-        //freeze_player = false;
         this->set_trigger("RESET");
     }
 
     set_trigger :: proc(using this: Player, trigger: string) {
-        if this.animator.instance != null {
+        if this.animator.instance != null && this.animator.instance.state_machine != null {
             this.animator.instance.state_machine->set_trigger(trigger);
         }
     }
-
-	// Adds the animation state machine.
-	ensure_anim_state_machine :: proc(using this: Player) {
-		if sm_inited {
-			return;
-		}
-		if this.animator.instance == null {
-            log_error("No animator instance found");
-			return;
-		}
-		sm := this.animator.instance.state_machine;
-		if sm == null {
-            log_error("No state machine found");
-			return;
-		}
-
-		layer := sm->try_get_layer("main");
-		if layer == null {
-			log_error("No 'main' state machine layer found");
-			return;
-		}
-        idle_state := layer->try_get_state("Idle");
-		if idle_state == null {
-			log_error("No 'Idle' state found on 'main' layer");
-			return;
-		}
-
-		// prank_slip (trigger var -> one-shot anim state -> back to Idle)
-		prank_slip_var := sm->create_variable("prank_slip", State_Machine_Variable.Kind.TRIGGER);
-		prank_slip_state := layer->create_state("004RAND_trickster/Slip_On_Banana", false, 2.0);
-		layer->create_global_transition(prank_slip_state, false)->create_trigger_condition(prank_slip_var);
-		layer->create_transition(prank_slip_state, idle_state, true);
-
-		// jester_win (trigger var -> end-game anim state -> back to Idle)
-		jester_win_var := sm->create_variable("jester_win", State_Machine_Variable.Kind.TRIGGER);
-		jester_win_state := layer->create_state("004RAND_trickster/Trickster_End_Game", false, 5.0);
-		layer->create_global_transition(jester_win_state, false)->create_trigger_condition(jester_win_var);
-		layer->create_transition(jester_win_state, idle_state, true);
-
-		// --- Movie Star ---
-		// write_place_autograph (trigger var -> one-shot anim state -> back to Idle)
-		write_autograph_var := sm->create_variable("write_place_autograph", State_Machine_Variable.Kind.TRIGGER);
-		write_autograph_state := layer->create_state("004RAND_movie_star/Write_Place_Autograph", false, 2.1);
-		layer->create_global_transition(write_autograph_state, false)->create_trigger_condition(write_autograph_var);
-		layer->create_transition(write_autograph_state, idle_state, true);
-
-		// stunned_by_autograph_loop (trigger var -> timed anim state -> back to Idle)
-		stunned_autograph_var := sm->create_variable("stunned_by_autograph_loop", State_Machine_Variable.Kind.TRIGGER);
-		stunned_autograph_state := layer->create_state("004RAND_movie_star/stunned_by_autograph_loop", true, 15.0);
-		layer->create_global_transition(stunned_autograph_state, false)->create_trigger_condition(stunned_autograph_var);
-		layer->create_transition(stunned_autograph_state, idle_state, true);
-
-		sm_inited = true;
-        log_info("State machine initialized");
-	}
-
-	draw_letterbox_bars :: proc(using this: Player) {
-		screen := UI.get_screen_rect();
-		bg := get_asset(Texture_Asset, "$AO/white.png");
-		UI.push_layer(2000);
-		defer UI.pop_layer();
-		UI.quad(screen->subrect(0.0, 0.90, 1.0, 1.0), bg, .{0, 0, 0, 1});
-		UI.quad(screen->subrect(0.0, 0.0, 1.0, 0.10), bg, .{0, 0, 0, 1});
-	}
-
-	try_focus_camera_on_jester :: proc(using this: Player) {
-		// Deprecated: replaced by `try_begin_jester_win_camera_override` which avoids
-		// per-frame camera position writes.
-	}
-
-	try_begin_jester_win_camera_override :: proc(using this: Player) -> bool {
-		if jester_win_player_id == 0 {
-			return false;
-		}
-		for i: 0..players.elements.count-1 {
-			p := players.elements[i];
-			if p != null && #alive(p.entity) && p.entity.id == jester_win_player_id {
-				// Force the cinematic actor to face right and lock the camera once.
-				p->set_facing_right(true);
-				this.camera.follow_player = false;
-				this.camera.position = p.entity.world_position;
-				return true;
-			}
-		}
-		return false;
-	}
 
     apply_hub_camera_zoom_once :: proc(using this: Player) {
         if !this->is_local() {
@@ -487,6 +99,7 @@ Player :: class : Player_Base {
         if dist <= HUB_PORTAL_INDICATOR_MIN_DISTANCE {
             return;
         }
+
         tutorial_arrow_options := Tutorial_Arrow.default_options();
         tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
         tutorial_arrow_options.far = true;
@@ -498,110 +111,38 @@ Player :: class : Player_Base {
     }
 }
 
+// Kept as no-op components so existing scene entities don't break when loading.
 Task_Interactable :: class : Component {
     interactable: Interactable @ao_serialize;
-	// Optional override so runtime-spawned interactables can use the task system
-	// without relying on the entity name.
-	task_id_override: string @ao_serialize;
-
-	get_task_id :: proc(using this: Task_Interactable) -> string {
-		if task_id_override.count > 0 {
-			return task_id_override;
-		}
-		return this.entity->get_name();
-	}
 
     ao_start :: proc(using this: Task_Interactable) {
-		if interactable == null {
-			return;
-		}
-        interactable->set_listener(this);
-
-		// Register this interactable's world position as a destination for its task id.
-		rr_register_task_destination(this->get_task_id(), this.entity.world_position);
+        if interactable != null {
+            interactable->set_listener(this);
+        }
     }
 
     on_interact :: proc(using this: Task_Interactable, player: Player) {
-		task_id := this->get_task_id();
-        for i: 0..player.active_tasks.elements.count-1 {
-            task := player.active_tasks.elements[i];
-            if task.id == task_id && !task.started && !task.completed {
-                task->start_attempt(player);
-                break;
-            }
-        }
     }
 
     can_use :: proc(using this: Task_Interactable, player: Player) -> bool {
-		task_id := this->get_task_id();
-
-		// During power outage, allow everyone to complete the generator task.
-		if task_id == RR_RESTART_GENERATOR_TASK_ID {
-			if game_state != Game_State.INGAME return false;
-			if !rr_power_outage_active return false;
-			if player == null return false;
-			if player.player_state != Player_State.ALIVE return false;
-			// Temporarily resurrected players can move/talk, but cannot do tasks.
-			if player.is_temporarily_resurrected return false;
-
-			for i: 0..player.active_tasks.elements.count-1 {
-				task := player.active_tasks.elements[i];
-				if task.id == task_id && !task.started && !task.completed {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		// During comms outage, allow everyone to complete the comms restore task.
-		if task_id == RR_ENABLE_COMMUNICATIONS_TASK_ID {
-			if game_state != Game_State.INGAME return false;
-			if !rr_comms_outage_active return false;
-			if player == null return false;
-			if player.player_state != Player_State.ALIVE return false;
-			// Temporarily resurrected players can move/talk, but cannot do tasks.
-			if player.is_temporarily_resurrected return false;
-
-			for i: 0..player.active_tasks.elements.count-1 {
-				task := player.active_tasks.elements[i];
-				if task.id == task_id && !task.started && !task.completed {
-					return true;
-				}
-			}
-			return false;
-		}
-
-        can_use_base := player.player_state == Player_State.ALIVE && player.player_type == Player_Type.CIVILIAN;
-        if !can_use_base {
-            return false;
-        }
-		// Temporarily resurrected players can move/talk, but cannot do tasks.
-		if player.is_temporarily_resurrected {
-			return false;
-		}
-        for i: 0..player.active_tasks.elements.count-1 {
-            task := player.active_tasks.elements[i];
-            if task.id == task_id && !task.started && !task.completed {
-                return true;
-            }
-        }
         return false;
     }
 }
 
 Call_Meeting_Interactable :: class : Component {
     interactable: Interactable @ao_serialize;
-    
+
     ao_start :: proc(using this: Call_Meeting_Interactable) {
-        interactable->set_listener(this);
+        if interactable != null {
+            interactable->set_listener(this);
+        }
     }
 
     on_interact :: proc(using this: Call_Meeting_Interactable, player: Player) {
-        start_meeting(false, player);
     }
 
     can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
-        return player.player_state == Player_State.ALIVE;
+        return false;
     }
 }
 
@@ -624,118 +165,5 @@ destroy_corpses_for_player :: proc(player_entity_id: u64) {
 Corpse :: class : Component {
     has_been_reported: bool;
     owner_player_entity_id: u64;
-}
-
-draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
-	// Size scales with the window so it stays readable across resolutions.
-	size := window_rect->height() * 0.06;
-	if size < 28.0 { size = 28.0; }
-	if size > 64.0 { size = 64.0; }
-	pad := size * 0.45;
-
-	anchor := window_rect->top_right_rect()->offset_unscaled(-pad, -pad);
-	btn := anchor->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
-
-	UI.push_id("minimap_close");
-	defer UI.pop_id();
-
-	interact := UI.button(btn, .{}, .{}, "");
-
-	bg := get_asset(Texture_Asset, "$AO/white.png");
-	col := v4.{0.12, 0.12, 0.16, 0.75};
-	if interact.active {
-		col = v4.{0.18, 0.18, 0.25, 0.85};
-	}
-	UI.quad(btn, bg, col);
-
-	ts := UI.default_text_settings();
-	ts.size = size * 0.8;
-	ts.color = v4.{1, 1, 1, 1};
-	ts.halign = .CENTER;
-	ts.valign = .CENTER;
-	ts.do_outline = true;
-	ts.outline_thickness = 2;
-	ts.outline_color = v4.{0, 0, 0, 1};
-	UI.text(btn, ts, "X");
-
-	return interact.clicked;
-}
-
-update_minimap_ui :: proc(player: Player) {
-	if game_state != Game_State.INGAME {
-		player.show_minimap = false;
-		return;
-	}
-	if player.player_state != Player_State.ALIVE {
-		player.show_minimap = false;
-		return;
-	}
-	if player->has_task_in_progress() {
-		player.show_minimap = false;
-		return;
-	}
-
-	safe := UI.get_safe_screen_rect();
-
-	// Top-left "MAP" button
-	// Keep minimap UI above the comms "deaf" icons (layer 5200).
-	UI.push_layer(5600);
-	defer UI.pop_layer();
-
-	btn_rect := safe->top_left_rect()->grow(0.0, 120.0, 52.0, 0.0)->offset(12.0, -12.0);
-	bs := UI.default_button_settings();
-	ts := UI.default_text_settings();
-	ts.size = 30;
-	ts.halign = .CENTER;
-	ts.valign = .CENTER;
-
-	UI.push_id("minimap_toggle");
-	defer UI.pop_id();
-	if UI.button(btn_rect, bs, ts, "MAP").clicked {
-		player.show_minimap = !player.show_minimap;
-	}
-
-	if !player.show_minimap {
-		return;
-	}
-
-	// Fullscreen modal with the map image
-	// Keep minimap modal above the comms "deaf" icons (layer 5200).
-	UI.push_layer(5700);
-	defer UI.pop_layer();
-
-	screen := UI.get_screen_rect();
-	bg := get_asset(Texture_Asset, "$AO/white.png");
-	UI.quad(screen, bg, v4.{0.0, 0.0, 0.0, 0.75});
-
-	map_tex := get_asset(Texture_Asset, "sprites/map.png");
-	content := screen->inset(80.0);
-	map_rect := content->fit_aspect(map_tex->get_aspect());
-	UI.quad(map_rect, map_tex, v4.{1, 1, 1, 1});
-
-	// Local player marker
-	{
-		p_ui := rr_minimap_world_to_ui(map_rect, player.entity.world_position);
-		dot_size := map_rect->height() * 0.018;
-		if dot_size < 10.0 { dot_size = 10.0; }
-		if dot_size > 22.0 { dot_size = 22.0; }
-		dot := Rect{p_ui, p_ui}->grow_unscaled(dot_size, dot_size, dot_size, dot_size);
-		UI.quad(dot, core_globals.white_sprite, v4.{0.2, 0.9, 0.3, 0.95});
-	}
-
-	// --- Sabotage buttons (traitors only): to the right of the minimap ---
-	power_clicked := false;
-	comms_clicked := false;
-	rr_draw_sabotages_next_to_minimap(player, map_rect, ref power_clicked, ref comms_clicked, rr_comms_outage_active, rr_comms_outage_cooldown_ends_at);
-	if power_clicked {
-		rr_try_start_power_outage(player);
-	}
-	if comms_clicked {
-		rr_try_start_comms_outage(player);
-	}
-
-	if draw_minimap_close_button(map_rect) {
-		player.show_minimap = false;
-	}
 }
 

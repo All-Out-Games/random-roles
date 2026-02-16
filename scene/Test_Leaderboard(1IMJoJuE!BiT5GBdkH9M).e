@@ -22,6 +22,6 @@
   "internal_component_type": "Leaderboard",
   "data": {
     "leaderboard_id": "wins",
-    "optional_title": "Wins"
+    "optional_title": "WIP"
   }
 }
