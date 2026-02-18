@@ -3075,17 +3075,62 @@ assign_players_to_types :: proc() {
 			obj1.completed = false;
 			append(ref p.active_tasks, obj1);
 
-			obj2 := new(Task_Base);
-			obj2.id = "pyro_ignite_5_props";
-			obj2.started = true;
-			obj2.completed = false;
-			append(ref p.active_tasks, obj2);
+			// Collect all eligible rooms (Props entities with MIN & MAX children).
+			candidate_rooms: [..]Entity;
+			candidate_names: [..]string;
+			foreach room_e: entity_iterator() {
+				if room_e == null continue;
+				if !#alive(room_e) continue;
+				if room_e->get_name() != "Props" continue;
 
-			obj3 := new(Task_Base);
-			obj3.id = "pyro_burn_out_rooms";
-			obj3.started = true;
-			obj3.completed = false;
-			append(ref p.active_tasks, obj3);
+				has_min := false;
+				has_max := false;
+				bounds_child := room_e.first_child;
+				while bounds_child != null {
+					if #alive(bounds_child) {
+						bc_n := bounds_child->get_name();
+						if bc_n == "MIN" { has_min = true; }
+						else if bc_n == "MAX" { has_max = true; }
+					}
+					bounds_child = bounds_child.next_sibling;
+				}
+				if !has_min || !has_max continue;
+
+				room_name := "Room";
+				if room_e.parent != null && #alive(room_e.parent) {
+					pname := room_e.parent->get_name();
+					if pname.count > 0 {
+						room_name = pname;
+					}
+				}
+
+				append(ref candidate_rooms, room_e);
+				append(ref candidate_names, room_name);
+			}
+
+			// Partial Fisher-Yates shuffle — pick PYRO_ROOMS_BURNOUT_TARGET rooms at random.
+			rng: u64 = rng_seed_time();
+			pick_count := min(PYRO_ROOMS_BURNOUT_TARGET, candidate_rooms.count);
+			for pick_i: 0..pick_count-1 {
+				remaining := candidate_rooms.count - pick_i;
+				swap_idx := pick_i + rng_range_int(ref rng, 0, remaining - 1);
+
+				tmp_e := candidate_rooms[pick_i];
+				candidate_rooms[pick_i] = candidate_rooms[swap_idx];
+				candidate_rooms[swap_idx] = tmp_e;
+
+				tmp_n := candidate_names[pick_i];
+				candidate_names[pick_i] = candidate_names[swap_idx];
+				candidate_names[swap_idx] = tmp_n;
+
+				rt := new(RR_Pyro_Room_Task);
+				rt.id = format_string("pyro_burn_room_%", .{pick_i});
+				rt.started = true;
+				rt.completed = false;
+				rt.room_entity = candidate_rooms[pick_i];
+				rt.room_name = candidate_names[pick_i];
+				append(ref p.active_tasks, rt);
+			}
 		}
 	}
 

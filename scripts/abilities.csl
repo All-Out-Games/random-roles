@@ -2670,6 +2670,18 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
+		// Point an arrow toward the nearest burnable prop when the ability is ready.
+		if params.can_use && player->is_local() {
+			target := rr_pyro_get_closest_unlit_prop(player);
+			if target != null && #alive(target) {
+				options := Tutorial_Arrow.default_options();
+				options.alpha = 1.0;
+				options.far  = true;
+				options.near = true;
+				rr_draw_tutorial_arrow(player, target.world_position, options);
+			}
+		}
+
 		// Feedback when pressed while disabled.
 		if params.clicked && !params.can_use {
 			if player != null && !player.pyro_on_fire {
@@ -2770,10 +2782,9 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
 			if player != null && player.pyro_world_fire_unlocked_time <= 0.0 {
-				player->Notify(format_string("World Fire locked: burn 1 corpse + light 5 props + burn out % rooms (Corpse %/1, Props %/5, Rooms %/%).", .{
+				player->Notify(format_string("World Fire locked: burn 1 corpse + burn out % rooms (Corpse %/1, Rooms %/%).", .{
 					PYRO_ROOMS_BURNOUT_TARGET,
 					min(player.pyro_corpses_burned, 1),
-					min(player.pyro_props_ignited, 5),
 					min(player.pyro_rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
 					PYRO_ROOMS_BURNOUT_TARGET
 				}));
@@ -2815,9 +2826,8 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 		UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
 
 		// Show objective progress underneath.
-		prog := format_string("Corpse %/1  Props %/5  Rooms %/%", .{
+		prog := format_string("Corpse %/1  Rooms %/%", .{
 			min(p.pyro_corpses_burned, 1),
-			min(p.pyro_props_ignited, 5),
 			min(p.pyro_rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
 			PYRO_ROOMS_BURNOUT_TARGET
 		});

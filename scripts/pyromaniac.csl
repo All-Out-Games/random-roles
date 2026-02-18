@@ -4,9 +4,8 @@ import "core:ao"
 
 PYRO_FIRE_ATTACH_OFFSET_X :: 0.0;
 PYRO_FIRE_ATTACH_OFFSET_Y :: -0.6;
-// Fallback render order if the prop has no Sprite_Renderer.
+// Render layer used for fire entities that have no parent prop to copy from.
 PYRO_FIRE_FALLBACK_LAYER :: 2;
-PYRO_FIRE_FALLBACK_DEPTH_OFFSET :: 2.0;
 PYRO_FIRE_ABOVE_PROP_LAYER_BUMP :: 1;
 PYRO_FIRE_ABOVE_PROP_DEPTH_BUMP :: 0.05;
 PYRO_FIRE_IGNITE_RADIUS :: 0.95;
@@ -347,18 +346,20 @@ rr_pyro_check_objectives :: proc(player: Player) {
 	if t_corpse != null {
 		t_corpse.completed = player.pyro_corpses_burned >= 1;
 	}
-	t_props := rr_pyro_find_task(player, "pyro_ignite_5_props");
-	if t_props != null {
-		t_props.completed = player.pyro_props_ignited >= 5;
-	}
-	t_rooms := rr_pyro_find_task(player, "pyro_burn_out_rooms");
-	if t_rooms != null {
-		t_rooms.completed = player.pyro_rooms_burned_out >= PYRO_ROOMS_BURNOUT_TARGET;
+
+	// Per-room tasks: complete when the room is fully burned out.
+	for ti: 0..player.active_tasks.elements.count-1 {
+		t := player.active_tasks.elements[ti];
+		if t == null continue;
+		if t.#type != RR_Pyro_Room_Task continue;
+		rt := t.(RR_Pyro_Room_Task);
+		if rt.room_entity == null || !#alive(rt.room_entity) continue;
+		room_state := rt.room_entity->get_component(RR_Pyro_Room_Fire_State);
+		rt.completed = room_state != null && room_state.fiery_locked;
 	}
 
 	// Unlock World Fire once all objectives are complete.
 	unlocked := (player.pyro_corpses_burned >= 1)
-		&& (player.pyro_props_ignited >= 5)
 		&& (player.pyro_rooms_burned_out >= PYRO_ROOMS_BURNOUT_TARGET);
 	if unlocked && player.pyro_world_fire_unlocked_time <= 0.0 {
 		player.pyro_world_fire_unlocked_time = get_time();
@@ -482,7 +483,7 @@ rr_pyro_start_burning_corpse_visual :: proc(corpse_entity: Entity) -> Entity {
 		spine.depth_offset = corpse_spine.depth_offset + PYRO_FIRE_ABOVE_PROP_DEPTH_BUMP;
 	} else {
 		spine.layer = PYRO_FIRE_FALLBACK_LAYER;
-		spine.depth_offset = PYRO_FIRE_FALLBACK_DEPTH_OFFSET;
+		spine.depth_offset = fire_entity.world_position.y;
 	}
 
 	spine.instance->set_skeleton(get_asset(Spine_Asset, "anims/torch_fire/008BED_fire.spine"));
@@ -663,12 +664,15 @@ rr_pyro_spawn_burnout_fires :: proc(room_root: Entity) {
 
 			spine := fire_e->add_component(Spine_Animator);
 			spine->awaken();
-			spine.layer        = PYRO_FIRE_FALLBACK_LAYER;
-			spine.depth_offset = PYRO_FIRE_FALLBACK_DEPTH_OFFSET;
+			spine.depth_offset = -0.1;
 			spine.instance->set_skeleton(spine_asset);
-			spine.instance->set_animation(intro_anim, false, 0);
 
-			if intro_anim != loop_anim {
+			if intro_anim == loop_anim {
+				// No separate intro — start looping immediately.
+				spine.instance->set_animation(loop_anim, true, 0);
+			} else {
+				// Play the intro once, then the driver switches to the loop.
+				spine.instance->set_animation(intro_anim, false, 0);
 				driver := fire_e->add_component(RR_Burnout_Fire_Intro_Driver);
 				driver.loop_anim = loop_anim;
 			}
@@ -792,6 +796,12 @@ RR_Pyro_Room_Fire_State :: class : Component {
 	room_max: v2;
 }
 
+// Task_Base subclass for per-room burn objectives.
+RR_Pyro_Room_Task :: class : Task_Base {
+	room_entity: Entity;
+	room_name: string;
+}
+
 // Interactable on the fire entity to extinguish it.
 RR_Extinguish_Fire_Interactable :: class : Interactable {
 	target: RR_Prop_Fire_Target;
@@ -824,7 +834,7 @@ RR_Extinguish_Fire_Interactable :: class : Interactable {
 				spine.depth_offset = prop_sprite.depth_offset + PYRO_FIRE_ABOVE_PROP_DEPTH_BUMP;
 			} else {
 				spine.layer = PYRO_FIRE_FALLBACK_LAYER;
-				spine.depth_offset = PYRO_FIRE_FALLBACK_DEPTH_OFFSET;
+				spine.depth_offset = entity.world_position.y;
 			}
 
 			spine.instance->set_skeleton(get_asset(Spine_Asset, "anims/torch_fire/008BED_fire.spine"));

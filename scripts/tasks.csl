@@ -325,12 +325,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Prank 3 people";
 		case "call_fake_meeting":
 			return "Vote out target";
-		case "pyro_burn_1_corpse":
-			return "Burn 1 corpse";
-		case "pyro_ignite_5_props":
-			return "Set 5 objects on fire";
-		case "pyro_burn_out_rooms":
-			return format_string("Burn out % rooms", .{PYRO_ROOMS_BURNOUT_TARGET});
+	case "pyro_burn_1_corpse":
+		return "Burn 1 corpse";
 		case "jail_codes":
 			return "Change jail codes";
 		case RR_RESTART_GENERATOR_TASK_ID:
@@ -952,7 +948,7 @@ update_tasks_ui :: proc(player: Player) {
 	LIST_PAD :: 10.0;
 	DROPDOWN_SLICE_PX :: 16.0;
 
-	// Fake meeting task gets an extra sub-row for the "in a fake meeting" subtitle.
+	// Fake meeting and per-room pyro tasks get an extra sub-row for a subtitle line.
 	SUBTITLE_ROW_H :: 18.0;
 	extra_h := 0.0;
 	for i: 0..player.active_tasks.elements.count-1 {
@@ -960,6 +956,9 @@ update_tasks_ui :: proc(player: Player) {
 		if t == null continue;
 		if t.id == "call_fake_meeting" {
 			extra_h += SUBTITLE_ROW_H;
+		}
+		if t.#type == RR_Pyro_Room_Task {
+			extra_h += SUBTITLE_ROW_H + 5.0;
 		}
 	}
 	list_h := (player_total_tasks.(float)) * ROW_H + extra_h + (LIST_PAD * 2.0);
@@ -1014,6 +1013,10 @@ update_tasks_ui :: proc(player: Player) {
 					}
 				}
 			}
+			case RR_Pyro_Room_Task: {
+				rt := task.(RR_Pyro_Room_Task);
+				task_name = format_string("Burn out % room", .{rt.room_name});
+			}
 		}
 		if task.id == WEREWOLF_INFECT_TO_CURE_TASK_ID {
 			done := 0;
@@ -1023,12 +1026,6 @@ update_tasks_ui :: proc(player: Player) {
 		// Pyro objectives (plain Task_Base, matched by id).
 		if task.id == "pyro_burn_1_corpse" {
 			task_progress = format_string("%/1", .{player.pyro_corpses_burned});
-		}
-		if task.id == "pyro_ignite_5_props" {
-			task_progress = format_string("%/5", .{player.pyro_props_ignited});
-		}
-		if task.id == "pyro_burn_out_rooms" {
-			task_progress = format_string("%/%", .{player.pyro_rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET});
 		}
 
 		text_rect := entry_content;
@@ -1078,6 +1075,36 @@ update_tasks_ui :: proc(player: Player) {
 			sub_ts.outline_thickness = 3;
 			sub_ts.outline_color = v4.{0.1, 0.1, 0.15, 1};
 			UI.text(subtitle_content, sub_ts, "in a fake meeting");
+		}
+
+		// Per-room pyro task: draw "- X/Y Objects" subtitle on a second line.
+		if task.#type == RR_Pyro_Room_Task && !task.completed {
+			rt := task.(RR_Pyro_Room_Task);
+			subtitle_rect := list_content->cut_top(SUBTITLE_ROW_H);
+			subtitle_content := subtitle_rect->inset(0.0, 0.0, 0.0, 28.0);
+
+			burned := 0;
+			total := 0;
+			if rt.room_entity != null && #alive(rt.room_entity) {
+				room_state := rt.room_entity->get_component(RR_Pyro_Room_Fire_State);
+				if room_state != null {
+					burned = room_state.burning_props;
+					total = room_state.total_props;
+				} else {
+					// State is created lazily on first ignition; count props directly.
+					total = rr_pyro_count_ignitable_props_in_room(rt.room_entity);
+				}
+			}
+
+			sub_ts := UI.default_text_settings();
+			sub_ts.size = 18;
+			sub_ts.color = v4.{0.65, 0.65, 0.7, 1};
+			sub_ts.halign = .LEFT;
+			sub_ts.valign = .TOP;
+			sub_ts.do_outline = true;
+			sub_ts.outline_thickness = 3;
+			sub_ts.outline_color = v4.{0.1, 0.1, 0.15, 1};
+			UI.text(subtitle_content, sub_ts, format_string("- %/% Objects", .{burned, total}));
 		}
 	}
 }
