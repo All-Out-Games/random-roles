@@ -2456,6 +2456,21 @@ rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 		if !#alive(e) continue;
 		if e->get_name() != "Props" continue;
 
+		// Only show rooms that have Min/Max bounds markers (eligible for fire).
+		has_bounds := false;
+		bounds_check := e.first_child;
+		while bounds_check != null {
+			if #alive(bounds_check) {
+				bc_name := bounds_check->get_name();
+				if bc_name == "MIN" || bc_name == "MAX" {
+					has_bounds = true;
+					break;
+				}
+			}
+			bounds_check = bounds_check.next_sibling;
+		}
+		if !has_bounds continue;
+
 		room_state   := e->get_component(RR_Pyro_Room_Fire_State);
 		fiery_locked := room_state != null && room_state.fiery_locked;
 

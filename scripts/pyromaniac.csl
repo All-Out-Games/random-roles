@@ -29,8 +29,6 @@ PYRO_WORLD_FIRE_COLOR_B :: 0.05;
 PYRO_ROOMS_BURNOUT_TARGET :: 3;
 // How long (seconds) a player must stay in a fully-burned room before catching fire.
 PYRO_ROOM_EXPOSURE_DURATION :: 10.0;
-// Radius (meters) used to detect if a player is inside a fiery room.
-PYRO_ROOM_EXPOSURE_SEARCH_RADIUS :: 8.0;
 
 // Local-only cinematic overlay + bigfire around the pyro.
 RR_Pyro_World_Fire_Cinematic :: class : Component {
@@ -106,24 +104,92 @@ RR_Pyro_World_Fire_Cinematic :: class : Component {
 	}
 }
 
-// Returns true if any active fire belonging to a fiery-locked room is within
-// PYRO_ROOM_EXPOSURE_SEARCH_RADIUS of the player.
+// Reads the "MIN" and "MAX" named children of a Props root to get its room bounding box.
+// Returns false if either is absent (room is not eligible for fire spreading).
+rr_pyro_get_room_bounds :: proc(room_root: Entity, min_pos: ref v2, max_pos: ref v2) -> bool {
+	if room_root == null || !#alive(room_root) return false;
+	found_min := false;
+	found_max := false;
+	raw_min: v2;
+	raw_max: v2;
+	child := room_root.first_child;
+	while child != null {
+		if child != null && #alive(child) {
+			name := child->get_name();
+			if name == "MIN" {
+				raw_min = child.world_position;
+				found_min = true;
+			} else if name == "MAX" {
+				raw_max = child.world_position;
+				found_max = true;
+			}
+		}
+		child = child.next_sibling;
+	}
+	if !found_min || !found_max return false;
+	// Normalise so min/max are correct regardless of how the user placed the objects.
+	// Use field-by-field assignment so the ref writes back correctly.
+	min_pos.x = min(raw_min.x, raw_max.x);
+	min_pos.y = min(raw_min.y, raw_max.y);
+	max_pos.x = max(raw_min.x, raw_max.x);
+	max_pos.y = max(raw_min.y, raw_max.y);
+	return true;
+}
+
+rr_point_in_bounds :: proc(p: v2, box_min: v2, box_max: v2) -> bool {
+	return p.x >= box_min.x && p.x <= box_max.x && p.y >= box_min.y && p.y <= box_max.y;
+}
+
+// Returns true if 'pos' is on the navmesh AND every cardinal neighbor at
+// 'border_dist' away is also on the navmesh (i.e. the point is not near an edge).
+rr_navmesh_away_from_border :: proc(pos: v2, border_dist: float) -> bool {
+	if world_references == null return false;
+	if world_references.main_navmesh == null return false;
+	nm := world_references.main_navmesh;
+	SNAP_TOL_SQ :: 0.04; // 0.2 units snap tolerance
+
+	nav: v2; hint: s64;
+	if !nm->try_find_closest_point_on_navmesh(pos, ref nav, ref hint) return false;
+	dx := nav.x - pos.x; dy := nav.y - pos.y;
+	if dx*dx + dy*dy > SNAP_TOL_SQ return false;
+
+	n0 := v2.{pos.x + border_dist, pos.y};
+	nav0: v2; h0: s64;
+	if !nm->try_find_closest_point_on_navmesh(n0, ref nav0, ref h0) return false;
+	dx = nav0.x - n0.x; dy = nav0.y - n0.y;
+	if dx*dx + dy*dy > SNAP_TOL_SQ return false;
+
+	n1 := v2.{pos.x - border_dist, pos.y};
+	nav1: v2; h1: s64;
+	if !nm->try_find_closest_point_on_navmesh(n1, ref nav1, ref h1) return false;
+	dx = nav1.x - n1.x; dy = nav1.y - n1.y;
+	if dx*dx + dy*dy > SNAP_TOL_SQ return false;
+
+	n2 := v2.{pos.x, pos.y + border_dist};
+	nav2: v2; h2: s64;
+	if !nm->try_find_closest_point_on_navmesh(n2, ref nav2, ref h2) return false;
+	dx = nav2.x - n2.x; dy = nav2.y - n2.y;
+	if dx*dx + dy*dy > SNAP_TOL_SQ return false;
+
+	n3 := v2.{pos.x, pos.y - border_dist};
+	nav3: v2; h3: s64;
+	if !nm->try_find_closest_point_on_navmesh(n3, ref nav3, ref h3) return false;
+	dx = nav3.x - n3.x; dy = nav3.y - n3.y;
+	if dx*dx + dy*dy > SNAP_TOL_SQ return false;
+
+	return true;
+}
+
+// Returns true if the player is inside the bounding box of any fiery-locked room.
 rr_pyro_player_in_fiery_room :: proc(player: Player) -> bool {
 	if player == null return false;
 	if !#alive(player.entity) return false;
-
 	pos := player.entity.world_position;
-	r_sq := PYRO_ROOM_EXPOSURE_SEARCH_RADIUS * PYRO_ROOM_EXPOSURE_SEARCH_RADIUS;
 
-	foreach fire: component_iterator(RR_Prop_Fire_Target) {
-		if fire == null continue;
-		if !fire.active continue;
-		if fire.room_state == null continue;
-		if !fire.room_state.fiery_locked continue;
-		if fire.fire_entity == null || !#alive(fire.fire_entity) continue;
-
-		d := fire.fire_entity.world_position - pos;
-		if length_squared(d) <= r_sq {
+	foreach room_state: component_iterator(RR_Pyro_Room_Fire_State) {
+		if room_state == null continue;
+		if !room_state.fiery_locked continue;
+		if rr_point_in_bounds(pos, room_state.room_min, room_state.room_max) {
 			return true;
 		}
 	}
@@ -193,6 +259,17 @@ rr_pyro_draw_room_exposure_timer :: proc(player: Player) {
 	if player.player_role == Player_Role.PYROMANIAC return;
 	if player.pyro_room_exposure_timer <= 0.0 return;
 
+	// --- Screen-space red vignette overlay ---
+	// Steady ramp: faint at the start, deep red when nearly out of time.
+	danger_t      := 1.0 - (player.pyro_room_exposure_timer / PYRO_ROOM_EXPOSURE_DURATION);
+	danger_t       = clamp(danger_t, 0.0, 1.0);
+	overlay_alpha := lerp(0.08, 0.5, danger_t);
+
+	UI.push_layer(4900);
+	defer UI.pop_layer();
+	screen := UI.get_screen_rect();
+	UI.quad(screen, core_globals.white_sprite, v4.{1.0, 0.0, 0.0, overlay_alpha});
+
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
 
@@ -241,6 +318,10 @@ rr_pyro_extinguish_all_fires :: proc() {
 		room_state.burning_props = 0;
 		room_state.burnout_awarded = false;
 		room_state.burned_by_player_entity_id = 0;
+	}
+	foreach burnout_fires: component_iterator(RR_Burnout_Room_Fires) {
+		if burnout_fires == null continue;
+		burnout_fires->cleanup();
 	}
 }
 
@@ -330,15 +411,13 @@ rr_pyro_count_ignitable_props_in_room :: proc(room_root: Entity) -> int {
 	if room_root == null return 0;
 	if !#alive(room_root) return 0;
 
-	// Only count DIRECT children of the Props entity that have a Sprite_Renderer.
-	// Props are placed as direct children; fire entities are grandchildren (children of props),
-	// so this naturally excludes any Spine-created sub-entities that appear after ignition.
+	// Count DIRECT children that have a Sprite_Renderer.
+	// "MIN"/"MAX" bound markers are excluded naturally — they carry no Sprite_Renderer.
 	count := 0;
 	child := room_root.first_child;
 	while child != null {
 		if child != null && #alive(child) {
-			sprite := child->get_component(Sprite_Renderer);
-			if sprite != null {
+			if child->get_component(Sprite_Renderer) != null {
 				count += 1;
 			}
 		}
@@ -357,10 +436,14 @@ rr_pyro_get_or_create_room_state :: proc(room_root: Entity) -> RR_Pyro_Room_Fire
 		return state;
 	}
 	if state == null {
+		// Rooms without Min+Max marker children are not eligible for fire spreading.
+		bmin: v2; bmax: v2;
+		if !rr_pyro_get_room_bounds(room_root, ref bmin, ref bmax) return null;
+
 		state = room_root->add_component(RR_Pyro_Room_Fire_State);
+		state.room_min = bmin;
+		state.room_max = bmax;
 		// Count total props ONCE on creation, before any fires are lit.
-		// Recalculating later risks counting Spine-internal child entities
-		// that get added when fires are awakened.
 		state.total_props = rr_pyro_count_ignitable_props_in_room(room_root);
 	}
 	return state;
@@ -457,6 +540,145 @@ RR_Pyro_Burning_Corpse :: class : Component {
 	}
 }
 
+// --- Burnout decorative fires ---
+
+// Number of fires to scatter inside the room when it fully burns out.
+PYRO_BURNOUT_FIRE_COUNT :: 4;
+// Minimum navmesh-border clearance (units) required before placing a fire.
+PYRO_BURNOUT_FIRE_BORDER_CLEARANCE :: 1.0;
+// Maximum placement attempts per fire before giving up.
+PYRO_BURNOUT_FIRE_MAX_ATTEMPTS :: 20;
+
+// Tracks the decorative fire entities spawned when a room fully burns out.
+RR_Burnout_Room_Fires :: class : Component {
+	fire_entities: [..]Entity;
+
+	add_fire :: proc(using this: RR_Burnout_Room_Fires, e: Entity) {
+		if e == null return;
+		fire_entities->append(e);
+	}
+
+	cleanup :: proc(using this: RR_Burnout_Room_Fires) {
+		for i: 0..fire_entities.count-1 {
+			e := fire_entities[i];
+			if e != null && #alive(e) {
+				e->destroy();
+			}
+		}
+		fire_entities->clear();
+	}
+
+	ao_end :: proc(using this: RR_Burnout_Room_Fires) {
+		this->cleanup();
+	}
+}
+
+// Switches a burnout fire spine from its intro animation to its loop after a short delay.
+RR_Burnout_Fire_Intro_Driver :: class : Component {
+	loop_anim: string;
+	start_time: float;
+	switched: bool;
+
+	ao_start :: proc(using this: RR_Burnout_Fire_Intro_Driver) {
+		start_time = get_time();
+	}
+
+	ao_update :: proc(using this: RR_Burnout_Fire_Intro_Driver, dt: float) {
+		if switched return;
+		if (get_time() - start_time) < 0.8 return;
+		spine := entity->get_component(Spine_Animator);
+		if spine != null && spine.instance != null {
+			spine.instance->set_animation(loop_anim, true, 0);
+		}
+		switched = true;
+	}
+}
+
+rr_pyro_spawn_burnout_fires :: proc(room_root: Entity) {
+	if !Game.is_server() return;
+	if room_root == null || !#alive(room_root) return;
+	if world_references == null return;
+	if world_references.main_navmesh == null return;
+
+	// Bounds must already be stored on the room state.
+	room_state := room_root->get_component(RR_Pyro_Room_Fire_State);
+	if room_state == null return;
+
+	bmin := room_state.room_min;
+	bmax := room_state.room_max;
+	width  := bmax.x - bmin.x;
+	height := bmax.y - bmin.y;
+	if width <= 0.0 || height <= 0.0 return;
+
+	fires_comp := room_root->get_component(RR_Burnout_Room_Fires);
+	if fires_comp == null {
+		fires_comp = room_root->add_component(RR_Burnout_Room_Fires);
+	}
+
+	rng := rng_seed(room_root.id);
+
+	fire_column_asset := get_asset(Spine_Asset, "anims/fires/fire_column.spine");
+	w54_fire_asset    := get_asset(Spine_Asset, "anims/fires/W54_AB_Fire.spine");
+
+	for fi: 0..PYRO_BURNOUT_FIRE_COUNT-1 {
+		for attempt: 0..PYRO_BURNOUT_FIRE_MAX_ATTEMPTS-1 {
+			// Random position within the room bounds.
+			candidate := v2.{
+				rng_range_float(ref rng, bmin.x, bmax.x),
+				rng_range_float(ref rng, bmin.y, bmax.y),
+			};
+
+			// Must be on the navmesh and at least 1 unit from any border.
+			if !rr_navmesh_away_from_border(candidate, PYRO_BURNOUT_FIRE_BORDER_CLEARANCE) {
+				continue;
+			}
+
+			// Randomly pick fire_column or W54_AB_Fire.
+			use_column := (rng_range_int(ref rng, 0, 1) == 0) && fire_column_asset != null;
+
+			spine_asset: Spine_Asset;
+			intro_anim: string;
+			loop_anim: string;
+
+			if use_column {
+				spine_asset = fire_column_asset;
+				intro_anim  = "fire_column_intro";
+				loop_anim   = "fire_column_loop";
+			} else if w54_fire_asset != null {
+				spine_asset = w54_fire_asset;
+				intro_anim  = "Floor Fire";
+				loop_anim   = "Floor Fire";
+			} else if fire_column_asset != null {
+				spine_asset = fire_column_asset;
+				intro_anim  = "fire_column_intro";
+				loop_anim   = "fire_column_loop";
+			} else {
+				break;
+			}
+
+			fire_e := Scene.create_entity();
+			fire_e->set_local_position(candidate);
+			fire_e->set_local_rotation(0.0);
+			fire_e->set_local_scale(v2.{1.0, 1.0});
+
+			spine := fire_e->add_component(Spine_Animator);
+			spine->awaken();
+			spine.layer        = PYRO_FIRE_FALLBACK_LAYER;
+			spine.depth_offset = PYRO_FIRE_FALLBACK_DEPTH_OFFSET;
+			spine.instance->set_skeleton(spine_asset);
+			spine.instance->set_animation(intro_anim, false, 0);
+
+			if intro_anim != loop_anim {
+				driver := fire_e->add_component(RR_Burnout_Fire_Intro_Driver);
+				driver.loop_anim = loop_anim;
+			}
+
+			fires_comp->add_fire(fire_e);
+			break;
+		}
+	}
+}
+
 // Per-prop fire controller. This is attached at runtime to the chosen prop.
 RR_Prop_Fire_Target :: class : Component {
 	active: bool;
@@ -473,7 +695,9 @@ RR_Prop_Fire_Target :: class : Component {
 
 		room_root = rr_pyro_find_props_room_root(entity);
 		room_state = rr_pyro_get_or_create_room_state(room_root);
-		if room_state != null && room_state.fiery_locked {
+		// Rooms without Min/Max marker children are ineligible — don't ignite.
+		if room_state == null return;
+		if room_state.fiery_locked {
 			if by != null {
 				by->Notify("This room is fully ablaze.");
 			}
@@ -510,6 +734,7 @@ RR_Prop_Fire_Target :: class : Component {
 						rr_pyro_register_room_burned_out(by);
 						by->Notify("Room burned out!");
 					}
+					rr_pyro_spawn_burnout_fires(room_root);
 				}
 			}
 		}
@@ -562,6 +787,9 @@ RR_Pyro_Room_Fire_State :: class : Component {
 	fiery_locked: bool;
 	burnout_awarded: bool;
 	burned_by_player_entity_id: u64;
+	// World-space bounding box from the room's "MIN" / "MAX" child entities.
+	room_min: v2;
+	room_max: v2;
 }
 
 // Interactable on the fire entity to extinguish it.
