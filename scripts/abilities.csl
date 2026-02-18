@@ -2606,8 +2606,8 @@ rr_pyro_get_closest_unlit_prop :: proc(player: Player) -> Entity {
 	if player == null return null;
 	if world_references == null return null;
 
-	props: [..]Sprite_Renderer;
-	world_references->find_props_child_sprite_renderers(ref props, clear_first=true);
+	props: [..]Entity;
+	world_references->find_props_child_entities(ref props, clear_first=true);
 	if props.count <= 0 return null;
 
 	best: Entity = null;
@@ -2615,15 +2615,19 @@ rr_pyro_get_closest_unlit_prop :: proc(player: Player) -> Entity {
 	r_sq := PYRO_LIGHT_FIRE_RANGE * PYRO_LIGHT_FIRE_RANGE;
 
 	for i: 0..props.count-1 {
-		s := props[i];
-		if s == null continue;
-		e := s.entity;
+		e := props[i];
 		if e == null continue;
 		if !#alive(e) continue;
 
 		// Skip already-burning props.
 		existing := e->get_component(RR_Prop_Fire_Target);
 		if existing != null && existing.active {
+			continue;
+		}
+		// Skip props in rooms that are already fully burned out.
+		room_root := rr_pyro_find_props_room_root(e);
+		room_state := rr_pyro_get_or_create_room_state(room_root);
+		if room_state != null && room_state.fiery_locked {
 			continue;
 		}
 
@@ -2684,7 +2688,7 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 					if fire == null {
 						fire = target->add_component(RR_Prop_Fire_Target);
 					}
-					fire->ignite();
+					fire->ignite(player);
 					// Cosmetic but should replicate: trigger snap animation on merged rig.
 					player->set_trigger("pyro_snap_fingers");
 					rr_pyro_register_prop_ignited(player);
@@ -2766,9 +2770,12 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
 			if player != null && player.pyro_world_fire_unlocked_time <= 0.0 {
-				player->Notify(format_string("World Fire locked: burn 1 corpse + light 5 props (Corpse %/1, Props %/5).", .{
+				player->Notify(format_string("World Fire locked: burn 1 corpse + light 5 props + burn out % rooms (Corpse %/1, Props %/5, Rooms %/%).", .{
+					PYRO_ROOMS_BURNOUT_TARGET,
 					min(player.pyro_corpses_burned, 1),
-					min(player.pyro_props_ignited, 5)
+					min(player.pyro_props_ignited, 5),
+					min(player.pyro_rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
+					PYRO_ROOMS_BURNOUT_TARGET
 				}));
 			}
 		}
@@ -2808,7 +2815,12 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 		UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
 
 		// Show objective progress underneath.
-		prog := format_string("Corpse %/1  Props %/5", .{min(p.pyro_corpses_burned, 1), min(p.pyro_props_ignited, 5)});
+		prog := format_string("Corpse %/1  Props %/5  Rooms %/%", .{
+			min(p.pyro_corpses_burned, 1),
+			min(p.pyro_props_ignited, 5),
+			min(p.pyro_rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
+			PYRO_ROOMS_BURNOUT_TARGET
+		});
 		ts2 := ts;
 		ts2.size = 14;
 		ts2.valign = .BOTTOM;

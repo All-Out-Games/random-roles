@@ -2,7 +2,7 @@
 1602022801409
 1346911037464008 1766017063610964300
 {
-  "name": "Props",
+  "name": "Props_NoFire",
   "local_enabled": true,
   "local_position": {
     "X": 1.3388123512268066,

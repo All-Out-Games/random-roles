@@ -92,7 +92,11 @@ Player :: class : Player_Base {
 	pyro_on_fire: bool;
 	pyro_props_ignited: int;
 	pyro_corpses_burned: int;
+	pyro_rooms_burned_out: int;
 	pyro_world_fire_unlocked_time: float; // 0 = locked; otherwise time unlocked
+	// Counts down from PYRO_ROOM_EXPOSURE_DURATION when in a fully-burned room.
+	// Server-authoritative and replicated; read locally for UI display.
+	pyro_room_exposure_timer: float;
 
 	// Jester Win (unlock + timer)
 	prankster_jester_unlocked_time: float; // 0 = locked, otherwise time it unlocked
@@ -382,6 +386,8 @@ Player :: class : Player_Base {
 			// Draw resurrection timer above any temporarily resurrected players' heads.
 			if this->is_local() {
 				rr_draw_temp_resurrect_timers();
+				// Draw fiery-room exposure countdown above the local player's head.
+				rr_pyro_draw_room_exposure_timer(this);
 			}
 			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
 				this->draw_letterbox_bars();
@@ -408,6 +414,9 @@ Player :: class : Player_Base {
 
 		// Drag body animation state (runs on all clients).
 		rr_drag_body_update_anim_state(this, delta_time);
+
+		// Server-authoritative: fiery room exposure countdown.
+		rr_pyro_update_room_exposure(this, delta_time);
     }
 
 	update_chat_mode :: proc(using this: Player) {
@@ -780,7 +789,7 @@ Player :: class : Player_Base {
 
 						t := get_time();
 						screen := UI.get_safe_screen_rect();
-						area_rect := screen->center_rect()->offset(0, 30);
+						area_rect := screen->bottom_center_rect()->offset(0, 230);
 
 						// --- Elapsed timer (top) ---
 						timer_rect := area_rect->grow(20, 240, 0, 240)->offset(0, 40);
@@ -2404,9 +2413,115 @@ rr_draw_task_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, color: v4)
 	}
 }
 
+// Draw minimap markers for every prop the Pyromaniac can still ignite
+// (i.e. props that are not already actively burning).
+// Returns one of 12 vivid hues by sequential index (mod 12).
+// Hues span the blue-green-purple-magenta arc, avoiding yellow/orange/red
+// so they don't clash with the "burning" red flash or "fully burned" deep-orange.
+rr_pyro_room_color :: proc(idx: int) -> v4 {
+	switch idx % 12 {
+		case 0:  return v4.{0.0,  1.0,  0.15, 1.0}; // pure green      (~120°)
+		case 1:  return v4.{0.0,  0.9,  0.3,  1.0}; // mint green      (~140°)
+		case 2:  return v4.{0.0,  0.85, 0.75, 1.0}; // teal            (~175°)
+		case 3:  return v4.{0.0,  0.8,  1.0,  1.0}; // cyan            (~195°)
+		case 4:  return v4.{0.0,  0.55, 1.0,  1.0}; // sky blue        (~210°)
+		case 5:  return v4.{0.15, 0.5,  1.0,  1.0}; // cornflower      (~220°)
+		case 6:  return v4.{0.1,  0.15, 1.0,  1.0}; // blue            (~240°)
+		case 7:  return v4.{0.55, 0.1,  1.0,  1.0}; // violet          (~265°)
+		case 8:  return v4.{0.5,  0.3,  1.0,  1.0}; // lavender        (~270°)
+		case 9:  return v4.{0.85, 0.0,  1.0,  1.0}; // purple          (~290°)
+		case 10: return v4.{1.0,  0.1,  0.65, 1.0}; // magenta         (~320°)
+		case:    return v4.{1.0,  0.05, 0.45, 1.0}; // hot pink/rose   (~340°)
+	}
+}
+
+rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
+	if player == null return;
+	if world_references == null return;
+
+	icon        := get_asset(Texture_Asset, "sprites/pyro_task_icon.png");
+	icon_fire   := get_asset(Texture_Asset, "sprites/pyro_task_icon_fire.png");
+	burned_col  := v4.{1.0, 0.15, 0.0, 1.0}; // deep orange-red for fully burned rooms
+
+	// Pulsing red for props that are currently burning (room not yet fully burned).
+	flash_alpha := sin(get_time() * 7.0) * 0.4 + 0.6; // oscillates 0.2–1.0
+	burning_col := v4.{1.0, 0.08, 0.05, flash_alpha};
+
+	// Assign each room a color by its encounter order in entity_iterator().
+	// entity_iterator() is stable for scene entities, so this is consistent every frame.
+	room_idx := 0;
+
+	foreach e: entity_iterator() {
+		if e == null continue;
+		if !#alive(e) continue;
+		if e->get_name() != "Props" continue;
+
+		room_state   := e->get_component(RR_Pyro_Room_Fire_State);
+		fiery_locked := room_state != null && room_state.fiery_locked;
+
+		room_col: v4;
+		if fiery_locked {
+			room_col = burned_col;
+		} else {
+			room_col = rr_pyro_room_color(room_idx);
+		}
+		room_idx += 1;
+
+		// Walk direct children; only actual props carry a Sprite_Renderer here.
+		child := e.first_child;
+		while child != null {
+			next := child.next_sibling;
+
+			if #alive(child) {
+				sprite := child->get_component(Sprite_Renderer);
+				if sprite != null {
+					col: v4;
+
+					if fiery_locked {
+						col = burned_col;
+					} else {
+						fire := child->get_component(RR_Prop_Fire_Target);
+						if fire != null && fire.active {
+							// Prop is actively burning: flash red.
+							col = burning_col;
+						} else {
+							// Prop is unlit: use this room's unique color.
+							col = room_col;
+						}
+					}
+
+					p_ui := rr_minimap_world_to_ui(map_rect, child.world_position);
+					size := map_rect->height() * 0.022;
+					if size < 10.0 { size = 10.0; }
+					if size > 26.0 { size = 26.0; }
+
+					r := Rect{p_ui, p_ui}->grow_unscaled(size, size, size, size);
+					if icon != null {
+						UI.quad(r->fit_aspect(icon->get_aspect()), icon, col);
+					} else {
+						UI.quad(r, core_globals.white_sprite, col);
+					}
+					// Fire overlay on top, uncolored.
+					if icon_fire != null {
+						UI.quad(r->fit_aspect(icon_fire->get_aspect()), icon_fire, v4.{1.0, 1.0, 1.0, 1.0});
+					}
+				}
+			}
+
+			child = next;
+		}
+	}
+}
+
 rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 	if player == null return;
 	if !player->is_local() return;
+
+	// Pyromaniac: show all igniteable prop locations with the pyro icon.
+	if player.player_role == Player_Role.PYROMANIAC {
+		rr_draw_pyro_prop_markers_on_minimap(player, map_rect);
+		return;
+	}
 
 	if rr_power_outage_active && player.player_type != Player_Type.TRAITOR {
 		rr_draw_task_marker_on_minimap(map_rect, rr_get_power_outage_generator_pos(), v4.{1.0, 0.3, 0.3, 1.0});

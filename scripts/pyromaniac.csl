@@ -26,6 +26,11 @@ PYRO_WORLD_FIRE_OVERLAY_SECONDS :: 5.0;
 PYRO_WORLD_FIRE_COLOR_R :: 1.0;
 PYRO_WORLD_FIRE_COLOR_G :: 0.35;
 PYRO_WORLD_FIRE_COLOR_B :: 0.05;
+PYRO_ROOMS_BURNOUT_TARGET :: 3;
+// How long (seconds) a player must stay in a fully-burned room before catching fire.
+PYRO_ROOM_EXPOSURE_DURATION :: 10.0;
+// Radius (meters) used to detect if a player is inside a fiery room.
+PYRO_ROOM_EXPOSURE_SEARCH_RADIUS :: 8.0;
 
 // Local-only cinematic overlay + bigfire around the pyro.
 RR_Pyro_World_Fire_Cinematic :: class : Component {
@@ -101,11 +106,141 @@ RR_Pyro_World_Fire_Cinematic :: class : Component {
 	}
 }
 
+// Returns true if any active fire belonging to a fiery-locked room is within
+// PYRO_ROOM_EXPOSURE_SEARCH_RADIUS of the player.
+rr_pyro_player_in_fiery_room :: proc(player: Player) -> bool {
+	if player == null return false;
+	if !#alive(player.entity) return false;
+
+	pos := player.entity.world_position;
+	r_sq := PYRO_ROOM_EXPOSURE_SEARCH_RADIUS * PYRO_ROOM_EXPOSURE_SEARCH_RADIUS;
+
+	foreach fire: component_iterator(RR_Prop_Fire_Target) {
+		if fire == null continue;
+		if !fire.active continue;
+		if fire.room_state == null continue;
+		if !fire.room_state.fiery_locked continue;
+		if fire.fire_entity == null || !#alive(fire.fire_entity) continue;
+
+		d := fire.fire_entity.world_position - pos;
+		if length_squared(d) <= r_sq {
+			return true;
+		}
+	}
+	return false;
+}
+
+// Server-authoritative: tick down the room-exposure countdown for a player.
+// When the countdown hits 0 the player catches fire using the existing on-fire system.
+// The timer pauses while the player has a task in progress and resets when leaving
+// the fiery room, dying, or already being on fire.
+rr_pyro_update_room_exposure :: proc(player: Player, dt: float) {
+	if !Game.is_server() return;
+	if player == null return;
+	if !#alive(player.entity) return;
+
+	// Clear timer if not mid-game or player is not alive.
+	if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
+		player.pyro_room_exposure_timer = 0.0;
+		return;
+	}
+
+	// Pyromaniacs are immune to their own fiery rooms.
+	if player.player_role == Player_Role.PYROMANIAC {
+		player.pyro_room_exposure_timer = 0.0;
+		return;
+	}
+
+	// Already on fire: clear the exposure timer so it restarts fresh afterward.
+	if player.pyro_on_fire {
+		player.pyro_room_exposure_timer = 0.0;
+		return;
+	}
+
+	if !rr_pyro_player_in_fiery_room(player) {
+		// Reset timer when leaving the room.
+		player.pyro_room_exposure_timer = 0.0;
+		return;
+	}
+
+	// Pause while a task minigame is in progress.
+	if player->has_task_in_progress() return;
+
+	// Start the countdown the first time a player enters a fiery room.
+	if player.pyro_room_exposure_timer <= 0.0 {
+		player.pyro_room_exposure_timer = PYRO_ROOM_EXPOSURE_DURATION;
+	}
+
+	player.pyro_room_exposure_timer -= dt;
+
+	if player.pyro_room_exposure_timer <= 0.0 {
+		player.pyro_room_exposure_timer = 0.0;
+		// Catch fire using the existing status system.
+		on_fire := player.entity->get_component(RR_Player_On_Fire_Status);
+		if on_fire == null {
+			on_fire = player.entity->add_component(RR_Player_On_Fire_Status);
+		}
+		on_fire->arm(PYRO_ON_FIRE_DURATION_SECONDS);
+	}
+}
+
+// Local-only: draw a world-space countdown timer above the player's head while
+// they are being exposed to a fiery room.
+rr_pyro_draw_room_exposure_timer :: proc(player: Player) {
+	if player == null return;
+	if game_state != Game_State.INGAME return;
+	if player.player_state != Player_State.ALIVE return;
+	if player.player_role == Player_Role.PYROMANIAC return;
+	if player.pyro_room_exposure_timer <= 0.0 return;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+
+	pos := player.entity.world_position;
+	UI.push_z(pos.y);
+	defer UI.pop_z();
+
+	// Ceiling of remaining seconds for display.
+	secs_f := player.pyro_room_exposure_timer;
+	secs_i := secs_f.(int);
+	rem := secs_f - secs_i.(float);
+	if rem > 0.001 { secs_i += 1; }
+	if secs_i < 1 { secs_i = 1; }
+
+	// Interpolate color: yellow (full time) → red (about to burn).
+	t := player.pyro_room_exposure_timer / PYRO_ROOM_EXPOSURE_DURATION;
+	g := t;
+	if g < 0.0 { g = 0.0; }
+	col := v4.{1.0, g, 0.0, 1.0};
+
+	// Draw above the player's nameplate (~2.1 m above entity origin).
+	label_pos := pos + v2.{0.0, 2.1};
+	label_rect := Rect{label_pos, label_pos}->grow(0.10, 0.50, 0.10, 0.50);
+
+	ts := UI.default_text_settings();
+	ts.size = 0.30;
+	ts.color = col;
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 0.04;
+	ts.outline_color = v4.{0.0, 0.0, 0.0, 1.0};
+
+	UI.text(label_rect, ts, format_string("FIRE IN %", .{secs_i}));
+}
+
 rr_pyro_extinguish_all_fires :: proc() {
 	// Server authoritative cleanup between rounds / in lobby.
 	if !Game.is_server() return;
 	foreach fire: component_iterator(RR_Prop_Fire_Target) {
-		fire->extinguish(null);
+		fire->extinguish(null, true);
+	}
+	foreach room_state: component_iterator(RR_Pyro_Room_Fire_State) {
+		if room_state == null continue;
+		room_state.fiery_locked = false;
+		room_state.burning_props = 0;
+		room_state.burnout_awarded = false;
+		room_state.burned_by_player_entity_id = 0;
 	}
 }
 
@@ -135,9 +270,15 @@ rr_pyro_check_objectives :: proc(player: Player) {
 	if t_props != null {
 		t_props.completed = player.pyro_props_ignited >= 5;
 	}
+	t_rooms := rr_pyro_find_task(player, "pyro_burn_out_rooms");
+	if t_rooms != null {
+		t_rooms.completed = player.pyro_rooms_burned_out >= PYRO_ROOMS_BURNOUT_TARGET;
+	}
 
-	// Unlock World Fire once both are complete.
-	unlocked := (player.pyro_corpses_burned >= 1) && (player.pyro_props_ignited >= 5);
+	// Unlock World Fire once all objectives are complete.
+	unlocked := (player.pyro_corpses_burned >= 1)
+		&& (player.pyro_props_ignited >= 5)
+		&& (player.pyro_rooms_burned_out >= PYRO_ROOMS_BURNOUT_TARGET);
 	if unlocked && player.pyro_world_fire_unlocked_time <= 0.0 {
 		player.pyro_world_fire_unlocked_time = get_time();
 		player->Notify("World Fire unlocked!");
@@ -160,6 +301,69 @@ rr_pyro_register_corpse_burned :: proc(player: Player) {
 	if player.player_role != Player_Role.PYROMANIAC return;
 	player.pyro_corpses_burned += 1;
 	rr_pyro_check_objectives(player);
+}
+
+rr_pyro_register_room_burned_out :: proc(player: Player) {
+	// Server authoritative; counters are replicated.
+	if !Game.is_server() return;
+	if player == null return;
+	if player.player_role != Player_Role.PYROMANIAC return;
+	player.pyro_rooms_burned_out += 1;
+	rr_pyro_check_objectives(player);
+}
+
+rr_pyro_find_props_room_root :: proc(start: Entity) -> Entity {
+	if start == null return null;
+	if !#alive(start) return null;
+
+	cur := start;
+	while cur != null {
+		if cur->get_name() == "Props" {
+			return cur;
+		}
+		cur = cur.parent;
+	}
+	return null;
+}
+
+rr_pyro_count_ignitable_props_in_room :: proc(room_root: Entity) -> int {
+	if room_root == null return 0;
+	if !#alive(room_root) return 0;
+
+	// Only count DIRECT children of the Props entity that have a Sprite_Renderer.
+	// Props are placed as direct children; fire entities are grandchildren (children of props),
+	// so this naturally excludes any Spine-created sub-entities that appear after ignition.
+	count := 0;
+	child := room_root.first_child;
+	while child != null {
+		if child != null && #alive(child) {
+			sprite := child->get_component(Sprite_Renderer);
+			if sprite != null {
+				count += 1;
+			}
+		}
+		child = child.next_sibling;
+	}
+	return count;
+}
+
+
+rr_pyro_get_or_create_room_state :: proc(room_root: Entity) -> RR_Pyro_Room_Fire_State {
+	if room_root == null return null;
+	if !#alive(room_root) return null;
+
+	state := room_root->get_component(RR_Pyro_Room_Fire_State);
+	if !Game.is_server() {
+		return state;
+	}
+	if state == null {
+		state = room_root->add_component(RR_Pyro_Room_Fire_State);
+		// Count total props ONCE on creation, before any fires are lit.
+		// Recalculating later risks counting Spine-internal child entities
+		// that get added when fires are awakened.
+		state.total_props = rr_pyro_count_ignitable_props_in_room(room_root);
+	}
+	return state;
 }
 
 rr_pyro_find_burnable_corpse :: proc(pyro: Player) -> Corpse {
@@ -258,12 +462,23 @@ RR_Prop_Fire_Target :: class : Component {
 	active: bool;
 	fire_entity: Entity;
 	ignited_at: float;
+	room_root: Entity;
+	room_state: RR_Pyro_Room_Fire_State;
 
-	ignite :: proc(using this: RR_Prop_Fire_Target) {
+	ignite :: proc(using this: RR_Prop_Fire_Target, by: Player = null) {
 		// Server authoritative: affects gameplay (burning + interaction)
 		if !Game.is_server() return;
 		if active return;
 		if entity == null || !#alive(entity) return;
+
+		room_root = rr_pyro_find_props_room_root(entity);
+		room_state = rr_pyro_get_or_create_room_state(room_root);
+		if room_state != null && room_state.fiery_locked {
+			if by != null {
+				by->Notify("This room is fully ablaze.");
+			}
+			return;
+		}
 
 		active = true;
 		ignited_at = get_time();
@@ -283,12 +498,39 @@ RR_Prop_Fire_Target :: class : Component {
 		// Interactable (extinguish)
 		ext := fire_entity->add_component(RR_Extinguish_Fire_Interactable);
 		ext.target = this;
+
+		if room_state != null {
+			room_state.burning_props += 1;
+			if room_state.total_props > 0 && room_state.burning_props >= room_state.total_props {
+				room_state.fiery_locked = true;
+				if !room_state.burnout_awarded {
+					room_state.burnout_awarded = true;
+					if by != null {
+						room_state.burned_by_player_entity_id = by.entity.id;
+						rr_pyro_register_room_burned_out(by);
+						by->Notify("Room burned out!");
+					}
+				}
+			}
+		}
 	}
 
-	extinguish :: proc(using this: RR_Prop_Fire_Target, by: Player = null) {
+	extinguish :: proc(using this: RR_Prop_Fire_Target, by: Player = null, force: bool = false) {
 		// Server authoritative.
 		if !Game.is_server() return;
 		if !active return;
+		if !force {
+			if room_state == null {
+				room_root = rr_pyro_find_props_room_root(entity);
+				room_state = rr_pyro_get_or_create_room_state(room_root);
+			}
+			if room_state != null && room_state.fiery_locked {
+				if by != null {
+					by->Notify("This room is too fiery to extinguish.");
+				}
+				return;
+			}
+		}
 
 		active = false;
 
@@ -304,40 +546,22 @@ RR_Prop_Fire_Target :: class : Component {
 			fire_entity->queue_for_destruction(0.8);
 		}
 		fire_entity = null;
+		if room_state != null && room_state.burning_props > 0 {
+			room_state.burning_props -= 1;
+		}
 
 		if by != null {
 			by->Notify("Fire extinguished!");
 		}
 	}
+}
 
-	ao_update :: proc(using this: RR_Prop_Fire_Target, dt: float) {
-		// Server authoritative gameplay checks.
-		if !Game.is_server() return;
-		if !active return;
-		if fire_entity == null || !#alive(fire_entity) return;
-		if game_state != Game_State.INGAME return;
-
-		// Burn players who walk through it.
-		pos := fire_entity.world_position;
-		r_sq := PYRO_FIRE_IGNITE_RADIUS * PYRO_FIRE_IGNITE_RADIUS;
-		for i: 0..players.elements.count-1 {
-			p := players.elements[i];
-			if p == null continue;
-			if !#alive(p.entity) continue;
-			if p.player_state != Player_State.ALIVE continue;
-			// Pyromaniacs are immune to their own fire.
-			if p.player_role == Player_Role.PYROMANIAC continue;
-
-			d := p.entity.world_position - pos;
-			if length_squared(d) > r_sq continue;
-
-			on_fire := p.entity->get_component(RR_Player_On_Fire_Status);
-			if on_fire == null {
-				on_fire = p.entity->add_component(RR_Player_On_Fire_Status);
-			}
-			on_fire->arm(PYRO_ON_FIRE_DURATION_SECONDS);
-		}
-	}
+RR_Pyro_Room_Fire_State :: class : Component {
+	total_props: int;
+	burning_props: int;
+	fiery_locked: bool;
+	burnout_awarded: bool;
+	burned_by_player_entity_id: u64;
 }
 
 // Interactable on the fire entity to extinguish it.
@@ -395,8 +619,14 @@ RR_Extinguish_Fire_Interactable :: class : Interactable {
 	can_use :: method(player: Player) -> bool {
 		if player == null return false;
 		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role == Player_Role.PYROMANIAC return false;
 		if target == null return false;
 		if !target.active return false;
+		if target.room_state == null {
+			target.room_root = rr_pyro_find_props_room_root(target.entity);
+			target.room_state = rr_pyro_get_or_create_room_state(target.room_root);
+		}
+		if target.room_state != null && target.room_state.fiery_locked return false;
 		return true;
 	}
 

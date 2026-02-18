@@ -277,7 +277,7 @@ World_References :: class : Component {
 
 	// Collect all Sprite_Renderers in the descendants of any entity named "Props".
 	// (Does not include Sprite_Renderers on the "Props" entity itself.)
-	find_props_child_sprite_renderers :: proc(using this: World_References, results: ref [..]Sprite_Renderer, clear_first: bool = true) {
+	find_props_child_entities :: proc(using this: World_References, results: ref [..]Entity, clear_first: bool = true) {
 		if clear_first {
 			results->clear();
 		}
@@ -286,11 +286,11 @@ World_References :: class : Component {
 			if !#alive(e) continue;
 			if e->get_name() != "Props" continue;
 
-			this->append_sprite_renderers_in_descendants(e, ref results);
+			this->append_entities_in_descendants(e, ref results);
 		}
 	}
 
-	append_sprite_renderers_in_descendants :: proc(using this: World_References, root: Entity, results: ref [..]Sprite_Renderer) {
+	append_entities_in_descendants :: proc(using this: World_References, root: Entity, results: ref [..]Entity) {
 		if root == null return;
 		if !#alive(root) return;
 
@@ -308,18 +308,7 @@ World_References :: class : Component {
 			cur := stack->pop();
 			if cur == null continue;
 			if !#alive(cur) continue;
-
-			sprite := cur->get_component(Sprite_Renderer);
-			if sprite != null {
-				results->append(sprite);
-			}
-
-			// Push this entity's children.
-			c := cur.first_child;
-			while c != null {
-				stack->append(c);
-				c = c.next_sibling;
-			}
+			results->append(cur);
 		}
 	}
 }

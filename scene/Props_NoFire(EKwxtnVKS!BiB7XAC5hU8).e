@@ -2,7 +2,7 @@
 1142461300737
 1173232285471378 1765953594246698300
 {
-  "name": "Props",
+  "name": "Props_NoFire",
   "local_enabled": true,
   "local_position": {
     "X": 0.2047350257635117,
