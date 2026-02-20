@@ -2,7 +2,7 @@ import "core:ao"
 
 // Mobile UI: push a higher scale factor on phones/tablets so HUD elements
 // are readable without changing the base layout for PC players.
-// On PC nothing is pushed, so the existing scale is left untouched.
+// Pass multiplier > 1.0 to also scale on PC (e.g. for large help panels).
 RR_MOBILE_UI_SCALE_PHONE  :: 1.5;
 RR_MOBILE_UI_SCALE_TABLET :: 1.2;
 
@@ -14,6 +14,23 @@ rr_push_mobile_ui_scale :: proc(player: Player) -> bool {
 	}
 	if player.device_kind == .TABLET {
 		UI.push_scale_factor(RR_MOBILE_UI_SCALE_TABLET);
+		return true;
+	}
+	return false;
+}
+
+rr_push_mobile_ui_scale :: proc(player: Player, multiplier: float) -> bool {
+	if player == null return false;
+	if player.device_kind == .PHONE {
+		UI.push_scale_factor(RR_MOBILE_UI_SCALE_PHONE * multiplier);
+		return true;
+	}
+	if player.device_kind == .TABLET {
+		UI.push_scale_factor(RR_MOBILE_UI_SCALE_TABLET * multiplier);
+		return true;
+	}
+	if multiplier > 1.0 {
+		UI.push_scale_factor(UI.get_current_scale_factor() * multiplier);
 		return true;
 	}
 	return false;
@@ -762,9 +779,10 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 			}
 		}
 
-		append(ref results, Help_Ability_Entry.{"sprites/icons/power_outage.png", "Sabotage: Lights", "Cut the station power to plunge it into darkness."});
-		append(ref results, Help_Ability_Entry.{"sprites/icons/communication_outage_icon.png", "Sabotage: Comms", "Disable proximity chat so civilians cannot coordinate."});
-		append(ref results, Help_Ability_Entry.{"sprites/icons/doors_lock.png", "Sabotage: Lockdown", "Lock all doors on the station, trapping players."});
+		// Sabotage entries removed — covered by the dedicated Sabotages tab (page 2).
+		// append(ref results, Help_Ability_Entry.{"sprites/icons/power_outage.png", "Sabotage: Lights", "Cut the station power to plunge it into darkness."});
+		// append(ref results, Help_Ability_Entry.{"sprites/icons/communication_outage_icon.png", "Sabotage: Comms", "Disable proximity chat so civilians cannot coordinate."});
+		// append(ref results, Help_Ability_Entry.{"sprites/icons/doors_lock.png", "Sabotage: Lockdown", "Lock all doors on the station, trapping players."});
 		return;
 	}
 
@@ -776,7 +794,7 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 				append(ref results, Help_Ability_Entry.{"sprites/icons/trickster/jester.png", "Jester Win", "Unlocked after enough chaos. Get voted out to win."});
 			}
 			case .PYROMANIAC: {
-				append(ref results, Help_Ability_Entry.{"sprites/icons/pyro/set_fire.png", "Light Fire", "Set fire to the room you are standing in."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/pyro/set_fire.png", "Light Fire", "Set fire to objects in rooms in your task list to put the room on fire."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/pyro/light_corpse.png", "Light Corpse", "Ignite a nearby dead body to destroy evidence."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/pyro/worldfire.png", "World Fire", "Unlocked after burning enough. Engulf the station in flames to win."});
 			}
@@ -832,6 +850,75 @@ rr_get_role_difficulty :: proc(role: Player_Role, ptype: Player_Type) -> int {
 	return 1;
 }
 
+rr_draw_help_entry_list :: proc(area: Rect, scroll_id: string, entries: ref [..]Help_Ability_Entry) {
+	scroll_area := area;
+	scroll_bar_area := scroll_area->cut_right(6)->inset(2);
+
+	settings: Scroll_View_Settings;
+	settings.vertical = true;
+	settings.horizontal = false;
+	settings.clip_padding = v4.{6, 6, 6, 6};
+
+	sv := UI.push_scroll_view(scroll_area, scroll_id, settings); {
+		defer UI.pop_scroll_view();
+
+		sc := sv.content_rect;
+		ROW_H :: 80.0;
+		ICON_SIZE :: 28.0;
+		ROW_GAP :: 8.0;
+
+		for i: 0..entries.count-1 {
+			entry := entries[i];
+
+			UI.push_id("help_row_%", {i});
+			defer UI.pop_id();
+
+			row := sc->cut_top(ROW_H);
+			if i < entries.count - 1 {
+				sc->cut_top(ROW_GAP);
+			}
+
+			row_content := row->inset(6, 8, 6, 8);
+
+			if entry.icon_path.count > 0 {
+				icon_slot := row_content->cut_left(ICON_SIZE * 2.0 + 8.0);
+			icon_tex := get_asset(Texture_Asset, entry.icon_path);
+			if icon_tex != null {
+				icon_rect := icon_slot->center_rect()->grow(ICON_SIZE);
+				UI.quad(icon_rect->fit_aspect(icon_tex->get_aspect()), icon_tex, v4.{1, 1, 1, 1});
+			}
+
+			}
+			name_ts := UI.default_text_settings();
+			name_ts.size = 24;
+			name_ts.color = v4.{1, 1, 1, 1};
+			name_ts.halign = .LEFT;
+			name_ts.valign = .TOP;
+			name_ts.do_outline = true;
+			name_ts.outline_thickness = 2;
+			name_ts.outline_color = v4.{0, 0, 0, 1};
+
+			name_row := row_content->cut_top(26.0);
+			UI.text(name_row, name_ts, entry.entry_name);
+
+			desc_ts := UI.default_text_settings();
+			desc_ts.size = 18;
+			desc_ts.color = v4.{0.8, 0.8, 0.85, 0.85};
+			desc_ts.halign = .LEFT;
+			desc_ts.valign = .TOP;
+			desc_ts.word_wrap = true;
+			desc_ts.do_outline = true;
+			desc_ts.outline_thickness = 2;
+			desc_ts.outline_color = v4.{0, 0, 0, 1};
+			UI.text(row_content, desc_ts, entry.description);
+		}
+	}
+
+	scroll_bar_rect := sv->compute_scroll_bar_rect(scroll_bar_area);
+	UI.quad(scroll_bar_area, core_globals.white_sprite, v4.{0.1, 0.1, 0.1, 0.4});
+	UI.quad(scroll_bar_rect, core_globals.white_sprite, v4.{0.4, 0.4, 0.4, 0.6});
+}
+
 rr_draw_role_help_panel :: proc(player: Player) {
 	if player == null return;
 	if !player.task_help_open return;
@@ -839,25 +926,28 @@ rr_draw_role_help_panel :: proc(player: Player) {
 	UI.push_layer(500);
 	defer UI.pop_layer();
 
+	_pushed_scale := rr_push_mobile_ui_scale(player,1.5);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
 	full_screen := UI.get_screen_rect();
 	UI.quad(full_screen, core_globals.white_sprite, v4.{0, 0, 0, 0.72});
 
-	PANEL_W :: 780.0;
-	PANEL_H :: 480.0;
+	PANEL_W := full_screen->width() * 0.6;
+	PANEL_H := full_screen->height() * 0.75;
 	HELP_SLICE_PX :: 16.0;
 
 	help_bg := get_asset(Texture_Asset, "ui/task list/task_help_backing.png");
 	safe := UI.get_safe_screen_rect();
-	panel_rect := safe->center_rect()->grow(PANEL_H * 0.5, PANEL_W * 0.5, PANEL_H * 0.5, PANEL_W * 0.5);
+	panel_rect := safe->center_rect()->grow_unscaled(PANEL_H * 0.5, PANEL_W * 0.5, PANEL_H * 0.5, PANEL_W * 0.5);
 
-	rr_ui_draw_nine_slice_panel_color(panel_rect, help_bg, HELP_SLICE_PX, v4.{1, 1, 1, 0.88});
+	rr_ui_draw_nine_slice_panel_color(panel_rect, help_bg, HELP_SLICE_PX, v4.{1, 1, 1, 0.95});
 
 	UI.push_id("help_close_btn");
 	defer UI.pop_id();
 
-	CLOSE_HALF :: 18.0;
+	CLOSE_HALF :: 22.0;
 	CLOSE_PAD :: 10.0;
-	close_btn_rect := panel_rect->top_right_rect()->offset(-CLOSE_HALF - CLOSE_PAD, -CLOSE_HALF - CLOSE_PAD)->grow(CLOSE_HALF);
+	close_btn_rect := panel_rect->top_right_rect()->offset(-CLOSE_PAD, -CLOSE_PAD)->grow(CLOSE_HALF);
 
 	close_bs := UI.default_button_settings();
 	close_bs.sprite = get_asset(Texture_Asset, "sprites/icons/close_icon.png");
@@ -901,15 +991,15 @@ rr_draw_role_help_panel :: proc(player: Player) {
 	// --- Header: bigger icon centered, tabs flanking ---
 	ICON_HALF :: 56.0;
 	HEADER_H :: 70.0;
-	TAB_W :: 200.0;
+	TAB_W :: 150.0;
 
 	header_strip := content->cut_top(HEADER_H);
 	content->cut_top(12.0);
 
-	header_width := header_strip->width()*0.8;
+	header_width := header_strip->width() * 0.90;
 
-	left_tab_area  := header_strip->cut_left_unscaled(header_width/2.0)->cut_right(TAB_W);
-	right_tab_area := header_strip->cut_right_unscaled(header_width/2.0)->cut_left(TAB_W);
+	left_side  := header_strip->cut_left_unscaled(header_width * 0.5);
+	right_side := header_strip->cut_right_unscaled(header_width * 0.5);
 
 	if role_icon != null {
 		// offset = content inset-top (20) + HEADER_H/2 (31) = 51 → icon center at panel top edge = half out
@@ -929,10 +1019,17 @@ rr_draw_role_help_panel :: proc(player: Player) {
 			}
 		}
 		icon_rect := header_strip->center_rect()->offset(0, 51.0)->grow(ICON_HALF);
-		UI.quad(icon_rect->fit_aspect(role_icon->get_aspect()), role_icon, v4.{1, 1, 1, 1});
+		UI.quad(icon_rect->fit_aspect(role_icon->get_aspect(), .KEEP_HEIGHT), role_icon, v4.{1, 1, 1, 1});
 	}
 
-	if has_abilities {
+	// Pre-compute all 4 tab rects from left_side / right_side.
+	// Left side uses cut_left (outer→inner), right side uses cut_right (outer→inner).
+	role_area := left_side->cut_left(TAB_W)->inset(14, 2, 0, 4);
+	abil_area := left_side->cut_left(TAB_W)->inset(14, 4, 0, 2);
+	map_area  := right_side->cut_right(TAB_W)->inset(14, 4, 0, 2);
+	sab_area  := right_side->cut_right(TAB_W)->inset(14, 2, 0, 4);
+
+	if true {
 		tab_ts := UI.default_text_settings();
 		tab_ts.size = 22;
 		tab_ts.color = v4.{1, 1, 1, 1};
@@ -955,20 +1052,20 @@ rr_draw_role_help_panel :: proc(player: Player) {
 
 		UI.push_id("help_tab_role");
 		defer UI.pop_id();
-		role_tab_rect := left_tab_area->inset(14, 4, 0, 36);
+		role_tab_rect := role_area;
 		if player.task_help_page == 0 {
-			if UI.button(role_tab_rect, active_tab_bs, tab_ts, "Role Info").clicked {
+			if UI.button(role_tab_rect, active_tab_bs, tab_ts, "Role").clicked {
 				player.task_help_page = 0;
 			}
 		} else {
-			if UI.button(role_tab_rect, tab_bs, tab_ts, "Role Info").clicked {
+			if UI.button(role_tab_rect, tab_bs, tab_ts, "Role").clicked {
 				player.task_help_page = 0;
 			}
 		}
 
 		UI.push_id("help_tab_abilities");
 		defer UI.pop_id();
-		abilities_tab_rect := right_tab_area->inset(14, 36, 0, 4);
+		abilities_tab_rect := abil_area;
 		if player.task_help_page == 1 {
 			if UI.button(abilities_tab_rect, active_tab_bs, tab_ts, "Abilities").clicked {
 				player.task_help_page = 1;
@@ -980,6 +1077,55 @@ rr_draw_role_help_panel :: proc(player: Player) {
 		}
 	} else {
 		player.task_help_page = 0;
+	}
+
+	// --- Right tabs: Sabotages | Map (always visible) ---
+	rtab_sprite      := get_asset(Texture_Asset, tab_path);
+	rtab_sprite_grey := get_asset(Texture_Asset, "$AO/ui/kit/Modal Augments/modal_tabs/tabs_grey/tab_trapezoid.png");
+
+	rtab_ts := UI.default_text_settings();
+	rtab_ts.size = 20;
+	rtab_ts.color = v4.{1, 1, 1, 1};
+	rtab_ts.halign = .CENTER;
+	rtab_ts.valign = .CENTER;
+	rtab_ts.do_outline = true;
+	rtab_ts.outline_thickness = 2;
+	rtab_ts.outline_color = v4.{0, 0, 0, 1};
+
+	rtab_bs := UI.default_button_settings();
+	rtab_bs.press_scaling = 0.4;
+	rtab_bs.sprite = rtab_sprite_grey;
+
+	rtab_active_bs := UI.default_button_settings();
+	rtab_active_bs.sprite = rtab_sprite;
+	rtab_active_bs.press_scaling = 0.4;
+
+	page2_label := "Sabotages";
+	if player.player_type != Player_Type.TRAITOR {
+		page2_label = "Tasks";
+	}
+	UI.push_id("help_tab_sabotages");
+	defer UI.pop_id();
+	if player.task_help_page == 2 {
+		if UI.button(sab_area, rtab_active_bs, rtab_ts, page2_label).clicked {
+			player.task_help_page = 2;
+		}
+	} else {
+		if UI.button(sab_area, rtab_bs, rtab_ts, page2_label).clicked {
+			player.task_help_page = 2;
+		}
+	}
+
+	UI.push_id("help_tab_map");
+	defer UI.pop_id();
+	if player.task_help_page == 3 {
+		if UI.button(map_area, rtab_active_bs, rtab_ts, "Map").clicked {
+			player.task_help_page = 3;
+		}
+	} else {
+		if UI.button(map_area, rtab_bs, rtab_ts, "Map").clicked {
+			player.task_help_page = 3;
+		}
 	}
 
 	// ---- Page 0: Role Info ----
@@ -1000,73 +1146,53 @@ rr_draw_role_help_panel :: proc(player: Player) {
 
 	// ---- Page 1: Abilities ----
 	if player.task_help_page == 1 {
-		entries: [..]Help_Ability_Entry;
-		rr_get_role_ability_entries(player.player_role, player.player_type, ref entries);
-
-		scroll_area := content;
-		scroll_bar_area := scroll_area->cut_right(6)->inset(2);
-
-		settings: Scroll_View_Settings;
-		settings.vertical = true;
-		settings.horizontal = false;
-		settings.clip_padding = v4.{6, 6, 6, 6};
-
-		sv := UI.push_scroll_view(scroll_area, "help_abilities_scroll", settings); {
-			defer UI.pop_scroll_view();
-
-			sc := sv.content_rect;
-			ROW_H :: 72.0;
-			ICON_SIZE :: 28.0;
-			ROW_GAP :: 6.0;
-
-			for i: 0..entries.count-1 {
-				entry := entries[i];
-
-				UI.push_id("help_entry_%", {i});
-				defer UI.pop_id();
-
-				row := sc->cut_top(ROW_H);
-				if i < entries.count - 1 {
-					sc->cut_top(ROW_GAP);
-				}
-
-				row_content := row->inset(6, 8, 6, 8);
-
-				icon_slot := row_content->cut_left(ICON_SIZE * 2.0 + 8.0);
-				icon_tex := get_asset(Texture_Asset, entry.icon_path);
-				if icon_tex != null {
-					icon_rect := icon_slot->center_rect()->grow(ICON_SIZE);
-					UI.quad(icon_rect->fit_aspect(icon_tex->get_aspect()), icon_tex, v4.{1, 1, 1, 1});
-				}
-
-				name_ts := UI.default_text_settings();
-				name_ts.size = 24;
-				name_ts.color = v4.{1, 1, 1, 1};
-				name_ts.halign = .LEFT;
-				name_ts.valign = .TOP;
-				name_ts.do_outline = true;
-				name_ts.outline_thickness = 2;
-				name_ts.outline_color = v4.{0, 0, 0, 1};
-
-				name_row := row_content->cut_top(26.0);
-				UI.text(name_row, name_ts, entry.entry_name);
-
-				desc_ts := UI.default_text_settings();
-				desc_ts.size = 18;
-				desc_ts.color = v4.{0.8, 0.8, 0.85, 0.85};
-				desc_ts.halign = .LEFT;
-				desc_ts.valign = .TOP;
-				desc_ts.word_wrap = true;
-				desc_ts.do_outline = true;
-				desc_ts.outline_thickness = 2;
-				desc_ts.outline_color = v4.{0, 0, 0, 1};
-				UI.text(row_content, desc_ts, entry.description);
-			}
+		ab_entries: [..]Help_Ability_Entry;
+		rr_get_role_ability_entries(player.player_role, player.player_type, ref ab_entries);
+		if !has_abilities {
+			no_ab_ts := UI.default_text_settings();
+			no_ab_ts.size = 28;
+			no_ab_ts.color = v4.{0.7, 0.7, 0.75, 1};
+			no_ab_ts.halign = .CENTER;
+			no_ab_ts.valign = .CENTER;
+			no_ab_ts.do_outline = true;
+			no_ab_ts.outline_thickness = 2;
+			no_ab_ts.outline_color = v4.{0, 0, 0, 1};
+			UI.text(content, no_ab_ts, "No special abilities for this role.");
+		} else {
+			rr_draw_help_entry_list(content, "help_abilities_scroll", ref ab_entries);
 		}
+	}
 
-		scroll_bar_rect := sv->compute_scroll_bar_rect(scroll_bar_area);
-		UI.quad(scroll_bar_area, core_globals.white_sprite, v4.{0.1, 0.1, 0.1, 0.4});
-		UI.quad(scroll_bar_rect, core_globals.white_sprite, v4.{0.4, 0.4, 0.4, 0.6});
+	// ---- Page 2: Sabotages (traitors) / Tasks (civilians + anarchists) ----
+	if player.task_help_page == 2 {
+		if player.player_type == Player_Type.TRAITOR {
+			sab_entries: [..]Help_Ability_Entry;
+		append(ref sab_entries, Help_Ability_Entry.{"sprites/icons/power_outage.png", "Power Outage", "Plunges the map into darkness. Civilians can restart it from Generator room."});
+		append(ref sab_entries, Help_Ability_Entry.{"sprites/icons/communication_outage_icon.png", "Comms Outage", "Hides all task information and stop communication. Civilians can stop it from Comms room."});
+		append(ref sab_entries, Help_Ability_Entry.{"sprites/icons/doors_lock.png", "Door Lockdown", "All doors are sealed for 10 seconds. Civilians can force doors open. All doors open once cooldown over."});
+			rr_draw_help_entry_list(content, "help_sabotages_scroll", ref sab_entries);
+		} else {
+			task_entries: [..]Help_Ability_Entry;
+			append(ref task_entries, Help_Ability_Entry.{"", "Calibrate Teleporter", "Drag the reticle to align it with the blinking target zone."});
+			append(ref task_entries, Help_Ability_Entry.{"", "Solve the Cypher", "Press the 4 icons in the exact order shown on the display panel."});
+			append(ref task_entries, Help_Ability_Entry.{"", "Restart System", "Rearrange the scrambled letters to spell the hidden word."});
+			append(ref task_entries, Help_Ability_Entry.{"", "Reroute Power", "Rotate the pipe tiles to form a connected path from left to right."});
+			append(ref task_entries, Help_Ability_Entry.{"", "Guide the Electron", "Move the electron left or right to steer it through the gaps."});
+			append(ref task_entries, Help_Ability_Entry.{"", "Sync Signals", "Aim the beam at each satellite dish until all signals are synced."});
+			append(ref task_entries, Help_Ability_Entry.{"", "Catching Butterflies", "Tap all the butterflies before they flutter away."});
+			append(ref task_entries, Help_Ability_Entry.{"", "Change Jail Codes", "Find and enter the 4-digit code shown on the sticky note nearby."});
+			append(ref task_entries, Help_Ability_Entry.{"", "Repair Laptop", "Drag each piece back into its correct slot on the laptop."});
+			rr_draw_help_entry_list(content, "help_tasks_scroll", ref task_entries);
+		}
+	}
+
+	// ---- Page 3: Map ----
+	if player.task_help_page == 3 {
+		map_entries: [..]Help_Ability_Entry;
+		append(ref map_entries, Help_Ability_Entry.{"sprites/icons/call_meeting_icon.png", "Emergency Meeting", "Press button in the Conference hallto call an emergency meeting."});
+		append(ref map_entries, Help_Ability_Entry.{"sprites/icons/power_outage.png", "Generator", "The generator can be restarted from the Reactor room during power outages!"});
+		append(ref map_entries, Help_Ability_Entry.{"sprites/icons/communication_outage_icon.png", "Comms Console", "Restores communications from the Comms room. Flip the lever to reveal task information again."});
+		rr_draw_help_entry_list(content, "help_map_scroll", ref map_entries);
 	}
 }
 
