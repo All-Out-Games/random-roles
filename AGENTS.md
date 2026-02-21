@@ -146,8 +146,11 @@ foreach player: component_iterator(My_Player) {
 #### Finding components close to the player
 > csl does not have collision callbacks. To know when a player collides with something get components near them and check distance
 ```csl
+// Populates a dynamic array with all matching components in range
 Scene.get_all_components_in_range :: proc(position: v2, range: float, results: ref [..]$T)
-Scene.get_closest_component_in_range :: proc(position: v2, range: float, $T: typeid) -> T
+
+// Returns (component, bool). The bool indicates if anything was found.
+Scene.get_closest_component_in_range :: proc(position: v2, range: float, $T: typeid) -> T, bool
 ```
 
 Example usage:
@@ -157,13 +160,13 @@ nearby_enemies: [..]Enemy;
 Scene.get_all_components_in_range(player_pos, 5.0, ref nearby_enemies);
 
 for enemy: nearby_enemies {
-    
+
 }
 
 // Get the single closest pickup within 2 units
-closest_pickup := Scene.get_closest_component_in_range(player_pos, 2.0, Pickup);
-if closest_pickup != null {
-
+closest_pickup, found := Scene.get_closest_component_in_range(player_pos, 2.0, Pickup);
+if found {
+    // use closest_pickup
 }
 ```
 
