@@ -364,6 +364,7 @@ Player_Role :: enum {
 	PIRATE;
 	HITMAN;
 	WEREWOLF;
+	GOO_GOO_GAGA;
 }
 
 rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
@@ -378,8 +379,9 @@ rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
 		case .PYROMANIAC:   return Player_Type.ANARCHIST;
 		case .PIRATE:       return Player_Type.TRAITOR;
 		case .HITMAN:       return Player_Type.TRAITOR;
-		case .WEREWOLF:     return Player_Type.TRAITOR;
-		case .NONE:         return Player_Type.CIVILIAN;
+		case .WEREWOLF:      return Player_Type.TRAITOR;
+		case .GOO_GOO_GAGA:  return Player_Type.TRAITOR;
+		case .NONE:          return Player_Type.CIVILIAN;
 	}
 	return Player_Type.CIVILIAN;
 }
@@ -396,8 +398,9 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .PYROMANIAC:   return "pyromaniac";
 		case .PIRATE:       return "pirate";
 		case .HITMAN:       return "hitman";
-		case .WEREWOLF:     return "werewolf";
-		case .NONE:         return "none";
+		case .WEREWOLF:      return "werewolf";
+		case .GOO_GOO_GAGA:  return "goo_goo_gaga";
+		case .NONE:          return "none";
 	}
 	return "none";
 }
@@ -438,6 +441,9 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	}
 	if role_name == "werewolf" || role_name == "Werewolf" {
 		return Player_Role.WEREWOLF, true;
+	}
+	if role_name == "goo_goo_gaga" || role_name == "goo goo gaga" || role_name == "Goo_Goo_Gaga" || role_name == "Goo Goo Gaga" || role_name == "googoo" || role_name == "GGG" {
+		return Player_Role.GOO_GOO_GAGA, true;
 	}
 	return Player_Role.NONE, false;
 }
@@ -1423,6 +1429,8 @@ setup_lobby :: proc() {
 	close_all_doors();
 	rr_destroy_all_portals();
 	rr_hitman_clear_mines();
+	rr_ggg_clear_traps();
+	rr_ggg_clear_decoys();
 	rr_pyro_extinguish_all_fires();
 	// Reset sabotages
 	rr_power_outage_active = false;
@@ -2074,7 +2082,7 @@ start :: proc(player: Player) {
 r :: proc(player: Player, role_name: string) {
 	role, ok := rr_parse_role_name(role_name);
 	if !ok {
-		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, warper, prankster, pyromaniac, pirate, hitman, werewolf, none.", player);
+		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, warper, prankster, pyromaniac, pirate, hitman, werewolf, googoo, none.", player);
 		return;
 	}
 
@@ -2200,6 +2208,8 @@ ao_update_ingame :: proc(dt: float) {
 	update_temporary_resurrections();
 	update_autograph_traps();
 	update_hitman_mines();
+	update_ggg_traps();
+	update_ggg_decoys();
 	rr_update_comms_lever_visuals();
 	// Keep prankster fake-meeting targets valid (reassign if dead/left).
 	for i: 0..players.elements.count-1 {
@@ -2964,6 +2974,7 @@ assign_players_to_types :: proc() {
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 	append(ref traitor_roles_master, Player_Role.HITMAN);
 	append(ref traitor_roles_master, Player_Role.WEREWOLF);
+	append(ref traitor_roles_master, Player_Role.GOO_GOO_GAGA);
 
 	civ_players: List(Player);
 	an_players: List(Player);
@@ -3039,6 +3050,21 @@ assign_players_to_types :: proc() {
 		p->capture_werewolf_round_start_look();
 		p.werewolf_kills = 0;
 
+		// Goo Goo Gaga
+		p.ggg_wraps = 0;
+		p.ggg_is_creature_form = false;
+		p.ggg_creature_form_ends_at = 0.0;
+		p.ggg_speed_boost_active = false;
+		p.ggg_is_crawling = false;
+		p.ggg_crawl_ends_at = 0.0;
+		p.ggg_crawl_speed_active = false;
+		p.ggg_wrap_channel_active = false;
+		p.ggg_wrap_channel_corpse_id = 0;
+		p.ggg_wrap_channel_end_at = 0.0;
+		p.ggg_skeleton_swap_at = 0.0;
+		p.ggg_creature_visible = false;
+		rr_ggg_destroy_creature_entity(p);
+
 		// Pyromaniac
 		p.pyro_on_fire = false;
 		p.pyro_props_ignited = 0;
@@ -3064,6 +3090,16 @@ assign_players_to_types :: proc() {
 			p.prankster_fake_meetings_called = 0;
 			p.prankster_jester_unlocked_time = 0.0;
 			p.prankster_fake_meeting_target_id = 0;
+		}
+
+		if p.player_role == Player_Role.GOO_GOO_GAGA {
+			p.active_tasks = List(Task_Base).{};
+
+			wrap := new(Task_GGG_Wrap);
+			wrap.id = "ggg_wrap_3";
+			wrap.started = true;
+			wrap.goal = 3;
+			append(ref p.active_tasks, wrap);
 		}
 
 		if p.player_role == Player_Role.PYROMANIAC {

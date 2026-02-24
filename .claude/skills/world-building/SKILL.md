@@ -95,9 +95,9 @@ instantiate_asset (asset_id: "nature/tree.png", relative_to: "Tree_2", direction
 
 When `relative_to` is used, the `position` parameter should be ommitted. 
 
-Use `instantiate_asset` for straightforward placement. Use `propose_scene_changes` when you need to do complex operations in one batch (parenting, adding extra components, setting Sprite_Renderer properties like layer/tint).
+Use `instantiate_asset` for straightforward placement. Use `modify_scene` when you need to do complex operations in one batch (parenting, adding extra components, setting Sprite_Renderer properties like layer/tint).
 
-#### Batch operations with `propose_scene_changes`
+#### Batch operations with `modify_scene`
 
 For setting layers, tint, depth, or doing multiple complex ops at once:
 ```json

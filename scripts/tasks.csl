@@ -286,6 +286,7 @@ update_tasks :: proc(player: Player) {
 			case Task_Repair_Laptop: task.(Task_Repair_Laptop)->update_task(player);
 			case Task_Prank_3_People: task.(Task_Prank_3_People)->update_task(player);
 			case Task_Call_Fake_Meeting: task.(Task_Call_Fake_Meeting)->update_task(player);
+			case Task_GGG_Wrap: task.(Task_GGG_Wrap)->update_task(player);
 			case Task_Call_Jail_Codes: task.(Task_Call_Jail_Codes)->update_task(player);
 			case Task_Restart_Generator: task.(Task_Restart_Generator)->update_task(player);
 			case Task_Enable_Communications: task.(Task_Enable_Communications)->update_task(player);
@@ -344,6 +345,8 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Vote out target";
 	case "pyro_burn_1_corpse":
 		return "Burn 1 corpse";
+		case "ggg_wrap_3":
+			return "Wrap 3 bodies";
 		case "jail_codes":
 			return "Change jail codes";
 		case RR_RESTART_GENERATOR_TASK_ID:
@@ -611,6 +614,7 @@ rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player
 				case .PIRATE:       { role_name = "PIRATE";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/pirate_icon.png"); }
 				case .HITMAN:       { role_name = "HITMAN";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/hitman_icon.png"); }
 				case .WEREWOLF:     { role_name = "WEREWOLF";     role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/werewolf_icon.png"); }
+				case .GOO_GOO_GAGA: { role_name = "GOO GOO GAGA"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/werewolf_icon.png"); }
 			}
 		}
 
@@ -727,6 +731,7 @@ rr_get_role_description :: proc(role: Player_Role, ptype: Player_Type) -> string
 			case .PIRATE:   return "A swashbuckling traitor. Get treasure maps from dead bodies. Dig for buried treasure to unlock new abilities.";
 			case .HITMAN:   return "A cold and calculating assassin. Silently snap necks up close. Rack up kills to unlock proximity mines and a long-range sniper rifle.";
 			case .WEREWOLF: return "A shape-shifting beast hiding among civilians. Switch between schleem and wolf form. Devour victims as a wolf or drag bodies as a schleem. Earn kills to unlock Infect and Claw.";
+			case .GOO_GOO_GAGA: return "A horrifying creature hiding in plain sight. Transform into a monster and wrap dead bodies in tinfoil to unlock powerful abilities. Crawl through vents, lay chocolate traps, and summon decoy swarms.";
 		}
 		return "You are a traitor. Sabotage the station, eliminate the civilians, and avoid suspicion. Work with fellow traitors to win.";
 	}
@@ -776,6 +781,13 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 				append(ref results, Help_Ability_Entry.{"sprites/icons/werewolf/devour.png", "Devour", "Wolf form. Consume a nearby body, destroying it completely."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/werewolf/infecting_bite.png", "Infect", "Unlocked after kills. Bite a player to turn them into a mini-werewolf."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/werewolf/claw_slash.png", "Claw", "Unlocked after kills. Wolf form only. Slash at range."});
+			}
+			case .GOO_GOO_GAGA: {
+				append(ref results, Help_Ability_Entry.{"sprites/icons/transform_evil.png", "Transform", "Switch between schleem and creature form. Faster cooldown during power outage."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/kill_ability.png", "Wrap", "Creature form. Wrap a nearby dead body in tinfoil. Wraps unlock new abilities."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/kill_ability.png", "Crawl", "Unlocked at 1 wrap. Creature form. Shrink down and move faster."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/kill_ability.png", "Trap", "Unlocked at 2 wraps. Creature form. Place a chocolate trap that roots civilians."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/kill_ability.png", "Swarm", "Unlocked at 3 wraps. Creature form. Summon decoy creatures to cause chaos."});
 			}
 		}
 
@@ -829,6 +841,7 @@ rr_get_role_difficulty :: proc(role: Player_Role, ptype: Player_Type) -> int {
 			case .PIRATE:   return 2;
 			case .HITMAN:   return 3;
 			case .WEREWOLF: return 2;
+			case .GOO_GOO_GAGA: return 3;
 		}
 		return 2;
 	}
@@ -1485,7 +1498,7 @@ update_tasks_ui :: proc(player: Player) {
 	}
 
 	// Civilians see their normal tasks; Prankster/Pyromaniac see their objective; infected mini-werewolves see the infection objective.
-	if player.player_type != Player_Type.CIVILIAN && player.player_role != Player_Role.PRANKSTER && player.player_role != Player_Role.PYROMANIAC && !player.werewolf_infected {
+	if player.player_type != Player_Type.CIVILIAN && player.player_role != Player_Role.PRANKSTER && player.player_role != Player_Role.PYROMANIAC && player.player_role != Player_Role.GOO_GOO_GAGA && !player.werewolf_infected {
 		return;
 	}
 
@@ -1575,6 +1588,10 @@ update_tasks_ui :: proc(player: Player) {
 			case RR_Pyro_Room_Task: {
 				rt := task.(RR_Pyro_Room_Task);
 				task_name = format_string("Burn out % room", .{rt.room_name});
+			}
+			case Task_GGG_Wrap: {
+				gt := task.(Task_GGG_Wrap);
+				task_progress = format_string("%/%", .{player.ggg_wraps, gt.goal});
 			}
 		}
 		if task.id == WEREWOLF_INFECT_TO_CURE_TASK_ID {
@@ -1685,6 +1702,18 @@ Task_Call_Fake_Meeting :: class : Task_Base {
 	update_task :: proc(using this: Task_Call_Fake_Meeting, player: Player) {
 		if completed return;
 		if player.prankster_fake_meetings_called >= 1 {
+			complete_attempt(this, player, true);
+		}
+	}
+}
+
+// --- Goo Goo Gaga objectives ---
+Task_GGG_Wrap :: class : Task_Base {
+	goal: int;
+
+	update_task :: proc(using this: Task_GGG_Wrap, player: Player) {
+		if completed return;
+		if player.ggg_wraps >= goal {
 			complete_attempt(this, player, true);
 		}
 	}

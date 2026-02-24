@@ -141,7 +141,12 @@ Kill_Ability :: class : Ability_Base {
 					rr_play_sfx("sfx/traitor_kill_death.wav", sfx);
 				}
 
-                current_cooldown = KILL_COOLDOWN_SECONDS;
+                // GGG has a shorter kill cooldown.
+                if player.player_role == Player_Role.GOO_GOO_GAGA {
+                    current_cooldown = GGG_KILL_COOLDOWN_SECONDS;
+                } else {
+                    current_cooldown = KILL_COOLDOWN_SECONDS;
+                }
             }
         }
     }
@@ -1589,6 +1594,14 @@ DNA_Sample_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			corpse := get_closest_sampleable_corpse(this, player);
 			if corpse == null return;
+
+			// GGG wrapped corpses must be unwrapped first before DNA can be sampled.
+			if corpse.ggg_is_wrapped {
+				corpse.ggg_is_wrapped = false;
+				Notifier.notify(player, "Unwrapped tinfoil from corpse.");
+				current_cooldown = 5.0;
+				return;
+			}
 
 			corpse.has_dna_been_sampled = true;
 			player.coroner_dna_vials->append(corpse.killer_player_entity_id);

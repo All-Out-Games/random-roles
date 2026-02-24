@@ -178,6 +178,29 @@ Player :: class : Player_Base {
 	// 0 = no pending trigger.
 	werewolf_infected_transform_trigger_at: float;
 
+	// --- Goo Goo Gaga (Traitor role) ---
+	ggg_wraps: int;
+	ggg_is_creature_form: bool;
+	ggg_creature_form_ends_at: float;
+	ggg_speed_boost_active: bool;
+	ggg_speed_original: float;
+	ggg_is_crawling: bool;
+	ggg_crawl_ends_at: float;
+	ggg_crawl_speed_active: bool;
+	ggg_crawl_speed_original: float;
+	ggg_crawl_original_scale: v2;
+	ggg_wrap_channel_active: bool;
+	ggg_wrap_channel_corpse_id: u64;
+	ggg_wrap_channel_end_at: float;
+	ggg_wrap_channel_last_pos: v2;
+	// Separate creature entity + animator (created on role assign, destroyed on role end).
+	ggg_creature_entity: Entity;
+	ggg_creature_animator: Spine_Animator;
+	// Delayed visual swap timing (game-time to show creature entity after transform anim).
+	ggg_skeleton_swap_at: float;
+	// True when the creature entity is the active visual.
+	ggg_creature_visible: bool;
+
 	// --- Meeting cooldown pause ---
 	// Saved ability cooldowns when a meeting starts so they can be restored afterwards.
 	meeting_saved_cooldowns: [..]float;
@@ -409,10 +432,14 @@ Player :: class : Player_Base {
 		// Server-authoritative werewolf transform timing.
 		if Game.is_server() {
 			rr_werewolf_update_transform(this, delta_time);
+			rr_ggg_update_transform(this, delta_time);
 		}
 
 		// Cosmetic: apply scheduled skin toggles on all clients.
 		rr_werewolf_update_skins(this);
+
+		// GGG creature animation controller (runs on all clients).
+		rr_ggg_update_creature_anims(this, delta_time);
 
 		// Drag body animation state (runs on all clients).
 		rr_drag_body_update_anim_state(this, delta_time);
@@ -672,13 +699,37 @@ Player :: class : Player_Base {
 								draw_ability_button(this, Werewolf_Transform_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
+						} else if player_role == Player_Role.GOO_GOO_GAGA {
+							if this.ggg_is_creature_form {
+								// Creature form: Kill + Transform + Wrap + Crawl/Trap/Swarm (progressive unlock).
+								draw_ability_button(this, Kill_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, GGG_Transform_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, GGG_Wrap_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, GGG_Crawl_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, GGG_Chocolate_Trap_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, GGG_Swarm_Ability, abilityIndex);
+								abilityIndex += 1;
+							} else {
+								// Human form: Kill + Drag + Transform.
+								draw_ability_button(this, Kill_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, Drag_Body_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, GGG_Transform_Ability, abilityIndex);
+								abilityIndex += 1;
+							}
 						} else {
                         	draw_ability_button(this, Kill_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
 
-						// All traitors (except werewolf, handled above) can drag bodies.
-						if player_role != Player_Role.WEREWOLF {
+						// All traitors (except werewolf and GGG, handled above) can drag bodies.
+						if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA {
 							draw_ability_button(this, Drag_Body_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
@@ -945,6 +996,7 @@ Player :: class : Player_Base {
 		}
 		rr_hitman_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_werewolf_on_player_killed(killer_player_entity_id, this.entity.id);
+		rr_ggg_on_player_killed(killer_player_entity_id, this.entity.id);
         log(format_string("Player % killed (killer=%)", .{this.entity.id, killer_player_entity_id}));
 	}
 
@@ -962,7 +1014,8 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .PYROMANIAC: return "PYROMANIAC";
 		case .PIRATE:     return "PIRATE";
 		case .HITMAN:     return "HITMAN";
-		case .WEREWOLF:   return "WEREWOLF";
+		case .WEREWOLF:      return "WEREWOLF";
+		case .GOO_GOO_GAGA:  return "GOO GOO GAGA";
 	}
 	return "CREW";
 }
@@ -979,7 +1032,8 @@ player_role_to_icon_texture :: proc(role: Player_Role) -> Texture_Asset {
 		case .PYROMANIAC:   return get_asset(Texture_Asset, "sprites/icons/roles/pyromaniac_icon.png");
 		case .PIRATE:       return get_asset(Texture_Asset, "sprites/icons/roles/pirate_icon.png");
 		case .HITMAN:       return get_asset(Texture_Asset, "sprites/icons/roles/hitman_icon.png");
-		case .WEREWOLF:     return get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png");
+		case .WEREWOLF:      return get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png");
+		case .GOO_GOO_GAGA:  return get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png"); // TODO: replace with GGG icon
 	}
 	return null;
 }
@@ -1832,6 +1886,33 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer->create_global_transition(pirate_dig_for_treasure_state, false)->create_trigger_condition(pirate_dig_for_treasure_var);
 		layer->create_transition(pirate_dig_for_treasure_state, idle_state, true);
 
+		// --- Goo Goo Gaga (player rig only; creature rig uses direct set_animation) ---
+		// Transform into creature (one-shot, 2s) -> back to Idle (skeleton swap happens during anim).
+		ggg_transform_var := sm->create_variable("ggg_transform", State_Machine_Variable.Kind.TRIGGER);
+		ggg_transform_state := layer->create_state("004RAND_GOOGOOGAGA/Transform_Monster_Start", false, 2.0);
+		layer->create_global_transition(ggg_transform_state, false)->create_trigger_condition(ggg_transform_var);
+		layer->create_transition(ggg_transform_state, idle_state, true);
+
+		// Revert from creature (one-shot, 1s) -> back to Idle.
+		ggg_revert_var := sm->create_variable("ggg_revert", State_Machine_Variable.Kind.TRIGGER);
+		ggg_revert_state := layer->create_state("004RAND_GOOGOOGAGA/Transform_Player_End", false, 1.0);
+		layer->create_global_transition(ggg_revert_state, false)->create_trigger_condition(ggg_revert_var);
+		layer->create_transition(ggg_revert_state, idle_state, true);
+
+		// Tinfoil trap: start (one-shot, 0.5s) -> loop (exits via ggg_trapped_end trigger).
+		ggg_trapped_start_var := sm->create_variable("ggg_trapped_start", State_Machine_Variable.Kind.TRIGGER);
+		ggg_trapped_start_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Start", false, 0.5);
+		layer->create_global_transition(ggg_trapped_start_state, false)->create_trigger_condition(ggg_trapped_start_var);
+
+		ggg_trapped_loop_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Loop", true, 0.0);
+		layer->create_transition(ggg_trapped_start_state, ggg_trapped_loop_state, true);
+
+		// Tinfoil trap end (one-shot, 0.5s) -> back to Idle.
+		ggg_trapped_end_var := sm->create_variable("ggg_trapped_end", State_Machine_Variable.Kind.TRIGGER);
+		ggg_trapped_end_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_End", false, 0.5);
+		layer->create_global_transition(ggg_trapped_end_state, false)->create_trigger_condition(ggg_trapped_end_var);
+		layer->create_transition(ggg_trapped_end_state, idle_state, true);
+
 		// --- Drag Body (traitor utility) ---
 		// Inject drag locomotion states; driven by bools set in `Drag_Body_Ability`.
 		drag_enabled_var := sm->create_variable("drag_body_enabled", State_Machine_Variable.Kind.BOOL);
@@ -2264,6 +2345,8 @@ Corpse :: class : Component {
 	pyro_has_been_burned: bool;
 	// Pirate can only loot one treasure map per corpse.
 	pirate_map_taken: bool;
+	// GGG: true once the corpse has been wrapped in foil.
+	ggg_is_wrapped: bool;
 
 	// --- Drag Body ---
 	// 0 = not being dragged; otherwise entity id of the dragging player.
