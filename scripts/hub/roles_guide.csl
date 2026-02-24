@@ -1,0 +1,562 @@
+RG_NUM_ROLES :: 13;
+
+Rg_Ability_Entry :: struct {
+    icon_path: string;
+    name:      string;
+    desc:      string;
+}
+
+rg_get_role_name :: proc(idx: int) -> string {
+    switch idx {
+        case 0:  return "CREW";
+        case 1:  return "SHERIFF";
+        case 2:  return "DOCTOR";
+        case 3:  return "PRESIDENT";
+        case 4:  return "MOVIE STAR";
+        case 5:  return "CORONER";
+        case 6:  return "WARPER";
+        case 7:  return "PRANKSTER";
+        case 8:  return "PYROMANIAC";
+        case 9:  return "TRAITOR";
+        case 10: return "PIRATE";
+        case 11: return "HITMAN";
+        case 12: return "WEREWOLF";
+    }
+    return "UNKNOWN";
+}
+
+rg_get_role_team :: proc(idx: int) -> string {
+    if idx >= 7 && idx <= 8 return "ANARCHIST";
+    if idx >= 9               return "TRAITOR";
+    return "CIVILIAN";
+}
+
+rg_get_role_color :: proc(idx: int) -> v4 {
+    if idx >= 7 && idx <= 8 return v4.{0.9,  0.55, 0.1,  1.0};
+    if idx >= 9               return v4.{0.95, 0.2,  0.2,  1.0};
+    return                         v4.{0.1,  0.9,  0.3,  1.0};
+}
+
+rg_get_team_badge_bg :: proc(idx: int) -> v4 {
+    if idx >= 7 && idx <= 8 return v4.{0.20, 0.12, 0.02, 0.75};
+    if idx >= 9               return v4.{0.20, 0.04, 0.04, 0.75};
+    return                         v4.{0.03, 0.20, 0.06, 0.75};
+}
+
+rg_get_role_icon :: proc(idx: int) -> string {
+    switch idx {
+        case 1:  return "sprites/icons/revolver.png";
+        case 2:  return "sprites/icons/doctor/revive.png";
+        case 4:  return "sprites/icons/movie_star/write_signature.png";
+        case 7:  return "sprites/icons/trickster/prank.png";
+        case 9:  return "sprites/icons/kill_ability.png";
+        case 10: return "sprites/icons/pirate/black_flag.png";
+        case 11: return "sprites/icons/kill_ability.png";
+        case 12: return "sprites/icons/kill_ability.png";
+    }
+    return "";
+}
+
+rg_get_role_description :: proc(idx: int) -> string {
+    switch idx {
+        case 0:  return "Complete your tasks and help civilians identify and vote out the traitors before they eliminate everyone.";
+        case 1:  return "The station's law enforcer. You carry a gun and can shoot suspected traitors. Be careful - shooting an innocent has consequences.";
+        case 2:  return "The civilians' medic. Resurrect fallen civilians and bring them back into the game. Use your power wisely to turn the tide.";
+        case 3:  return "A high-value civilian. Your votes count double - use it to outplay traitors in close meetings.";
+        case 4:  return "A beloved celebrity. Hand out autographs to players - anyone who walks over them gets stunned!";
+        case 5:  return "The forensic investigator. Collect DNA samples from dead bodies and match them against living players to find killers.";
+        case 6:  return "A spatial engineer who bends space. Place two portals anywhere on the map - players who enter one exit through the other.";
+        case 7:  return "A chaotic wild card. Prank players, call fake meetings, and get someone voted out. Cause enough chaos to unlock the Jester Win!";
+        case 8:  return "A fire-obsessed anarchist. Set rooms ablaze and ignite corpses to destroy evidence. Burn enough to unlock World Fire and win!";
+        case 9:  return "Sabotage the station, eliminate civilians, and avoid suspicion. Work together with fellow traitors to win.";
+        case 10: return "A swashbuckling traitor. Loot treasure maps from bodies and dig for buried treasure to unlock powerful new abilities.";
+        case 11: return "A cold and calculating assassin. Silently snap necks up close. Rack up kills to unlock proximity mines and a sniper rifle.";
+        case 12: return "A shape-shifting beast hiding among civilians. Switch between schleem and wolf form. Earn kills to unlock Infect and Claw.";
+    }
+    return "";
+}
+
+rg_get_role_difficulty :: proc(idx: int) -> string {
+    switch idx {
+        case 0:  return "EASY";
+        case 1:  return "MEDIUM";
+        case 2:  return "MEDIUM";
+        case 3:  return "EASY";
+        case 4:  return "EASY";
+        case 5:  return "HARD";
+        case 6:  return "MEDIUM";
+        case 7:  return "HARD";
+        case 8:  return "HARD";
+        case 9:  return "MEDIUM";
+        case 10: return "MEDIUM";
+        case 11: return "HARD";
+        case 12: return "MEDIUM";
+    }
+    return "EASY";
+}
+
+rg_get_role_difficulty_color :: proc(idx: int) -> v4 {
+    d := rg_get_role_difficulty(idx);
+    if d == "HARD"   return v4.{1.0, 0.35, 0.25, 1.0};
+    if d == "MEDIUM" return v4.{1.0, 0.78, 0.2,  1.0};
+    return v4.{0.4, 0.9, 0.4, 1.0};
+}
+
+rg_get_role_abilities :: proc(idx: int, results: ref [..]Rg_Ability_Entry) {
+    switch idx {
+        case 1: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/revolver.png",               "Shoot",        "Fire your gun at a target. Friendly fire has consequences."});
+        }
+        case 2: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/doctor/revive.png",          "Resurrect",    "Revive a fallen civilian and bring them back to life."});
+        }
+        case 4: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/movie_star/write_signature.png", "Autograph", "Sign an autograph on the ground. Players who walk over it get stunned."});
+        }
+        case 5: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/coroner/ability_take_dna.png",    "DNA Sample",   "Collect a DNA sample from a dead body."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/coroner/ability_compare_dna.png", "DNA Match",    "Compare collected DNA against a living player to identify killers."});
+        }
+        case 6: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/portal_maker/red_portal.png",  "Red Portal",   "Shoot a bolt to place the red end of your portal."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/portal_maker/blue_portal.png", "Blue Portal",  "Shoot a bolt to place the blue end of your portal."});
+        }
+        case 7: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/trickster/prank.png",        "Prank",        "Prank other players to make them fall!"});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/trickster/call_fake.png",    "Fake Meeting", "Call a fake emergency meeting and get someone voted out!"});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/trickster/jester.png",       "Jester Win",   "Unlocked after enough chaos. Prank everyone and win!"});
+        }
+        case 8: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/pyro/set_fire.png",      "Light Fire",   "Set fire to objects in rooms on your task list to start a room blaze."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/pyro/light_corpse.png",  "Light Corpse", "Ignite a nearby dead body to destroy evidence."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/pyro/worldfire.png",     "World Fire",   "Unlocked after burning enough. Engulf the entire station in flames!"});
+        }
+        case 9: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/kill_ability.png",           "Kill",         "Eliminate a nearby civilian up close."});
+        }
+        case 10: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/kill_ability.png",                "Kill",            "Eliminate a nearby civilian."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/pirate/dig_for_treasure.png",     "Dig Treasure",    "Loot treasure maps from bodies and dig for buried treasure."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/pirate/black_flag.png",           "Black Flag",      "Plant a flag that blinds nearby enemies with thick fog."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/pirate/flintlock_pistol.png",     "Shoot",           "Unlocked with treasure. Fire your pistol at range."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/pirate/powder_keg.png",           "Powder Keg",      "Unlocked with treasure. Place an explosive barrel that detonates after a delay."});
+        }
+        case 11: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/hitman/knee_snap.png",            "Neck Snap",       "Silently eliminate a nearby target. Replaces the default kill."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/hitman/land_mine.png",            "Proximity Mine",  "Unlocked with kills. Place a hidden mine that detonates when enemies walk over it."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/hitman/sniper_rifle.png",         "Sniper Rifle",    "Unlocked with kills. Eliminate targets from long range."});
+        }
+        case 12: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/werewolf/devour.png",             "Kill",            "Eliminate a nearby civilian."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/werewolf/infecting_bite.png",     "Infect",          "Unlocked with kills. Bite a civilian to turn them into a werewolf."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/werewolf/claw_slash.png",         "Claw",            "Unlocked with kills. Slash at nearby enemies with deadly claws."});
+        }
+    }
+}
+
+rg_get_role_detail_icon :: proc(idx: int) -> string {
+    switch idx {
+        case 1:  return "ui/roles/sheriff_icon.png";
+        case 2:  return "ui/roles/doctor_icon.png";
+        case 3:  return "ui/roles/president_icon.png";
+        case 4:  return "ui/roles/moviestar_icon.png";
+        case 5:  return "ui/roles/coroner_icon.png";
+        case 6:  return "ui/roles/portalmaker_icon.png";
+        case 7:  return "ui/roles/trickster_icon.png";
+        case 8:  return "ui/roles/pyromaniac_icon.png";
+        case 10: return "ui/roles/pirate_icon.png";
+        case 11: return "ui/roles/hitman_icon.png";
+        case 12: return "ui/roles/werewolf_icon.png";
+    }
+    return "";
+}
+
+rg_get_role_difficulty_stars :: proc(idx: int) -> int {
+    d := rg_get_role_difficulty(idx);
+    if d == "HARD"   return 3;
+    if d == "MEDIUM" return 2;
+    return 1;
+}
+
+// ---- Main panel ----
+
+draw_roles_guide :: proc(player: Player) {
+    if !player.roles_guide_open return;
+
+    UI.push_layer(500);
+    defer UI.pop_layer();
+
+    // Dim the background
+    full_screen := UI.get_screen_rect();
+    UI.quad(full_screen, core_globals.white_sprite, v4.{0, 0, 0, 0.76});
+
+    safe := UI.get_safe_screen_rect();
+
+    PANEL_W := safe->width() * 0.70;
+    PANEL_H := safe->height() * 0.75;
+    panel_rect := safe->center_rect()->grow_unscaled(PANEL_H * 0.5, PANEL_W * 0.5, PANEL_H * 0.5, PANEL_W * 0.5);
+
+    // 9-slice panel background (matches task help backing)
+    HELP_SLICE_PX :: 16.0;
+    bg_tex := get_asset(Texture_Asset, "ui/task_help_backing.png");
+    if bg_tex != null {
+        bs := UI.default_button_settings();
+        bs.sprite = bg_tex;
+        bs.press_scaling = 1.0;
+        bs.color = v4.{1, 1, 1, 0.95};
+        bs.hovered_color  = bs.color;
+        bs.pressed_color  = bs.color;
+        bs.disabled_color = bs.color;
+        bs.background_color_multiplier = v4.{1, 1, 1, 1};
+        bs.nine_slice_data.slice       = v4.{HELP_SLICE_PX, HELP_SLICE_PX, HELP_SLICE_PX, HELP_SLICE_PX};
+        bs.nine_slice_data.slice_scale = 1.0;
+        UI.push_disabled(true);
+        defer UI.pop_disabled();
+        UI.begin_button(panel_rect, bs, {}, ""); { defer UI.end_button(); }
+    } else {
+        UI.quad(panel_rect, core_globals.white_sprite, v4.{0.07, 0.07, 0.11, 0.97});
+    }
+
+    content := panel_rect->inset(20, 24, 20, 24);
+
+    // ---- Title bar ----
+    title_strip := content->cut_top(46);
+
+    title_ts := UI.default_text_settings();
+    title_ts.size             = 36;
+    title_ts.color            = v4.{1, 1, 1, 1};
+    title_ts.halign           = .CENTER;
+    title_ts.valign           = .CENTER;
+    title_ts.do_outline       = true;
+    title_ts.outline_thickness = 3;
+    title_ts.outline_color    = v4.{0, 0, 0, 1};
+    UI.text(title_strip, title_ts, "ROLES GUIDE");
+
+    // Close button (icon sprite, top-right of panel)
+    UI.push_id("rg_close");
+    defer UI.pop_id();
+
+    CLOSE_HALF :: 22.0;
+    CLOSE_PAD  :: 10.0;
+    close_rect := panel_rect->top_right_rect()->offset(-CLOSE_PAD, -CLOSE_PAD)->grow(CLOSE_HALF);
+
+    close_bs := UI.default_button_settings();
+    close_bs.sprite        = get_asset(Texture_Asset, "ui/close_icon.png");
+    close_bs.press_scaling = 0.35;
+    close_bs.color         = v4.{1, 1, 1, 0.8};
+    close_bs.hovered_color = v4.{1, 1, 1, 1};
+    close_bs.pressed_color = v4.{0.6, 0.6, 0.6, 1};
+
+    if UI.button(close_rect, close_bs, UI.default_text_settings(), "").clicked {
+        player.roles_guide_open = false;
+    }
+
+    content->cut_top(8);
+
+    // Thin horizontal divider
+    div := content->cut_top(1);
+    UI.quad(div, core_globals.white_sprite, v4.{1, 1, 1, 0.1});
+    content->cut_top(10);
+
+    // ---- Split left list | right detail ----
+    LIST_W :: 190.0;
+    GAP    :: 14.0;
+
+    left_panel := content->cut_left(LIST_W);
+    content->cut_left(GAP);
+
+    // Vertical divider
+    vert_div := content->cut_left(1);
+    UI.quad(vert_div, core_globals.white_sprite, v4.{1, 1, 1, 0.1});
+    content->cut_left(GAP);
+
+    rg_draw_role_list(player, left_panel);
+    rg_draw_role_detail(player, content);
+}
+
+// ---- Left panel: role list ----
+
+rg_draw_role_list :: proc(player: Player, rect: Rect) {
+    list_area := rect;
+
+    // Small section label
+    hdr_area := list_area->cut_top(26);
+    hdr_ts := UI.default_text_settings();
+    hdr_ts.size             = 18;
+    hdr_ts.color            = v4.{0.55, 0.55, 0.60, 1};
+    hdr_ts.halign           = .LEFT;
+    hdr_ts.valign           = .CENTER;
+    hdr_ts.do_outline       = true;
+    hdr_ts.outline_thickness = 2;
+    hdr_ts.outline_color    = v4.{0, 0, 0, 1};
+    UI.text(hdr_area, hdr_ts, "ALL ROLES");
+    list_area->cut_top(5);
+
+    // Reserve scrollbar strip
+    scroll_area    := list_area;
+    scrollbar_area := scroll_area->cut_right(6)->inset(2);
+
+    ROW_H :: 42.0;
+    ROW_GAP :: 5.0;
+
+    settings: Scroll_View_Settings;
+    settings.vertical     = true;
+    settings.horizontal   = false;
+    settings.clip_padding = v4.{2, 2, 2, 2};
+
+    sv := UI.push_scroll_view(scroll_area, "rg_role_list_sv", settings); {
+        defer UI.pop_scroll_view();
+
+        sc := sv.content_rect;
+
+        for i: 1..RG_NUM_ROLES-1 {
+            if i == 9 continue; // skip generic traitor
+
+            UI.push_id("rg_rl_%", {i});
+            defer UI.pop_id();
+
+            row := sc->cut_top(ROW_H);
+            if i < RG_NUM_ROLES - 1 {
+                sc->cut_top(ROW_GAP);
+            }
+
+            is_selected := player.roles_guide_selected == i;
+            role_color  := rg_get_role_color(i);
+
+            btn_bs := UI.default_button_settings();
+            btn_bs.press_scaling = 0.3;
+
+            if is_selected {
+                btn_bs.sprite                    = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_9.png");
+                btn_bs.color                     = v4.{1, 1, 1, 1};
+                btn_bs.hovered_color             = v4.{1, 1, 1, 1};
+                btn_bs.pressed_color             = v4.{0.82, 0.82, 0.82, 1};
+                btn_bs.background_color_multiplier = role_color;
+            } else {
+                btn_bs.sprite                    = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png");
+                btn_bs.color                     = v4.{1, 1, 1, 1};
+                btn_bs.hovered_color             = v4.{1, 1, 1, 1};
+                btn_bs.pressed_color             = v4.{0.82, 0.82, 0.82, 1};
+                btn_bs.background_color_multiplier = v4.{0.28, 0.28, 0.32, 1};
+            }
+
+            btn_ts := UI.default_text_settings();
+            btn_ts.size             = 20;
+            btn_ts.color            = v4.{1, 1, 1, 1};
+            btn_ts.halign           = .LEFT;
+            btn_ts.valign           = .CENTER;
+            btn_ts.do_outline       = true;
+            btn_ts.outline_thickness = 2;
+            btn_ts.outline_color    = v4.{0, 0, 0, 1};
+            btn_ts.offset.x         = 10;
+
+            if UI.button(row, btn_bs, btn_ts, rg_get_role_name(i)).clicked {
+                player.roles_guide_selected = i;
+            }
+
+            UI.expand_current_scroll_view(row);
+        }
+    }
+
+    sb_rect := sv->compute_scroll_bar_rect(scrollbar_area);
+    UI.quad(scrollbar_area, core_globals.white_sprite, v4.{0.1, 0.1, 0.1, 0.4});
+    UI.quad(sb_rect,        core_globals.white_sprite, v4.{0.4, 0.4, 0.4, 0.6});
+}
+
+// ---- Right panel: role detail ----
+
+rg_draw_role_detail :: proc(player: Player, rect: Rect) {
+    idx := player.roles_guide_selected;
+    if idx < 1 { idx = 1; }
+
+    description := rg_get_role_description(idx);
+
+    content := rect;
+
+    // ---- Header: role icon centered with stars to the right ----
+    ICON_HALF  :: 46.0;
+    HEADER_H   :: 100.0;
+    detail_icon_path := rg_get_role_detail_icon(idx);
+    diff_stars       := rg_get_role_difficulty_stars(idx);
+
+    header_strip := content->cut_top(HEADER_H);
+
+    if detail_icon_path.count > 0 {
+        role_icon_tex := get_asset(Texture_Asset, detail_icon_path);
+        if role_icon_tex != null {
+            icon_rect := header_strip->center_rect()->grow(ICON_HALF);
+            UI.quad(icon_rect->fit_aspect(role_icon_tex->get_aspect(), .KEEP_HEIGHT), role_icon_tex, v4.{1, 1, 1, 1});
+        }
+
+        // Stars to the right of the icon
+        star_gold  := get_asset(Texture_Asset, "ui/star_gold 2.png");
+        star_empty := get_asset(Texture_Asset, "ui/star_empty2 2.png");
+        STAR_HALF :: 12.0;
+        STAR_GAP  :: 4.0;
+        stars_anchor := header_strip->center_rect()->offset(ICON_HALF + 14.0, 0);
+        for si: 0..2 {
+            offset_y := (si.(float) - 1.0) * (STAR_HALF * 2.0 + STAR_GAP);
+            star_rect := stars_anchor->offset(0, -offset_y)->grow(STAR_HALF);
+            star_tex := star_empty;
+            if si < diff_stars { star_tex = star_gold; }
+            if star_tex != null {
+                UI.quad(star_rect->fit_aspect(star_tex->get_aspect()), star_tex, v4.{1, 1, 1, 1});
+            }
+        }
+    }
+
+    content->cut_top(8);
+
+    // Thin divider
+    UI.quad(content->cut_top(1), core_globals.white_sprite, v4.{1, 1, 1, 0.1});
+    content->cut_top(10);
+
+    // ---- Description ----
+    DESC_H :: 90.0;
+    desc_area := content->cut_top(DESC_H);
+
+    desc_ts := UI.default_text_settings();
+    desc_ts.size              = 28;
+    desc_ts.color             = v4.{0.9, 0.9, 0.95, 1};
+    desc_ts.halign            = .CENTER;
+    desc_ts.valign            = .TOP;
+    desc_ts.word_wrap         = true;
+    desc_ts.do_outline        = true;
+    desc_ts.outline_thickness = 3;
+    desc_ts.outline_color     = v4.{0, 0, 0, 1};
+    desc_ts.do_autofit        = true;
+    desc_ts.autofit_min_size  = 18;
+    desc_ts.autofit_max_size  = 28;
+    UI.text(desc_area, desc_ts, description);
+
+    content->cut_top(10);
+
+    // Thin divider
+    UI.quad(content->cut_top(1), core_globals.white_sprite, v4.{1, 1, 1, 0.1});
+    content->cut_top(8);
+
+    // ---- Abilities section label ----
+    ab_label := content->cut_top(26);
+    ab_label_ts := UI.default_text_settings();
+    ab_label_ts.size             = 19;
+    ab_label_ts.color            = v4.{0.6, 0.6, 0.65, 1};
+    ab_label_ts.halign           = .LEFT;
+    ab_label_ts.valign           = .CENTER;
+    ab_label_ts.do_outline       = true;
+    ab_label_ts.outline_thickness = 2;
+    ab_label_ts.outline_color    = v4.{0, 0, 0, 1};
+    UI.text(ab_label, ab_label_ts, "ABILITIES");
+    content->cut_top(6);
+
+    // ---- Abilities list ----
+    ab_entries: [..]Rg_Ability_Entry;
+    rg_get_role_abilities(idx, ref ab_entries);
+
+    if ab_entries.count == 0 {
+        no_ab_ts := UI.default_text_settings();
+        no_ab_ts.size             = 26;
+        no_ab_ts.color            = v4.{0.45, 0.45, 0.50, 1};
+        no_ab_ts.halign           = .CENTER;
+        no_ab_ts.valign           = .CENTER;
+        no_ab_ts.do_outline       = true;
+        no_ab_ts.outline_thickness = 2;
+        no_ab_ts.outline_color    = v4.{0, 0, 0, 1};
+        UI.text(content, no_ab_ts, "No special abilities.");
+        return;
+    }
+
+    // Scroll view for abilities
+    scroll_area    := content;
+    scrollbar_area := scroll_area->cut_right(6)->inset(2);
+
+    settings: Scroll_View_Settings;
+    settings.vertical     = true;
+    settings.horizontal   = false;
+    settings.clip_padding = v4.{6, 6, 6, 6};
+
+    sv := UI.push_scroll_view(scroll_area, "rg_ability_sv", settings); {
+        defer UI.pop_scroll_view();
+
+        sc := sv.content_rect;
+
+        ROW_H      :: 55.0;
+        ICON_SIZE  :: 32.0;
+        ROW_GAP    :: 15.0;
+
+        for i: 0..ab_entries.count-1 {
+            entry := ab_entries[i];
+
+            UI.push_id("rg_ab_%", {i});
+            defer UI.pop_id();
+
+            row := sc->cut_top(ROW_H);
+            if i < ab_entries.count - 1 {
+                sc->cut_top(ROW_GAP);
+            }
+
+            row_inner := row->inset(6, 8, 6, 8);
+
+            // Icon slot
+            if entry.icon_path.count > 0 {
+                icon_slot := row_inner->cut_left(ICON_SIZE * 2.0 + 8.0);
+                icon_tex  := get_asset(Texture_Asset, entry.icon_path);
+                if icon_tex != null {
+                    icon_rect := icon_slot->center_rect()->grow(ICON_SIZE);
+                    UI.quad(icon_rect->fit_aspect(icon_tex->get_aspect()), icon_tex, v4.{1, 1, 1, 1});
+                }
+            }
+
+            // Ability name
+            name_row := row_inner->cut_top(26);
+            ab_name_ts := UI.default_text_settings();
+            ab_name_ts.size             = 30;
+            ab_name_ts.color            = v4.{1, 1, 1, 1};
+            ab_name_ts.halign           = .LEFT;
+            ab_name_ts.valign           = .TOP;
+            ab_name_ts.do_outline       = true;
+            ab_name_ts.outline_thickness = 2;
+            ab_name_ts.outline_color    = v4.{0, 0, 0, 1};
+            UI.text(name_row, ab_name_ts, entry.name);
+
+            // Ability description
+            ab_desc_ts := UI.default_text_settings();
+            ab_desc_ts.size             = 22;
+            ab_desc_ts.color            = v4.{0.8, 0.8, 0.85, 0.85};
+            ab_desc_ts.halign           = .LEFT;
+            ab_desc_ts.valign           = .TOP;
+            ab_desc_ts.word_wrap        = true;
+            ab_desc_ts.do_outline       = true;
+            ab_desc_ts.outline_thickness = 2;
+            ab_desc_ts.outline_color    = v4.{0, 0, 0, 1};
+            UI.text(row_inner, ab_desc_ts, entry.desc);
+
+            UI.expand_current_scroll_view(row);
+        }
+    }
+
+    sb_rect := sv->compute_scroll_bar_rect(scrollbar_area);
+    UI.quad(scrollbar_area, core_globals.white_sprite, v4.{0.1, 0.1, 0.1, 0.4});
+    UI.quad(sb_rect,        core_globals.white_sprite, v4.{0.4, 0.4, 0.4, 0.6});
+}
+
+// ---- Open/close button (drawn in HUD) ----
+
+draw_roles_guide_open_button :: proc(player: Player) {
+    UI.push_id("rg_open_btn");
+    defer UI.pop_id();
+
+    BTN_HALF :: 22.0;
+    safe     := UI.get_safe_screen_rect();
+    btn_rect := safe->left_center_rect()->offset(BTN_HALF + 12.0, 0)->grow(BTN_HALF);
+
+    bs := UI.default_button_settings();
+    bs.sprite        = get_asset(Texture_Asset, "ui/info_icon_b.png");
+    bs.press_scaling = 0.35;
+    bs.color         = v4.{1, 1, 1, 1};
+    bs.hovered_color = v4.{1, 1, 1, 1};
+    bs.pressed_color = v4.{0.6, 0.6, 0.6, 1};
+
+    if UI.button(btn_rect, bs, UI.default_text_settings(), "").clicked {
+        player.roles_guide_open = !player.roles_guide_open;
+    }
+}
