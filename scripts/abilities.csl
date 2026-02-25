@@ -539,7 +539,9 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.WEREWOLF return false;
-		if !player.werewolf_is_wolf_form return false;
+		wm := player.entity->get_component(Werewolf_Module);
+		if wm == null return false;
+		if !wm.is_wolf_form return false;
 		return rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true) != null;
 	}
 
@@ -591,7 +593,9 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 		if player.player_role != Player_Role.WEREWOLF return false;
 		// Usable in both human and wolf form.
 		// Unlock after 1 kill.
-		if player.werewolf_kills < WEREWOLF_INFECT_UNLOCK_KILLS return false;
+		wm := player.entity->get_component(Werewolf_Module);
+		if wm == null return false;
+		if wm.kills < WEREWOLF_INFECT_UNLOCK_KILLS return false;
 		return rr_werewolf_find_melee_target(player, WEREWOLF_INFECT_RANGE, true) != null;
 	}
 
@@ -603,9 +607,10 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			if player != null && player.player_role == Player_Role.WEREWOLF && player.werewolf_kills < WEREWOLF_INFECT_UNLOCK_KILLS {
+			wm2 := player.entity->get_component(Werewolf_Module);
+			if player != null && player.player_role == Player_Role.WEREWOLF && wm2 != null && wm2.kills < WEREWOLF_INFECT_UNLOCK_KILLS {
 				player->Notify(format_string("Infect locked: get %/% kills as Werewolf to unlock.", .{
-					min(player.werewolf_kills, WEREWOLF_INFECT_UNLOCK_KILLS),
+					min(wm2.kills, WEREWOLF_INFECT_UNLOCK_KILLS),
 					WEREWOLF_INFECT_UNLOCK_KILLS
 				}));
 			}
@@ -625,7 +630,8 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 
 		// Locked overlay (shown until unlocked).
 		p := instance.player;
-		if p != null && p.player_role == Player_Role.WEREWOLF && p.werewolf_kills < WEREWOLF_INFECT_UNLOCK_KILLS {
+		pwm := p.entity->get_component(Werewolf_Module);
+		if p != null && p.player_role == Player_Role.WEREWOLF && pwm != null && pwm.kills < WEREWOLF_INFECT_UNLOCK_KILLS {
 			ts := UI.default_text_settings();
 			ts.size = 18;
 			ts.halign = .CENTER;
@@ -654,9 +660,11 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.WEREWOLF return false;
-		if !player.werewolf_is_wolf_form return false;
+		wm := player.entity->get_component(Werewolf_Module);
+		if wm == null return false;
+		if !wm.is_wolf_form return false;
 		// Unlock after 2 kills.
-		if player.werewolf_kills < WEREWOLF_CLAW_UNLOCK_KILLS return false;
+		if wm.kills < WEREWOLF_CLAW_UNLOCK_KILLS return false;
 		return true;
 	}
 
@@ -668,9 +676,10 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			if player != null && player.player_role == Player_Role.WEREWOLF && player.werewolf_kills < WEREWOLF_CLAW_UNLOCK_KILLS {
+			wm2 := player.entity->get_component(Werewolf_Module);
+			if player != null && player.player_role == Player_Role.WEREWOLF && wm2 != null && wm2.kills < WEREWOLF_CLAW_UNLOCK_KILLS {
 				player->Notify(format_string("Claw locked: get %/% kills as Werewolf to unlock.", .{
-					min(player.werewolf_kills, WEREWOLF_CLAW_UNLOCK_KILLS),
+					min(wm2.kills, WEREWOLF_CLAW_UNLOCK_KILLS),
 					WEREWOLF_CLAW_UNLOCK_KILLS
 				}));
 			}
@@ -695,7 +704,8 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 
 		// Locked overlay (shown while in wolf form until unlocked).
 		p := instance.player;
-		if p != null && p.player_role == Player_Role.WEREWOLF && p.werewolf_kills < WEREWOLF_CLAW_UNLOCK_KILLS {
+		pwm := p.entity->get_component(Werewolf_Module);
+		if p != null && p.player_role == Player_Role.WEREWOLF && pwm != null && pwm.kills < WEREWOLF_CLAW_UNLOCK_KILLS {
 			ts := UI.default_text_settings();
 			ts.size = 18;
 			ts.halign = .CENTER;
@@ -773,10 +783,12 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
-			if player.werewolf_is_wolf_form {
+			wm := player.entity->get_component(Werewolf_Module);
+			if wm == null return;
+			if wm.is_wolf_form {
 				// Revert to schleem form early.
-				player.werewolf_is_wolf_form = false;
-				player.werewolf_transform_ends_at = 0.0;
+				wm.is_wolf_form = false;
+				wm.transform_ends_at = 0.0;
 				player->set_trigger("RESET");
 				player.werewolf_skin_enable_at = 0.0;
 				player.werewolf_skin_disable_at = get_time();
@@ -785,8 +797,8 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 				current_cooldown = WEREWOLF_TRANSFORM_COOLDOWN_SECONDS;
 			} else {
 				// Activate wolf form.
-				player.werewolf_is_wolf_form = true;
-				player.werewolf_transform_ends_at = get_time() + WEREWOLF_TRANSFORM_MAX_DURATION_SECONDS;
+				wm.is_wolf_form = true;
+				wm.transform_ends_at = get_time() + WEREWOLF_TRANSFORM_MAX_DURATION_SECONDS;
 
 				// Howl animation.
 				player->set_trigger("werewolf_howl");
@@ -816,11 +828,12 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 
 	on_draw_button :: proc(instance: Werewolf_Transform_Ability, rect: Rect) {
 		p := instance.player;
-		if p != null && p.werewolf_is_wolf_form {
+		pwm := p.entity->get_component(Werewolf_Module);
+		if p != null && pwm != null && pwm.is_wolf_form {
 			// Swap icon to "transform back" while in wolf form.
 			instance.icon = get_asset(Texture_Asset, "sprites/icons/transform_good.png");
 			// Show remaining wolf form time as the label.
-			remaining := p.werewolf_transform_ends_at - get_time();
+			remaining := pwm.transform_ends_at - get_time();
 			if remaining < 0.0 { remaining = 0.0; }
 			remaining_s := (remaining + 0.999).(int);
 			ts := UI.default_text_settings();
@@ -1067,9 +1080,10 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
 		// Apply any contract-based cooldown adjustments (from kills via other methods).
-		if player != null && player.player_role == Player_Role.HITMAN && player.hitman_kill_cooldown_adjust_seconds != 0.0 {
-			current_cooldown = max(0.0, current_cooldown + player.hitman_kill_cooldown_adjust_seconds);
-			player.hitman_kill_cooldown_adjust_seconds = 0.0;
+		hm := player.entity->get_component(Hitman_Module);
+		if player != null && player.player_role == Player_Role.HITMAN && hm != null && hm.kill_cooldown_adjust_seconds != 0.0 {
+			current_cooldown = max(0.0, current_cooldown + hm.kill_cooldown_adjust_seconds);
+			hm.kill_cooldown_adjust_seconds = 0.0;
 		}
 
 		if params.clicked && params.can_use {
@@ -1082,7 +1096,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 				}
 				lock->arm(HITMAN_NECK_SNAP_LOCK_SECONDS);
 
-				player.hitman_last_kill_style = Hitman_Kill_Style.NECK_SNAP;
+				if hm != null hm.last_kill_style = Hitman_Kill_Style.NECK_SNAP;
 				player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
 				player->set_trigger("hitman_kill_snap_neck");
 				target->kill_with_killer(player.entity.id);
@@ -1127,7 +1141,9 @@ Hitman_Mine_Ability :: class : Ability_Base {
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
 		// Unlock after 1 kill.
-		if player.hitman_kills < HITMAN_MINE_UNLOCK_KILLS return false;
+		hm := player.entity->get_component(Hitman_Module);
+		if hm == null return false;
+		if hm.kills < HITMAN_MINE_UNLOCK_KILLS return false;
 		return true;
 	}
 
@@ -1139,9 +1155,10 @@ Hitman_Mine_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			if player != null && player.player_role == Player_Role.HITMAN && player.hitman_kills < HITMAN_MINE_UNLOCK_KILLS {
+			hm := player.entity->get_component(Hitman_Module);
+			if player != null && player.player_role == Player_Role.HITMAN && hm != null && hm.kills < HITMAN_MINE_UNLOCK_KILLS {
 				player->Notify(format_string("Mine locked: get %/% kills as Hitman to unlock.", .{
-					min(player.hitman_kills, HITMAN_MINE_UNLOCK_KILLS),
+					min(hm.kills, HITMAN_MINE_UNLOCK_KILLS),
 					HITMAN_MINE_UNLOCK_KILLS
 				}));
 			}
@@ -1194,7 +1211,8 @@ Hitman_Mine_Ability :: class : Ability_Base {
 
 		// Locked overlay (still show button for learnability).
 		p := instance.player;
-		if p != null && p.player_role == Player_Role.HITMAN && p.hitman_kills < HITMAN_MINE_UNLOCK_KILLS {
+		hm := p.entity->get_component(Hitman_Module);
+		if p != null && p.player_role == Player_Role.HITMAN && hm != null && hm.kills < HITMAN_MINE_UNLOCK_KILLS {
 			ts := UI.default_text_settings();
 			ts.size = 18;
 			ts.halign = .CENTER;
@@ -1225,9 +1243,11 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
 		// Unlock after 2 kills.
-		if player.hitman_kills < HITMAN_SNIPER_UNLOCK_KILLS return false;
+		hm := player.entity->get_component(Hitman_Module);
+		if hm == null return false;
+		if hm.kills < HITMAN_SNIPER_UNLOCK_KILLS return false;
 		// Needs a valid contract target to snipe.
-		if player.hitman_contract_target_id == 0 return false;
+		if hm.contract_target_id == 0 return false;
 		return true;
 	}
 
@@ -1293,9 +1313,10 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			if player != null && player.player_role == Player_Role.HITMAN && player.hitman_kills < HITMAN_SNIPER_UNLOCK_KILLS {
+			hm := player.entity->get_component(Hitman_Module);
+			if player != null && player.player_role == Player_Role.HITMAN && hm != null && hm.kills < HITMAN_SNIPER_UNLOCK_KILLS {
 				player->Notify(format_string("Sniper locked: get %/% kills as Hitman to unlock.", .{
-					min(player.hitman_kills, HITMAN_SNIPER_UNLOCK_KILLS),
+					min(hm.kills, HITMAN_SNIPER_UNLOCK_KILLS),
 					HITMAN_SNIPER_UNLOCK_KILLS
 				}));
 			}
@@ -1343,7 +1364,8 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 				return;
 			}
 
-			player.hitman_last_kill_style = Hitman_Kill_Style.SNIPER;
+			hm := player.entity->get_component(Hitman_Module);
+			if hm != null hm.last_kill_style = Hitman_Kill_Style.SNIPER;
 			player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
 			player->set_trigger("hitman_shoot_sniper");
 			target->kill_with_killer(player.entity.id);
@@ -1359,7 +1381,8 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 
 		// Locked overlay (still show button for learnability).
 		p := instance.player;
-		if p != null && p.player_role == Player_Role.HITMAN && p.hitman_kills < HITMAN_SNIPER_UNLOCK_KILLS {
+		hm := p.entity->get_component(Hitman_Module);
+		if p != null && p.player_role == Player_Role.HITMAN && hm != null && hm.kills < HITMAN_SNIPER_UNLOCK_KILLS {
 			ts := UI.default_text_settings();
 			ts.size = 18;
 			ts.halign = .CENTER;
@@ -1412,7 +1435,9 @@ Resurrect_Ability :: class : Ability_Base {
 		if player->has_task_in_progress() return false;
         if player.player_type != Player_Type.CIVILIAN return false;
         if player.player_role != Player_Role.DOCTOR return false;
-        if player.doctor_resurrects_used >= DOCTOR_RESURRECTS_PER_ROUND return false;
+        dm := player.entity->get_component(Doctor_Module);
+        if dm == null return false;
+        if dm.resurrects_used >= DOCTOR_RESURRECTS_PER_ROUND return false;
         return get_closest_resurrectable_corpse(this, player) != null;
     }
 
@@ -1432,7 +1457,10 @@ Resurrect_Ability :: class : Ability_Base {
             target.was_corpse_reported_before_resurrect = corpse.has_been_reported;
 
             // Consume a use.
-           instance.player.doctor_resurrects_used += 1;
+            dm := instance.player.entity->get_component(Doctor_Module);
+            if dm != null {
+                dm.resurrects_used += 1;
+            }
 
             // Remove the body (they "stand up").
             if #alive(corpse.entity) {
@@ -1447,10 +1475,12 @@ Resurrect_Ability :: class : Ability_Base {
             target.temporarily_resurrected_until = get_time() + DOCTOR_RESURRECT_DURATION_SECONDS;
 
             // Feedback
+            dm_uses := 0;
+            if dm != null { dm_uses = dm.resurrects_used; }
             instance.player->Notify(format_string("Resurrected % for %s (%/% used)", .{
                 target.entity->get_name(),
                 format_float(DOCTOR_RESURRECT_DURATION_SECONDS, decimals=0),
-                instance.player.doctor_resurrects_used,
+                dm_uses,
                 DOCTOR_RESURRECTS_PER_ROUND
             }));
             target->Notify(format_string("You were resurrected for %s (no tasks).", .{format_float(DOCTOR_RESURRECT_DURATION_SECONDS, decimals=0)}));
@@ -1471,7 +1501,10 @@ Resurrect_Ability :: class : Ability_Base {
         ts.size = 18;
         ts.halign = .CENTER;
         ts.valign = .TOP;
-        remaining := DOCTOR_RESURRECTS_PER_ROUND - player.doctor_resurrects_used;
+        dm := player.entity->get_component(Doctor_Module);
+        used := 0;
+        if dm != null { used = dm.resurrects_used; }
+        remaining := DOCTOR_RESURRECTS_PER_ROUND - used;
         if remaining < 0 { remaining = 0; }
         UI.text(rect->inset(2)->cut_top(20), ts, format_string("%/%", .{remaining, DOCTOR_RESURRECTS_PER_ROUND}));
     }
@@ -1574,6 +1607,7 @@ DNA_Sample_Ability :: class : Ability_Base {
 		foreach corpse: component_iterator(Corpse) {
 			if corpse.has_been_reported continue;
 			if corpse.has_dna_been_sampled continue;
+			if corpse.ggg_is_wrapped continue;
 			// Only corpses with known player killers yield a vial.
 			if corpse.killer_player_entity_id == 0 continue;
 			finder->check(corpse, corpse.entity.world_position);
@@ -1595,16 +1629,11 @@ DNA_Sample_Ability :: class : Ability_Base {
 			corpse := get_closest_sampleable_corpse(this, player);
 			if corpse == null return;
 
-			// GGG wrapped corpses must be unwrapped first before DNA can be sampled.
-			if corpse.ggg_is_wrapped {
-				corpse.ggg_is_wrapped = false;
-				Notifier.notify(player, "Unwrapped tinfoil from corpse.");
-				current_cooldown = 5.0;
-				return;
-			}
-
 			corpse.has_dna_been_sampled = true;
-			player.coroner_dna_vials->append(corpse.killer_player_entity_id);
+			cm := player.entity->get_component(Coroner_Module);
+			if cm != null {
+				cm.dna_vials->append(corpse.killer_player_entity_id);
+			}
 
 			current_cooldown = 1.0;
 		}
@@ -1641,7 +1670,9 @@ DNA_Match_Ability :: class : Ability_Base {
 		if player->has_task_in_progress() return false;
 		if player.player_type != Player_Type.CIVILIAN return false;
 		if player.player_role != Player_Role.CORONER return false;
-		if player.coroner_dna_vials.count <= 0 return false;
+		cm := player.entity->get_component(Coroner_Module);
+		if cm == null return false;
+		if cm.dna_vials.count <= 0 return false;
 		return get_closest_alive_other_player(this, player) != null;
 	}
 
@@ -1650,7 +1681,9 @@ DNA_Match_Ability :: class : Ability_Base {
 			target := get_closest_alive_other_player(this, player);
 			if target == null return;
 
-			killer_id := player.coroner_dna_vials->pop();
+			cm := player.entity->get_component(Coroner_Module);
+			if cm == null return;
+			killer_id := cm.dna_vials->pop();
 			is_match := target.entity.id == killer_id;
 
 			// Show vial feedback above the coroner's head.
@@ -1776,7 +1809,10 @@ Shoot_Ability :: class : Ability_Base {
         if player.player_state != Player_State.ALIVE return false;
         if player->has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
-		if player.player_role == Player_Role.PIRATE && player.pirate_treasure < PIRATE_SHOOT_UNLOCK_TREASURE_COST return false;
+		if player.player_role == Player_Role.PIRATE {
+			pm := player.entity->get_component(Pirate_Module);
+			if pm != null && pm.treasure < PIRATE_SHOOT_UNLOCK_TREASURE_COST return false;
+		}
         return true;
     }
 
@@ -1841,14 +1877,16 @@ PIRATE_TREASURE_DIG_REASON :: "pirate_dig_for_treasure";
 rr_pirate_refresh_unlocks :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.PIRATE return;
+	pm := player.entity->get_component(Pirate_Module);
+	if pm == null return;
 
 	// Treasure is NOT consumed on unlock; abilities become usable once you have enough.
-	player.pirate_black_flag_unlocked = true;
-	if player.pirate_treasure >= PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
-		player.pirate_black_flag_unlocked = true;
+	pm.black_flag_unlocked = true;
+	if pm.treasure >= PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
+		pm.black_flag_unlocked = true;
 	}
-	if player.pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
-		player.pirate_powder_keg_unlocked = true;
+	if pm.treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+		pm.powder_keg_unlocked = true;
 	}
 }
 
@@ -1934,10 +1972,11 @@ Black_Flag_Ability :: class : Ability_Base {
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
         if player.player_role != Player_Role.PIRATE return false;
 		// Auto-unlock based on current treasure amount (treasure is not spent).
-		if player.pirate_treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST return false;
+		pm := player.entity->get_component(Pirate_Module);
+		if pm != null && pm.treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST return false;
         return true;
     }
-    
+
     on_update :: method(params: ref Ability_Update_Params) {
 		// Keep cooldown overlay in sync with post-meeting / round-start lockout.
 		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
@@ -1946,9 +1985,10 @@ Black_Flag_Ability :: class : Ability_Base {
 
         // If pressed while locked, explain unlock requirement.
         if params.clicked && !params.can_use {
-            if player != null && player.player_role == Player_Role.PIRATE && player.pirate_treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
+			pm := player.entity->get_component(Pirate_Module);
+            if player != null && player.player_role == Player_Role.PIRATE && pm != null && pm.treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
                 player->Notify(format_string("Black Flag locked: get %/% treasure to unlock.", .{
-                    min(player.pirate_treasure, PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST),
+                    min(pm.treasure, PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST),
                     PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST
                 }));
             }
@@ -1978,7 +2018,8 @@ Black_Flag_Ability :: class : Ability_Base {
 
 		// Locked overlay (still show button for learnability).
 		p := instance.player;
-		if p != null && p.player_role == Player_Role.PIRATE && p.pirate_treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
+		pm := p.entity->get_component(Pirate_Module);
+		if p != null && p.player_role == Player_Role.PIRATE && pm != null && pm.treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
 			ts := UI.default_text_settings();
 			ts.size = 18;
 			ts.halign = .CENTER;
@@ -2121,7 +2162,8 @@ Pirate_Dig_Lock :: class : Component {
 
 			// Award treasure server-side.
 			if Game.is_server() {
-				p.pirate_treasure += 1;
+				pm := p.entity->get_component(Pirate_Module);
+				if pm != null pm.treasure += 1;
 				rr_pirate_refresh_unlocks(p);
 				p->Notify("Found treasure! (+1)");
 				this->destroy_spot_entity_if_alive();
@@ -2457,7 +2499,8 @@ Powder_Keg_Ability :: class : Ability_Base {
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_role != Player_Role.PIRATE return false;
 		// Auto-unlock based on current treasure amount (treasure is not spent).
-		if player.pirate_treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST return false;
+		pm := player.entity->get_component(Pirate_Module);
+		if pm != null && pm.treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST return false;
 		return true;
 	}
 
@@ -2491,9 +2534,10 @@ Powder_Keg_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			if player != null && player.player_role == Player_Role.PIRATE && player.pirate_treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+			pm := player.entity->get_component(Pirate_Module);
+			if player != null && player.player_role == Player_Role.PIRATE && pm != null && pm.treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
 				player->Notify(format_string("Powder Keg locked: get %/% treasure to unlock.", .{
-					min(player.pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST),
+					min(pm.treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST),
 					PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST
 				}));
 			}
@@ -2591,7 +2635,8 @@ Powder_Keg_Ability :: class : Ability_Base {
 
 		// Locked overlay (still show button for learnability).
 		p := instance.player;
-		if p != null && p.player_role == Player_Role.PIRATE && p.pirate_treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+		pm := p.entity->get_component(Pirate_Module);
+		if p != null && p.player_role == Player_Role.PIRATE && pm != null && pm.treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
 			ts := UI.default_text_settings();
 			ts.size = 18;
 			ts.halign = .CENTER;
@@ -2791,18 +2836,21 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 		if player.pyro_on_fire return false;
 		// Still allow the button to show while locked (so we can draw LOCKED overlay),
 		// but don't allow activation until unlocked.
-		if player.pyro_world_fire_unlocked_time <= 0.0 return false;
+		pyro := player.entity->get_component(Pyro_Module);
+		if pyro == null return false;
+		if pyro.world_fire_unlocked_time <= 0.0 return false;
 		return true;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			if player != null && player.pyro_world_fire_unlocked_time <= 0.0 {
+			pyro := player.entity->get_component(Pyro_Module);
+			if player != null && pyro != null && pyro.world_fire_unlocked_time <= 0.0 {
 				player->Notify(format_string("World Fire locked: burn 1 corpse + burn out % rooms (Corpse %/1, Rooms %/%).", .{
 					PYRO_ROOMS_BURNOUT_TARGET,
-					min(player.pyro_corpses_burned, 1),
-					min(player.pyro_rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
+					min(pyro.corpses_burned, 1),
+					min(pyro.rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
 					PYRO_ROOMS_BURNOUT_TARGET
 				}));
 			}
@@ -2831,7 +2879,9 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 		// Locked overlay + progress
 		p := instance.player;
 		if p == null return;
-		if p.pyro_world_fire_unlocked_time > 0.0 return;
+		pyro := p.entity->get_component(Pyro_Module);
+		if pyro == null return;
+		if pyro.world_fire_unlocked_time > 0.0 return;
 
 		ts := UI.default_text_settings();
 		ts.size = 18;
@@ -2844,8 +2894,8 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 
 		// Show objective progress underneath.
 		prog := format_string("Corpse %/1  Rooms %/%", .{
-			min(p.pyro_corpses_burned, 1),
-			min(p.pyro_rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
+			min(pyro.corpses_burned, 1),
+			min(pyro.rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
 			PYRO_ROOMS_BURNOUT_TARGET
 		});
 		ts2 := ts;
@@ -2952,7 +3002,8 @@ Prank_Ability :: class : Ability_Base {
 			}
 
 			// Count unique pranks toward the win condition
-			instance.player.prankster_prank_count += 1;
+			prk := instance.player.entity->get_component(Prankster_Module);
+			if prk != null { prk.prank_count += 1; }
 
 			// Attach a delayed effect to the target so the message shows on THEIR client after 10s
 			eff := target.entity->get_component(Pranked_Effect);
@@ -3032,27 +3083,32 @@ Jester_Win_Ability :: class : Ability_Base {
 		if player->has_task_in_progress() return false;
 
 		// Locked until both objectives are complete (and unlock timer started)
-		if player.prankster_jester_unlocked_time <= 0.0 return false;
+		prk := player.entity->get_component(Prankster_Module);
+		if prk == null return false;
+		if prk.jester_unlocked_time <= 0.0 return false;
 
 		// Wait 15 seconds after unlocking
-		return get_time() >= (player.prankster_jester_unlocked_time + JESTER_WIN_DELAY_SECONDS);
+		return get_time() >= (prk.jester_unlocked_time + JESTER_WIN_DELAY_SECONDS);
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
 		// If pressed while locked, explain unlock requirement / timing.
 		if params.clicked && !params.can_use {
 			if player != null {
-				if player.prankster_jester_unlocked_time <= 0.0 {
-					player->Notify(format_string("Jester Win locked: prank %/% and call %/% fake meetings to unlock.", .{
-						min(player.prankster_prank_count, 3),
-						3,
-						min(player.prankster_fake_meetings_called, 1),
-						1
-					}));
-				} else {
-					remaining := (player.prankster_jester_unlocked_time + JESTER_WIN_DELAY_SECONDS) - get_time();
-					if remaining > 0.0 {
-						player->Notify(format_string("Jester Win charging: survive %s more seconds.", .{format_float(remaining, decimals=0)}));
+				prk := player.entity->get_component(Prankster_Module);
+				if prk != null {
+					if prk.jester_unlocked_time <= 0.0 {
+						player->Notify(format_string("Jester Win locked: prank %/% and call %/% fake meetings to unlock.", .{
+							min(prk.prank_count, 3),
+							3,
+							min(prk.fake_meetings_called, 1),
+							1
+						}));
+					} else {
+						remaining := (prk.jester_unlocked_time + JESTER_WIN_DELAY_SECONDS) - get_time();
+						if remaining > 0.0 {
+							player->Notify(format_string("Jester Win charging: survive %s more seconds.", .{format_float(remaining, decimals=0)}));
+						}
 					}
 				}
 			}
@@ -3080,11 +3136,12 @@ Jester_Win_Ability :: class : Ability_Base {
 			return;
 		}
 
+		prk := player.entity->get_component(Prankster_Module);
 		label := "";
-		if player.prankster_jester_unlocked_time <= 0.0 {
+		if prk == null || prk.jester_unlocked_time <= 0.0 {
 			label = "LOCKED";
 		} else {
-			remaining := (player.prankster_jester_unlocked_time + JESTER_WIN_DELAY_SECONDS) - get_time();
+			remaining := (prk.jester_unlocked_time + JESTER_WIN_DELAY_SECONDS) - get_time();
 			if remaining > 0.0 {
 				label = format_string("%s", .{format_float(remaining, decimals=0)});
 			} else {

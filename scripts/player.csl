@@ -84,84 +84,37 @@ Player :: class : Player_Base {
 	ghost_speed_override_active: bool;
 	ghost_speed_original_movement_speed: float;
 	
-	// Prankster progress (server-driven, shown locally via tasks UI)
-	prankster_prank_count: int;
-	prankster_fake_meetings_called: int;
-	prankster_fake_meeting_target_id: u64; // entity id of the player the prankster must get voted out
-
-	// --- Pyromaniac ---
-	// True while this player is currently "on fire" (status effect).
+	// --- Pyromaniac (cross-player: any player can be on fire) ---
 	pyro_on_fire: bool;
-	pyro_props_ignited: int;
-	pyro_corpses_burned: int;
-	pyro_rooms_burned_out: int;
-	pyro_world_fire_unlocked_time: float; // 0 = locked; otherwise time unlocked
-	// Counts down from PYRO_ROOM_EXPOSURE_DURATION when in a fully-burned room.
-	// Server-authoritative and replicated; read locally for UI display.
-	pyro_room_exposure_timer: float;
 
-	// Jester Win (unlock + timer)
-	prankster_jester_unlocked_time: float; // 0 = locked, otherwise time it unlocked
+	// Jester / vote eject camera (kept on Player for now)
 	sm_inited: bool;
 	jester_win_camera_override_active: bool;
 	vote_eject_camera_override_active: bool;
 	vote_eject_camera_original_size: float;
 
-	// --- Doctor ---
-	doctor_resurrects_used: int; // resets each round
+	// --- Doctor (cross-player: any player can be resurrected) ---
 	is_temporarily_resurrected: bool;
 	temporarily_resurrected_until: float;
-	was_corpse_reported_before_resurrect: bool; // true if the body had been reported before the doctor revived them
-
-	// --- Sheriff ---
-	// Sheriff gun has 1 ammo per round; after firing once, Shoot is disabled.
-	sheriff_gun_ammo: int;
-
-	// --- Coroner ---
-	// Stores killer entity ids sampled from corpses. Consumed one-at-a-time by DNA Match.
-	coroner_dna_vials: [..]u64;
-
-	// --- Portal Maker ---
-	portal_maker_red_portal: Entity;
-	portal_maker_blue_portal: Entity;
+	was_corpse_reported_before_resurrect: bool;
 
 	// Per-player portal interaction (anyone can use portals)
 	portal_standing_on_portal: Entity;
 	portal_standing_seconds: float;
-	portal_blocked_portal: Entity; // prevents instant teleport back until leaving the destination portal
+	portal_blocked_portal: Entity;
 
 	// Door unlock interactable (1 per player, repositioned to nearest closed door)
 	door_unlock_entity: Entity;
 	door_unlock_interactable: Door_Unlock_Interactable;
 
-	// --- Hitman ---
-	// Kills credited to this player (used for Mine/Sniper unlocks).
-	hitman_kills: int;
-	// Entity id of the current contract target (0 = none / invalid).
-	hitman_contract_target_id: u64;
-	// Dynamic adjustment applied to the next Hitman kill ability cooldown.
-	// (Negative = reduced cooldown for killing contract; positive = increased for off-contract kill.)
-	hitman_kill_cooldown_adjust_seconds: float;
-	// Last-kill style used for corpse death animation selection.
-	hitman_last_kill_style: Hitman_Kill_Style;
-
-	// --- Pirate ---
-	// Treasure used to unlock pirate abilities (Black Flag + Powder Keg).
-	pirate_treasure: int;
-	pirate_black_flag_unlocked: bool;
-	pirate_powder_keg_unlocked: bool;
-
 	// --- Werewolf (Traitor role) ---
-	// Server-driven transformation cycle; UI reads these fields locally.
-	werewolf_kills: int;              // unlocks for werewolf abilities
+	// Gameplay fields (kills, wolf form, speed) live in Werewolf_Module (only on werewolf player).
 	werewolf_infected: bool;          // infected "small werewolf" curse
 	werewolf_infected_from_id: u64;   // original werewolf entity id (0 = unknown)
 	// When infected, we temporarily replace the player's task list with a single objective.
 	werewolf_saved_tasks_active: bool;
 	werewolf_saved_tasks: List(Task_Base);
-	werewolf_is_wolf_form: bool;      // true during wolf window (gameplay + visuals)
-	werewolf_transform_ends_at: float; // 0 = not transformed; otherwise game-time wolf form ends
-	// Cosmetic: skin switching timing (used for transform animations).
+	// Cosmetic: skin switching timing (used for transform animations — cross-player due to infection).
 	werewolf_skin_enable_at: float;   // 0 = none, otherwise game-time to enable werewolf skin
 	werewolf_skin_disable_at: float;  // 0 = none, otherwise game-time to disable werewolf skin
 	werewolf_skin_active: bool;       // cached flag – avoids get_skins() every frame
@@ -171,35 +124,12 @@ Player :: class : Player_Base {
 	werewolf_round_start_cosmetic_skins: [..]string;
 	werewolf_saved_avatar_color: Color_Replace_Color;
 	werewolf_round_start_avatar_color: Color_Replace_Color;
-	// Speed boost while in wolf form.
-	werewolf_speed_boost_active: bool;
-	werewolf_speed_original: float;
 	// Delayed infected transform: game-time at which to fire the "werewolf_infected_transform" trigger.
 	// 0 = no pending trigger.
 	werewolf_infected_transform_trigger_at: float;
 
 	// --- Goo Goo Gaga (Traitor role) ---
-	ggg_wraps: int;
-	ggg_is_creature_form: bool;
-	ggg_creature_form_ends_at: float;
-	ggg_speed_boost_active: bool;
-	ggg_speed_original: float;
-	ggg_is_crawling: bool;
-	ggg_crawl_ends_at: float;
-	ggg_crawl_speed_active: bool;
-	ggg_crawl_speed_original: float;
-	ggg_crawl_original_scale: v2;
-	ggg_wrap_channel_active: bool;
-	ggg_wrap_channel_corpse_id: u64;
-	ggg_wrap_channel_end_at: float;
-	ggg_wrap_channel_last_pos: v2;
-	// Separate creature entity + animator (created on role assign, destroyed on role end).
-	ggg_creature_entity: Entity;
-	ggg_creature_animator: Spine_Animator;
-	// Delayed visual swap timing (game-time to show creature entity after transform anim).
-	ggg_skeleton_swap_at: float;
-	// True when the creature entity is the active visual.
-	ggg_creature_visible: bool;
+	// All GGG fields live in GGG_Module (only on GGG player).
 
 	// --- Meeting cooldown pause ---
 	// Saved ability cooldowns when a meeting starts so they can be restored afterwards.
@@ -686,7 +616,8 @@ Player :: class : Player_Base {
 							draw_ability_button(this, Hitman_Neck_Snap_Ability, abilityIndex);
 							abilityIndex += 1;
 						} else if player_role == Player_Role.WEREWOLF {
-							if this.werewolf_is_wolf_form {
+							wm := this.entity->get_component(Werewolf_Module);
+							if wm != null && wm.is_wolf_form {
 								// Wolf form: Devour + Transform (no Drag).
 								draw_ability_button(this, Werewolf_Devour_Ability, abilityIndex);
 								abilityIndex += 1;
@@ -700,7 +631,8 @@ Player :: class : Player_Base {
 								abilityIndex += 1;
 							}
 						} else if player_role == Player_Role.GOO_GOO_GAGA {
-							if this.ggg_is_creature_form {
+							ggm := this.entity->get_component(GGG_Module);
+							if ggm != null && ggm.is_creature_form {
 								// Creature form: Kill + Transform + Wrap + Crawl/Trap/Swarm (progressive unlock).
 								draw_ability_button(this, Kill_Ability, abilityIndex);
 								abilityIndex += 1;
@@ -738,13 +670,14 @@ Player :: class : Player_Base {
                         if player_role == Player_Role.PIRATE {
 							draw_ability_button(this, Black_Flag_Ability, abilityIndex);
 							abilityIndex += 1;
+							pm := this.entity->get_component(Pirate_Module);
 							// Only show Shoot once unlocked.
-							if this.pirate_treasure >= PIRATE_SHOOT_UNLOCK_TREASURE_COST {
+							if pm != null && pm.treasure >= PIRATE_SHOOT_UNLOCK_TREASURE_COST {
 								draw_ability_button(this, Shoot_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
 							// Only show Powder Keg once unlocked.
-							if this.pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+							if pm != null && pm.treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
 								draw_ability_button(this, Powder_Keg_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
@@ -754,11 +687,12 @@ Player :: class : Player_Base {
 
 						// Hitman gets Mine + Sniper (only show once unlocked).
 						if player_role == Player_Role.HITMAN {
-							if this.hitman_kills >= HITMAN_MINE_UNLOCK_KILLS {
+							hm := this.entity->get_component(Hitman_Module);
+							if hm != null && hm.kills >= HITMAN_MINE_UNLOCK_KILLS {
 								draw_ability_button(this, Hitman_Mine_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
-							if this.hitman_kills >= HITMAN_SNIPER_UNLOCK_KILLS {
+							if hm != null && hm.kills >= HITMAN_SNIPER_UNLOCK_KILLS {
 								draw_ability_button(this, Hitman_Sniper_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
@@ -766,11 +700,12 @@ Player :: class : Player_Base {
 
 						// Werewolf gets Infect (any form) + Claw (wolf form only), once unlocked.
 						if player_role == Player_Role.WEREWOLF {
-							if this.werewolf_kills >= WEREWOLF_INFECT_UNLOCK_KILLS {
+							wm2 := this.entity->get_component(Werewolf_Module);
+							if wm2 != null && wm2.kills >= WEREWOLF_INFECT_UNLOCK_KILLS {
 								draw_ability_button(this, Werewolf_Infecting_Bite_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
-							if this.werewolf_is_wolf_form && this.werewolf_kills >= WEREWOLF_CLAW_UNLOCK_KILLS {
+							if wm2 != null && wm2.is_wolf_form && wm2.kills >= WEREWOLF_CLAW_UNLOCK_KILLS {
 								draw_ability_button(this, Werewolf_Claw_Slash_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
@@ -809,7 +744,8 @@ Player :: class : Player_Base {
 						draw_ability_button(this, Fake_Meeting_Ability, abilityIndex);
 						abilityIndex += 1;
 						// Only show Jester Win once unlocked.
-						if this.prankster_jester_unlocked_time > 0.0 {
+						prk := this.entity->get_component(Prankster_Module);
+						if prk != null && prk.jester_unlocked_time > 0.0 {
 							draw_ability_button(this, Jester_Win_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
@@ -820,7 +756,8 @@ Player :: class : Player_Base {
 						draw_ability_button(this, Pyromaniac_Light_Corpse_Ability, abilityIndex);
 						abilityIndex += 1;
 						// Only show World Fire once unlocked.
-						if this.pyro_world_fire_unlocked_time > 0.0 {
+						pyro := this.entity->get_component(Pyro_Module);
+						if pyro != null && pyro.world_fire_unlocked_time > 0.0 {
 							draw_ability_button(this, Pyromaniac_World_Fire_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
@@ -1135,9 +1072,17 @@ draw_player_role_hud :: proc(player: Player) {
 
 		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
 
+		hm := player.entity->get_component(Hitman_Module);
+		hm_kills : int = 0;
+		hm_contract_target_id : u64 = 0;
+		if hm != null {
+			hm_kills = hm.kills;
+			hm_contract_target_id = hm.contract_target_id;
+		}
+
 		target_name := "None";
-		if player.hitman_contract_target_id != 0 {
-			t := get_player_by_entity_id(player.hitman_contract_target_id);
+		if hm_contract_target_id != 0 {
+			t := get_player_by_entity_id(hm_contract_target_id);
 			if t != null && t.player_state == Player_State.ALIVE {
 				target_name = t.entity->get_name();
 			}
@@ -1171,7 +1116,7 @@ draw_player_role_hud :: proc(player: Player) {
 			entry_content->cut_left(24.0);
 			row_ts := base_ts;
 			row_ts.color = v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{player.hitman_kills}));
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{hm_kills}));
 		}
 		{
 			entry_rect := list_content->cut_top(ROW_H);
@@ -1179,7 +1124,7 @@ draw_player_role_hud :: proc(player: Player) {
 			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 			checkbox_slot := entry_content->cut_left(24.0);
 			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-			mine_unlocked := player.hitman_kills >= HITMAN_MINE_UNLOCK_KILLS;
+			mine_unlocked := hm_kills >= HITMAN_MINE_UNLOCK_KILLS;
 			if mine_unlocked {
 				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
@@ -1187,14 +1132,14 @@ draw_player_role_hud :: proc(player: Player) {
 			}
 			row_ts := base_ts;
 			row_ts.color = mine_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Mine: %/%", .{min(player.hitman_kills, HITMAN_MINE_UNLOCK_KILLS), HITMAN_MINE_UNLOCK_KILLS}));
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Mine: %/%", .{min(hm_kills, HITMAN_MINE_UNLOCK_KILLS), HITMAN_MINE_UNLOCK_KILLS}));
 		}
 		{
 			entry_rect := list_content->cut_top(ROW_H);
 			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 			checkbox_slot := entry_content->cut_left(24.0);
 			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-			sniper_unlocked := player.hitman_kills >= HITMAN_SNIPER_UNLOCK_KILLS;
+			sniper_unlocked := hm_kills >= HITMAN_SNIPER_UNLOCK_KILLS;
 			if sniper_unlocked {
 				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
@@ -1202,7 +1147,7 @@ draw_player_role_hud :: proc(player: Player) {
 			}
 			row_ts := base_ts;
 			row_ts.color = sniper_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Sniper: %/%", .{min(player.hitman_kills, HITMAN_SNIPER_UNLOCK_KILLS), HITMAN_SNIPER_UNLOCK_KILLS}));
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Sniper: %/%", .{min(hm_kills, HITMAN_SNIPER_UNLOCK_KILLS), HITMAN_SNIPER_UNLOCK_KILLS}));
 		}
 		} // end task_list_open
 	}
@@ -1226,7 +1171,10 @@ draw_player_role_hud :: proc(player: Player) {
 		count_ts.do_outline = true;
 		count_ts.outline_thickness = 3;
 		count_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(icon_rect, count_ts, format_string("%", .{player.coroner_dna_vials.count}));
+		cm := player.entity->get_component(Coroner_Module);
+		vial_count := 0;
+		if cm != null { vial_count = cm.dna_vials.count; }
+		UI.text(icon_rect, count_ts, format_string("%", .{vial_count}));
 	}
 
 	// Pirate unlock progress.
@@ -1272,6 +1220,8 @@ draw_player_role_hud :: proc(player: Player) {
 		base_ts.autofit_max_size = 24;
 
 		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+		pm := player.entity->get_component(Pirate_Module);
+		pirate_treasure := pm != null ? pm.treasure : 0;
 		{
 			entry_rect := list_content->cut_top(ROW_H);
 			list_content->cut_top(2.0);
@@ -1279,7 +1229,7 @@ draw_player_role_hud :: proc(player: Player) {
 			entry_content->cut_left(24.0);
 			row_ts := base_ts;
 			row_ts.color = v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Treasure: %", .{player.pirate_treasure}));
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Treasure: %", .{pirate_treasure}));
 		}
 		{
 			entry_rect := list_content->cut_top(ROW_H);
@@ -1287,7 +1237,7 @@ draw_player_role_hud :: proc(player: Player) {
 			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 			checkbox_slot := entry_content->cut_left(24.0);
 			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-			shoot_unlocked := player.pirate_treasure >= PIRATE_SHOOT_UNLOCK_TREASURE_COST;
+			shoot_unlocked := pirate_treasure >= PIRATE_SHOOT_UNLOCK_TREASURE_COST;
 			if shoot_unlocked {
 				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
@@ -1298,7 +1248,7 @@ draw_player_role_hud :: proc(player: Player) {
 			if shoot_unlocked {
 				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Unlock Shoot: UNLOCKED");
 			} else {
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Shoot: %/%", .{min(player.pirate_treasure, PIRATE_SHOOT_UNLOCK_TREASURE_COST), PIRATE_SHOOT_UNLOCK_TREASURE_COST}));
+				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Shoot: %/%", .{min(pirate_treasure, PIRATE_SHOOT_UNLOCK_TREASURE_COST), PIRATE_SHOOT_UNLOCK_TREASURE_COST}));
 			}
 		}
 		{
@@ -1306,7 +1256,7 @@ draw_player_role_hud :: proc(player: Player) {
 			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 			checkbox_slot := entry_content->cut_left(24.0);
 			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-			powder_keg_unlocked := player.pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST;
+			powder_keg_unlocked := pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST;
 			if powder_keg_unlocked {
 				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
@@ -1317,7 +1267,7 @@ draw_player_role_hud :: proc(player: Player) {
 			if powder_keg_unlocked {
 				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Unlock Powder Keg: UNLOCKED");
 			} else {
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Powder Keg: %/%", .{min(player.pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST), PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
+				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Powder Keg: %/%", .{min(pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST), PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
 			}
 		}
 		} // end task_list_open
@@ -1365,14 +1315,23 @@ draw_player_role_hud :: proc(player: Player) {
 		base_ts.autofit_max_size = 24;
 
 		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+		wm := player.entity->get_component(Werewolf_Module);
+		wm_kills := 0;
+		wm_is_wolf := false;
+		wm_transform_ends := 0.0;
+		if wm != null {
+			wm_kills = wm.kills;
+			wm_is_wolf = wm.is_wolf_form;
+			wm_transform_ends = wm.transform_ends_at;
+		}
 		{
 			entry_rect := list_content->cut_top(ROW_H);
 			list_content->cut_top(2.0);
 			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 			entry_content->cut_left(24.0);
 			row_ts := base_ts;
-			if player.werewolf_is_wolf_form {
-				remaining := player.werewolf_transform_ends_at - get_time();
+			if wm_is_wolf {
+				remaining := wm_transform_ends - get_time();
 				if remaining < 0.0 { remaining = 0.0; }
 				remaining_s := (remaining + 0.999).(int);
 				row_ts.color = v4.{1.0, 0.25, 0.25, 1.0};
@@ -1389,7 +1348,7 @@ draw_player_role_hud :: proc(player: Player) {
 			entry_content->cut_left(24.0);
 			row_ts := base_ts;
 			row_ts.color = v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{player.werewolf_kills}));
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{wm_kills}));
 		}
 		{
 			entry_rect := list_content->cut_top(ROW_H);
@@ -1397,7 +1356,7 @@ draw_player_role_hud :: proc(player: Player) {
 			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 			checkbox_slot := entry_content->cut_left(24.0);
 			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-			infect_unlocked := player.werewolf_kills >= WEREWOLF_INFECT_UNLOCK_KILLS;
+			infect_unlocked := wm_kills >= WEREWOLF_INFECT_UNLOCK_KILLS;
 			if infect_unlocked {
 				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
@@ -1405,14 +1364,14 @@ draw_player_role_hud :: proc(player: Player) {
 			}
 			row_ts := base_ts;
 			row_ts.color = infect_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Infect: %/%", .{min(player.werewolf_kills, WEREWOLF_INFECT_UNLOCK_KILLS), WEREWOLF_INFECT_UNLOCK_KILLS}));
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Infect: %/%", .{min(wm_kills, WEREWOLF_INFECT_UNLOCK_KILLS), WEREWOLF_INFECT_UNLOCK_KILLS}));
 		}
 		{
 			entry_rect := list_content->cut_top(ROW_H);
 			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 			checkbox_slot := entry_content->cut_left(24.0);
 			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-			claw_unlocked := player.werewolf_kills >= WEREWOLF_CLAW_UNLOCK_KILLS;
+			claw_unlocked := wm_kills >= WEREWOLF_CLAW_UNLOCK_KILLS;
 			if claw_unlocked {
 				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
@@ -1420,7 +1379,7 @@ draw_player_role_hud :: proc(player: Player) {
 			}
 			row_ts := base_ts;
 			row_ts.color = claw_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Claw: %/%", .{min(player.werewolf_kills, WEREWOLF_CLAW_UNLOCK_KILLS), WEREWOLF_CLAW_UNLOCK_KILLS}));
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Claw: %/%", .{min(wm_kills, WEREWOLF_CLAW_UNLOCK_KILLS), WEREWOLF_CLAW_UNLOCK_KILLS}));
 		}
 		} // end task_list_open
 	}
@@ -1591,7 +1550,8 @@ rr_werewolf_should_look_werewolf :: proc(player: Player) -> bool {
 	if player.werewolf_infected && game_state == Game_State.INGAME return true;
 	// Werewolf player looks werewolf only during wolf form while in game.
 	if player.player_role == Player_Role.WEREWOLF && player.player_type == Player_Type.TRAITOR && game_state == Game_State.INGAME {
-		return player.werewolf_is_wolf_form;
+		wm := player.entity->get_component(Werewolf_Module);
+		if wm != null return wm.is_wolf_form;
 	}
 	return false;
 }
@@ -1657,14 +1617,10 @@ rr_werewolf_update_skins :: proc(player: Player) {
 
 rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 	if player == null return;
-	prev_is_wolf := player.werewolf_is_wolf_form;
 	now := get_time();
 
-	// Non-werewolf: reset transform state, but don't clobber skin schedules for infected civilians
-	// (their skin enable/disable is managed by the infection system, not the transform timer).
+	// Non-werewolf: just manage skin schedules for infected civilians.
 	if player.player_role != Player_Role.WEREWOLF || player.player_type != Player_Type.TRAITOR {
-		player.werewolf_is_wolf_form = false;
-		player.werewolf_transform_ends_at = 0.0;
 		if !player.werewolf_infected {
 			player.werewolf_skin_enable_at = 0.0;
 			player.werewolf_skin_disable_at = now;
@@ -1672,13 +1628,18 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		return;
 	}
 
+	wm := player.entity->get_component(Werewolf_Module);
+	if wm == null return;
+
+	prev_is_wolf := wm.is_wolf_form;
+
 	// Dead werewolves revert.
 	if player.player_state != Player_State.ALIVE {
 		if prev_is_wolf {
 			player->set_trigger("RESET");
 		}
-		player.werewolf_is_wolf_form = false;
-		player.werewolf_transform_ends_at = 0.0;
+		wm.is_wolf_form = false;
+		wm.transform_ends_at = 0.0;
 		player.werewolf_skin_enable_at = 0.0;
 		player.werewolf_skin_disable_at = now;
 		return;
@@ -1689,30 +1650,30 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		if prev_is_wolf {
 			player->set_trigger("RESET");
 		}
-		player.werewolf_is_wolf_form = false;
-		player.werewolf_transform_ends_at = 0.0;
+		wm.is_wolf_form = false;
+		wm.transform_ends_at = 0.0;
 		player.werewolf_skin_enable_at = 0.0;
 		player.werewolf_skin_disable_at = now;
 		return;
 	}
 
 	// Check if wolf form duration expired.
-	if player.werewolf_is_wolf_form && player.werewolf_transform_ends_at > 0.0 && now >= player.werewolf_transform_ends_at {
-		player.werewolf_is_wolf_form = false;
-		player.werewolf_transform_ends_at = 0.0;
+	if wm.is_wolf_form && wm.transform_ends_at > 0.0 && now >= wm.transform_ends_at {
+		wm.is_wolf_form = false;
+		wm.transform_ends_at = 0.0;
 		player->set_trigger("RESET");
 		player.werewolf_skin_enable_at = 0.0;
 		player.werewolf_skin_disable_at = now;
 	}
 
 	// Speed boost: apply on enter, remove on exit.
-	if player.werewolf_is_wolf_form && !player.werewolf_speed_boost_active {
-		player.werewolf_speed_original = player.agent.movement_speed;
-		player.werewolf_speed_boost_active = true;
-		player.agent.movement_speed = player.werewolf_speed_original * WEREWOLF_WOLF_FORM_SPEED_MULTIPLIER;
-	} else if !player.werewolf_is_wolf_form && player.werewolf_speed_boost_active {
-		player.agent.movement_speed = player.werewolf_speed_original;
-		player.werewolf_speed_boost_active = false;
+	if wm.is_wolf_form && !wm.speed_boost_active {
+		wm.speed_original = player.agent.movement_speed;
+		wm.speed_boost_active = true;
+		player.agent.movement_speed = wm.speed_original * WEREWOLF_WOLF_FORM_SPEED_MULTIPLIER;
+	} else if !wm.is_wolf_form && wm.speed_boost_active {
+		player.agent.movement_speed = wm.speed_original;
+		wm.speed_boost_active = false;
 	}
 }
 
@@ -1728,14 +1689,17 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		this->remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
 		this.werewolf_infected = false;
 		this.werewolf_infected_from_id = 0;
-		this.werewolf_is_wolf_form = false;
-		this.werewolf_transform_ends_at = 0.0;
 		this.werewolf_skin_enable_at = 0.0;
 		this.werewolf_skin_disable_at = 0.0;
 		this.werewolf_infected_transform_trigger_at = 0.0;
-		if this.werewolf_speed_boost_active {
-			this.agent.movement_speed = this.werewolf_speed_original;
-			this.werewolf_speed_boost_active = false;
+		wm := this.entity->get_component(Werewolf_Module);
+		if wm != null {
+			wm.is_wolf_form = false;
+			wm.transform_ends_at = 0.0;
+			if wm.speed_boost_active {
+				this.agent.movement_speed = wm.speed_original;
+				wm.speed_boost_active = false;
+			}
 		}
 	}
 
@@ -2280,6 +2244,9 @@ Report_Corpse_Interactable :: class : Interactable {
 		corpse := entity->get_component(Corpse);
 		if corpse == null return false;
 
+		// Wrapped corpses must be unwrapped before they can be reported.
+		if corpse.ggg_is_wrapped return false;
+
 		// Already-reported bodies should not show the report prompt at all.
 		if corpse.has_been_reported return false;
 
@@ -2315,6 +2282,42 @@ Report_Corpse_Interactable :: class : Interactable {
 		// Body stays in the world after reporting (shows "Already reported" when approached).
 		// Start the meeting.
 		start_meeting(true, player);
+	}
+}
+
+GGG_UNWRAP_HOLD_TIME :: 2.0;
+GGG_UNWRAP_COOLDOWN :: 5.0;
+
+Unwrap_Corpse_Interactable :: class : Interactable {
+	cooldown_ends_at: float;
+
+	ao_start :: method() {
+		this->set_listener(this);
+		this->set_text("Unwrap");
+		this->set_hold_text("Unwrapping...");
+		radius = 3.0;
+		required_hold_time = GGG_UNWRAP_HOLD_TIME;
+		prompt_offset = v2.{0, 1.0};
+		priority = 60;
+	}
+
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if get_time() < cooldown_ends_at return false;
+		corpse := entity->get_component(Corpse);
+		if corpse == null return false;
+		if !corpse.ggg_is_wrapped return false;
+		if corpse.has_been_reported return false;
+		return true;
+	}
+
+	on_interact :: method(player: Player) {
+		corpse := entity->get_component(Corpse);
+		if corpse == null return;
+		corpse.ggg_is_wrapped = false;
+		cooldown_ends_at = get_time() + GGG_UNWRAP_COOLDOWN;
 	}
 }
 

@@ -1571,15 +1571,16 @@ update_tasks_ui :: proc(player: Player) {
 
 		task_name := get_task_display_name(task.id);
 		task_progress := "";
+		prk := player.entity->get_component(Prankster_Module);
 		switch task.#type {
 			case Task_Prank_3_People: {
-				task_progress = format_string("%/3", .{player.prankster_prank_count});
+				if prk != null { task_progress = format_string("%/3", .{prk.prank_count}); }
 			}
 			case Task_Call_Fake_Meeting: {
-				task_progress = format_string("%/1", .{player.prankster_fake_meetings_called});
+				if prk != null { task_progress = format_string("%/1", .{prk.fake_meetings_called}); }
 				// Show the target name as the main text.
-				if !task.completed && player.prankster_fake_meeting_target_id != 0 {
-					target := get_player_by_entity_id(player.prankster_fake_meeting_target_id);
+				if prk != null && !task.completed && prk.fake_meeting_target_id != 0 {
+					target := get_player_by_entity_id(prk.fake_meeting_target_id);
 					if target != null && #alive(target.entity) {
 						task_name = format_string("Vote out %", .{target.entity->get_name()});
 					}
@@ -1591,7 +1592,10 @@ update_tasks_ui :: proc(player: Player) {
 			}
 			case Task_GGG_Wrap: {
 				gt := task.(Task_GGG_Wrap);
-				task_progress = format_string("%/%", .{player.ggg_wraps, gt.goal});
+				ggm := player.entity->get_component(GGG_Module);
+				ggg_w := 0;
+				if ggm != null { ggg_w = ggm.wraps; }
+				task_progress = format_string("%/%", .{ggg_w, gt.goal});
 			}
 		}
 		if task.id == WEREWOLF_INFECT_TO_CURE_TASK_ID {
@@ -1601,7 +1605,10 @@ update_tasks_ui :: proc(player: Player) {
 		}
 		// Pyro objectives (plain Task_Base, matched by id).
 		if task.id == "pyro_burn_1_corpse" {
-			task_progress = format_string("%/1", .{player.pyro_corpses_burned});
+			pyro := player.entity->get_component(Pyro_Module);
+			pyro_corpses := 0;
+			if pyro != null { pyro_corpses = pyro.corpses_burned; }
+			task_progress = format_string("%/1", .{pyro_corpses});
 		}
 
 		text_rect := entry_content;
@@ -1692,7 +1699,8 @@ Task_Prank_3_People :: class : Task_Base {
 	update_task :: proc(using this: Task_Prank_3_People, player: Player) {
 		// No interactive UI: just track progress and complete when met.
 		if completed return;
-		if player.prankster_prank_count >= GOAL {
+		prk := player.entity->get_component(Prankster_Module);
+		if prk != null && prk.prank_count >= GOAL {
 			complete_attempt(this, player, true);
 		}
 	}
@@ -1701,7 +1709,8 @@ Task_Prank_3_People :: class : Task_Base {
 Task_Call_Fake_Meeting :: class : Task_Base {
 	update_task :: proc(using this: Task_Call_Fake_Meeting, player: Player) {
 		if completed return;
-		if player.prankster_fake_meetings_called >= 1 {
+		prk := player.entity->get_component(Prankster_Module);
+		if prk != null && prk.fake_meetings_called >= 1 {
 			complete_attempt(this, player, true);
 		}
 	}
@@ -1713,7 +1722,8 @@ Task_GGG_Wrap :: class : Task_Base {
 
 	update_task :: proc(using this: Task_GGG_Wrap, player: Player) {
 		if completed return;
-		if player.ggg_wraps >= goal {
+		ggm := player.entity->get_component(GGG_Module);
+		if ggm != null && ggm.wraps >= goal {
 			complete_attempt(this, player, true);
 		}
 	}

@@ -1,5 +1,14 @@
 import "core:ao"
 
+// --- Pyromaniac Module ---
+Pyro_Module :: class : Component {
+	props_ignited: int;
+	corpses_burned: int;
+	rooms_burned_out: int;
+	world_fire_unlocked_time: float;
+	room_exposure_timer: float;
+}
+
 // --- Pyromaniac (Anarchist role) ---
 
 PYRO_FIRE_ATTACH_OFFSET_X :: 0.0;
@@ -203,28 +212,30 @@ rr_pyro_update_room_exposure :: proc(player: Player, dt: float) {
 	if !Game.is_server() return;
 	if player == null return;
 	if !#alive(player.entity) return;
+	pyro := player.entity->get_component(Pyro_Module);
+	if pyro == null return;
 
 	// Clear timer if not mid-game or player is not alive.
 	if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
-		player.pyro_room_exposure_timer = 0.0;
+		pyro.room_exposure_timer = 0.0;
 		return;
 	}
 
 	// Pyromaniacs are immune to their own fiery rooms.
 	if player.player_role == Player_Role.PYROMANIAC {
-		player.pyro_room_exposure_timer = 0.0;
+		pyro.room_exposure_timer = 0.0;
 		return;
 	}
 
 	// Already on fire: clear the exposure timer so it restarts fresh afterward.
 	if player.pyro_on_fire {
-		player.pyro_room_exposure_timer = 0.0;
+		pyro.room_exposure_timer = 0.0;
 		return;
 	}
 
 	if !rr_pyro_player_in_fiery_room(player) {
 		// Reset timer when leaving the room.
-		player.pyro_room_exposure_timer = 0.0;
+		pyro.room_exposure_timer = 0.0;
 		return;
 	}
 
@@ -232,14 +243,14 @@ rr_pyro_update_room_exposure :: proc(player: Player, dt: float) {
 	if player->has_task_in_progress() return;
 
 	// Start the countdown the first time a player enters a fiery room.
-	if player.pyro_room_exposure_timer <= 0.0 {
-		player.pyro_room_exposure_timer = PYRO_ROOM_EXPOSURE_DURATION;
+	if pyro.room_exposure_timer <= 0.0 {
+		pyro.room_exposure_timer = PYRO_ROOM_EXPOSURE_DURATION;
 	}
 
-	player.pyro_room_exposure_timer -= dt;
+	pyro.room_exposure_timer -= dt;
 
-	if player.pyro_room_exposure_timer <= 0.0 {
-		player.pyro_room_exposure_timer = 0.0;
+	if pyro.room_exposure_timer <= 0.0 {
+		pyro.room_exposure_timer = 0.0;
 		// Catch fire using the existing status system.
 		on_fire := player.entity->get_component(RR_Player_On_Fire_Status);
 		if on_fire == null {
@@ -256,11 +267,13 @@ rr_pyro_draw_room_exposure_timer :: proc(player: Player) {
 	if game_state != Game_State.INGAME return;
 	if player.player_state != Player_State.ALIVE return;
 	if player.player_role == Player_Role.PYROMANIAC return;
-	if player.pyro_room_exposure_timer <= 0.0 return;
+	pyro := player.entity->get_component(Pyro_Module);
+	if pyro == null return;
+	if pyro.room_exposure_timer <= 0.0 return;
 
 	// --- Screen-space red vignette overlay ---
 	// Steady ramp: faint at the start, deep red when nearly out of time.
-	danger_t      := 1.0 - (player.pyro_room_exposure_timer / PYRO_ROOM_EXPOSURE_DURATION);
+	danger_t      := 1.0 - (pyro.room_exposure_timer / PYRO_ROOM_EXPOSURE_DURATION);
 	danger_t       = clamp(danger_t, 0.0, 1.0);
 	overlay_alpha := lerp(0.08, 0.5, danger_t);
 
@@ -277,14 +290,14 @@ rr_pyro_draw_room_exposure_timer :: proc(player: Player) {
 	defer UI.pop_z();
 
 	// Ceiling of remaining seconds for display.
-	secs_f := player.pyro_room_exposure_timer;
+	secs_f := pyro.room_exposure_timer;
 	secs_i := secs_f.(int);
 	rem := secs_f - secs_i.(float);
 	if rem > 0.001 { secs_i += 1; }
 	if secs_i < 1 { secs_i = 1; }
 
 	// Interpolate color: yellow (full time) → red (about to burn).
-	t := player.pyro_room_exposure_timer / PYRO_ROOM_EXPOSURE_DURATION;
+	t := pyro.room_exposure_timer / PYRO_ROOM_EXPOSURE_DURATION;
 	g := t;
 	if g < 0.0 { g = 0.0; }
 	col := v4.{1.0, g, 0.0, 1.0};
@@ -340,11 +353,13 @@ rr_pyro_find_task :: proc(player: Player, task_id: string) -> Task_Base {
 rr_pyro_check_objectives :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.PYROMANIAC return;
+	pyro := player.entity->get_component(Pyro_Module);
+	if pyro == null return;
 
 	// Mark objective completion (these tasks are just UI objectives).
 	t_corpse := rr_pyro_find_task(player, "pyro_burn_1_corpse");
 	if t_corpse != null {
-		t_corpse.completed = player.pyro_corpses_burned >= 1;
+		t_corpse.completed = pyro.corpses_burned >= 1;
 	}
 
 	// Per-room tasks: complete when the room is fully burned out.
@@ -359,10 +374,10 @@ rr_pyro_check_objectives :: proc(player: Player) {
 	}
 
 	// Unlock World Fire once all objectives are complete.
-	unlocked := (player.pyro_corpses_burned >= 1)
-		&& (player.pyro_rooms_burned_out >= PYRO_ROOMS_BURNOUT_TARGET);
-	if unlocked && player.pyro_world_fire_unlocked_time <= 0.0 {
-		player.pyro_world_fire_unlocked_time = get_time();
+	unlocked := (pyro.corpses_burned >= 1)
+		&& (pyro.rooms_burned_out >= PYRO_ROOMS_BURNOUT_TARGET);
+	if unlocked && pyro.world_fire_unlocked_time <= 0.0 {
+		pyro.world_fire_unlocked_time = get_time();
 		player->Notify("World Fire unlocked!");
 	}
 }
@@ -372,7 +387,9 @@ rr_pyro_register_prop_ignited :: proc(player: Player) {
 	if !Game.is_server() return;
 	if player == null return;
 	if player.player_role != Player_Role.PYROMANIAC return;
-	player.pyro_props_ignited += 1;
+	pyro := player.entity->get_component(Pyro_Module);
+	if pyro == null return;
+	pyro.props_ignited += 1;
 	rr_pyro_check_objectives(player);
 }
 
@@ -381,7 +398,9 @@ rr_pyro_register_corpse_burned :: proc(player: Player) {
 	if !Game.is_server() return;
 	if player == null return;
 	if player.player_role != Player_Role.PYROMANIAC return;
-	player.pyro_corpses_burned += 1;
+	pyro := player.entity->get_component(Pyro_Module);
+	if pyro == null return;
+	pyro.corpses_burned += 1;
 	rr_pyro_check_objectives(player);
 }
 
@@ -390,7 +409,9 @@ rr_pyro_register_room_burned_out :: proc(player: Player) {
 	if !Game.is_server() return;
 	if player == null return;
 	if player.player_role != Player_Role.PYROMANIAC return;
-	player.pyro_rooms_burned_out += 1;
+	pyro := player.entity->get_component(Pyro_Module);
+	if pyro == null return;
+	pyro.rooms_burned_out += 1;
 	rr_pyro_check_objectives(player);
 }
 

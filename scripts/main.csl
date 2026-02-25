@@ -241,6 +241,7 @@ World_References :: class : Component {
 
 		// Reporting is an in-world interactable on the corpse (replaces Report_Ability).
 		corpse->add_component(Report_Corpse_Interactable);
+		corpse->add_component(Unwrap_Corpse_Interactable);
 
         spine_Animator := corpse->get_component(Spine_Animator);
         if spine_Animator != null && spine_Animator.instance != null && player.animator != null && player.animator.instance != null {
@@ -259,15 +260,19 @@ World_References :: class : Component {
 			// Hitman kill-specific corpse deaths (animations are integrated into the player rig).
 			killer := get_player_by_entity_id(killer_player_entity_id);
 			if killer != null && killer.player_role == Player_Role.HITMAN {
-				switch killer.hitman_last_kill_style {
-					case .NECK_SNAP: death_anim = "004RAND_hitman/Kill_Neck_Snapped";
-					case .SNIPER:    death_anim = "004RAND_hitman/Shot_By_Sniper";
-					case .NONE:      death_anim = "Death_No_HP";
+				hm := killer.entity->get_component(Hitman_Module);
+				if hm != null {
+					switch hm.last_kill_style {
+						case .NECK_SNAP: death_anim = "004RAND_hitman/Kill_Neck_Snapped";
+						case .SNIPER:    death_anim = "004RAND_hitman/Shot_By_Sniper";
+						case .NONE:      death_anim = "Death_No_HP";
+					}
 				}
 			}
 
 			// GGG creature-form kills wrap the victim in tinfoil.
-			if killer != null && killer.player_role == Player_Role.GOO_GOO_GAGA && killer.ggg_is_creature_form {
+			killer_gm := killer.entity->get_component(GGG_Module);
+			if killer != null && killer.player_role == Player_Role.GOO_GOO_GAGA && killer_gm != null && killer_gm.is_creature_form {
 				death_anim = "004RAND_GOOGOOGAGA/Death_Tinfoil";
 				if corpse_component != null {
 					corpse_component.ggg_is_wrapped = true;

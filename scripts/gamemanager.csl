@@ -65,7 +65,9 @@ rr_hitman_assign_new_contract :: proc(hitman: Player) {
 
 	// Build candidate list (exclude previous contract to reduce repeats when possible).
 	candidates: List(Player);
-	prev_target_id := hitman.hitman_contract_target_id;
+	hm := hitman.entity->get_component(Hitman_Module);
+	prev_target_id : u64 = 0;
+	if hm != null prev_target_id = hm.contract_target_id;
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
@@ -87,7 +89,7 @@ rr_hitman_assign_new_contract :: proc(hitman: Player) {
 	}
 
 	if candidates.elements.count <= 0 {
-		hitman.hitman_contract_target_id = 0;
+		if hm != null hm.contract_target_id = 0;
 		return;
 	}
 
@@ -95,11 +97,11 @@ rr_hitman_assign_new_contract :: proc(hitman: Player) {
 	idx := rng_range_int(ref rr_rng_state.value, 0, candidates.elements.count - 1);
 	target := candidates.elements[idx];
 	if target == null || !#alive(target.entity) {
-		hitman.hitman_contract_target_id = 0;
+		if hm != null hm.contract_target_id = 0;
 		return;
 	}
 
-	hitman.hitman_contract_target_id = target.entity.id;
+	if hm != null hm.contract_target_id = target.entity.id;
 }
 
 rr_hitman_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_entity_id: u64) {
@@ -112,17 +114,20 @@ rr_hitman_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_e
 	if killer.player_state != Player_State.ALIVE return;
 	if !killer->is_local_or_server() return;
 
-	is_contract := (killer.hitman_contract_target_id != 0 && killer.hitman_contract_target_id == victim_player_entity_id);
+	hm := killer.entity->get_component(Hitman_Module);
+	if hm == null return;
+
+	is_contract := (hm.contract_target_id != 0 && hm.contract_target_id == victim_player_entity_id);
 	// Only contract kills count toward Hitman unlock progress.
 	if is_contract {
-		killer.hitman_kills += 1;
+		hm.kills += 1;
 	}
 
 	// Professional: adjust kill cooldown based on whether the victim was the contract.
 	if is_contract {
-		killer.hitman_kill_cooldown_adjust_seconds += HITMAN_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS;
+		hm.kill_cooldown_adjust_seconds += HITMAN_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS;
 	} else {
-		killer.hitman_kill_cooldown_adjust_seconds += HITMAN_OFF_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS;
+		hm.kill_cooldown_adjust_seconds += HITMAN_OFF_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS;
 	}
 
 	// New contract after each kill.
@@ -141,7 +146,10 @@ rr_werewolf_on_player_killed :: proc(killer_player_entity_id: u64, victim_player
 	// Track on server + local player only (avoid remote-client double counting).
 	if !killer->is_local_or_server() return;
 
-	killer.werewolf_kills += 1;
+	wm := killer.entity->get_component(Werewolf_Module);
+	if wm != null {
+		wm.kills += 1;
+	}
 }
 
 // --- Role variety (no duplicates per round, maximize variety across rounds) ---
@@ -446,12 +454,6 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 		return Player_Role.GOO_GOO_GAGA, true;
 	}
 	return Player_Role.NONE, false;
-}
-
-Hitman_Kill_Style :: enum {
-	NONE;
-	NECK_SNAP;
-	SNIPER;
 }
 
 // --- Movie Star: Autograph trap ---
@@ -1177,7 +1179,7 @@ start_fake_meeting :: proc(caller: Player) {
 	fake_meeting_caller_id = caller.entity.id;
 	// Set the fake-meeting-specific cooldown so the Fake_Meeting_Ability timer syncs correctly.
 	fake_meeting_cooldown_ends_at = get_time() + MEETING_COOLDOWN_SECONDS;
-	// Note: prankster_fake_meetings_called is credited in end_voting() only if the
+	// Note: Prankster_Module.fake_meetings_called is credited in end_voting() only if the
 	// prankster gets voted out (tricked others into targeting them).
 }
 
@@ -1201,7 +1203,9 @@ rr_prankster_assign_target :: proc(prankster: Player) {
 
 	// Build candidate list (exclude current target to avoid repeats when possible).
 	candidates: List(Player);
-	prev_target_id := prankster.prankster_fake_meeting_target_id;
+	prk := prankster.entity->get_component(Prankster_Module);
+	if prk == null return;
+	prev_target_id := prk.fake_meeting_target_id;
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
@@ -1221,7 +1225,7 @@ rr_prankster_assign_target :: proc(prankster: Player) {
 	}
 
 	if candidates.elements.count <= 0 {
-		prankster.prankster_fake_meeting_target_id = 0;
+		prk.fake_meeting_target_id = 0;
 		return;
 	}
 
@@ -1229,11 +1233,11 @@ rr_prankster_assign_target :: proc(prankster: Player) {
 	idx := rng_range_int(ref rr_rng_state.value, 0, candidates.elements.count - 1);
 	target := candidates.elements[idx];
 	if target == null || !#alive(target.entity) {
-		prankster.prankster_fake_meeting_target_id = 0;
+		prk.fake_meeting_target_id = 0;
 		return;
 	}
 
-	prankster.prankster_fake_meeting_target_id = target.entity.id;
+	prk.fake_meeting_target_id = target.entity.id;
 }
 
 // Reassign the prankster's target if the current one is no longer valid (dead/left).
@@ -1243,13 +1247,15 @@ rr_prankster_update_target :: proc(prankster: Player) {
 	if prankster.player_state != Player_State.ALIVE return;
 
 	// If no target yet, assign one.
-	if prankster.prankster_fake_meeting_target_id == 0 {
+	prk := prankster.entity->get_component(Prankster_Module);
+	if prk == null return;
+	if prk.fake_meeting_target_id == 0 {
 		rr_prankster_assign_target(prankster);
 		return;
 	}
 
 	// Check if the current target is still valid.
-	target := get_player_by_entity_id(prankster.prankster_fake_meeting_target_id);
+	target := get_player_by_entity_id(prk.fake_meeting_target_id);
 	if target == null || !#alive(target.entity) || target.player_state != Player_State.ALIVE {
 		rr_prankster_assign_target(prankster);
 	}
@@ -1258,10 +1264,12 @@ rr_prankster_update_target :: proc(prankster: Player) {
 prankster_check_unlock_jester_win :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.PRANKSTER return;
+	prk := player.entity->get_component(Prankster_Module);
+	if prk == null return;
 	// Requires BOTH objectives before unlocking
-	if player.prankster_prank_count >= 3 && player.prankster_fake_meetings_called >= 1 {
-		if player.prankster_jester_unlocked_time <= 0.0 {
-			player.prankster_jester_unlocked_time = get_time();
+	if prk.prank_count >= 3 && prk.fake_meetings_called >= 1 {
+		if prk.jester_unlocked_time <= 0.0 {
+			prk.jester_unlocked_time = get_time();
 			player->Notify("Jester Win unlocked! Survive 15s, then use it to win.");
 		}
 	}
@@ -2185,7 +2193,8 @@ cd :: proc(player: Player) {
 	}
 
 	// Clear deferred per-player cooldown modifiers.
-	player.hitman_kill_cooldown_adjust_seconds = 0.0;
+	hm := player.entity->get_component(Hitman_Module);
+	if hm != null hm.kill_cooldown_adjust_seconds = 0.0;
 
 	// These shared timers also gate ability usage (Fake Meeting + post-meeting attack lockout).
 	// We clear them here so /cd behaves like a true "all ability timers" reset in test sessions.
@@ -2635,8 +2644,9 @@ end_voting :: proc() {
 				}
 			}
 			// Success: the prankster's assigned target is the sole top-voted player.
-			if fm_max_count == 1 && fm_max_player != null && fm_max_votes > 0 && caller.prankster_fake_meeting_target_id != 0 && fm_max_player.entity.id == caller.prankster_fake_meeting_target_id {
-				caller.prankster_fake_meetings_called += 1;
+			prk := caller.entity->get_component(Prankster_Module);
+			if prk != null && fm_max_count == 1 && fm_max_player != null && fm_max_votes > 0 && prk.fake_meeting_target_id != 0 && fm_max_player.entity.id == prk.fake_meeting_target_id {
+				prk.fake_meetings_called += 1;
 				prankster_check_unlock_jester_win(caller);
 				rr_last_vote_prankster_got_voted = true;
 				// Assign a new target for the next fake meeting.
@@ -3027,51 +3037,109 @@ assign_players_to_types :: proc() {
 		if p == null continue;
 		
 		// Per-round resets
-		p.doctor_resurrects_used = 0;
-		// Sheriff: 1 bullet per round (Shoot ability will disable after firing).
-		p.sheriff_gun_ammo = 0;
-		if p.player_type == Player_Type.CIVILIAN && p.player_role == Player_Role.SHERIFF {
-			p.sheriff_gun_ammo = 1;
+		if p.player_role == Player_Role.DOCTOR {
+			dm := p.entity->get_component(Doctor_Module);
+			if dm == null {
+				dm = p.entity->add_component(Doctor_Module);
+			}
+			dm.resurrects_used = 0;
 		}
-		p.coroner_dna_vials->clear();
-		p.hitman_kills = 0;
-		p.hitman_contract_target_id = 0;
-		p.hitman_kill_cooldown_adjust_seconds = 0.0;
-		p.hitman_last_kill_style = Hitman_Kill_Style.NONE;
-		// Pirate
-		p.pirate_treasure = 0;
-		p.pirate_black_flag_unlocked = true;
-		p.pirate_powder_keg_unlocked = false;
+		// Sheriff: 1 bullet per round (Shoot ability will disable after firing).
+		if p.player_role == Player_Role.SHERIFF {
+			sm := p.entity->get_component(Sheriff_Module);
+			if sm == null {
+				sm = p.entity->add_component(Sheriff_Module);
+			}
+			sm.gun_ammo = 1;
+		}
+		if p.player_role == Player_Role.CORONER {
+			cm := p.entity->get_component(Coroner_Module);
+			if cm == null {
+				cm = p.entity->add_component(Coroner_Module);
+			}
+			cm.dna_vials->clear();
+		}
+		if p.player_role == Player_Role.PORTAL_MAKER {
+			portal_mod := p.entity->get_component(Portal_Maker_Module);
+			if portal_mod == null {
+				portal_mod = p.entity->add_component(Portal_Maker_Module);
+			}
+			portal_mod.red_portal = null;
+			portal_mod.blue_portal = null;
+		}
+		if p.player_role == Player_Role.HITMAN {
+			hm := p.entity->get_component(Hitman_Module);
+			if hm == null {
+				hm = p.entity->add_component(Hitman_Module);
+			}
+			hm.kills = 0;
+			hm.contract_target_id = 0;
+			hm.kill_cooldown_adjust_seconds = 0.0;
+			hm.last_kill_style = Hitman_Kill_Style.NONE;
+		}
+		// Pirate — reset or create the module for pirate players.
+		if p.player_role == Player_Role.PIRATE {
+			pm := p.entity->get_component(Pirate_Module);
+			if pm == null {
+				pm = p.entity->add_component(Pirate_Module);
+			}
+			pm.treasure = 0;
+			pm.black_flag_unlocked = true;
+			pm.powder_keg_unlocked = false;
+		}
 		// Ensure any leftover dig-spots from prior sessions are cleared.
 		destroy_pirate_dig_spots_for_player(p.entity.id);
 		// Werewolf — full reset including skin state (guards against /restart race).
 		p->reset_werewolf_visuals();
 		// Capture round-start cosmetics so werewolf cleanup can always restore baseline look.
 		p->capture_werewolf_round_start_look();
-		p.werewolf_kills = 0;
+		// Werewolf module: only for actual werewolves.
+		if p.player_role == Player_Role.WEREWOLF {
+			wwm := p.entity->get_component(Werewolf_Module);
+			if wwm == null {
+				wwm = p.entity->add_component(Werewolf_Module);
+			}
+			wwm.kills = 0;
+			wwm.is_wolf_form = false;
+			wwm.transform_ends_at = 0.0;
+			wwm.speed_boost_active = false;
+			wwm.speed_original = 0.0;
+		}
 
 		// Goo Goo Gaga
-		p.ggg_wraps = 0;
-		p.ggg_is_creature_form = false;
-		p.ggg_creature_form_ends_at = 0.0;
-		p.ggg_speed_boost_active = false;
-		p.ggg_is_crawling = false;
-		p.ggg_crawl_ends_at = 0.0;
-		p.ggg_crawl_speed_active = false;
-		p.ggg_wrap_channel_active = false;
-		p.ggg_wrap_channel_corpse_id = 0;
-		p.ggg_wrap_channel_end_at = 0.0;
-		p.ggg_skeleton_swap_at = 0.0;
-		p.ggg_creature_visible = false;
 		rr_ggg_destroy_creature_entity(p);
+		if p.player_role == Player_Role.GOO_GOO_GAGA {
+			ggm := p.entity->get_component(GGG_Module);
+			if ggm == null {
+				ggm = p.entity->add_component(GGG_Module);
+			}
+			ggm.wraps = 0;
+			ggm.is_creature_form = false;
+			ggm.creature_form_ends_at = 0.0;
+			ggm.speed_boost_active = false;
+			ggm.is_crawling = false;
+			ggm.crawl_ends_at = 0.0;
+			ggm.crawl_speed_active = false;
+			ggm.wrap_channel_active = false;
+			ggm.wrap_channel_corpse_id = 0;
+			ggm.wrap_channel_end_at = 0.0;
+			ggm.skeleton_swap_at = 0.0;
+			ggm.creature_visible = false;
+		}
 
 		// Pyromaniac
 		p.pyro_on_fire = false;
-		p.pyro_props_ignited = 0;
-		p.pyro_corpses_burned = 0;
-		p.pyro_rooms_burned_out = 0;
-		p.pyro_world_fire_unlocked_time = 0.0;
-		p.pyro_room_exposure_timer = 0.0;
+		if p.player_role == Player_Role.PYROMANIAC {
+			pyro := p.entity->get_component(Pyro_Module);
+			if pyro == null {
+				pyro = p.entity->add_component(Pyro_Module);
+			}
+			pyro.props_ignited = 0;
+			pyro.corpses_burned = 0;
+			pyro.rooms_burned_out = 0;
+			pyro.world_fire_unlocked_time = 0.0;
+			pyro.room_exposure_timer = 0.0;
+		}
 
 		if p.player_role == Player_Role.PRANKSTER {
 			p.active_tasks = List(Task_Base).{};
@@ -3086,10 +3154,12 @@ assign_players_to_types :: proc() {
 			append(ref p.active_tasks, fake_task);
 
 			// Reset prank progress at round start
-			p.prankster_prank_count = 0;
-			p.prankster_fake_meetings_called = 0;
-			p.prankster_jester_unlocked_time = 0.0;
-			p.prankster_fake_meeting_target_id = 0;
+			prk := p.entity->get_component(Prankster_Module);
+			if prk == null { prk = p.entity->add_component(Prankster_Module); }
+			prk.prank_count = 0;
+			prk.fake_meetings_called = 0;
+			prk.jester_unlocked_time = 0.0;
+			prk.fake_meeting_target_id = 0;
 		}
 
 		if p.player_role == Player_Role.GOO_GOO_GAGA {

@@ -1,9 +1,15 @@
 import "core:ao"
 
 // --- Portal Maker gameplay ---
-// - Portals are per Portal Maker (stored on the owning Player).
+// - Portals are per Portal Maker (stored in Portal_Maker_Module on the owning Player entity).
 // - Any alive player can use a linked portal by standing on it for 2 seconds.
 // - After teleporting, the destination portal won't re-teleport you until you step off and back on.
+
+// --- Portal Maker Module ---
+Portal_Maker_Module :: class : Component {
+	red_portal: Entity;
+	blue_portal: Entity;
+}
 
 PORTAL_MAKER_BOLT_SPEED :: 14.0;
 // Bolt travel tuning: keep portals from always reaching the wall.
@@ -25,32 +31,36 @@ PORTAL_MAKER_WALL_BACKSTEP :: 0.9;
 rr_portal_maker_cleanup_for_player :: proc(player: Player) {
 	if player == null return;
 
-	// Unlink + destroy red
-	if player.portal_maker_red_portal != null && #alive(player.portal_maker_red_portal) {
-		red_portal := player.portal_maker_red_portal->get_component(RR_Portal);
-		if red_portal != null && red_portal.linked_portal != null && #alive(red_portal.linked_portal) {
-			other := red_portal.linked_portal->get_component(RR_Portal);
-			if other != null {
-				other.linked_portal = null;
+	pm := player.entity->get_component(Portal_Maker_Module);
+	if pm != null {
+		// Unlink + destroy red
+		if pm.red_portal != null && #alive(pm.red_portal) {
+			red_portal := pm.red_portal->get_component(RR_Portal);
+			if red_portal != null && red_portal.linked_portal != null && #alive(red_portal.linked_portal) {
+				other := red_portal.linked_portal->get_component(RR_Portal);
+				if other != null {
+					other.linked_portal = null;
+				}
 			}
+			pm.red_portal->destroy();
 		}
-		player.portal_maker_red_portal->destroy();
+
+		// Unlink + destroy blue
+		if pm.blue_portal != null && #alive(pm.blue_portal) {
+			blue_portal := pm.blue_portal->get_component(RR_Portal);
+			if blue_portal != null && blue_portal.linked_portal != null && #alive(blue_portal.linked_portal) {
+				other := blue_portal.linked_portal->get_component(RR_Portal);
+				if other != null {
+					other.linked_portal = null;
+				}
+			}
+			pm.blue_portal->destroy();
+		}
+
+		pm.red_portal = null;
+		pm.blue_portal = null;
 	}
 
-	// Unlink + destroy blue
-	if player.portal_maker_blue_portal != null && #alive(player.portal_maker_blue_portal) {
-		blue_portal := player.portal_maker_blue_portal->get_component(RR_Portal);
-		if blue_portal != null && blue_portal.linked_portal != null && #alive(blue_portal.linked_portal) {
-			other := blue_portal.linked_portal->get_component(RR_Portal);
-			if other != null {
-				other.linked_portal = null;
-			}
-		}
-		player.portal_maker_blue_portal->destroy();
-	}
-
-	player.portal_maker_red_portal = null;
-	player.portal_maker_blue_portal = null;
 	player.portal_standing_on_portal = null;
 	player.portal_blocked_portal = null;
 	player.portal_standing_seconds = 0.0;
@@ -76,8 +86,11 @@ rr_destroy_all_portals :: proc() {
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
-		p.portal_maker_red_portal = null;
-		p.portal_maker_blue_portal = null;
+		pm := p.entity->get_component(Portal_Maker_Module);
+		if pm != null {
+			pm.red_portal = null;
+			pm.blue_portal = null;
+		}
 		p.portal_standing_on_portal = null;
 		p.portal_blocked_portal = null;
 		p.portal_standing_seconds = 0.0;
@@ -122,11 +135,14 @@ rr_portal_maker_place_portal :: proc(owner: Player, is_red: bool, position: v2, 
 	}
 
 	// Remove old portal of the same color (and unlink its partner if needed).
+	pm := owner.entity->get_component(Portal_Maker_Module);
+	if pm == null return;
+
 	old: Entity;
 	if is_red {
-		old = owner.portal_maker_red_portal;
+		old = pm.red_portal;
 	} else {
-		old = owner.portal_maker_blue_portal;
+		old = pm.blue_portal;
 	}
 	if old != null && #alive(old) {
 		old_portal := old->get_component(RR_Portal);
@@ -163,17 +179,17 @@ rr_portal_maker_place_portal :: proc(owner: Player, is_red: bool, position: v2, 
 	portal.linked_portal = null;
 
 	if is_red {
-		owner.portal_maker_red_portal = e;
+		pm.red_portal = e;
 	} else {
-		owner.portal_maker_blue_portal = e;
+		pm.blue_portal = e;
 	}
 
 	// Link if the other portal exists.
 	other_entity: Entity;
 	if is_red {
-		other_entity = owner.portal_maker_blue_portal;
+		other_entity = pm.blue_portal;
 	} else {
-		other_entity = owner.portal_maker_red_portal;
+		other_entity = pm.red_portal;
 	}
 	if other_entity != null && #alive(other_entity) {
 		other_portal := other_entity->get_component(RR_Portal);
