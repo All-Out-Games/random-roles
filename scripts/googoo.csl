@@ -298,7 +298,7 @@ GGG_Transform_Lock :: class : Component {
 
 
 // ============================================================================
-// Transform Update (server-authoritative)
+// Transform Update
 // ============================================================================
 
 rr_ggg_update_transform :: proc(player: Player, dt: float) {
@@ -797,11 +797,14 @@ GGG_Decoy :: class : Component {
 			pick_new_target();
 		}
 
-		// Use Movement_Agent pathfinding to stay on navmesh
+		// Move directly toward target, using pathfinding for direction.
 		if agent != null {
 			result := agent->set_path_target(move_target, speed);
-			// Flip entity scale to face movement direction
 			if result.success {
+				new_pos := entity.world_position + result.move_direction * speed * dt;
+				entity->set_local_position(new_pos);
+
+				// Flip entity scale to face movement direction
 				s := entity.local_scale;
 				if result.move_direction.x > 0.01 {
 					entity->set_local_scale(v2.{abs(s.x), s.y});
