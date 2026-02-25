@@ -70,7 +70,6 @@ Player :: class : Player_Base {
 	local_light: Light;
 	local_light_caster: LOS_Caster;
 
-
 	// --- Camera ---
 	// Saved once at start so we can restore it at the beginning of each round.
 	camera_default_size: float;
@@ -2222,6 +2221,9 @@ Call_Meeting_Interactable :: class : Component {
 
 // Spawned on corpse entities so reporting is an in-world interaction, not an ability.
 Report_Corpse_Interactable :: class : Interactable {
+	// Set by Unwrap_Corpse_Interactable to prevent immediate report after an unwrap.
+	cooldown_ends_at: float;
+
 	ao_start :: method() {
 		this->set_listener(this);
 		this->set_text("Report");
@@ -2240,6 +2242,8 @@ Report_Corpse_Interactable :: class : Interactable {
 		if player.player_state != Player_State.ALIVE return false;
 		// Infected players cannot report bodies (they can't call meetings).
 		if player.werewolf_infected return false;
+		// Brief lockout after an unwrap so report doesn't fire in the same gesture.
+		if get_time() < cooldown_ends_at return false;
 
 		corpse := entity->get_component(Corpse);
 		if corpse == null return false;
@@ -2318,6 +2322,11 @@ Unwrap_Corpse_Interactable :: class : Interactable {
 		if corpse == null return;
 		corpse.ggg_is_wrapped = false;
 		cooldown_ends_at = get_time() + GGG_UNWRAP_COOLDOWN;
+		// Lock out reporting briefly so it doesn't fire in the same interaction gesture.
+		report := entity->get_component(Report_Corpse_Interactable);
+		if report != null {
+			report.cooldown_ends_at = get_time() + 1.0;
+		}
 	}
 }
 
