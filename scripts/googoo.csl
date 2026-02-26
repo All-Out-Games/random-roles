@@ -52,6 +52,9 @@ GGG_TRAP_MAX_ACTIVE :: 2;
 GGG_TRAP_LIFETIME_SECONDS :: 60.0;
 GGG_TRAP_TRIGGER_RADIUS :: 0.8;
 GGG_TRAP_UNLOCK_WRAPS :: 2;
+GGG_TRAP_RIG :: "anims/trap/004RAND_SantaTrap.spine";
+GGG_TRAP_PLACE_DURATION :: 0.8;
+GGG_TRAP_ACTIVATE_DURATION :: 1.2;
 
 GGG_SWARM_COOLDOWN_SECONDS :: 90.0;
 GGG_SWARM_DECOY_COUNT :: 3;
@@ -559,18 +562,61 @@ GGG_Trap_Entry :: class {
 
 ggg_traps: [..]GGG_Trap_Entry;
 
+// State: 0 = placing, 1 = idle, 2 = activating
+GGG_Trap_Animator :: class : Component {
+	state: int;
+	state_end_at: float;
+
+	ao_update :: method(dt: float) {
+		if !Game.is_server() return;
+		// Destroy check first — must not be gated behind spine null guards
+		if state == 2 && get_time() >= state_end_at {
+			entity->destroy();
+			return;
+		}
+		spine := entity->get_component(Spine_Animator);
+		if spine == null return;
+		if spine.instance == null return;
+		if state == 0 && get_time() >= state_end_at {
+			state = 1;
+			spine.instance->set_animation("Idle", true, 0);
+		}
+	}
+
+	activate :: method() {
+		if !Game.is_server() return;
+		state = 2;
+		state_end_at = get_time() + GGG_TRAP_ACTIVATE_DURATION;
+		spine := entity->get_component(Spine_Animator);
+		if spine == null return;
+		if spine.instance == null return;
+		spine.instance->set_animation("Activate", false, 0);
+	}
+}
+
 GGG_Trap_Visibility :: class : Component {
 	ao_update :: method(dt: float) {
+		spine := entity->get_component(Spine_Animator);
+		if spine == null return;
+		if spine.instance == null return;
+
+		// During Place or Activate: visible to everyone
+		trap_anim := entity->get_component(GGG_Trap_Animator);
+		if trap_anim != null && trap_anim.state != 1 {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
+			return;
+		}
+
+		// During Idle: only visible to traitors
 		local_player, ok := Game.get_local_player();
-		if !ok return;
-		visible := local_player.player_type == Player_Type.TRAITOR;
-		sprite := entity->get_component(Sprite_Renderer);
-		if sprite != null {
-			if visible {
-				sprite.color = v4.{1, 1, 1, 1};
-			} else {
-				sprite.color = v4.{1, 1, 1, 0};
-			}
+		if !ok {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 0};
+			return;
+		}
+		if local_player.player_type == Player_Type.TRAITOR {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
+		} else {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 0};
 		}
 	}
 }
@@ -601,13 +647,18 @@ rr_ggg_place_trap :: proc(player: Player, world_pos: v2) {
 	trap_e->set_local_position(world_pos);
 	trap_e->set_local_scale(v2.{0.6, 0.6});
 
-	sprite := trap_e->add_component(Sprite_Renderer);
-	if sprite != null {
-		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/ggg/santa_trap_2.png"));
-		sprite.layer = 0;
-		sprite.depth_offset = 1.0;
+	spine := trap_e->add_component(Spine_Animator);
+	if spine != null {
+		spine->awaken();
+		if spine.instance != null {
+			spine.instance->set_skeleton(get_asset(Spine_Asset, GGG_TRAP_RIG));
+			spine.instance->set_animation("Place", false, 0);
+		}
 	}
 
+	anim := trap_e->add_component(GGG_Trap_Animator);
+	anim.state = 0;
+	anim.state_end_at = get_time() + GGG_TRAP_PLACE_DURATION;
 	trap_e->add_component(GGG_Trap_Visibility);
 	entry.trap_entity = trap_e;
 
@@ -708,9 +759,14 @@ update_ggg_traps :: proc() {
 				}
 				root->arm(GGG_TRAP_ROOT_SECONDS);
 
-				// Destroy the trap entity
+				// Play activate animation then destroy
 				if t.trap_entity != null && #alive(t.trap_entity) {
-					t.trap_entity->destroy();
+					trap_anim := t.trap_entity->get_component(GGG_Trap_Animator);
+					if trap_anim != null {
+						trap_anim->activate();
+					} else {
+						t.trap_entity->destroy();
+					}
 				}
 				last := ggg_traps.count - 1;
 				ggg_traps[i] = ggg_traps[last];
