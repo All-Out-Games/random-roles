@@ -57,10 +57,12 @@ GGG_TRAP_PLACE_DURATION :: 0.8;
 GGG_TRAP_ACTIVATE_DURATION :: 1.2;
 
 GGG_SWARM_COOLDOWN_SECONDS :: 90.0;
-GGG_SWARM_DECOY_COUNT :: 3;
+GGG_SWARM_DECOY_COUNT :: 15;
 GGG_SWARM_DURATION_SECONDS :: 10.0;
 GGG_SWARM_UNLOCK_WRAPS :: 3;
 GGG_SWARM_DECOY_SPEED :: 4.0;
+GGG_SWARM_EXPLODE_RADIUS :: 1.5;
+GGG_SWARM_EXPLODE_DESTROY_DELAY :: 0.6;
 
 // Night Crawler passive (during power outage)
 GGG_NIGHT_TRANSFORM_CD :: 15.0;
@@ -811,6 +813,8 @@ GGG_Decoy :: class : Component {
 	expires_at: float;
 	agent: Movement_Agent;
 	nav_hint: int;
+	exploding: bool;
+	explode_end_at: float;
 
 	ao_start :: method() {
 		rng = rng_seed(entity.id);
@@ -841,9 +845,44 @@ GGG_Decoy :: class : Component {
 		move_interval_end = get_time() + rng_range_float(ref rng, 1.0, 2.0);
 	}
 
+	start_explode :: method() {
+		exploding = true;
+		explode_end_at = get_time() + GGG_SWARM_EXPLODE_DESTROY_DELAY;
+
+		spine := entity->get_component(Spine_Animator);
+		if spine != null && spine.instance != null {
+			spine.instance->set_animation("Crawl_Explode", false, 0);
+		}
+
+		if Game.is_server() {
+			for j: 0..players.elements.count-1 {
+				p := players.elements[j];
+				if p == null continue;
+				if !#alive(p.entity) continue;
+				if p.player_state != Player_State.ALIVE continue;
+				if p.player_type == Player_Type.TRAITOR continue;
+				dist := length(p.entity.world_position - entity.world_position);
+				if dist < GGG_SWARM_EXPLODE_RADIUS {
+					root := p.entity->get_component(GGG_Trap_Root_Effect);
+					if root == null {
+						root = p.entity->add_component(GGG_Trap_Root_Effect);
+					}
+					root->arm(GGG_TRAP_ROOT_SECONDS);
+				}
+			}
+		}
+	}
+
 	ao_update :: method(dt: float) {
+		if exploding {
+			if get_time() >= explode_end_at {
+				entity->destroy();
+			}
+			return;
+		}
+
 		if get_time() >= expires_at {
-			entity->destroy();
+			start_explode();
 			return;
 		}
 
@@ -912,15 +951,15 @@ update_ggg_decoys :: proc() {
 	i := 0;
 	while i < ggg_decoys.count {
 		d := ggg_decoys[i];
-		if now >= d.expires_at || d.decoy_entity == null || !#alive(d.decoy_entity) {
-			if d.decoy_entity != null && #alive(d.decoy_entity) {
-				d.decoy_entity->destroy();
-			}
+
+		// Only remove from list once the entity is gone — the component handles all lifetime/expiry logic
+		if d.decoy_entity == null || !#alive(d.decoy_entity) {
 			last := ggg_decoys.count - 1;
 			ggg_decoys[i] = ggg_decoys[last];
 			ggg_decoys->pop();
 			continue;
 		}
+
 		i += 1;
 	}
 }
