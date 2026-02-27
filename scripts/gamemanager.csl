@@ -413,46 +413,47 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 	return "none";
 }
 
+// Case-insensitive single-char lowercase: "A"-"Z" → "a"-"z", others pass through.
+rr_lower_char :: proc(ch: string) -> string {
+	if ch == "A" return "a"; if ch == "B" return "b"; if ch == "C" return "c";
+	if ch == "D" return "d"; if ch == "E" return "e"; if ch == "F" return "f";
+	if ch == "G" return "g"; if ch == "H" return "h"; if ch == "I" return "i";
+	if ch == "J" return "j"; if ch == "K" return "k"; if ch == "L" return "l";
+	if ch == "M" return "m"; if ch == "N" return "n"; if ch == "O" return "o";
+	if ch == "P" return "p"; if ch == "Q" return "q"; if ch == "R" return "r";
+	if ch == "S" return "s"; if ch == "T" return "t"; if ch == "U" return "u";
+	if ch == "V" return "v"; if ch == "W" return "w"; if ch == "X" return "x";
+	if ch == "Y" return "y"; if ch == "Z" return "z";
+	return ch;
+}
+
+// Lowercase an entire string and normalize spaces to underscores.
+rr_to_lower :: proc(s: string) -> string {
+	result := "";
+	for i: 0..s.count-1 {
+		ch := string_substring(s, i, 1);
+		lower := rr_lower_char(ch);
+		if lower == " " { lower = "_"; }
+		result = format_string("%0%", .{result, lower});
+	}
+	return result;
+}
+
 rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
-	if role_name == "none" || role_name == "None" {
-		return Player_Role.NONE, true;
-	}
-	if role_name == "sheriff" || role_name == "Sheriff" {
-		return Player_Role.SHERIFF, true;
-	}
-	if role_name == "doctor" || role_name == "Doctor" {
-		return Player_Role.DOCTOR, true;
-	}
-	if role_name == "president" || role_name == "President" {
-		return Player_Role.PRESIDENT, true;
-	}
-	if role_name == "movie_star" || role_name == "movie star" || role_name == "Movie_Star" || role_name == "Movie Star" {
-		return Player_Role.MOVIE_STAR, true;
-	}
-	if role_name == "coroner" || role_name == "Coroner" {
-		return Player_Role.CORONER, true;
-	}
-	if role_name == "portal_maker" || role_name == "portal maker" || role_name == "Portal_Maker" || role_name == "Portal Maker" || role_name == "warper" || role_name == "Warper" || role_name == "WARPER" {
-		return Player_Role.PORTAL_MAKER, true;
-	}
-	if role_name == "prankster" || role_name == "Prankster" {
-		return Player_Role.PRANKSTER, true;
-	}
-	if role_name == "pyromaniac" || role_name == "Pyromaniac" {
-		return Player_Role.PYROMANIAC, true;
-	}
-	if role_name == "pirate" || role_name == "Pirate" {
-		return Player_Role.PIRATE, true;
-	}
-	if role_name == "hitman" || role_name == "Hitman" {
-		return Player_Role.HITMAN, true;
-	}
-	if role_name == "werewolf" || role_name == "Werewolf" {
-		return Player_Role.WEREWOLF, true;
-	}
-	if role_name == "goo_goo_gaga" || role_name == "goo goo gaga" || role_name == "Goo_Goo_Gaga" || role_name == "Goo Goo Gaga" || role_name == "googoo" || role_name == "GGG" {
-		return Player_Role.GOO_GOO_GAGA, true;
-	}
+	name := rr_to_lower(role_name);
+	if name == "none"                                          return Player_Role.NONE, true;
+	if name == "sheriff"                                       return Player_Role.SHERIFF, true;
+	if name == "doctor"                                        return Player_Role.DOCTOR, true;
+	if name == "president"                                     return Player_Role.PRESIDENT, true;
+	if name == "movie_star"                                    return Player_Role.MOVIE_STAR, true;
+	if name == "coroner"                                       return Player_Role.CORONER, true;
+	if name == "portal_maker" || name == "warper"              return Player_Role.PORTAL_MAKER, true;
+	if name == "prankster"                                     return Player_Role.PRANKSTER, true;
+	if name == "pyromaniac"                                    return Player_Role.PYROMANIAC, true;
+	if name == "pirate"                                        return Player_Role.PIRATE, true;
+	if name == "hitman"                                        return Player_Role.HITMAN, true;
+	if name == "werewolf"                                      return Player_Role.WEREWOLF, true;
+	if name == "ggg" || name == "goo_goo_gaga" || name == "googoo" return Player_Role.GOO_GOO_GAGA, true;
 	return Player_Role.NONE, false;
 }
 
@@ -3163,13 +3164,8 @@ assign_players_to_types :: proc() {
 		}
 
 		if p.player_role == Player_Role.GOO_GOO_GAGA {
+			// GGG has a dedicated role HUD panel (like werewolf) — no task list tasks.
 			p.active_tasks = List(Task_Base).{};
-
-			wrap := new(Task_GGG_Wrap);
-			wrap.id = "ggg_wrap_3";
-			wrap.started = true;
-			wrap.goal = 3;
-			append(ref p.active_tasks, wrap);
 		}
 
 		if p.player_role == Player_Role.PYROMANIAC {

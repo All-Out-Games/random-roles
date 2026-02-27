@@ -1382,6 +1382,125 @@ draw_player_role_hud :: proc(player: Player) {
 		}
 		} // end task_list_open
 	}
+
+	draw_ggg_role_hud(player);
+}
+
+// --- GGG ability unlock progress: left side ---
+draw_ggg_role_hud :: proc(player: Player) {
+	if player == null return;
+	if player.player_role != Player_Role.GOO_GOO_GAGA return;
+	if !player->is_local_or_server() return;
+
+	UI.push_layer(1600);
+	defer UI.pop_layer();
+
+	_pushed_scale := rr_push_mobile_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
+	safe := UI.get_safe_screen_rect();
+
+	PANEL_W :: 300.0;
+	ROW_H :: 32.0;
+	LIST_PAD :: 10.0;
+	DROPDOWN_SLICE_PX :: 16.0;
+
+	row_count := 4;
+	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
+
+	header_rect := rr_draw_task_list_header(safe, false, player);
+
+	if player.task_list_open {
+	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+
+	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
+	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
+	checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
+
+	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
+
+	base_ts := UI.default_text_settings();
+	base_ts.size = 24;
+	base_ts.halign = .LEFT;
+	base_ts.valign = .CENTER;
+	base_ts.do_outline = true;
+	base_ts.outline_thickness = 4;
+	base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+	base_ts.do_autofit = true;
+	base_ts.autofit_min_size = 14;
+	base_ts.autofit_max_size = 24;
+
+	list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+	gm := player.entity->get_component(GGG_Module);
+	ggg_wraps := 0;
+	ggg_is_creature := false;
+	ggg_form_ends := 0.0;
+	if gm != null {
+		ggg_wraps = gm.wraps;
+		ggg_is_creature = gm.is_creature_form;
+		ggg_form_ends = gm.creature_form_ends_at;
+	}
+	// Row 1: wrap count
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		row_ts.color = v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Wraps: %", .{ggg_wraps}));
+	}
+	// Row 3: Crawl unlock
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		crawl_unlocked := ggg_wraps >= GGG_CRAWL_UNLOCK_WRAPS;
+		if crawl_unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = crawl_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Crawl: %/%", .{min(ggg_wraps, GGG_CRAWL_UNLOCK_WRAPS), GGG_CRAWL_UNLOCK_WRAPS}));
+	}
+	// Row 4: Trap unlock
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		trap_unlocked := ggg_wraps >= GGG_TRAP_UNLOCK_WRAPS;
+		if trap_unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = trap_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Trap: %/%", .{min(ggg_wraps, GGG_TRAP_UNLOCK_WRAPS), GGG_TRAP_UNLOCK_WRAPS}));
+	}
+	// Row 5: Swarm unlock
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		swarm_unlocked := ggg_wraps >= GGG_SWARM_UNLOCK_WRAPS;
+		if swarm_unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = swarm_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Swarm: %/%", .{min(ggg_wraps, GGG_SWARM_UNLOCK_WRAPS), GGG_SWARM_UNLOCK_WRAPS}));
+	}
+	} // end task_list_open
 }
 
 // --- Werewolf transform (ability-driven, server authoritative) ---
@@ -2309,6 +2428,7 @@ Unwrap_Corpse_Interactable :: class : Interactable {
 		if player == null return false;
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
+		if player.player_type == Player_Type.TRAITOR return false;
 		if get_time() < cooldown_ends_at return false;
 		corpse := entity->get_component(Corpse);
 		if corpse == null return false;
@@ -2321,6 +2441,13 @@ Unwrap_Corpse_Interactable :: class : Interactable {
 		corpse := entity->get_component(Corpse);
 		if corpse == null return;
 		corpse.ggg_is_wrapped = false;
+		// Restore the pre-wrap death animation visually.
+		spine := entity->get_component(Spine_Animator);
+		if spine != null && spine.instance != null {
+			restore := corpse.ggg_pre_wrap_death_anim.count > 0 ? corpse.ggg_pre_wrap_death_anim : (corpse.death_anim.count > 0 ? corpse.death_anim : "Death_No_HP");
+			spine.instance->set_animation(restore, false, 0, 1000.0);
+			corpse.death_anim = restore;
+		}
 		cooldown_ends_at = get_time() + GGG_UNWRAP_COOLDOWN;
 		// Lock out reporting briefly so it doesn't fire in the same interaction gesture.
 		report := entity->get_component(Report_Corpse_Interactable);
@@ -2359,6 +2486,8 @@ Corpse :: class : Component {
 	pirate_map_taken: bool;
 	// GGG: true once the corpse has been wrapped in foil.
 	ggg_is_wrapped: bool;
+	// GGG: death animation saved before wrapping, so we can restore it on unwrap.
+	ggg_pre_wrap_death_anim: string;
 
 	// --- Drag Body ---
 	// 0 = not being dragged; otherwise entity id of the dragging player.
@@ -2412,8 +2541,10 @@ Corpse :: class : Component {
 		// Detect drag state changes to avoid restarting the drag animation every frame.
 		if dragged_by_player_entity_id != last_dragged_by_player_entity_id {
 			if dragged_by_player_entity_id != 0 {
-				// Dragging: play the dedicated drag-loop.
-				spine.instance->set_animation("004RAND/dead_body_drag", true, 0);
+				// Wrapped corpses keep their tinfoil pose while dragged.
+				if !ggg_is_wrapped {
+					spine.instance->set_animation("004RAND/dead_body_drag", true, 0);
+				}
 			} else {
 				// Dropped: restore the original corpse pose by fast-forwarding the death anim.
 				restore := death_anim.count > 0 ? death_anim : "Death_No_HP";
@@ -2823,6 +2954,14 @@ update_minimap_ui :: proc(player: Player) {
 				role_panel_rect = Rect{v2.{panel_anchor.min.x, list_rect.min.y}, v2.{panel_anchor.min.x + PANEL_W, header_rect.max.y}};
 				has_role_panel = true;
 			} else if player.player_role == Player_Role.WEREWOLF {
+				row_count := 4;
+				list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
+				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
+				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				role_panel_rect = Rect{v2.{panel_anchor.min.x, list_rect.min.y}, v2.{panel_anchor.min.x + PANEL_W, header_rect.max.y}};
+				has_role_panel = true;
+			} else if player.player_role == Player_Role.GOO_GOO_GAGA {
 				row_count := 4;
 				list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);

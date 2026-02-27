@@ -24,6 +24,8 @@ GGG_Module :: class : Component {
 	creature_animator: Spine_Animator;
 	skeleton_swap_at: float;
 	creature_visible: bool;
+	// Set to >0 when auto-revert fires, consumed by GGG_Transform_Ability to apply cooldown.
+	pending_transform_cooldown: float;
 }
 
 // --- Constants ---
@@ -40,13 +42,14 @@ GGG_WRAP_RANGE :: 2.5;
 GGG_WRAP_MOVEMENT_INTERRUPT_THRESHOLD :: 0.15;
 
 GGG_CRAWL_COOLDOWN_SECONDS :: 30.0;
-GGG_CRAWL_DURATION_SECONDS :: 5.0;
+GGG_CRAWL_DURATION_SECONDS :: 12.0;
 GGG_CRAWL_SPEED_MULTIPLIER :: 1.75;
 GGG_CRAWL_SCALE_X :: 0.5;
 GGG_CRAWL_SCALE_Y :: 0.5;
 GGG_CRAWL_UNLOCK_WRAPS :: 1;
 
 GGG_TRAP_COOLDOWN_SECONDS :: 45.0;
+GGG_TRAP_PLACE_DISTANCE :: 4.0;
 GGG_TRAP_ROOT_SECONDS :: 3.0;
 GGG_TRAP_MAX_ACTIVE :: 2;
 GGG_TRAP_LIFETIME_SECONDS :: 60.0;
@@ -387,6 +390,12 @@ rr_ggg_begin_revert :: proc(player: Player) {
 	gm.is_creature_form = false;
 	gm.creature_form_ends_at = 0.0;
 	gm.skeleton_swap_at = 0.0;
+	// Signal the transform ability to apply its cooldown on next frame.
+	cooldown := GGG_TRANSFORM_COOLDOWN_SECONDS;
+	if rr_power_outage_active {
+		cooldown = GGG_NIGHT_TRANSFORM_CD;
+	}
+	gm.pending_transform_cooldown = cooldown;
 	// Speed will be restored in the transform update next frame
 	rr_ggg_swap_to_player(player);
 	player->set_trigger("ggg_revert");
@@ -513,6 +522,10 @@ rr_ggg_complete_wrap :: proc(player: Player) {
 		if !#alive(corpse.entity) continue;
 		if corpse.entity.id == corpse_id {
 			corpse.ggg_is_wrapped = true;
+			// Save the pre-wrap death animation so unwrap can restore it.
+			corpse.ggg_pre_wrap_death_anim = corpse.death_anim.count > 0 ? corpse.death_anim : "Death_No_HP";
+			// Update death_anim so drag-restore shows tinfoil, not the original pose.
+			corpse.death_anim = "004RAND_GOOGOOGAGA/Dead_Body_Tinfoil";
 			// Play the tinfoil body animation on the corpse
 			spine := corpse.entity->get_component(Spine_Animator);
 			if spine != null && spine.instance != null {
@@ -1033,6 +1046,12 @@ GGG_Transform_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Apply cooldown from auto-revert (creature form expired naturally).
+		gm_check := player.entity->get_component(GGG_Module);
+		if gm_check != null && gm_check.pending_transform_cooldown > 0.0 {
+			current_cooldown = gm_check.pending_transform_cooldown;
+			gm_check.pending_transform_cooldown = 0.0;
+		}
 		if params.clicked && params.can_use {
 			gm := player.entity->get_component(GGG_Module);
 			if gm == null return;
@@ -1241,6 +1260,9 @@ GGG_Crawl_Ability :: class : Ability_Base {
 GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 	NAME :: "Trap";
 
+	was_targeting: bool;
+	activated_this_session: bool;
+
 	on_init :: proc(instance: GGG_Chocolate_Trap_Ability) {
 		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/santa_trap.png");
 		instance.is_aimed_ability = true;
@@ -1259,6 +1281,11 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 		return true;
 	}
 
+	cleanup_targeting :: method() {
+		was_targeting = false;
+		activated_this_session = false;
+	}
+
 	on_update :: method(params: ref Ability_Update_Params) {
 		// Locked notification
 		if params.clicked && !params.can_use {
@@ -1270,13 +1297,74 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 			}
 		}
 
-		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+		// Enter/exit targeting mode via standard helper.
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		targeting := targeted.targeting;
 
-		if activation.activate {
-			// Place trap at player position + aim direction
-			place_pos := player.entity.world_position + activation.direction * 2.0;
-			rr_ggg_place_trap(player, place_pos);
+		// Cancel aim if ability becomes unusable.
+		if targeting && !params.can_use {
+			player.active_ability = null;
+			cleanup_targeting();
+			return;
+		}
+
+		// Track targeting transitions.
+		if targeting && !was_targeting {
+			activated_this_session = false;
+			was_targeting = true;
+		}
+		if !targeting {
+			if was_targeting {
+				cleanup_targeting();
+			}
+			return;
+		}
+
+		aiming := Ability_Utilities.update_aiming_ability(player, ref params);
+		if aiming.cancel {
+			player.active_ability = null;
+			cleanup_targeting();
+			return;
+		}
+
+		// Compute target position (mouse position clamped to max range).
+		target_pos := get_mouse_world_position();
+		{
+			origin := player.entity.world_position;
+			delta := target_pos - origin;
+			max_r := GGG_TRAP_PLACE_DISTANCE;
+			if length_squared(delta) > max_r * max_r {
+				if length_squared(delta) < 0.001 {
+					delta = v2.{1, 0};
+				} else {
+					delta = normalize(delta);
+				}
+				target_pos = origin + delta * max_r;
+			}
+		}
+
+		// Draw aiming line + ground reticle.
+		draw_aiming_line(player.entity.world_position, aiming.aim_direction, 1.0 / player.camera.size * 4);
+		if player->is_local() {
+			UI.push_world_draw_context();
+			defer UI.pop_draw_context();
+			UI.push_z(target_pos.y);
+			defer UI.pop_z();
+			reticle := get_asset(Texture_Asset, GROUND_RETICLE_TEXTURE_PATH);
+			reticle_rect := Rect{target_pos, target_pos}->grow(0.80, 0.80, 0.80, 0.80);
+			UI.quad(reticle_rect->fit_aspect(reticle->get_aspect()), reticle, v4.{1, 1, 1, 0.95});
+		}
+
+		if activated_this_session {
+			return;
+		}
+
+		if aiming.activate && params.can_use {
+			activated_this_session = true;
 			current_cooldown = GGG_TRAP_COOLDOWN_SECONDS;
+			rr_ggg_place_trap(player, target_pos);
+			player.active_ability = null;
+			cleanup_targeting();
 		}
 	}
 
