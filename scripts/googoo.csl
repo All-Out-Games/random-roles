@@ -24,6 +24,8 @@ GGG_Module :: class : Component {
 	creature_animator: Spine_Animator;
 	skeleton_swap_at: float;
 	creature_visible: bool;
+	crawl_sfx_id: u64;
+	crawl_sfx_playing: bool;
 	// Set to >0 when auto-revert fires, consumed by GGG_Transform_Ability to apply cooldown.
 	pending_transform_cooldown: float;
 }
@@ -64,8 +66,8 @@ GGG_SWARM_DECOY_COUNT :: 15;
 GGG_SWARM_DURATION_SECONDS :: 10.0;
 GGG_SWARM_UNLOCK_WRAPS :: 3;
 GGG_SWARM_DECOY_SPEED :: 4.0;
-GGG_SWARM_EXPLODE_RADIUS :: 1.5;
 GGG_SWARM_EXPLODE_DESTROY_DELAY :: 0.6;
+GGG_SWARM_EXPLODE_RADIUS :: 2.5;
 
 // Night Crawler passive (during power outage)
 GGG_NIGHT_TRANSFORM_CD :: 15.0;
@@ -181,7 +183,7 @@ rr_ggg_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 	crawl_idle_state := layer->create_state("Crawl_Idle", true);
 	crawl_move_state := layer->create_state("Crawl_Move", true);
 	crawl_end_state := layer->create_state("Crawl_End", false, 0.5);
-	pounce_state := layer->create_state("Pounce", false, 1.0);
+	pounce_state := layer->create_state("PounceWrap", false, 1.0);
 
 	layer->set_initial_state(idle_state);
 
@@ -365,6 +367,31 @@ rr_ggg_update_transform :: proc(player: Player, dt: float) {
 		rr_ggg_end_crawl(player);
 	}
 
+	// Crawl SFX: play only while moving, stop when idle
+	if Game.is_server() {
+		if gm.is_crawling {
+			crawl_moving := length_squared(player.agent.velocity) > 0.01;
+			if crawl_moving && !gm.crawl_sfx_playing {
+				crawl_desc := SFX.default_sfx_desc();
+				crawl_desc.entity_to_follow = player.entity.id;
+				crawl_desc.loop = true;
+				crawl_desc.loop_timeout = 0.0;
+				crawl_desc.volume = 0.1;
+				crawl_desc.speed_perturb = 0.05;
+				gm.crawl_sfx_id = rr_play_sfx("sfx/ggg_crawl.wav", crawl_desc);
+				gm.crawl_sfx_playing = true;
+			} else if !crawl_moving && gm.crawl_sfx_playing {
+				SFX.stop(gm.crawl_sfx_id);
+				gm.crawl_sfx_id = 0;
+				gm.crawl_sfx_playing = false;
+			}
+		} else if gm.crawl_sfx_playing {
+			SFX.stop(gm.crawl_sfx_id);
+			gm.crawl_sfx_id = 0;
+			gm.crawl_sfx_playing = false;
+		}
+	}
+
 	// Wrap channel: interrupt if player moved
 	if gm.wrap_channel_active {
 		dist := length(player.entity.world_position - gm.wrap_channel_last_pos);
@@ -465,6 +492,12 @@ rr_ggg_end_crawl :: proc(player: Player) {
 	if gm.crawl_speed_active {
 		player.agent.movement_speed = gm.crawl_speed_original;
 		gm.crawl_speed_active = false;
+	}
+	// Stop crawl SFX
+	if Game.is_server() && gm.crawl_sfx_playing {
+		SFX.stop(gm.crawl_sfx_id);
+		gm.crawl_sfx_id = 0;
+		gm.crawl_sfx_playing = false;
 	}
 	// Fire crawl end trigger on creature state machine.
 	if gm.creature_visible && gm.creature_animator != null && gm.creature_animator.instance != null {
@@ -828,6 +861,8 @@ GGG_Decoy :: class : Component {
 	nav_hint: int;
 	exploding: bool;
 	explode_end_at: float;
+	sfx_id: u64;
+	sfx_next_play_at: float;
 
 	ao_start :: method() {
 		rng = rng_seed(entity.id);
@@ -837,6 +872,8 @@ GGG_Decoy :: class : Component {
 			agent->set_navmesh_to_lock_to(world_references.main_navmesh);
 		}
 		pick_new_target();
+		// Schedule first ggg sound with a random offset so they don't all play at once
+		sfx_next_play_at = get_time() + rng_range_float(ref rng, 0.0, 4.0);
 	}
 
 	pick_new_target :: method() {
@@ -886,8 +923,19 @@ GGG_Decoy :: class : Component {
 		}
 	}
 
+	ao_end :: method() {
+		if sfx_id != 0 {
+			SFX.stop(sfx_id);
+			sfx_id = 0;
+		}
+	}
+
 	ao_update :: method(dt: float) {
 		if exploding {
+			if sfx_id != 0 {
+				SFX.stop(sfx_id);
+				sfx_id = 0;
+			}
 			if get_time() >= explode_end_at {
 				entity->destroy();
 			}
@@ -897,6 +945,19 @@ GGG_Decoy :: class : Component {
 		if get_time() >= expires_at {
 			start_explode();
 			return;
+		}
+
+		// Play ggg sound with random breaks, picking a random variant each time
+		if Game.is_server() && get_time() >= sfx_next_play_at {
+			sfx_desc := SFX.default_sfx_desc();
+			sfx_desc.entity_to_follow = entity.id;
+			sfx_desc.volume = 0.2;
+			sfx_desc.speed_perturb = 0.15;
+			variant := rng_range_int(ref rng, 1, 3);
+			sfx_path := format_string("sfx/ggg%.wav", {variant});
+			sfx_id = rr_play_sfx(sfx_path, sfx_desc);
+			// Wider random break so fewer compete for audio channels
+			sfx_next_play_at = get_time() + rng_range_float(ref rng, 3.0, 5.0);
 		}
 
 		now := get_time();
@@ -932,7 +993,7 @@ rr_ggg_spawn_decoys :: proc(player: Player) {
 	for i: 0..GGG_SWARM_DECOY_COUNT-1 {
 		decoy_e := Scene.create_entity();
 		decoy_e->set_local_position(player.entity.world_position);
-		decoy_e->set_local_scale(v2.{GGG_CRAWL_SCALE_X, GGG_CRAWL_SCALE_Y});
+		decoy_e->set_local_scale(v2.{0.7, 0.7});
 
 		spine := decoy_e->add_component(Spine_Animator);
 		if spine != null {
@@ -1090,6 +1151,12 @@ GGG_Transform_Ability :: class : Ability_Base {
 					sfx.volume_perturb = 0.05 * 0.25;
 					sfx.speed_perturb = 0.05;
 					rr_play_sfx("sfx/killer_transform.wav", sfx);
+
+					ggg_sfx := SFX.default_sfx_desc();
+					ggg_sfx->set_position(player.entity.world_position);
+					ggg_sfx.volume = 0.3;
+					ggg_sfx.speed_perturb = 0.05;
+					rr_play_sfx("sfx/ggg1.wav", ggg_sfx);
 				}
 
 				current_cooldown = 0.0; // No CD while in form (button stays for revert)
