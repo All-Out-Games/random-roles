@@ -27,7 +27,7 @@ Leaderboard :: class : Component {
 
     base_ts: Text_Settings;
 
-    ao_start :: method() {
+    init_texture :: method() {
         board_texture  = get_asset(Texture_Asset, "leaderboard/leaderboard.png");
         shadow_texture = get_asset(Texture_Asset, "leaderboard/shadow.png");
 
@@ -36,6 +36,10 @@ Leaderboard :: class : Component {
         if bg_third  == null { bg_third  = get_asset(Texture_Asset, "leaderboard/RANK 3.png"); }
         if bg_other  == null { bg_other  = get_asset(Texture_Asset, "leaderboard/RANK 4.png"); }
         if bg_me     == null { bg_me     = get_asset(Texture_Asset, "leaderboard/RANK ME.png"); }
+    }
+
+    ao_start :: method() {
+        init_texture();
 
         base_ts = UI.default_text_settings();
         base_ts.size  = 0.15;
@@ -49,6 +53,10 @@ Leaderboard :: class : Component {
         this->refresh_entries();
         this->refresh_my_entry();
         last_refresh_time = get_time();
+    }
+
+    ao_editor_start :: method() {
+        init_texture();
     }
 
     // Data refresh only — drawing is done from Player.ao_late_update
@@ -106,46 +114,47 @@ Leaderboard :: class : Component {
 
             UI.quad(board_rect, board_texture);
         }
-
-        my_rect := viewport_rect->cut_bottom(0.3);
-        if has_my_entry {
-            this->draw_my_entry(my_rect);
-        }
-
-        settings: Scroll_View_Settings;
-        settings.vertical   = true;
-        settings.horizontal = false;
-        settings.clip_padding = v4.{0, 0.1, 0, 0};
-
-        sv := UI.push_scroll_view(viewport_rect, "world_leaderboard", settings); {
-            defer UI.pop_scroll_view();
-
-            content_cut := sv.content_rect->top_rect();
-
-            for i: 0..49 {
-                h := 0.23;
-                if i == 0 { h = 0.55; }
-                if i == 1 { h = 0.375; }
-                if i == 2 { h = 0.375; }
-
-                entry_rect := content_cut->cut_top(h);
-                if i == 0 { entry_rect = entry_rect->grow(0, 0.075, 0, 0); }
-
-                this->draw_entry(entry_rect, i);
-                UI.expand_current_scroll_view(entry_rect);
-                content_cut->cut_top(0.05);
+        if !Game.is_editor() {
+            my_rect := viewport_rect->cut_bottom(0.3);
+            if has_my_entry {
+                this->draw_my_entry(my_rect);
             }
-        }
 
-        if optional_title.count > 0 {
-            title_pos := pos + v2.{0, -2.0};
-            title_rect := Rect.{title_pos, title_pos};
+            settings: Scroll_View_Settings;
+            settings.vertical   = true;
+            settings.horizontal = false;
+            settings.clip_padding = v4.{0, 0.1, 0, 0};
 
-            title_ts := base_ts;
-            title_ts.size       = 0.5;
-            title_ts.word_wrap  = false;
+            sv := UI.push_scroll_view(viewport_rect, "world_leaderboard", settings); {
+                defer UI.pop_scroll_view();
 
-            UI.text(title_rect, title_ts, optional_title);
+                content_cut := sv.content_rect->top_rect();
+
+                for i: 0..49 {
+                    h := 0.23;
+                    if i == 0 { h = 0.55; }
+                    if i == 1 { h = 0.375; }
+                    if i == 2 { h = 0.375; }
+
+                    entry_rect := content_cut->cut_top(h);
+                    if i == 0 { entry_rect = entry_rect->grow(0, 0.075, 0, 0); }
+
+                    this->draw_entry(entry_rect, i);
+                    UI.expand_current_scroll_view(entry_rect);
+                    content_cut->cut_top(0.05);
+                }
+            }
+
+            if optional_title.count > 0 {
+                title_pos := pos + v2.{0, -2.0};
+                title_rect := Rect.{title_pos, title_pos};
+
+                title_ts := base_ts;
+                title_ts.size       = 0.5;
+                title_ts.word_wrap  = false;
+
+                UI.text(title_rect, title_ts, optional_title);
+            }
         }
     }
 
