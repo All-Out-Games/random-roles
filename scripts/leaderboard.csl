@@ -295,14 +295,25 @@ on_my_entry_received :: proc(raw: Ordered_Save_Entry, userdata: Object) {
     }
 }
 
+Leaderboard_Increment_Data :: class {
+    user_id: string;
+    leaderboard_id: string;
+    amount: f64;
+}
+
 leaderboard_increment_score :: proc(player: Player, leaderboard_id: string, amount: f64) {
     if !Game.is_server() return;
-    user_id := player->get_user_id();
-    save_key := format_string("lb_score_%", {leaderboard_id});
-    current := Save.get_f64(player, save_key, 0.0);
-    new_score := current + amount;
-    Save.set_f64(player, save_key, new_score);
-    Save.ordered_set(leaderboard_id, user_id, new_score);
+    data := new(Leaderboard_Increment_Data);
+    data.leaderboard_id = leaderboard_id;
+    data.user_id = player->get_user_id();
+    data.amount = amount;
+    #rootify_object(data);
+    Save.ordered_get(leaderboard_id, data.user_id, 0.0, data, proc(entry: Ordered_Save_Entry, userdata: Object) {
+        d := userdata.(Leaderboard_Increment_Data);
+        new_score := entry.value + d.amount;
+        Save.ordered_set(d.leaderboard_id, d.user_id, new_score);
+        #free_root(d);
+    });
 }
 
 lb_ordinal_suffix :: proc(index: int) -> string {
