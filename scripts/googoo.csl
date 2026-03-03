@@ -4,6 +4,10 @@ import "core:ao"
 // Goo Goo Gaga (GGG) — Traitor Role
 // ============================================================================
 
+// Toggle: when false, GGG is hidden from role assignment and help UI.
+// Use /ggg chat command to toggle.
+rr_ggg_role_enabled: bool;
+
 // --- GGG Module ---
 GGG_Module :: class : Component {
 	wraps: int;
@@ -52,7 +56,7 @@ GGG_CRAWL_UNLOCK_WRAPS :: 1;
 
 GGG_TRAP_COOLDOWN_SECONDS :: 45.0;
 GGG_TRAP_PLACE_DISTANCE :: 4.0;
-GGG_TRAP_ROOT_SECONDS :: 3.0;
+GGG_TRAP_ROOT_SECONDS :: 15.0;
 GGG_TRAP_MAX_ACTIVE :: 2;
 GGG_TRAP_LIFETIME_SECONDS :: 60.0;
 GGG_TRAP_TRIGGER_RADIUS :: 0.8;
@@ -375,7 +379,7 @@ rr_ggg_update_transform :: proc(player: Player, dt: float) {
 				crawl_desc := SFX.default_sfx_desc();
 				crawl_desc.entity_to_follow = player.entity.id;
 				crawl_desc.loop = true;
-				crawl_desc.loop_timeout = 0.0;
+				crawl_desc.loop_timeout = GGG_CRAWL_DURATION_SECONDS;
 				crawl_desc.volume = 0.1;
 				crawl_desc.speed_perturb = 0.05;
 				gm.crawl_sfx_id = rr_play_sfx("sfx/ggg_crawl.wav", crawl_desc);
@@ -417,12 +421,7 @@ rr_ggg_begin_revert :: proc(player: Player) {
 	gm.is_creature_form = false;
 	gm.creature_form_ends_at = 0.0;
 	gm.skeleton_swap_at = 0.0;
-	// Signal the transform ability to apply its cooldown on next frame.
-	cooldown := GGG_TRANSFORM_COOLDOWN_SECONDS;
-	if rr_power_outage_active {
-		cooldown = GGG_NIGHT_TRANSFORM_CD;
-	}
-	gm.pending_transform_cooldown = cooldown;
+	gm.pending_transform_cooldown = 0.0;
 	// Speed will be restored in the transform update next frame
 	rr_ggg_swap_to_player(player);
 	player->set_trigger("ggg_revert");
@@ -494,7 +493,7 @@ rr_ggg_end_crawl :: proc(player: Player) {
 		gm.crawl_speed_active = false;
 	}
 	// Stop crawl SFX
-	if Game.is_server() && gm.crawl_sfx_playing {
+	if gm.crawl_sfx_playing {
 		SFX.stop(gm.crawl_sfx_id);
 		gm.crawl_sfx_id = 0;
 		gm.crawl_sfx_playing = false;
@@ -950,9 +949,14 @@ GGG_Decoy :: class : Component {
 		// Play ggg sound with random breaks, picking a random variant each time
 		if Game.is_server() && get_time() >= sfx_next_play_at {
 			sfx_desc := SFX.default_sfx_desc();
-			sfx_desc.entity_to_follow = entity.id;
-			sfx_desc.volume = 0.2;
 			sfx_desc.speed_perturb = 0.15;
+			// Night Crawler: during power outage, goo goo ga ga SFX is global
+			if rr_power_outage_active {
+				sfx_desc.volume = 0.2;
+			} else {
+				sfx_desc.entity_to_follow = entity.id;
+				sfx_desc.volume = 0.2;
+			}
 			variant := rng_range_int(ref rng, 1, 3);
 			sfx_path := format_string("sfx/ggg%.wav", {variant});
 			sfx_id = rr_play_sfx(sfx_path, sfx_desc);
@@ -1119,12 +1123,7 @@ GGG_Transform_Ability :: class : Ability_Base {
 			if gm.is_creature_form {
 				// Revert
 				rr_ggg_begin_revert(player);
-				cooldown := GGG_TRANSFORM_COOLDOWN_SECONDS;
-				// Night Crawler passive
-				if rr_power_outage_active {
-					cooldown = GGG_NIGHT_TRANSFORM_CD;
-				}
-				current_cooldown = cooldown;
+				current_cooldown = 0.0;
 			} else {
 				// Enter creature form
 				gm.is_creature_form = true;
@@ -1153,9 +1152,14 @@ GGG_Transform_Ability :: class : Ability_Base {
 					rr_play_sfx("sfx/killer_transform.wav", sfx);
 
 					ggg_sfx := SFX.default_sfx_desc();
-					ggg_sfx->set_position(player.entity.world_position);
-					ggg_sfx.volume = 0.3;
 					ggg_sfx.speed_perturb = 0.05;
+					// Night Crawler: during power outage, goo goo ga ga SFX is global
+					if rr_power_outage_active {
+						ggg_sfx.volume = 0.3;
+					} else {
+						ggg_sfx->set_position(player.entity.world_position);
+						ggg_sfx.volume = 0.3;
+					}
 					rr_play_sfx("sfx/ggg1.wav", ggg_sfx);
 				}
 
@@ -1410,8 +1414,7 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 			}
 		}
 
-		// Draw aiming line + ground reticle.
-		draw_aiming_line(player.entity.world_position, aiming.aim_direction, 1.0 / player.camera.size * 4);
+		// Draw reticle + translucent trap preview at target position.
 		if player->is_local() {
 			UI.push_world_draw_context();
 			defer UI.pop_draw_context();
@@ -1420,6 +1423,9 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 			reticle := get_asset(Texture_Asset, GROUND_RETICLE_TEXTURE_PATH);
 			reticle_rect := Rect{target_pos, target_pos}->grow(0.80, 0.80, 0.80, 0.80);
 			UI.quad(reticle_rect->fit_aspect(reticle->get_aspect()), reticle, v4.{1, 1, 1, 0.95});
+			trap_preview := get_asset(Texture_Asset, "sprites/icons/ggg/santa_trap.png");
+			preview_rect := Rect{target_pos, target_pos}->grow(0.60, 0.60, 0.60, 0.60);
+			UI.quad(preview_rect->fit_aspect(trap_preview->get_aspect()), trap_preview, v4.{1, 1, 1, 0.45});
 		}
 
 		if activated_this_session {
