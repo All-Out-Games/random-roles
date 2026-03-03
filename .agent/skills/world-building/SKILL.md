@@ -28,20 +28,21 @@ scene_screenshot         → See the current scene visually
 
 #### 3a. Search local relevant assets
 ```
-assets_find (query: "tree")
-assets_find (query: "road")
-assets_find (query: "grass")
+asset_local_search (query: "tree")
+asset_local_search (query: "road")
+asset_local_search (query: "grass")
 ```
 
 #### 3b. Search catalog only for any gaps
 ```
-catalog_search (query: "oak tree")
-catalog_search (query: "dirt road tile")
+asset_remote_search (query: "oak tree")
+asset_remote_search (query: "dirt road tile")
 ```
 
 #### 3c. Download what you need
 ```
-catalog_download (source_url: "...", filename: "environment/oak_tree.png")
+asset_remote_download (id: "asset_id_from_search")
+asset_remote_download (ids: ["id_1", "id_2"])  // batch download
 ```
 
 ### Step 4: Build — Place entities in logical order
@@ -119,7 +120,7 @@ For setting layers, tint, depth, or doing multiple complex ops at once:
 ```
 
 #### Key fields on Sprite_Renderer
-- `texture` — asset path (what you'd pass to `assets_find`)
+- `texture` — asset path (what you'd pass to `asset_local_search`)
 - `layer` — integer draw order. Higher layers render on top. Use this to separate ground (-10), objects (0), foreground (8+)
 - `tint` — `[r, g, b, a]` values 0-1. Use for color variation (e.g. slightly different greens on trees)
 
