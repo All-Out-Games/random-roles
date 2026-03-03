@@ -37,6 +37,7 @@ GGG_Module :: class : Component {
 // --- Constants ---
 GGG_KILL_COOLDOWN_SECONDS :: 25.0;
 GGG_TRANSFORM_START_COOLDOWN_SECONDS :: 15.0;
+GGG_TRANSFORM_TOGGLE_COOLDOWN_SECONDS :: 2.0;
 GGG_TRANSFORM_COOLDOWN_SECONDS :: 30.0;
 GGG_TRANSFORM_DURATION_SECONDS :: 15.0;
 GGG_TRANSFORM_ANIM_ENTER_SECONDS :: 0.5;
@@ -482,6 +483,12 @@ rr_ggg_end_crawl :: proc(player: Player) {
 	if player == null return;
 	gm := player.entity->get_component(GGG_Module);
 	if gm == null return;
+	// Always stop crawl SFX, even if is_crawling is already false.
+	if gm.crawl_sfx_id != 0 {
+		SFX.stop(gm.crawl_sfx_id);
+		gm.crawl_sfx_id = 0;
+	}
+	gm.crawl_sfx_playing = false;
 	if !gm.is_crawling return;
 	gm.is_crawling = false;
 	gm.crawl_ends_at = 0.0;
@@ -491,12 +498,6 @@ rr_ggg_end_crawl :: proc(player: Player) {
 	if gm.crawl_speed_active {
 		player.agent.movement_speed = gm.crawl_speed_original;
 		gm.crawl_speed_active = false;
-	}
-	// Stop crawl SFX
-	if gm.crawl_sfx_playing {
-		SFX.stop(gm.crawl_sfx_id);
-		gm.crawl_sfx_id = 0;
-		gm.crawl_sfx_playing = false;
 	}
 	// Fire crawl end trigger on creature state machine.
 	if gm.creature_visible && gm.creature_animator != null && gm.creature_animator.instance != null {
@@ -904,6 +905,12 @@ GGG_Decoy :: class : Component {
 		}
 
 		if Game.is_server() {
+			explode_sfx_desc := SFX.default_sfx_desc();
+			explode_sfx_desc.entity_to_follow = entity.id;
+			explode_sfx_desc.volume = 0.4;
+			explode_sfx_desc.speed_perturb = 0.1;
+			rr_play_sfx("sfx/ggg_explode.wav", explode_sfx_desc);
+
 			for j: 0..players.elements.count-1 {
 				p := players.elements[j];
 				if p == null continue;
@@ -1123,7 +1130,7 @@ GGG_Transform_Ability :: class : Ability_Base {
 			if gm.is_creature_form {
 				// Revert
 				rr_ggg_begin_revert(player);
-				current_cooldown = 0.0;
+				current_cooldown = GGG_TRANSFORM_TOGGLE_COOLDOWN_SECONDS;
 			} else {
 				// Enter creature form
 				gm.is_creature_form = true;
@@ -1163,7 +1170,7 @@ GGG_Transform_Ability :: class : Ability_Base {
 					rr_play_sfx("sfx/ggg1.wav", ggg_sfx);
 				}
 
-				current_cooldown = 0.0; // No CD while in form (button stays for revert)
+				current_cooldown = GGG_TRANSFORM_TOGGLE_COOLDOWN_SECONDS;
 			}
 		}
 	}
