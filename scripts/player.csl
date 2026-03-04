@@ -342,6 +342,8 @@ Player :: class : Player_Base {
 				rr_draw_temp_resurrect_timers();
 				// Draw fiery-room exposure countdown above the local player's head.
 				rr_pyro_draw_room_exposure_timer(this);
+				// Draw stun countdown timers above stunned players' heads.
+				rr_draw_stun_timers();
 			}
 			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
 				this->draw_letterbox_bars();
@@ -1016,6 +1018,99 @@ rr_draw_temp_resurrect_timers :: proc() {
 		}
 
 		UI.text(text_rect, ts, format_string("%s", .{remaining_i}));
+	}
+}
+
+// Returns the longest remaining stun time for a player, or 0 if not stunned.
+rr_get_stun_remaining :: proc(p: Player) -> float {
+	if p == null return 0.0;
+	if !#alive(p.entity) return 0.0;
+
+	now := get_time();
+	best := 0.0;
+
+	ws := p.entity->get_component(Werewolf_Infection_Stun);
+	if ws != null && ws.active {
+		r := ws.end_time - now;
+		if r > best { best = r; }
+	}
+
+	hm := p.entity->get_component(Hitman_Mine_Stun);
+	if hm != null && hm.active {
+		r := hm.stun_end_time - now;
+		if r > best { best = r; }
+	}
+
+	pe := p.entity->get_component(Pranked_Effect);
+	if pe != null && pe.phase == 1 {
+		r := pe.stun_end_time - now;
+		if r > best { best = r; }
+	}
+
+	sa := p.entity->get_component(Stunned_By_Autograph_Effect);
+	if sa != null && sa.active {
+		r := sa.stun_end_time - now;
+		if r > best { best = r; }
+	}
+
+	gr := p.entity->get_component(GGG_Trap_Root_Effect);
+	if gr != null && gr.active {
+		r := gr.root_end_time - now;
+		if r > best { best = r; }
+	}
+
+	if best < 0.0 { best = 0.0; }
+	return best;
+}
+
+// Draw a countdown timer above the head of every stunned player.
+rr_draw_stun_timers :: proc() {
+	if game_state != Game_State.INGAME return;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+
+	foreach p: component_iterator(Player) {
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if p.player_state != Player_State.ALIVE continue;
+
+		remaining := rr_get_stun_remaining(p);
+		if remaining <= 0.0 continue;
+
+		// Ceiling for display.
+		secs_i := remaining.(int);
+		frac := remaining - secs_i.(float);
+		if frac > 0.001 { secs_i += 1; }
+		if secs_i < 1 { secs_i = 1; }
+
+		pos := p.entity.world_position;
+
+		UI.push_z(pos.y);
+		defer UI.pop_z();
+
+		// Position above the player.
+		label_pos := pos + v2.{0.0, 1.8};
+
+		// Background pill.
+		bg_rect := Rect{label_pos, label_pos}->grow(0.18, 0.45, 0.18, 0.45);
+		UI.quad(bg_rect, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.55});
+
+		// Color: lerp from white to red as time decreases (treat 5s as "full").
+		t := clamp(remaining / 5.0, 0.0, 1.0);
+		col := v4.{1.0, t, t, 1.0};
+
+		ts := UI.default_text_settings();
+		ts.size = 0.30;
+		ts.color = col;
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 0.05;
+		ts.outline_color = v4.{0.0, 0.0, 0.0, 1.0};
+
+		text_rect := Rect{label_pos, label_pos}->grow(0.16, 0.43, 0.16, 0.43);
+		UI.text(text_rect, ts, format_string("%s", .{secs_i}));
 	}
 }
 
