@@ -533,7 +533,7 @@ rr_ggg_cancel_wrap :: proc(player: Player) {
 	gm.wrap_channel_active = false;
 	gm.wrap_channel_corpse_id = 0;
 	gm.wrap_channel_end_at = 0.0;
-	player->remove_disable_movement_input_reason(GGG_WRAP_LOCK_REASON);
+	player->remove_freeze_reason(GGG_WRAP_LOCK_REASON);
 	rr_ggg_creature_trigger(player, "wrap_end");
 }
 
@@ -546,7 +546,7 @@ rr_ggg_complete_wrap :: proc(player: Player) {
 	gm.wrap_channel_active = false;
 	gm.wrap_channel_corpse_id = 0;
 	gm.wrap_channel_end_at = 0.0;
-	player->remove_disable_movement_input_reason(GGG_WRAP_LOCK_REASON);
+	player->remove_freeze_reason(GGG_WRAP_LOCK_REASON);
 	rr_ggg_creature_trigger(player, "wrap_end");
 
 	// Find the corpse and mark it wrapped
@@ -956,6 +956,11 @@ GGG_Decoy :: class : Component {
 
 		// Play ggg sound with random breaks, picking a random variant each time
 		if Game.is_server() && get_time() >= sfx_next_play_at {
+			// Stop previous sound before starting a new one to avoid orphaned sfx_ids
+			if sfx_id != 0 {
+				SFX.stop(sfx_id);
+				sfx_id = 0;
+			}
 			sfx_desc := SFX.default_sfx_desc();
 			sfx_desc.speed_perturb = 0.15;
 			// Night Crawler: during power outage, goo goo ga ga SFX is global
@@ -1002,6 +1007,7 @@ rr_ggg_spawn_decoys :: proc(player: Player) {
 	if !Game.is_server() return;
 
 	now := get_time();
+	spawn_rng: u64 = rng_seed_time();
 	for i: 0..GGG_SWARM_DECOY_COUNT-1 {
 		decoy_e := Scene.create_entity();
 		decoy_e->set_local_position(player.entity.world_position);
@@ -1019,12 +1025,14 @@ rr_ggg_spawn_decoys :: proc(player: Player) {
 		agent := decoy_e->add_component(Movement_Agent);
 		agent.movement_speed = GGG_SWARM_DECOY_SPEED;
 
+		// Stagger expiry so decoys don't all explode at the same instant
+		stagger := rng_range_float(ref spawn_rng, 0.0, 2.0);
 		decoy_comp := decoy_e->add_component(GGG_Decoy);
-		decoy_comp.expires_at = now + GGG_SWARM_DURATION_SECONDS;
+		decoy_comp.expires_at = now + GGG_SWARM_DURATION_SECONDS + stagger;
 
 		entry := new(GGG_Decoy_Entry);
 		entry.decoy_entity = decoy_e;
-		entry.expires_at = now + GGG_SWARM_DURATION_SECONDS;
+		entry.expires_at = now + GGG_SWARM_DURATION_SECONDS + stagger;
 		ggg_decoys->append(entry);
 	}
 }
@@ -1237,7 +1245,7 @@ GGG_Wrap_Ability :: class : Ability_Base {
 			gm.wrap_channel_corpse_id = corpse.entity.id;
 			gm.wrap_channel_end_at = get_time() + GGG_WRAP_CHANNEL_SECONDS;
 			gm.wrap_channel_last_pos = player.entity.world_position;
-			player->add_disable_movement_input_reason(GGG_WRAP_LOCK_REASON);
+			player->add_freeze_reason(GGG_WRAP_LOCK_REASON);
 			// Fire wrap trigger on creature state machine.
 			if gm.creature_visible && gm.creature_animator != null && gm.creature_animator.instance != null {
 				if gm.creature_animator.instance.state_machine != null {

@@ -1970,6 +1970,13 @@ rr_remove_movement_reason_all :: proc(player: Player, reason: string) {
 	}
 }
 
+rr_remove_freeze_reason_all :: proc(player: Player, reason: string) {
+	if player == null return;
+	for _i: 0..RR_UNSTUCK_REASON_REMOVE_PASSES-1 {
+		player->remove_freeze_reason(reason);
+	}
+}
+
 rr_unstuck_player :: proc(player: Player) {
 	if player == null return;
 	if player.entity == null return;
@@ -2018,6 +2025,16 @@ rr_unstuck_player :: proc(player: Player) {
 	if autograph_stun != null {
 		autograph_stun.active = false;
 	}
+	ggg_transform_lock := player.entity->get_component(GGG_Transform_Lock);
+	if ggg_transform_lock != null {
+		ggg_transform_lock.active = false;
+	}
+	ggg_trap_root := player.entity->get_component(GGG_Trap_Root_Effect);
+	if ggg_trap_root != null {
+		ggg_trap_root.active = false;
+	}
+	// Cancel active GGG wrap channel.
+	rr_ggg_cancel_wrap(player);
 
 	// Clear pyromaniac fire status through its own cleanup path.
 	fire_status := player.entity->get_component(RR_Player_On_Fire_Status);
@@ -2054,6 +2071,9 @@ rr_unstuck_player :: proc(player: Player) {
 	rr_remove_movement_reason_all(player, PRANK_STUN_REASON);
 	rr_remove_movement_reason_all(player, MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
 	rr_remove_movement_reason_all(player, MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+	rr_remove_movement_reason_all(player, GGG_TRANSFORM_LOCK_REASON);
+	rr_remove_movement_reason_all(player, GGG_TRAP_ROOT_REASON);
+	rr_remove_freeze_reason_all(player, GGG_WRAP_LOCK_REASON);
 
 	// Keep visual state coherent after force-clears.
 	player->remove_name_invisibility_reason("werewolf_transform");
