@@ -373,6 +373,7 @@ Player_Role :: enum {
 	HITMAN;
 	WEREWOLF;
 	GOO_GOO_GAGA;
+	MIMICER;
 }
 
 rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
@@ -389,6 +390,7 @@ rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
 		case .HITMAN:       return Player_Type.TRAITOR;
 		case .WEREWOLF:      return Player_Type.TRAITOR;
 		case .GOO_GOO_GAGA:  return Player_Type.TRAITOR;
+		case .MIMICER:       return Player_Type.TRAITOR;
 		case .NONE:          return Player_Type.CIVILIAN;
 	}
 	return Player_Type.CIVILIAN;
@@ -408,6 +410,7 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .HITMAN:       return "hitman";
 		case .WEREWOLF:      return "werewolf";
 		case .GOO_GOO_GAGA:  return "goo_goo_gaga";
+		case .MIMICER:       return "mimicer";
 		case .NONE:          return "none";
 	}
 	return "none";
@@ -440,6 +443,7 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	if name == "hitman"                                        return Player_Role.HITMAN, true;
 	if name == "werewolf"                                      return Player_Role.WEREWOLF, true;
 	if name == "ggg" || name == "goo_goo_gaga" || name == "googoo" return Player_Role.GOO_GOO_GAGA, true;
+	if name == "mimicer" || name == "mim"                        return Player_Role.MIMICER, true;
 	return Player_Role.NONE, false;
 }
 
@@ -2054,6 +2058,11 @@ rr_unstuck_player :: proc(player: Player) {
 	player.is_temporarily_resurrected = false;
 	player.temporarily_resurrected_until = 0.0;
 
+	// Clear mimicer blind/distort state.
+	player.mimicer_blinded = false;
+	player.mimicer_blinded_until = 0.0;
+	player.mimicer_distorted_until = 0.0;
+
 	// Always reset local animation and velocity.
 	player->set_trigger("RESET");
 	player.agent.velocity = v2.{0, 0};
@@ -2074,9 +2083,16 @@ rr_unstuck_player :: proc(player: Player) {
 	rr_remove_movement_reason_all(player, GGG_TRANSFORM_LOCK_REASON);
 	rr_remove_movement_reason_all(player, GGG_TRAP_ROOT_REASON);
 	rr_remove_freeze_reason_all(player, GGG_WRAP_LOCK_REASON);
+	rr_remove_movement_reason_all(player, MIMICER_TRANSFORM_LOCK_REASON);
+	rr_remove_movement_reason_all(player, MIMICER_VOID_LUNGE_LOCK_REASON);
+	rr_remove_movement_reason_all(player, MIMICER_STUN_REASON);
+	rr_remove_movement_reason_all(player, MIMICER_SPEW_LOCK_REASON);
+	rr_remove_movement_reason_all(player, MIMICER_UNLEASH_LOCK_REASON);
 
 	// Keep visual state coherent after force-clears.
 	player->remove_name_invisibility_reason("werewolf_transform");
+	player->remove_invisibility_reason(MIMICER_INVIS_REASON);
+	player->remove_name_invisibility_reason(MIMICER_NAME_INVIS_REASON);
 }
 
 // Chat command: /start
@@ -2994,6 +3010,9 @@ assign_players_to_types :: proc() {
 	if rr_ggg_role_enabled {
 		append(ref traitor_roles_master, Player_Role.GOO_GOO_GAGA);
 	}
+	if rr_mimicer_role_enabled {
+		append(ref traitor_roles_master, Player_Role.MIMICER);
+	}
 
 	civ_players: List(Player);
 	an_players: List(Player);
@@ -3173,6 +3192,32 @@ assign_players_to_types :: proc() {
 
 		if p.player_role == Player_Role.GOO_GOO_GAGA {
 			// GGG has a dedicated role HUD panel (like werewolf) — no task list tasks.
+			p.active_tasks = List(Task_Base).{};
+		}
+
+		// Mimicer
+		rr_mimicer_destroy_creature_entity(p);
+		if p.player_role == Player_Role.MIMICER {
+			mm := p.entity->get_component(Mimicer_Module);
+			if mm == null {
+				mm = p.entity->add_component(Mimicer_Module);
+			}
+			mm.kills = 0;
+			mm.is_monster_form = false;
+			mm.creature_visible = false;
+			mm.skeleton_swap_at = 0.0;
+			mm.is_prowling = false;
+			mm.prowl_speed_active = false;
+			mm.prowl_near_wall = false;
+			mm.is_disguised = false;
+			mm.disguise_ends_at = 0.0;
+			mm.disguise_target_id = 0;
+			mm.void_lunge_active = false;
+			mm.unleash_used = false;
+			mm.is_ultimate_form = false;
+			mm.pillars_placed = 0;
+			mm.selecting_pillars = false;
+			mm.selecting_pillars_camera_active = false;
 			p.active_tasks = List(Task_Base).{};
 		}
 

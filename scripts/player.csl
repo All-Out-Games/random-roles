@@ -97,6 +97,11 @@ Player :: class : Player_Base {
 	temporarily_resurrected_until: float;
 	was_corpse_reported_before_resurrect: bool;
 
+	// --- Mimicer (cross-player: any player can be blinded/distorted) ---
+	mimicer_blinded: bool;
+	mimicer_blinded_until: float;
+	mimicer_distorted_until: float;
+
 	// Per-player portal interaction (anyone can use portals)
 	portal_standing_on_portal: Entity;
 	portal_standing_seconds: float;
@@ -296,19 +301,17 @@ Player :: class : Player_Base {
 	}
 
     ao_end :: proc(using this: Player) {
-		// Release any corpse this player was dragging (disconnect cleanup).
 		rr_drag_body_force_drop_for_player(this);
-		// Clean up portal maker portals on disconnect.
+
 		rr_portal_maker_cleanup_for_player(this);
-        // Player entity is being destroyed (typically disconnect). Clean up any corpses they spawned.
+
         destroy_corpses_for_player(this.entity.id);
-		// Clean up any pirate dig-spots they spawned.
+
 		destroy_pirate_dig_spots_for_player(this.entity.id);
-		// Clean up door unlock interactable.
+
 		rr_cleanup_door_unlock_interactable(this);
         unordered_remove_by_value(ref players, this);
 
-		// Local-only: destroy LOS light.
 		if this->is_local() {
 			if local_light_entity != null && #alive(local_light_entity) {
 				local_light_entity->destroy();
@@ -371,6 +374,24 @@ Player :: class : Player_Base {
 
 		// GGG creature animation controller (runs on all clients).
 		rr_ggg_update_creature_anims(this, delta_time);
+
+		// Mimicer per-frame update (transform, prowl, disguise, void lunge).
+		rr_mimicer_update(this, delta_time);
+
+		// Mimicer blind/distort effect (cross-player, runs on all clients).
+		rr_mimicer_update_blind(this, delta_time);
+
+		// Drive prowl locomotion bools on player state machine
+		if this.player_role == Player_Role.MIMICER {
+			mim_sm := this.animator.instance.state_machine;
+			if mim_sm != null {
+				mim_mod := this.entity->get_component(Mimicer_Module);
+				if mim_mod != null && mim_mod.is_prowling {
+					prowl_moving := length_squared(this.agent.velocity) > 0.01;
+					mim_sm->set_bool("mimicer_prowl_moving", prowl_moving);
+				}
+			}
+		}
 
 		// Drag body animation state (runs on all clients).
 		rr_drag_body_update_anim_state(this, delta_time);
@@ -656,13 +677,15 @@ Player :: class : Player_Base {
 								draw_ability_button(this, GGG_Transform_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
+						} else if player_role == Player_Role.MIMICER {
+							abilityIndex = rr_mimicer_draw_abilities(this, abilityIndex);
 						} else {
                         	draw_ability_button(this, Kill_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
 
 						// All traitors (except werewolf and GGG, handled above) can drag bodies.
-						if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA {
+						if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA && player_role != Player_Role.MIMICER {
 							draw_ability_button(this, Drag_Body_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
@@ -935,6 +958,7 @@ Player :: class : Player_Base {
 		rr_hitman_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_werewolf_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_ggg_on_player_killed(killer_player_entity_id, this.entity.id);
+		rr_mimicer_on_player_killed(killer_player_entity_id, this.entity.id);
         log(format_string("Player % killed (killer=%)", .{this.entity.id, killer_player_entity_id}));
 	}
 
@@ -954,6 +978,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .HITMAN:     return "HITMAN";
 		case .WEREWOLF:      return "WEREWOLF";
 		case .GOO_GOO_GAGA:  return "GOO GOO GAGA";
+		case .MIMICER:       return "MIMICER";
 	}
 	return "CREW";
 }
@@ -972,6 +997,7 @@ player_role_to_icon_texture :: proc(role: Player_Role) -> Texture_Asset {
 		case .HITMAN:       return get_asset(Texture_Asset, "sprites/icons/roles/hitman_icon.png");
 		case .WEREWOLF:      return get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png");
 		case .GOO_GOO_GAGA:  return get_asset(Texture_Asset, "sprites/icons/roles/googoogaga_icon.png");
+		case .MIMICER:       return get_asset(Texture_Asset, "sprites/icons/roles/googoogaga_icon.png"); // TODO: mimicer role icon
 	}
 	return null;
 }
@@ -1479,6 +1505,7 @@ draw_player_role_hud :: proc(player: Player) {
 	}
 
 	draw_ggg_role_hud(player);
+	draw_mimicer_role_hud(player);
 }
 
 // --- GGG ability unlock progress: left side ---
@@ -1598,6 +1625,133 @@ draw_ggg_role_hud :: proc(player: Player) {
 	} // end task_list_open
 }
 
+// --- Mimicer ability unlock progress: left side ---
+draw_mimicer_role_hud :: proc(player: Player) {
+	if player == null return;
+	if player.player_role != Player_Role.MIMICER return;
+	if !player->is_local_or_server() return;
+	if player.player_type != Player_Type.TRAITOR return;
+
+	mm := player.entity->get_component(Mimicer_Module);
+	if mm == null return;
+
+	safe := UI.get_safe_screen_rect();
+	PANEL_W :: 300.0;
+	ROW_H :: 32.0;
+	LIST_PAD :: 10.0;
+	DROPDOWN_SLICE_PX :: 16.0;
+
+	row_count := 5;
+	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
+
+	header_rect := rr_draw_task_list_header(safe, false, player);
+
+	if player.task_list_open {
+	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+
+	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
+	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
+	checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
+
+	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
+
+	base_ts := UI.default_text_settings();
+	base_ts.size = 20;
+	base_ts.halign = .LEFT;
+	base_ts.valign = .CENTER;
+	base_ts.do_outline = true;
+	base_ts.outline_thickness = 3;
+	base_ts.outline_color = v4.{0, 0, 0, 1};
+
+	list_content := list_rect->inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
+	mim_kills := mm.kills;
+
+	rr_mimicer_draw_hud_rows(player, mm, mim_kills, ref list_content, base_ts, checkbox, checkbox_filled, ROW_H);
+	} // end task_list_open
+}
+
+rr_mimicer_draw_hud_rows :: proc(player: Player, mm: Mimicer_Module, mim_kills: int, list_content: ref Rect, base_ts: Text_Settings, checkbox: Texture_Asset, checkbox_filled: Texture_Asset, ROW_H: float) {
+	// Form status
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		if mm.is_monster_form {
+			row_ts.color = v4.{1.0, 0.25, 0.25, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "MONSTER");
+		} else {
+			row_ts.color = v4.{0.9, 0.9, 0.9, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Schleem");
+		}
+	}
+	// Kill count
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		row_ts.color = v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{mim_kills}));
+	}
+	// Void Lunge + Mimic (1 kill)
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := mim_kills >= MIMICER_VOID_LUNGE_UNLOCK_KILLS;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Lunge+Mimic: %/%", .{min(mim_kills, MIMICER_VOID_LUNGE_UNLOCK_KILLS), MIMICER_VOID_LUNGE_UNLOCK_KILLS}));
+	}
+	// Spew Corruption (2 kills)
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := mim_kills >= MIMICER_SPEW_UNLOCK_KILLS;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Spew: %/%", .{min(mim_kills, MIMICER_SPEW_UNLOCK_KILLS), MIMICER_SPEW_UNLOCK_KILLS}));
+	}
+	// Unleash (3 kills)
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := mim_kills >= MIMICER_UNLEASH_UNLOCK_KILLS && !mm.unleash_used;
+		used := mm.unleash_used;
+		if used {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{0.5, 0.5, 0.5, 1});
+		} else if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		if used {
+			row_ts.color = v4.{0.5, 0.5, 0.5, 1.0};
+		} else {
+			row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		}
+		label := used ? "Unleash: USED" : format_string("Unleash: %/%", .{min(mim_kills, MIMICER_UNLEASH_UNLOCK_KILLS), MIMICER_UNLEASH_UNLOCK_KILLS});
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, label);
+	}
+}
+
 // --- Werewolf transform (ability-driven, server authoritative) ---
 // Constants defined in abilities.csl: WEREWOLF_TRANSFORM_MAX_DURATION_SECONDS, WEREWOLF_TRANSFORM_COOLDOWN_SECONDS
 
@@ -1662,6 +1816,61 @@ rr_werewolf_capture_round_start_look :: proc(player: Player) {
 		}
 	}
 	player.werewolf_round_start_avatar_color = player.avatar_color;
+}
+
+// Mimicer ability button layout (extracted from ao_late_update to reduce register pressure).
+rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
+	abilityIndex := idx;
+	mim := player.entity->get_component(Mimicer_Module);
+	if mim != null && mim.selecting_pillars {
+		draw_ability_button(player, Mimicer_Place_Pillar_Ability, abilityIndex);
+		abilityIndex += 1;
+	} else if mim != null && mim.is_monster_form {
+		draw_ability_button(player, Kill_Ability, abilityIndex);
+		abilityIndex += 1;
+		draw_ability_button(player, Mimicer_Transform_Ability, abilityIndex);
+		abilityIndex += 1;
+		draw_ability_button(player, Mimicer_Prowl_Ability, abilityIndex);
+		abilityIndex += 1;
+		if mim.kills >= MIMICER_VOID_LUNGE_UNLOCK_KILLS {
+			draw_ability_button(player, Mimicer_Void_Lunge_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if mim.kills >= MIMICER_MIMIC_UNLOCK_KILLS {
+			draw_ability_button(player, Mimicer_Mimic_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if mim.kills >= MIMICER_SPEW_UNLOCK_KILLS {
+			draw_ability_button(player, Mimicer_Spew_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if mim.kills >= MIMICER_UNLEASH_UNLOCK_KILLS && !mim.unleash_used {
+			draw_ability_button(player, Mimicer_Unleash_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+	} else {
+		draw_ability_button(player, Kill_Ability, abilityIndex);
+		abilityIndex += 1;
+		draw_ability_button(player, Drag_Body_Ability, abilityIndex);
+		abilityIndex += 1;
+		draw_ability_button(player, Mimicer_Transform_Ability, abilityIndex);
+		abilityIndex += 1;
+		draw_ability_button(player, Mimicer_Prowl_Ability, abilityIndex);
+		abilityIndex += 1;
+		if mim != null && mim.kills >= MIMICER_MIMIC_UNLOCK_KILLS {
+			draw_ability_button(player, Mimicer_Mimic_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if mim != null && mim.kills >= MIMICER_SPEW_UNLOCK_KILLS {
+			draw_ability_button(player, Mimicer_Spew_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if mim != null && mim.kills >= MIMICER_UNLEASH_UNLOCK_KILLS && !mim.unleash_used {
+			draw_ability_button(player, Mimicer_Unleash_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+	}
+	return abilityIndex;
 }
 
 // Enables the full werewolf look: saves current cosmetic skins, strips them, enables only the
@@ -1890,14 +2099,13 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 	}
 }
 
-    revive :: proc(using this: Player) {
-        //freeze_player = false;
+    revive :: method() {
         this->set_trigger("RESET");
     }
 
 	// Immediately restores werewolf visuals + clears all skin/transform state.
 	// Safe to call even if the player is not in wolf form (no-ops if skin not active).
-	reset_werewolf_visuals :: proc(using this: Player) {
+	reset_werewolf_visuals :: method() {
 		rr_werewolf_disable_wolf_look(this);
 		this->remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
 		this.werewolf_infected = false;
@@ -1920,11 +2128,249 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		rr_werewolf_capture_round_start_look(this);
 	}
 
-    set_trigger :: proc(using this: Player, trigger: string) {
+    set_trigger :: method(trigger: string) {
         if this.animator.instance != null {
             this.animator.instance.state_machine->set_trigger(trigger);
         }
     }
+
+	// --- State machine setup helpers (split per role to avoid VM register exhaustion) ---
+	rr_sm_setup_common :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		// prank_slip (trigger var -> one-shot anim state -> back to Idle)
+		prank_slip_var := sm->create_variable("prank_slip", State_Machine_Variable.Kind.TRIGGER);
+		prank_slip_state := layer->create_state("004RAND_trickster/Slip_On_Banana", false, 2.0);
+		layer->create_global_transition(prank_slip_state, false)->create_trigger_condition(prank_slip_var);
+		layer->create_transition(prank_slip_state, idle_state, true);
+
+		// jester_win (trigger var -> end-game anim state -> back to Idle)
+		jester_win_var := sm->create_variable("jester_win", State_Machine_Variable.Kind.TRIGGER);
+		jester_win_state := layer->create_state("004RAND_trickster/Trickster_End_Game", false, 5.0);
+		layer->create_global_transition(jester_win_state, false)->create_trigger_condition(jester_win_var);
+		layer->create_transition(jester_win_state, idle_state, true);
+
+		// vote_eject (trigger var -> one-shot anim state -> back to Idle)
+		vote_eject_var := sm->create_variable("death_vote2", State_Machine_Variable.Kind.TRIGGER);
+		vote_eject_state := layer->create_state("004RAND/death_vote2", false, RR_VOTE_EJECT_ANIM_SECONDS);
+		layer->create_global_transition(vote_eject_state, false)->create_trigger_condition(vote_eject_var);
+		layer->create_transition(vote_eject_state, idle_state, true);
+
+		// Base traitor kill (default melee)
+		traitor_kill_var := sm->create_variable("traitor_kill", State_Machine_Variable.Kind.TRIGGER);
+		traitor_kill_state := layer->create_state("Attack_Melee_1", false, 1.0);
+		layer->create_global_transition(traitor_kill_state, false)->create_trigger_condition(traitor_kill_var);
+		layer->create_transition(traitor_kill_state, idle_state, true);
+	}
+
+	rr_sm_setup_movie_star :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		// write_place_autograph (trigger var -> one-shot anim state -> back to Idle)
+		write_autograph_var := sm->create_variable("write_place_autograph", State_Machine_Variable.Kind.TRIGGER);
+		write_autograph_state := layer->create_state("004RAND_movie_star/Write_Place_Autograph", false, 2.1);
+		layer->create_global_transition(write_autograph_state, false)->create_trigger_condition(write_autograph_var);
+		layer->create_transition(write_autograph_state, idle_state, true);
+
+		// stunned_by_autograph_loop (trigger var -> looping anim state -> back to Idle)
+		stunned_autograph_var := sm->create_variable("stunned_by_autograph_loop", State_Machine_Variable.Kind.TRIGGER);
+		stunned_autograph_state := layer->create_state("004RAND_movie_star/stunned_by_autograph_loop", true, 15.0);
+		layer->create_global_transition(stunned_autograph_state, false)->create_trigger_condition(stunned_autograph_var);
+		// This is a loop; exit via RESET (or another explicit transition), not state completion.
+	}
+
+	rr_sm_setup_hitman :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		// Neck snap (killer animation)
+		hitman_kill_snap_neck_var := sm->create_variable("hitman_kill_snap_neck", State_Machine_Variable.Kind.TRIGGER);
+		hitman_kill_snap_neck_state := layer->create_state("004RAND_hitman/Kill_Snap_Neck", false, 1.1);
+		layer->create_global_transition(hitman_kill_snap_neck_state, false)->create_trigger_condition(hitman_kill_snap_neck_var);
+		layer->create_transition(hitman_kill_snap_neck_state, idle_state, true);
+
+		// Sniper (killer animation)
+		hitman_shoot_sniper_var := sm->create_variable("hitman_shoot_sniper", State_Machine_Variable.Kind.TRIGGER);
+		hitman_shoot_sniper_state := layer->create_state("004RAND_hitman/Shoot_Sniper", false, 0.9);
+		layer->create_global_transition(hitman_shoot_sniper_state, false)->create_trigger_condition(hitman_shoot_sniper_var);
+		layer->create_transition(hitman_shoot_sniper_state, idle_state, true);
+
+		// Mine victim (fly -> collide -> broken leg idle while stunned)
+		hitman_fly_forward_var := sm->create_variable("hitman_fly_forward", State_Machine_Variable.Kind.TRIGGER);
+		hitman_fly_forward_state := layer->create_state("004RAND_hitman/Fly_Forward_Loop", true, 0.0);
+		layer->create_global_transition(hitman_fly_forward_state, false)->create_trigger_condition(hitman_fly_forward_var);
+
+		hitman_collide_midair_land_var := sm->create_variable("hitman_collide_midair_land", State_Machine_Variable.Kind.TRIGGER);
+		hitman_collide_midair_land_state := layer->create_state("004RAND_hitman/Collide_Midair_Land", false, 0.8);
+		layer->create_global_transition(hitman_collide_midair_land_state, false)->create_trigger_condition(hitman_collide_midair_land_var);
+		layer->create_transition(hitman_collide_midair_land_state, idle_state, true);
+
+		hitman_broken_leg_idle_var := sm->create_variable("hitman_broken_leg_idle", State_Machine_Variable.Kind.TRIGGER);
+		hitman_broken_leg_idle_state := layer->create_state("004RAND_hitman/Broken_Leg_Idle", true, 10.0);
+		layer->create_global_transition(hitman_broken_leg_idle_state, false)->create_trigger_condition(hitman_broken_leg_idle_var);
+	}
+
+	rr_sm_setup_werewolf :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		werewolf_howl_var := sm->create_variable("werewolf_howl", State_Machine_Variable.Kind.TRIGGER);
+		werewolf_howl_state := layer->create_state("004RAND_werewolf/howl", false, 2.0);
+		layer->create_global_transition(werewolf_howl_state, false)->create_trigger_condition(werewolf_howl_var);
+		layer->create_transition(werewolf_howl_state, idle_state, true);
+
+		werewolf_infection_bite_var := sm->create_variable("werewolf_infection_bite", State_Machine_Variable.Kind.TRIGGER);
+		werewolf_infection_bite_state := layer->create_state("004RAND_werewolf/Infection_Bite", false, 1.2);
+		layer->create_global_transition(werewolf_infection_bite_state, false)->create_trigger_condition(werewolf_infection_bite_var);
+		layer->create_transition(werewolf_infection_bite_state, idle_state, true);
+
+		werewolf_infected_transform_var := sm->create_variable("werewolf_infected_transform", State_Machine_Variable.Kind.TRIGGER);
+		werewolf_infected_transform_state := layer->create_state("004RAND_werewolf/Infected_Bitten_Transform", false, 2.0);
+		layer->create_global_transition(werewolf_infected_transform_state, false)->create_trigger_condition(werewolf_infected_transform_var);
+		layer->create_transition(werewolf_infected_transform_state, idle_state, true);
+	}
+
+	rr_sm_setup_pyromaniac :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		pyro_snap_fingers_var := sm->create_variable("pyro_snap_fingers", State_Machine_Variable.Kind.TRIGGER);
+		pyro_snap_fingers_state := layer->create_state("004RAND_pyromaniac/Snap_Fingers", false, 1.0);
+		layer->create_global_transition(pyro_snap_fingers_state, false)->create_trigger_condition(pyro_snap_fingers_var);
+		layer->create_transition(pyro_snap_fingers_state, idle_state, true);
+
+		pyro_on_fire_idle_var := sm->create_variable("pyro_on_fire_idle", State_Machine_Variable.Kind.TRIGGER);
+		pyro_on_fire_idle_state := layer->create_state("004RAND_pyromaniac/Idle_On_Fire", true, 0.0);
+		layer->create_global_transition(pyro_on_fire_idle_state, false)->create_trigger_condition(pyro_on_fire_idle_var);
+
+		pyro_blow_out_fire_var := sm->create_variable("pyro_blow_out_fire", State_Machine_Variable.Kind.TRIGGER);
+		pyro_blow_out_fire_state := layer->create_state("004RAND_pyromaniac/Blow_Out_Fire", false, 1.0);
+		layer->create_global_transition(pyro_blow_out_fire_state, false)->create_trigger_condition(pyro_blow_out_fire_var);
+		layer->create_transition(pyro_blow_out_fire_state, idle_state, true);
+
+		pyro_end_game_var := sm->create_variable("pyro_end_game", State_Machine_Variable.Kind.TRIGGER);
+		pyro_end_game_state := layer->create_state("004RAND_pyromaniac/End_Game", false, 5.0);
+		layer->create_global_transition(pyro_end_game_state, false)->create_trigger_condition(pyro_end_game_var);
+		layer->create_transition(pyro_end_game_state, idle_state, true);
+	}
+
+	rr_sm_setup_pirate :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		pirate_dig_for_treasure_var := sm->create_variable("pirate_dig_for_treasure", State_Machine_Variable.Kind.TRIGGER);
+		pirate_dig_for_treasure_state := layer->create_state("004RAND_pirate/dig_for_treasure", false, 2.0);
+		layer->create_global_transition(pirate_dig_for_treasure_state, false)->create_trigger_condition(pirate_dig_for_treasure_var);
+		layer->create_transition(pirate_dig_for_treasure_state, idle_state, true);
+	}
+
+	rr_sm_setup_ggg :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		ggg_transform_var := sm->create_variable("ggg_transform", State_Machine_Variable.Kind.TRIGGER);
+		ggg_transform_state := layer->create_state("004RAND_GOOGOOGAGA/Transform_Monster_Start", false, 2.0);
+		layer->create_global_transition(ggg_transform_state, false)->create_trigger_condition(ggg_transform_var);
+		layer->create_transition(ggg_transform_state, idle_state, true);
+
+		ggg_revert_var := sm->create_variable("ggg_revert", State_Machine_Variable.Kind.TRIGGER);
+		ggg_revert_state := layer->create_state("004RAND_GOOGOOGAGA/Transform_Player_End", false, 1.0);
+		layer->create_global_transition(ggg_revert_state, false)->create_trigger_condition(ggg_revert_var);
+		layer->create_transition(ggg_revert_state, idle_state, true);
+
+		ggg_trapped_start_var := sm->create_variable("ggg_trapped_start", State_Machine_Variable.Kind.TRIGGER);
+		ggg_trapped_start_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Start", false, 0.5);
+		layer->create_global_transition(ggg_trapped_start_state, false)->create_trigger_condition(ggg_trapped_start_var);
+
+		ggg_trapped_loop_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Loop", true, 0.0);
+		layer->create_transition(ggg_trapped_start_state, ggg_trapped_loop_state, true);
+
+		ggg_trapped_end_var := sm->create_variable("ggg_trapped_end", State_Machine_Variable.Kind.TRIGGER);
+		ggg_trapped_end_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_End", false, 0.5);
+		layer->create_global_transition(ggg_trapped_end_state, false)->create_trigger_condition(ggg_trapped_end_var);
+		layer->create_transition(ggg_trapped_end_state, idle_state, true);
+	}
+
+	rr_sm_setup_drag_body :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		drag_enabled_var := sm->create_variable("drag_body_enabled", State_Machine_Variable.Kind.BOOL);
+		drag_moving_var := sm->create_variable("drag_body_moving", State_Machine_Variable.Kind.BOOL);
+		drag_right_var := sm->create_variable("drag_body_right", State_Machine_Variable.Kind.BOOL);
+
+		drag_idle_left := layer->create_state("004RAND/drag_body_idle", true, 0.0);
+		drag_idle_right := layer->create_state("004RAND/drag_body_idle_right", true, 0.0);
+		drag_walk_left := layer->create_state("004RAND/drag_body_walk", true, 0.0);
+		drag_walk_right := layer->create_state("004RAND/drag_body_walk_right", true, 0.0);
+
+		to_drag_idle_left := layer->create_global_transition(drag_idle_left, false);
+		to_drag_idle_left->create_bool_condition(drag_enabled_var, true);
+		to_drag_idle_left->create_bool_condition(drag_moving_var, false);
+		to_drag_idle_left->create_bool_condition(drag_right_var, false);
+
+		to_drag_idle_right := layer->create_global_transition(drag_idle_right, false);
+		to_drag_idle_right->create_bool_condition(drag_enabled_var, true);
+		to_drag_idle_right->create_bool_condition(drag_moving_var, false);
+		to_drag_idle_right->create_bool_condition(drag_right_var, true);
+
+		to_drag_walk_left := layer->create_global_transition(drag_walk_left, false);
+		to_drag_walk_left->create_bool_condition(drag_enabled_var, true);
+		to_drag_walk_left->create_bool_condition(drag_moving_var, true);
+		to_drag_walk_left->create_bool_condition(drag_right_var, false);
+
+		to_drag_walk_right := layer->create_global_transition(drag_walk_right, false);
+		to_drag_walk_right->create_bool_condition(drag_enabled_var, true);
+		to_drag_walk_right->create_bool_condition(drag_moving_var, true);
+		to_drag_walk_right->create_bool_condition(drag_right_var, true);
+
+		exit_drag_idle_left := layer->create_transition(drag_idle_left, idle_state, false);
+		exit_drag_idle_left->create_bool_condition(drag_enabled_var, false);
+
+		exit_drag_idle_right := layer->create_transition(drag_idle_right, idle_state, false);
+		exit_drag_idle_right->create_bool_condition(drag_enabled_var, false);
+
+		exit_drag_walk_left := layer->create_transition(drag_walk_left, idle_state, false);
+		exit_drag_walk_left->create_bool_condition(drag_enabled_var, false);
+
+		exit_drag_walk_right := layer->create_transition(drag_walk_right, idle_state, false);
+		exit_drag_walk_right->create_bool_condition(drag_enabled_var, false);
+	}
+
+	// Mimicer player-rig state machine states.
+	rr_mimicer_setup_player_state_machine :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		// Transform to monster (one-shot, 1s) -> back to Idle.
+		mimicer_transform_var := sm->create_variable("mimicer_transform", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_transform_state := layer->create_state("004RAND/Transform_Monster_Start", false, 1.0);
+		layer->create_global_transition(mimicer_transform_state, false)->create_trigger_condition(mimicer_transform_var);
+		layer->create_transition(mimicer_transform_state, idle_state, true);
+
+		// Revert from monster (one-shot, 1s) -> back to Idle.
+		mimicer_revert_var := sm->create_variable("mimicer_revert", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_revert_state := layer->create_state("004RAND/Transform_Player_End", false, 1.0);
+		layer->create_global_transition(mimicer_revert_state, false)->create_trigger_condition(mimicer_revert_var);
+		layer->create_transition(mimicer_revert_state, idle_state, true);
+
+		// Prowl start -> prowl idle/run locomotion
+		mimicer_prowl_start_var := sm->create_variable("mimicer_prowl_start", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_prowl_moving_var := sm->create_variable("mimicer_prowl_moving", State_Machine_Variable.Kind.BOOL);
+
+		mimicer_prowl_start_state := layer->create_state("004RAND/Prowl_Start", false, 0.5);
+		layer->create_global_transition(mimicer_prowl_start_state, false)->create_trigger_condition(mimicer_prowl_start_var);
+
+		mimicer_prowl_idle_state := layer->create_state("004RAND/Prowl_Idle", true, 0.0);
+		layer->create_transition(mimicer_prowl_start_state, mimicer_prowl_idle_state, true);
+
+		mimicer_prowl_run_state := layer->create_state("004RAND/Prowl_Run", true, 0.0);
+		prowl_idle_to_run := layer->create_transition(mimicer_prowl_idle_state, mimicer_prowl_run_state, false);
+		prowl_idle_to_run->create_bool_condition(mimicer_prowl_moving_var, true);
+		prowl_run_to_idle := layer->create_transition(mimicer_prowl_run_state, mimicer_prowl_idle_state, false);
+		prowl_run_to_idle->create_bool_condition(mimicer_prowl_moving_var, false);
+
+		// Prowl end -> back to Idle
+		mimicer_prowl_end_var := sm->create_variable("mimicer_prowl_end", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_prowl_end_state := layer->create_state("004RAND/Prowl_End", false, 0.5);
+		layer->create_global_transition(mimicer_prowl_end_state, false)->create_trigger_condition(mimicer_prowl_end_var);
+		layer->create_transition(mimicer_prowl_end_state, idle_state, true);
+
+		// Blinded start -> blinded idle loop (exits via mimicer_blinded_end)
+		mimicer_blinded_start_var := sm->create_variable("mimicer_blinded_start", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_blinded_start_state := layer->create_state("004RAND/Blinded_Start", false, 0.5);
+		layer->create_global_transition(mimicer_blinded_start_state, false)->create_trigger_condition(mimicer_blinded_start_var);
+
+		mimicer_blinded_idle_state := layer->create_state("004RAND/Blinded_Idle", true, 0.0);
+		layer->create_transition(mimicer_blinded_start_state, mimicer_blinded_idle_state, true);
+
+		// Blinded end -> back to Idle
+		mimicer_blinded_end_var := sm->create_variable("mimicer_blinded_end", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_blinded_end_state := layer->create_state("004RAND/Blinded_End", false, 0.5);
+		layer->create_global_transition(mimicer_blinded_end_state, false)->create_trigger_condition(mimicer_blinded_end_var);
+		layer->create_transition(mimicer_blinded_end_state, idle_state, true);
+
+		// Kill slash in human form (one-shot) -> back to Idle
+		mimicer_kill_slash_var := sm->create_variable("mimicer_kill_slash", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_kill_slash_state := layer->create_state("004RAND/Death_Slash", false, 1.0);
+		layer->create_global_transition(mimicer_kill_slash_state, false)->create_trigger_condition(mimicer_kill_slash_var);
+		layer->create_transition(mimicer_kill_slash_state, idle_state, true);
+	}
 
 	// Adds the animation state machine.
 	ensure_anim_state_machine :: proc(using this: Player) {
@@ -1952,194 +2398,15 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 			return;
 		}
 
-		// prank_slip (trigger var -> one-shot anim state -> back to Idle)
-		prank_slip_var := sm->create_variable("prank_slip", State_Machine_Variable.Kind.TRIGGER);
-		prank_slip_state := layer->create_state("004RAND_trickster/Slip_On_Banana", false, 2.0);
-		layer->create_global_transition(prank_slip_state, false)->create_trigger_condition(prank_slip_var);
-		layer->create_transition(prank_slip_state, idle_state, true);
-
-		// jester_win (trigger var -> end-game anim state -> back to Idle)
-		jester_win_var := sm->create_variable("jester_win", State_Machine_Variable.Kind.TRIGGER);
-		jester_win_state := layer->create_state("004RAND_trickster/Trickster_End_Game", false, 5.0);
-		layer->create_global_transition(jester_win_state, false)->create_trigger_condition(jester_win_var);
-		layer->create_transition(jester_win_state, idle_state, true);
-
-		// vote_eject (trigger var -> one-shot anim state -> back to Idle)
-		vote_eject_var := sm->create_variable("death_vote2", State_Machine_Variable.Kind.TRIGGER);
-		vote_eject_state := layer->create_state("004RAND/death_vote2", false, RR_VOTE_EJECT_ANIM_SECONDS);
-		layer->create_global_transition(vote_eject_state, false)->create_trigger_condition(vote_eject_var);
-		layer->create_transition(vote_eject_state, idle_state, true);
-
-		// --- Movie Star ---
-		// write_place_autograph (trigger var -> one-shot anim state -> back to Idle)
-		write_autograph_var := sm->create_variable("write_place_autograph", State_Machine_Variable.Kind.TRIGGER);
-		write_autograph_state := layer->create_state("004RAND_movie_star/Write_Place_Autograph", false, 2.1);
-		layer->create_global_transition(write_autograph_state, false)->create_trigger_condition(write_autograph_var);
-		layer->create_transition(write_autograph_state, idle_state, true);
-
-		// stunned_by_autograph_loop (trigger var -> looping anim state -> back to Idle)
-		stunned_autograph_var := sm->create_variable("stunned_by_autograph_loop", State_Machine_Variable.Kind.TRIGGER);
-		stunned_autograph_state := layer->create_state("004RAND_movie_star/stunned_by_autograph_loop", true, 15.0);
-		layer->create_global_transition(stunned_autograph_state, false)->create_trigger_condition(stunned_autograph_var);
-		// This is a loop; exit via RESET (or another explicit transition), not state completion.
-
-		// --- Base traitor kill (default melee) ---
-		traitor_kill_var := sm->create_variable("traitor_kill", State_Machine_Variable.Kind.TRIGGER);
-		traitor_kill_state := layer->create_state("Attack_Melee_1", false, 1.0);
-		layer->create_global_transition(traitor_kill_state, false)->create_trigger_condition(traitor_kill_var);
-		layer->create_transition(traitor_kill_state, idle_state, true);
-
-		// --- Hitman ---
-		// Neck snap (killer animation)
-		hitman_kill_snap_neck_var := sm->create_variable("hitman_kill_snap_neck", State_Machine_Variable.Kind.TRIGGER);
-		// Keep this short so the hitman regains control right as the animation ends.
-		hitman_kill_snap_neck_state := layer->create_state("004RAND_hitman/Kill_Snap_Neck", false, 1.1);
-		layer->create_global_transition(hitman_kill_snap_neck_state, false)->create_trigger_condition(hitman_kill_snap_neck_var);
-		layer->create_transition(hitman_kill_snap_neck_state, idle_state, true);
-
-		// Sniper (killer animation)
-		hitman_shoot_sniper_var := sm->create_variable("hitman_shoot_sniper", State_Machine_Variable.Kind.TRIGGER);
-		hitman_shoot_sniper_state := layer->create_state("004RAND_hitman/Shoot_Sniper", false, 0.9);
-		layer->create_global_transition(hitman_shoot_sniper_state, false)->create_trigger_condition(hitman_shoot_sniper_var);
-		layer->create_transition(hitman_shoot_sniper_state, idle_state, true);
-
-		// Mine victim (fly -> collide -> broken leg idle while stunned)
-		hitman_fly_forward_var := sm->create_variable("hitman_fly_forward", State_Machine_Variable.Kind.TRIGGER);
-		// Loop while the fling component is active; we explicitly transition via collide + RESET.
-		hitman_fly_forward_state := layer->create_state("004RAND_hitman/Fly_Forward_Loop", true, 0.0);
-		layer->create_global_transition(hitman_fly_forward_state, false)->create_trigger_condition(hitman_fly_forward_var);
-
-		hitman_collide_midair_land_var := sm->create_variable("hitman_collide_midair_land", State_Machine_Variable.Kind.TRIGGER);
-		hitman_collide_midair_land_state := layer->create_state("004RAND_hitman/Collide_Midair_Land", false, 0.8);
-		layer->create_global_transition(hitman_collide_midair_land_state, false)->create_trigger_condition(hitman_collide_midair_land_var);
-		layer->create_transition(hitman_collide_midair_land_state, idle_state, true);
-
-		hitman_broken_leg_idle_var := sm->create_variable("hitman_broken_leg_idle", State_Machine_Variable.Kind.TRIGGER);
-		hitman_broken_leg_idle_state := layer->create_state("004RAND_hitman/Broken_Leg_Idle", true, 10.0);
-		layer->create_global_transition(hitman_broken_leg_idle_state, false)->create_trigger_condition(hitman_broken_leg_idle_var);
-		// This is a loop; we exit it via the existing RESET trigger (fired when stun ends).
-
-		// --- Werewolf ---
-		// werewolf_howl (trigger -> one-shot -> back to Idle)
-		werewolf_howl_var := sm->create_variable("werewolf_howl", State_Machine_Variable.Kind.TRIGGER);
-		werewolf_howl_state := layer->create_state("004RAND_werewolf/howl", false, 2.0);
-		layer->create_global_transition(werewolf_howl_state, false)->create_trigger_condition(werewolf_howl_var);
-		layer->create_transition(werewolf_howl_state, idle_state, true);
-
-		// werewolf_infection_bite (attacker one-shot -> back to Idle)
-		werewolf_infection_bite_var := sm->create_variable("werewolf_infection_bite", State_Machine_Variable.Kind.TRIGGER);
-		werewolf_infection_bite_state := layer->create_state("004RAND_werewolf/Infection_Bite", false, 1.2);
-		layer->create_global_transition(werewolf_infection_bite_state, false)->create_trigger_condition(werewolf_infection_bite_var);
-		layer->create_transition(werewolf_infection_bite_state, idle_state, true);
-
-		// werewolf_infected_transform (victim one-shot -> back to Idle)
-		werewolf_infected_transform_var := sm->create_variable("werewolf_infected_transform", State_Machine_Variable.Kind.TRIGGER);
-		werewolf_infected_transform_state := layer->create_state("004RAND_werewolf/Infected_Bitten_Transform", false, 2.0);
-		layer->create_global_transition(werewolf_infected_transform_state, false)->create_trigger_condition(werewolf_infected_transform_var);
-		layer->create_transition(werewolf_infected_transform_state, idle_state, true);
-
-		// --- Pyromaniac ---
-		// Snap fingers (one-shot) for Light Fire.
-		pyro_snap_fingers_var := sm->create_variable("pyro_snap_fingers", State_Machine_Variable.Kind.TRIGGER);
-		pyro_snap_fingers_state := layer->create_state("004RAND_pyromaniac/Snap_Fingers", false, 1.0);
-		layer->create_global_transition(pyro_snap_fingers_state, false)->create_trigger_condition(pyro_snap_fingers_var);
-		layer->create_transition(pyro_snap_fingers_state, idle_state, true);
-
-		// On-fire idle loop (explicitly entered; exits via RESET or Blow_Out_Fire).
-		pyro_on_fire_idle_var := sm->create_variable("pyro_on_fire_idle", State_Machine_Variable.Kind.TRIGGER);
-		pyro_on_fire_idle_state := layer->create_state("004RAND_pyromaniac/Idle_On_Fire", true, 0.0);
-		layer->create_global_transition(pyro_on_fire_idle_state, false)->create_trigger_condition(pyro_on_fire_idle_var);
-
-		// Extinguish (one-shot) -> back to normal Idle.
-		pyro_blow_out_fire_var := sm->create_variable("pyro_blow_out_fire", State_Machine_Variable.Kind.TRIGGER);
-		pyro_blow_out_fire_state := layer->create_state("004RAND_pyromaniac/Blow_Out_Fire", false, 1.0);
-		layer->create_global_transition(pyro_blow_out_fire_state, false)->create_trigger_condition(pyro_blow_out_fire_var);
-		layer->create_transition(pyro_blow_out_fire_state, idle_state, true);
-
-		// End-game (one-shot) -> back to Idle.
-		pyro_end_game_var := sm->create_variable("pyro_end_game", State_Machine_Variable.Kind.TRIGGER);
-		pyro_end_game_state := layer->create_state("004RAND_pyromaniac/End_Game", false, 5.0);
-		layer->create_global_transition(pyro_end_game_state, false)->create_trigger_condition(pyro_end_game_var);
-		layer->create_transition(pyro_end_game_state, idle_state, true);
-
-		// --- Pirate ---
-		// Dig for treasure (one-shot) -> back to normal Idle.
-		pirate_dig_for_treasure_var := sm->create_variable("pirate_dig_for_treasure", State_Machine_Variable.Kind.TRIGGER);
-		pirate_dig_for_treasure_state := layer->create_state("004RAND_pirate/dig_for_treasure", false, 2.0);
-		layer->create_global_transition(pirate_dig_for_treasure_state, false)->create_trigger_condition(pirate_dig_for_treasure_var);
-		layer->create_transition(pirate_dig_for_treasure_state, idle_state, true);
-
-		// --- Goo Goo Gaga (player rig only; creature rig uses direct set_animation) ---
-		// Transform into creature (one-shot, 2s) -> back to Idle (skeleton swap happens during anim).
-		ggg_transform_var := sm->create_variable("ggg_transform", State_Machine_Variable.Kind.TRIGGER);
-		ggg_transform_state := layer->create_state("004RAND_GOOGOOGAGA/Transform_Monster_Start", false, 2.0);
-		layer->create_global_transition(ggg_transform_state, false)->create_trigger_condition(ggg_transform_var);
-		layer->create_transition(ggg_transform_state, idle_state, true);
-
-		// Revert from creature (one-shot, 1s) -> back to Idle.
-		ggg_revert_var := sm->create_variable("ggg_revert", State_Machine_Variable.Kind.TRIGGER);
-		ggg_revert_state := layer->create_state("004RAND_GOOGOOGAGA/Transform_Player_End", false, 1.0);
-		layer->create_global_transition(ggg_revert_state, false)->create_trigger_condition(ggg_revert_var);
-		layer->create_transition(ggg_revert_state, idle_state, true);
-
-		// Tinfoil trap: start (one-shot, 0.5s) -> loop (exits via ggg_trapped_end trigger).
-		ggg_trapped_start_var := sm->create_variable("ggg_trapped_start", State_Machine_Variable.Kind.TRIGGER);
-		ggg_trapped_start_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Start", false, 0.5);
-		layer->create_global_transition(ggg_trapped_start_state, false)->create_trigger_condition(ggg_trapped_start_var);
-
-		ggg_trapped_loop_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Loop", true, 0.0);
-		layer->create_transition(ggg_trapped_start_state, ggg_trapped_loop_state, true);
-
-		// Tinfoil trap end (one-shot, 0.5s) -> back to Idle.
-		ggg_trapped_end_var := sm->create_variable("ggg_trapped_end", State_Machine_Variable.Kind.TRIGGER);
-		ggg_trapped_end_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_End", false, 0.5);
-		layer->create_global_transition(ggg_trapped_end_state, false)->create_trigger_condition(ggg_trapped_end_var);
-		layer->create_transition(ggg_trapped_end_state, idle_state, true);
-
-		// --- Drag Body (traitor utility) ---
-		// Inject drag locomotion states; driven by bools set in `Drag_Body_Ability`.
-		drag_enabled_var := sm->create_variable("drag_body_enabled", State_Machine_Variable.Kind.BOOL);
-		drag_moving_var := sm->create_variable("drag_body_moving", State_Machine_Variable.Kind.BOOL);
-		drag_right_var := sm->create_variable("drag_body_right", State_Machine_Variable.Kind.BOOL);
-
-		drag_idle_left := layer->create_state("004RAND/drag_body_idle", true, 0.0);
-		drag_idle_right := layer->create_state("004RAND/drag_body_idle_right", true, 0.0);
-		drag_walk_left := layer->create_state("004RAND/drag_body_walk", true, 0.0);
-		drag_walk_right := layer->create_state("004RAND/drag_body_walk_right", true, 0.0);
-
-		// Mutually-exclusive global transitions (enter drag states).
-		to_drag_idle_left := layer->create_global_transition(drag_idle_left, false);
-		to_drag_idle_left->create_bool_condition(drag_enabled_var, true);
-		to_drag_idle_left->create_bool_condition(drag_moving_var, false);
-		to_drag_idle_left->create_bool_condition(drag_right_var, false);
-
-		to_drag_idle_right := layer->create_global_transition(drag_idle_right, false);
-		to_drag_idle_right->create_bool_condition(drag_enabled_var, true);
-		to_drag_idle_right->create_bool_condition(drag_moving_var, false);
-		to_drag_idle_right->create_bool_condition(drag_right_var, true);
-
-		to_drag_walk_left := layer->create_global_transition(drag_walk_left, false);
-		to_drag_walk_left->create_bool_condition(drag_enabled_var, true);
-		to_drag_walk_left->create_bool_condition(drag_moving_var, true);
-		to_drag_walk_left->create_bool_condition(drag_right_var, false);
-
-		to_drag_walk_right := layer->create_global_transition(drag_walk_right, false);
-		to_drag_walk_right->create_bool_condition(drag_enabled_var, true);
-		to_drag_walk_right->create_bool_condition(drag_moving_var, true);
-		to_drag_walk_right->create_bool_condition(drag_right_var, true);
-
-		// Exit transitions: return to idle when drag ends.
-		exit_drag_idle_left := layer->create_transition(drag_idle_left, idle_state, false);
-		exit_drag_idle_left->create_bool_condition(drag_enabled_var, false);
-
-		exit_drag_idle_right := layer->create_transition(drag_idle_right, idle_state, false);
-		exit_drag_idle_right->create_bool_condition(drag_enabled_var, false);
-
-		exit_drag_walk_left := layer->create_transition(drag_walk_left, idle_state, false);
-		exit_drag_walk_left->create_bool_condition(drag_enabled_var, false);
-
-		exit_drag_walk_right := layer->create_transition(drag_walk_right, idle_state, false);
-		exit_drag_walk_right->create_bool_condition(drag_enabled_var, false);
+		rr_sm_setup_common(sm, layer, idle_state);
+		rr_sm_setup_movie_star(sm, layer, idle_state);
+		rr_sm_setup_hitman(sm, layer, idle_state);
+		rr_sm_setup_werewolf(sm, layer, idle_state);
+		rr_sm_setup_pyromaniac(sm, layer, idle_state);
+		rr_sm_setup_pirate(sm, layer, idle_state);
+		rr_sm_setup_ggg(sm, layer, idle_state);
+		rr_mimicer_setup_player_state_machine(sm, layer, idle_state);
+		rr_sm_setup_drag_body(sm, layer, idle_state);
 
 		sm_inited = true;
         log_info("State machine initialized");
