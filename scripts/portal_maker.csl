@@ -98,7 +98,7 @@ rr_destroy_all_portals :: proc() {
 }
 
 RR_Portal :: class : Component {
-	sprite: Sprite_Renderer;
+	spine: Spine_Animator;
 	is_red: bool;
 	owner_player_entity_id: u64;
 	linked_portal: Entity;
@@ -161,19 +161,30 @@ rr_portal_maker_place_portal :: proc(owner: Player, is_red: bool, position: v2, 
 	e->set_local_rotation(0.0);
 	e->set_local_scale(v2.{PORTAL_MAKER_PORTAL_SCALE, PORTAL_MAKER_PORTAL_SCALE});
 
-	sprite := e->add_component(Sprite_Renderer);
+	spine := e->add_component(Spine_Animator);
+	spine->awaken();
+	spine.instance->set_skeleton(get_asset(Spine_Asset, "anims/portals/004RAND_portal.spine"));
 	if is_red {
-		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/portal_maker/red_portal.png"));
+		spine.instance->set_skin("red");
 	} else {
-		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/portal_maker/blue_portal.png"));
+		spine.instance->set_skin("blue");
 	}
+	spine.instance->refresh_skins();
+	// State machine: appear -> idleloop
+	sm := State_Machine.create();
+	sm_layer := sm->create_layer("main", 0);
+	appear_state := sm_layer->create_state("004RAND/portals/active/appear", false);
+	idle_state := sm_layer->create_state("004RAND/portals/active/idleloop", true);
+	sm_layer->set_initial_state(appear_state);
+	appear_to_idle := sm_layer->create_transition(appear_state, idle_state, true);
+	spine.instance->set_state_machine(sm, true);
+
 	// Above map, below players (similar to other ground decals).
-	sprite.layer = 0;
-	sprite.depth_offset = PORTAL_MAKER_PORTAL_DEPTH_OFFSET;
-	sprite.color = v4.{1, 1, 1, 0.95};
+	spine.layer = 0;
+	spine.depth_offset = PORTAL_MAKER_PORTAL_DEPTH_OFFSET;
 
 	portal := e->add_component(RR_Portal);
-	portal.sprite = sprite;
+	portal.spine = spine;
 	portal.is_red = is_red;
 	portal.owner_player_entity_id = owner.entity.id;
 	portal.linked_portal = null;
@@ -201,7 +212,7 @@ rr_portal_maker_place_portal :: proc(owner: Player, is_red: bool, position: v2, 
 }
 
 RR_Portal_Bolt :: class : Component {
-	sprite: Sprite_Renderer;
+	spine: Spine_Animator;
 	velocity: v2;
 	approach_dir: v2;
 	lifetime: float;
@@ -215,18 +226,12 @@ RR_Portal_Bolt :: class : Component {
 		if lifetime <= 0.0 {
 			lifetime = PORTAL_MAKER_BOLT_LIFETIME_SECONDS;
 		}
-		if sprite == null {
-			sprite = entity->get_component(Sprite_Renderer);
+		if spine == null {
+			spine = entity->get_component(Spine_Animator);
 		}
 	}
 
 	ao_update :: proc(using this: RR_Portal_Bolt, dt: float) {
-		// Face direction of travel
-		if length_squared(velocity) > 0.0001 {
-			angle := to_degrees(atan2(velocity.y, velocity.x));
-			entity->set_local_rotation(angle);
-		}
-
 		// Move
 		entity->add_local_position(velocity * dt);
 
@@ -273,19 +278,21 @@ rr_portal_maker_fire_bolt :: proc(owner: Player, is_red: bool, direction: v2) {
 	e->set_local_rotation(0.0);
 	e->set_local_scale(v2.{0.65, 0.65});
 
-	sprite := e->add_component(Sprite_Renderer);
+	bolt_spine := e->add_component(Spine_Animator);
+	bolt_spine->awaken();
+	bolt_spine.instance->set_skeleton(get_asset(Spine_Asset, "anims/portals/004RAND_portal.spine"));
 	if is_red {
-		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/portal_maker/red_portal.png"));
-		sprite.color = v4.{1, 0.85, 0.85, 1.0};
+		bolt_spine.instance->set_skin("red");
 	} else {
-		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/portal_maker/blue_portal.png"));
-		sprite.color = v4.{0.85, 0.9, 1.0, 1.0};
+		bolt_spine.instance->set_skin("blue");
 	}
-	sprite.layer = 6;
-	sprite.depth_offset = -0.35;
+	bolt_spine.instance->refresh_skins();
+	bolt_spine.instance->set_animation("004RAND/projectile/idleloop", true, 0);
+	bolt_spine.layer = 6;
+	bolt_spine.depth_offset = -0.35;
 
 	bolt := e->add_component(RR_Portal_Bolt);
-	bolt.sprite = sprite;
+	bolt.spine = bolt_spine;
 	bolt.velocity = direction * PORTAL_MAKER_BOLT_SPEED;
 	bolt.approach_dir = direction;
 	bolt.owner_player_entity_id = owner.entity.id;

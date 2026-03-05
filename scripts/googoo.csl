@@ -4,6 +4,10 @@ import "core:ao"
 // Goo Goo Gaga (GGG) — Traitor Role
 // ============================================================================
 
+// Toggle: when false, GGG is hidden from role assignment and help UI.
+// Use /ggg chat command to toggle.
+rr_ggg_role_enabled: bool;
+
 // --- GGG Module ---
 GGG_Module :: class : Component {
 	wraps: int;
@@ -24,11 +28,16 @@ GGG_Module :: class : Component {
 	creature_animator: Spine_Animator;
 	skeleton_swap_at: float;
 	creature_visible: bool;
+	crawl_sfx_id: u64;
+	crawl_sfx_playing: bool;
+	// Set to >0 when auto-revert fires, consumed by GGG_Transform_Ability to apply cooldown.
+	pending_transform_cooldown: float;
 }
 
 // --- Constants ---
 GGG_KILL_COOLDOWN_SECONDS :: 25.0;
 GGG_TRANSFORM_START_COOLDOWN_SECONDS :: 15.0;
+GGG_TRANSFORM_TOGGLE_COOLDOWN_SECONDS :: 2.0;
 GGG_TRANSFORM_COOLDOWN_SECONDS :: 30.0;
 GGG_TRANSFORM_DURATION_SECONDS :: 15.0;
 GGG_TRANSFORM_ANIM_ENTER_SECONDS :: 0.5;
@@ -40,24 +49,30 @@ GGG_WRAP_RANGE :: 2.5;
 GGG_WRAP_MOVEMENT_INTERRUPT_THRESHOLD :: 0.15;
 
 GGG_CRAWL_COOLDOWN_SECONDS :: 30.0;
-GGG_CRAWL_DURATION_SECONDS :: 5.0;
+GGG_CRAWL_DURATION_SECONDS :: 12.0;
 GGG_CRAWL_SPEED_MULTIPLIER :: 1.75;
 GGG_CRAWL_SCALE_X :: 0.5;
 GGG_CRAWL_SCALE_Y :: 0.5;
 GGG_CRAWL_UNLOCK_WRAPS :: 1;
 
 GGG_TRAP_COOLDOWN_SECONDS :: 45.0;
-GGG_TRAP_ROOT_SECONDS :: 3.0;
+GGG_TRAP_PLACE_DISTANCE :: 4.0;
+GGG_TRAP_ROOT_SECONDS :: 15.0;
 GGG_TRAP_MAX_ACTIVE :: 2;
 GGG_TRAP_LIFETIME_SECONDS :: 60.0;
 GGG_TRAP_TRIGGER_RADIUS :: 0.8;
 GGG_TRAP_UNLOCK_WRAPS :: 2;
+GGG_TRAP_RIG :: "anims/trap/004RAND_SantaTrap.spine";
+GGG_TRAP_PLACE_DURATION :: 0.8;
+GGG_TRAP_ACTIVATE_DURATION :: 1.2;
 
 GGG_SWARM_COOLDOWN_SECONDS :: 90.0;
-GGG_SWARM_DECOY_COUNT :: 3;
+GGG_SWARM_DECOY_COUNT :: 15;
 GGG_SWARM_DURATION_SECONDS :: 10.0;
 GGG_SWARM_UNLOCK_WRAPS :: 3;
 GGG_SWARM_DECOY_SPEED :: 4.0;
+GGG_SWARM_EXPLODE_DESTROY_DELAY :: 0.6;
+GGG_SWARM_EXPLODE_RADIUS :: 2.5;
 
 // Night Crawler passive (during power outage)
 GGG_NIGHT_TRANSFORM_CD :: 15.0;
@@ -173,7 +188,7 @@ rr_ggg_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 	crawl_idle_state := layer->create_state("Crawl_Idle", true);
 	crawl_move_state := layer->create_state("Crawl_Move", true);
 	crawl_end_state := layer->create_state("Crawl_End", false, 0.5);
-	pounce_state := layer->create_state("Pounce", false, 1.0);
+	pounce_state := layer->create_state("PounceWrap", false, 1.0);
 
 	layer->set_initial_state(idle_state);
 
@@ -357,6 +372,31 @@ rr_ggg_update_transform :: proc(player: Player, dt: float) {
 		rr_ggg_end_crawl(player);
 	}
 
+	// Crawl SFX: play only while moving, stop when idle
+	if Game.is_server() {
+		if gm.is_crawling {
+			crawl_moving := length_squared(player.agent.velocity) > 0.01;
+			if crawl_moving && !gm.crawl_sfx_playing {
+				crawl_desc := SFX.default_sfx_desc();
+				crawl_desc.entity_to_follow = player.entity.id;
+				crawl_desc.loop = true;
+				crawl_desc.loop_timeout = GGG_CRAWL_DURATION_SECONDS;
+				crawl_desc.volume = 0.1;
+				crawl_desc.speed_perturb = 0.05;
+				gm.crawl_sfx_id = rr_play_sfx("sfx/ggg_crawl.wav", crawl_desc);
+				gm.crawl_sfx_playing = true;
+			} else if !crawl_moving && gm.crawl_sfx_playing {
+				SFX.stop(gm.crawl_sfx_id);
+				gm.crawl_sfx_id = 0;
+				gm.crawl_sfx_playing = false;
+			}
+		} else if gm.crawl_sfx_playing {
+			SFX.stop(gm.crawl_sfx_id);
+			gm.crawl_sfx_id = 0;
+			gm.crawl_sfx_playing = false;
+		}
+	}
+
 	// Wrap channel: interrupt if player moved
 	if gm.wrap_channel_active {
 		dist := length(player.entity.world_position - gm.wrap_channel_last_pos);
@@ -382,6 +422,7 @@ rr_ggg_begin_revert :: proc(player: Player) {
 	gm.is_creature_form = false;
 	gm.creature_form_ends_at = 0.0;
 	gm.skeleton_swap_at = 0.0;
+	gm.pending_transform_cooldown = 0.0;
 	// Speed will be restored in the transform update next frame
 	rr_ggg_swap_to_player(player);
 	player->set_trigger("ggg_revert");
@@ -442,6 +483,12 @@ rr_ggg_end_crawl :: proc(player: Player) {
 	if player == null return;
 	gm := player.entity->get_component(GGG_Module);
 	if gm == null return;
+	// Always stop crawl SFX, even if is_crawling is already false.
+	if gm.crawl_sfx_id != 0 {
+		SFX.stop(gm.crawl_sfx_id);
+		gm.crawl_sfx_id = 0;
+	}
+	gm.crawl_sfx_playing = false;
 	if !gm.is_crawling return;
 	gm.is_crawling = false;
 	gm.crawl_ends_at = 0.0;
@@ -486,7 +533,7 @@ rr_ggg_cancel_wrap :: proc(player: Player) {
 	gm.wrap_channel_active = false;
 	gm.wrap_channel_corpse_id = 0;
 	gm.wrap_channel_end_at = 0.0;
-	player->remove_disable_movement_input_reason(GGG_WRAP_LOCK_REASON);
+	player->remove_freeze_reason(GGG_WRAP_LOCK_REASON);
 	rr_ggg_creature_trigger(player, "wrap_end");
 }
 
@@ -499,7 +546,7 @@ rr_ggg_complete_wrap :: proc(player: Player) {
 	gm.wrap_channel_active = false;
 	gm.wrap_channel_corpse_id = 0;
 	gm.wrap_channel_end_at = 0.0;
-	player->remove_disable_movement_input_reason(GGG_WRAP_LOCK_REASON);
+	player->remove_freeze_reason(GGG_WRAP_LOCK_REASON);
 	rr_ggg_creature_trigger(player, "wrap_end");
 
 	// Find the corpse and mark it wrapped
@@ -508,6 +555,10 @@ rr_ggg_complete_wrap :: proc(player: Player) {
 		if !#alive(corpse.entity) continue;
 		if corpse.entity.id == corpse_id {
 			corpse.ggg_is_wrapped = true;
+			// Save the pre-wrap death animation so unwrap can restore it.
+			corpse.ggg_pre_wrap_death_anim = corpse.death_anim.count > 0 ? corpse.death_anim : "Death_No_HP";
+			// Update death_anim so drag-restore shows tinfoil, not the original pose.
+			corpse.death_anim = "004RAND_GOOGOOGAGA/Dead_Body_Tinfoil";
 			// Play the tinfoil body animation on the corpse
 			spine := corpse.entity->get_component(Spine_Animator);
 			if spine != null && spine.instance != null {
@@ -559,18 +610,61 @@ GGG_Trap_Entry :: class {
 
 ggg_traps: [..]GGG_Trap_Entry;
 
+// State: 0 = placing, 1 = idle, 2 = activating
+GGG_Trap_Animator :: class : Component {
+	state: int;
+	state_end_at: float;
+
+	ao_update :: method(dt: float) {
+		if !Game.is_server() return;
+		// Destroy check first — must not be gated behind spine null guards
+		if state == 2 && get_time() >= state_end_at {
+			entity->destroy();
+			return;
+		}
+		spine := entity->get_component(Spine_Animator);
+		if spine == null return;
+		if spine.instance == null return;
+		if state == 0 && get_time() >= state_end_at {
+			state = 1;
+			spine.instance->set_animation("Idle", true, 0);
+		}
+	}
+
+	activate :: method() {
+		if !Game.is_server() return;
+		state = 2;
+		state_end_at = get_time() + GGG_TRAP_ACTIVATE_DURATION;
+		spine := entity->get_component(Spine_Animator);
+		if spine == null return;
+		if spine.instance == null return;
+		spine.instance->set_animation("Activate", false, 0);
+	}
+}
+
 GGG_Trap_Visibility :: class : Component {
 	ao_update :: method(dt: float) {
+		spine := entity->get_component(Spine_Animator);
+		if spine == null return;
+		if spine.instance == null return;
+
+		// During Place or Activate: visible to everyone
+		trap_anim := entity->get_component(GGG_Trap_Animator);
+		if trap_anim != null && trap_anim.state != 1 {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
+			return;
+		}
+
+		// During Idle: only visible to traitors
 		local_player, ok := Game.get_local_player();
-		if !ok return;
-		visible := local_player.player_type == Player_Type.TRAITOR;
-		sprite := entity->get_component(Sprite_Renderer);
-		if sprite != null {
-			if visible {
-				sprite.color = v4.{1, 1, 1, 1};
-			} else {
-				sprite.color = v4.{1, 1, 1, 0};
-			}
+		if !ok {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 0};
+			return;
+		}
+		if local_player.player_type == Player_Type.TRAITOR {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
+		} else {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 0};
 		}
 	}
 }
@@ -601,13 +695,18 @@ rr_ggg_place_trap :: proc(player: Player, world_pos: v2) {
 	trap_e->set_local_position(world_pos);
 	trap_e->set_local_scale(v2.{0.6, 0.6});
 
-	sprite := trap_e->add_component(Sprite_Renderer);
-	if sprite != null {
-		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/hitman/land_mine.png")); // TODO: replace with chocolate bar sprite
-		sprite.layer = 0;
-		sprite.depth_offset = 1.0;
+	spine := trap_e->add_component(Spine_Animator);
+	if spine != null {
+		spine->awaken();
+		if spine.instance != null {
+			spine.instance->set_skeleton(get_asset(Spine_Asset, GGG_TRAP_RIG));
+			spine.instance->set_animation("Place", false, 0);
+		}
 	}
 
+	anim := trap_e->add_component(GGG_Trap_Animator);
+	anim.state = 0;
+	anim.state_end_at = get_time() + GGG_TRAP_PLACE_DURATION;
 	trap_e->add_component(GGG_Trap_Visibility);
 	entry.trap_entity = trap_e;
 
@@ -639,12 +738,13 @@ GGG_Trap_Root_Effect :: class : Component {
 			active = false;
 			return;
 		}
-		// Doctor proximity healing
+		// Doctor proximity healing (a doctor cannot free themselves)
 		foreach doc: component_iterator(Player) {
 			if doc == null continue;
 			if !#alive(doc.entity) continue;
 			if doc.player_state != Player_State.ALIVE continue;
 			if doc.player_role != Player_Role.DOCTOR continue;
+			if doc.entity.id == entity.id continue;
 			dist := length(doc.entity.world_position - entity.world_position);
 			if dist < 2.0 {
 				heal();
@@ -708,9 +808,14 @@ update_ggg_traps :: proc() {
 				}
 				root->arm(GGG_TRAP_ROOT_SECONDS);
 
-				// Destroy the trap entity
+				// Play activate animation then destroy
 				if t.trap_entity != null && #alive(t.trap_entity) {
-					t.trap_entity->destroy();
+					trap_anim := t.trap_entity->get_component(GGG_Trap_Animator);
+					if trap_anim != null {
+						trap_anim->activate();
+					} else {
+						t.trap_entity->destroy();
+					}
 				}
 				last := ggg_traps.count - 1;
 				ggg_traps[i] = ggg_traps[last];
@@ -755,6 +860,10 @@ GGG_Decoy :: class : Component {
 	expires_at: float;
 	agent: Movement_Agent;
 	nav_hint: int;
+	exploding: bool;
+	explode_end_at: float;
+	sfx_id: u64;
+	sfx_next_play_at: float;
 
 	ao_start :: method() {
 		rng = rng_seed(entity.id);
@@ -764,6 +873,8 @@ GGG_Decoy :: class : Component {
 			agent->set_navmesh_to_lock_to(world_references.main_navmesh);
 		}
 		pick_new_target();
+		// Schedule first ggg sound with a random offset so they don't all play at once
+		sfx_next_play_at = get_time() + rng_range_float(ref rng, 0.0, 4.0);
 	}
 
 	pick_new_target :: method() {
@@ -785,10 +896,85 @@ GGG_Decoy :: class : Component {
 		move_interval_end = get_time() + rng_range_float(ref rng, 1.0, 2.0);
 	}
 
+	start_explode :: method() {
+		exploding = true;
+		explode_end_at = get_time() + GGG_SWARM_EXPLODE_DESTROY_DELAY;
+
+		spine := entity->get_component(Spine_Animator);
+		if spine != null && spine.instance != null {
+			spine.instance->set_animation("Crawl_Explode", false, 0);
+		}
+
+		if Game.is_server() {
+			explode_sfx_desc := SFX.default_sfx_desc();
+			explode_sfx_desc.entity_to_follow = entity.id;
+			explode_sfx_desc.volume = 0.4;
+			explode_sfx_desc.speed_perturb = 0.1;
+			rr_play_sfx("sfx/ggg_explode.wav", explode_sfx_desc);
+
+			for j: 0..players.elements.count-1 {
+				p := players.elements[j];
+				if p == null continue;
+				if !#alive(p.entity) continue;
+				if p.player_state != Player_State.ALIVE continue;
+				if p.player_type == Player_Type.TRAITOR continue;
+				dist := length(p.entity.world_position - entity.world_position);
+				if dist < GGG_SWARM_EXPLODE_RADIUS {
+					root := p.entity->get_component(GGG_Trap_Root_Effect);
+					if root == null {
+						root = p.entity->add_component(GGG_Trap_Root_Effect);
+					}
+					root->arm(GGG_TRAP_ROOT_SECONDS);
+				}
+			}
+		}
+	}
+
+	ao_end :: method() {
+		if sfx_id != 0 {
+			SFX.stop(sfx_id);
+			sfx_id = 0;
+		}
+	}
+
 	ao_update :: method(dt: float) {
-		if get_time() >= expires_at {
-			entity->destroy();
+		if exploding {
+			if sfx_id != 0 {
+				SFX.stop(sfx_id);
+				sfx_id = 0;
+			}
+			if get_time() >= explode_end_at {
+				entity->destroy();
+			}
 			return;
+		}
+
+		if get_time() >= expires_at {
+			start_explode();
+			return;
+		}
+
+		// Play ggg sound with random breaks, picking a random variant each time
+		if Game.is_server() && get_time() >= sfx_next_play_at {
+			// Stop previous sound before starting a new one to avoid orphaned sfx_ids
+			if sfx_id != 0 {
+				SFX.stop(sfx_id);
+				sfx_id = 0;
+			}
+			sfx_desc := SFX.default_sfx_desc();
+			sfx_desc.speed_perturb = 0.15;
+			// Night Crawler: during power outage, goo goo ga ga SFX is global
+			if rr_power_outage_active {
+				sfx_desc.volume = 0.2;
+			} else {
+				sfx_desc.entity_to_follow = entity.id;
+				sfx_desc.volume = 0.2;
+			}
+			variant := rng_range_int(ref rng, 1, 3);
+			sfx_path := format_string("sfx/ggg%.wav", {variant});
+			sfx_id = rr_play_sfx(sfx_path, sfx_desc);
+			// Wider random break so fewer compete for audio channels
+			sfx_next_play_at = get_time() + rng_range_float(ref rng, 3.0, 5.0);
 		}
 
 		now := get_time();
@@ -821,10 +1007,11 @@ rr_ggg_spawn_decoys :: proc(player: Player) {
 	if !Game.is_server() return;
 
 	now := get_time();
+	spawn_rng: u64 = rng_seed_time();
 	for i: 0..GGG_SWARM_DECOY_COUNT-1 {
 		decoy_e := Scene.create_entity();
 		decoy_e->set_local_position(player.entity.world_position);
-		decoy_e->set_local_scale(v2.{GGG_CRAWL_SCALE_X, GGG_CRAWL_SCALE_Y});
+		decoy_e->set_local_scale(v2.{0.7, 0.7});
 
 		spine := decoy_e->add_component(Spine_Animator);
 		if spine != null {
@@ -838,12 +1025,14 @@ rr_ggg_spawn_decoys :: proc(player: Player) {
 		agent := decoy_e->add_component(Movement_Agent);
 		agent.movement_speed = GGG_SWARM_DECOY_SPEED;
 
+		// Stagger expiry so decoys don't all explode at the same instant
+		stagger := rng_range_float(ref spawn_rng, 0.0, 2.0);
 		decoy_comp := decoy_e->add_component(GGG_Decoy);
-		decoy_comp.expires_at = now + GGG_SWARM_DURATION_SECONDS;
+		decoy_comp.expires_at = now + GGG_SWARM_DURATION_SECONDS + stagger;
 
 		entry := new(GGG_Decoy_Entry);
 		entry.decoy_entity = decoy_e;
-		entry.expires_at = now + GGG_SWARM_DURATION_SECONDS;
+		entry.expires_at = now + GGG_SWARM_DURATION_SECONDS + stagger;
 		ggg_decoys->append(entry);
 	}
 }
@@ -856,15 +1045,15 @@ update_ggg_decoys :: proc() {
 	i := 0;
 	while i < ggg_decoys.count {
 		d := ggg_decoys[i];
-		if now >= d.expires_at || d.decoy_entity == null || !#alive(d.decoy_entity) {
-			if d.decoy_entity != null && #alive(d.decoy_entity) {
-				d.decoy_entity->destroy();
-			}
+
+		// Only remove from list once the entity is gone — the component handles all lifetime/expiry logic
+		if d.decoy_entity == null || !#alive(d.decoy_entity) {
 			last := ggg_decoys.count - 1;
 			ggg_decoys[i] = ggg_decoys[last];
 			ggg_decoys->pop();
 			continue;
 		}
+
 		i += 1;
 	}
 }
@@ -938,18 +1127,19 @@ GGG_Transform_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Apply cooldown from auto-revert (creature form expired naturally).
+		gm_check := player.entity->get_component(GGG_Module);
+		if gm_check != null && gm_check.pending_transform_cooldown > 0.0 {
+			current_cooldown = gm_check.pending_transform_cooldown;
+			gm_check.pending_transform_cooldown = 0.0;
+		}
 		if params.clicked && params.can_use {
 			gm := player.entity->get_component(GGG_Module);
 			if gm == null return;
 			if gm.is_creature_form {
 				// Revert
 				rr_ggg_begin_revert(player);
-				cooldown := GGG_TRANSFORM_COOLDOWN_SECONDS;
-				// Night Crawler passive
-				if rr_power_outage_active {
-					cooldown = GGG_NIGHT_TRANSFORM_CD;
-				}
-				current_cooldown = cooldown;
+				current_cooldown = GGG_TRANSFORM_TOGGLE_COOLDOWN_SECONDS;
 			} else {
 				// Enter creature form
 				gm.is_creature_form = true;
@@ -976,9 +1166,20 @@ GGG_Transform_Ability :: class : Ability_Base {
 					sfx.volume_perturb = 0.05 * 0.25;
 					sfx.speed_perturb = 0.05;
 					rr_play_sfx("sfx/killer_transform.wav", sfx);
+
+					ggg_sfx := SFX.default_sfx_desc();
+					ggg_sfx.speed_perturb = 0.05;
+					// Night Crawler: during power outage, goo goo ga ga SFX is global
+					if rr_power_outage_active {
+						ggg_sfx.volume = 0.3;
+					} else {
+						ggg_sfx->set_position(player.entity.world_position);
+						ggg_sfx.volume = 0.3;
+					}
+					rr_play_sfx("sfx/ggg1.wav", ggg_sfx);
 				}
 
-				current_cooldown = 0.0; // No CD while in form (button stays for revert)
+				current_cooldown = GGG_TRANSFORM_TOGGLE_COOLDOWN_SECONDS;
 			}
 		}
 	}
@@ -1016,7 +1217,7 @@ GGG_Wrap_Ability :: class : Ability_Base {
 	NAME :: "Wrap";
 
 	on_init :: proc(instance: GGG_Wrap_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/drag_body_icon.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/wrap_corpse.png");
 	}
 
 	can_use :: method() -> bool {
@@ -1044,7 +1245,7 @@ GGG_Wrap_Ability :: class : Ability_Base {
 			gm.wrap_channel_corpse_id = corpse.entity.id;
 			gm.wrap_channel_end_at = get_time() + GGG_WRAP_CHANNEL_SECONDS;
 			gm.wrap_channel_last_pos = player.entity.world_position;
-			player->add_disable_movement_input_reason(GGG_WRAP_LOCK_REASON);
+			player->add_freeze_reason(GGG_WRAP_LOCK_REASON);
 			// Fire wrap trigger on creature state machine.
 			if gm.creature_visible && gm.creature_animator != null && gm.creature_animator.instance != null {
 				if gm.creature_animator.instance.state_machine != null {
@@ -1084,7 +1285,7 @@ GGG_Crawl_Ability :: class : Ability_Base {
 	NAME :: "Crawl";
 
 	on_init :: proc(instance: GGG_Crawl_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/transform_evil.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/crawl_speedup.png");
 	}
 
 	can_use :: method() -> bool {
@@ -1146,8 +1347,11 @@ GGG_Crawl_Ability :: class : Ability_Base {
 GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 	NAME :: "Trap";
 
+	was_targeting: bool;
+	activated_this_session: bool;
+
 	on_init :: proc(instance: GGG_Chocolate_Trap_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/hitman/land_mine.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/santa_trap.png");
 		instance.is_aimed_ability = true;
 	}
 
@@ -1164,6 +1368,11 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 		return true;
 	}
 
+	cleanup_targeting :: method() {
+		was_targeting = false;
+		activated_this_session = false;
+	}
+
 	on_update :: method(params: ref Ability_Update_Params) {
 		// Locked notification
 		if params.clicked && !params.can_use {
@@ -1175,13 +1384,76 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 			}
 		}
 
-		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+		// Enter/exit targeting mode via standard helper.
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		targeting := targeted.targeting;
 
-		if activation.activate {
-			// Place trap at player position + aim direction
-			place_pos := player.entity.world_position + activation.direction * 2.0;
-			rr_ggg_place_trap(player, place_pos);
+		// Cancel aim if ability becomes unusable.
+		if targeting && !params.can_use {
+			player.active_ability = null;
+			cleanup_targeting();
+			return;
+		}
+
+		// Track targeting transitions.
+		if targeting && !was_targeting {
+			activated_this_session = false;
+			was_targeting = true;
+		}
+		if !targeting {
+			if was_targeting {
+				cleanup_targeting();
+			}
+			return;
+		}
+
+		aiming := Ability_Utilities.update_aiming_ability(player, ref params);
+		if aiming.cancel {
+			player.active_ability = null;
+			cleanup_targeting();
+			return;
+		}
+
+		// Compute target position (mouse position clamped to max range).
+		target_pos := get_mouse_world_position();
+		{
+			origin := player.entity.world_position;
+			delta := target_pos - origin;
+			max_r := GGG_TRAP_PLACE_DISTANCE;
+			if length_squared(delta) > max_r * max_r {
+				if length_squared(delta) < 0.001 {
+					delta = v2.{1, 0};
+				} else {
+					delta = normalize(delta);
+				}
+				target_pos = origin + delta * max_r;
+			}
+		}
+
+		// Draw reticle + translucent trap preview at target position.
+		if player->is_local() {
+			UI.push_world_draw_context();
+			defer UI.pop_draw_context();
+			UI.push_z(target_pos.y);
+			defer UI.pop_z();
+			reticle := get_asset(Texture_Asset, GROUND_RETICLE_TEXTURE_PATH);
+			reticle_rect := Rect{target_pos, target_pos}->grow(0.80, 0.80, 0.80, 0.80);
+			UI.quad(reticle_rect->fit_aspect(reticle->get_aspect()), reticle, v4.{1, 1, 1, 0.95});
+			trap_preview := get_asset(Texture_Asset, "sprites/icons/ggg/santa_trap.png");
+			preview_rect := Rect{target_pos, target_pos}->grow(0.60, 0.60, 0.60, 0.60);
+			UI.quad(preview_rect->fit_aspect(trap_preview->get_aspect()), trap_preview, v4.{1, 1, 1, 0.45});
+		}
+
+		if activated_this_session {
+			return;
+		}
+
+		if aiming.activate && params.can_use {
+			activated_this_session = true;
 			current_cooldown = GGG_TRAP_COOLDOWN_SECONDS;
+			rr_ggg_place_trap(player, target_pos);
+			player.active_ability = null;
+			cleanup_targeting();
 		}
 	}
 
@@ -1211,7 +1483,7 @@ GGG_Swarm_Ability :: class : Ability_Base {
 	NAME :: "Swarm";
 
 	on_init :: proc(instance: GGG_Swarm_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/transform_evil.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/swarm.png");
 	}
 
 	can_use :: method() -> bool {

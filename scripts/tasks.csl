@@ -42,6 +42,29 @@ rr_pop_mobile_ui_scale :: proc(pushed: bool) {
 	}
 }
 
+// --- Task SFX helpers (local-only to avoid double-play on host/server) ---
+RR_TASK_SFX_TILE_CLICK   :: "ui/task_click_tile.wav";
+RR_TASK_SFX_KEY_PRESS    :: "sfx/ui_type_key.wav";
+RR_TASK_SFX_ERROR        :: "Unknown/ui_error.wav";
+RR_TASK_SFX_BEEP         :: "ui/button_beep.wav";
+RR_TASK_SFX_ZAP          :: "Unknown/zap.wav";
+RR_TASK_SFX_LEVER        :: "Music/pull_lever.wav";
+RR_TASK_SFX_CATCH        :: "Unknown/swing_net_catch.wav";
+
+rr_task_sfx :: proc(player: Player, path: string, volume: float) {
+	if player == null return;
+	if !player->is_local() return;
+	sfx := SFX.default_sfx_desc();
+	sfx->set_position(player.entity.world_position);
+	sfx.volume = volume;
+	sfx.volume_perturb = 0.05;
+	sfx.speed_perturb = 0.08;
+	// Global SFX mix: everything at 25% volume.
+	sfx.volume *= 0.25;
+	sfx.volume_perturb *= 0.25;
+	rr_play_sfx(path, sfx);
+}
+
 NUM_TASKS: int : 10;
 
 // --- Task destinations (registered by Task_Interactable in `scripts/player.csl`) ---
@@ -113,6 +136,19 @@ Task_Base :: class {
 		}
 		attempt_id += 1;
 		started = true;
+
+		// Local-only start SFX (avoid double-play on host/server).
+		if player != null && player->is_local() {
+			sfx := SFX.default_sfx_desc();
+			sfx->set_position(player.entity.world_position);
+			sfx.volume = 0.5;
+			sfx.volume_perturb = 0.05;
+			sfx.speed_perturb = 0.08;
+			// Global SFX mix: everything at 25% volume.
+			sfx.volume *= 0.25;
+			sfx.volume_perturb *= 0.25;
+			rr_play_sfx("sfx/button_click.wav", sfx);
+		}
 	}
 
 	complete_attempt :: proc(using this: Task_Base, player: Player, success: bool) {
@@ -614,7 +650,7 @@ rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player
 				case .PIRATE:       { role_name = "PIRATE";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/pirate_icon.png"); }
 				case .HITMAN:       { role_name = "HITMAN";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/hitman_icon.png"); }
 				case .WEREWOLF:     { role_name = "WEREWOLF";     role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/werewolf_icon.png"); }
-				case .GOO_GOO_GAGA: { role_name = "GOO GOO GAGA"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/werewolf_icon.png"); }
+				case .GOO_GOO_GAGA: { role_name = "GOOGOO GAGA"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/goo_goo_icon.png"); }
 			}
 		}
 
@@ -631,7 +667,7 @@ rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player
 		text_start := header_content;
 		if role_icon != null {
 			ICON_SIZE :: 32.0;
-			ICON_OFFSET :: ICON_SIZE + 12.0;
+			ICON_OFFSET :: ICON_SIZE + 5.0;
 			text_start->cut_left(ICON_OFFSET * 2);
 			icon_rect := header_rect->left_rect()->center_rect()->offset(ICON_OFFSET, 0.0)->grow(ICON_SIZE);
 			UI.quad(icon_rect->fit_aspect(role_icon->get_aspect()), role_icon, v4.{1, 1, 1, 1});
@@ -639,7 +675,7 @@ rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player
 
 		ts.color = role_color;
 		role_actual := UI.text_sync(text_start, ts, role_name);
-		tasks_rect := text_start->offset_unscaled(role_actual->width() + 6.0, 0.0);
+		tasks_rect := text_start->offset_unscaled(role_actual->width() + 5.0, 0.0);
 		ts.color = v4.{1, 1, 1, 1};
 		UI.text(tasks_rect, ts, "Tasks");
 	}
@@ -696,10 +732,6 @@ rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player
 
 		help_ts := UI.default_text_settings();
 		
-		
-		
-		
-
 		if UI.button(help_btn_rect, help_bs, UI.default_text_settings(), "").clicked {
 			player.task_help_open = !player.task_help_open;
 		}
@@ -784,10 +816,12 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 			}
 			case .GOO_GOO_GAGA: {
 				append(ref results, Help_Ability_Entry.{"sprites/icons/transform_evil.png", "Transform", "Switch between schleem and creature form. Faster cooldown during power outage."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/kill_ability.png", "Wrap", "Creature form. Wrap a nearby dead body in tinfoil. Wraps unlock new abilities."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/kill_ability.png", "Crawl", "Unlocked at 1 wrap. Creature form. Shrink down and move faster."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/kill_ability.png", "Trap", "Unlocked at 2 wraps. Creature form. Place a chocolate trap that roots civilians."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/kill_ability.png", "Swarm", "Unlocked at 3 wraps. Creature form. Summon decoy creatures to cause chaos."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/kill_wrap_player.png", "Kill", "Creature form. Killing a player automatically wraps them."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/wrap_corpse.png", "Wrap", "Creature form. Wrap a nearby dead body in tinfoil. Wraps unlock new abilities."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/crawl_speedup.png", "Crawl", "Unlocked at 1 wrap. Creature form. Shrink down and move faster. Boosted during power outage."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/santa_trap.png", "Trap", "Unlocked at 2 wraps. Creature form. Place a chocolate trap that roots civilians."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/swarm.png", "Swarm", "Unlocked at 3 wraps. Creature form. Summon decoy creatures to cause chaos."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/power_outage.png", "Night Crawler", "Passive. During power outage: faster Transform CD, boosted Crawl speed, and goo goo ga ga SFX heard globally."});
 			}
 		}
 
@@ -991,6 +1025,7 @@ rr_draw_role_help_panel :: proc(player: Player) {
 		case .PIRATE:       role_icon = get_asset(Texture_Asset, "sprites/icons/roles/pirate_icon.png");
 		case .HITMAN:       role_icon = get_asset(Texture_Asset, "sprites/icons/roles/hitman_icon.png");
 		case .WEREWOLF:     role_icon = get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png");
+		case .GOO_GOO_GAGA: role_icon = get_asset(Texture_Asset, "sprites/icons/roles/googoogaga_icon.png");
 	}
 
 	// --- Tab sprite path by player type (same sprite for active/inactive, darker tint when inactive) ---
@@ -2065,6 +2100,7 @@ Task_Repair_Laptop :: class : Task_Base {
 					if is_point_in_rect(part_pos[i], target) {
 						part_pos[i] = target->center();
 						part_placed[i] = true;
+						rr_task_sfx(player, RR_TASK_SFX_TILE_CLICK, 0.6);
 					}
 					dragging_idx = -1;
 				}
@@ -2382,9 +2418,18 @@ Task_Call_Jail_Codes :: class : Task_Base {
 					if is_cancel {
 						task->handle_cancel_press();
 					} else if is_enter {
+						prev_success := task.success_time;
+						prev_fail := task.fail_time;
 						task->handle_enter_press();
+						if task.success_time > 0.0 && prev_success <= 0.0 {
+							rr_task_sfx(player, RR_TASK_SFX_BEEP, 0.7);
+						}
+						if task.fail_time > prev_fail && task.fail_time > 0.0 {
+							rr_task_sfx(player, RR_TASK_SFX_ERROR, 0.6);
+						}
 					} else {
 						task->handle_digit_press(digit);
+						rr_task_sfx(player, RR_TASK_SFX_KEY_PRESS, 0.4);
 					}
 				}
 			}
@@ -2650,6 +2695,7 @@ Task_Restart_Generator :: class : Task_Base {
 
 			if success_pull {
 				task.pulls_done += 1;
+				rr_task_sfx(player, RR_TASK_SFX_LEVER, 0.7);
 				if task.pulls_done >= PULLS_REQUIRED {
 					task.success_time = get_time();
 				}
@@ -3291,6 +3337,7 @@ Task_Reroute_Power :: class : Task_Base {
 						UI.quad(lid, lid_texture, .{1, 1, 1, 1});
 						if interact.clicked {
 							revealed[idx] = true;
+							rr_task_sfx(player, RR_TASK_SFX_TILE_CLICK, 0.5);
 						}
 						UI.pop_id();
 						continue;
@@ -3375,6 +3422,7 @@ Task_Reroute_Power :: class : Task_Base {
 
 						tile_kind[drag_from] = target_kind;
 						tile_rot[drag_from] = target_rot;
+						rr_task_sfx(player, RR_TASK_SFX_TILE_CLICK, 0.5);
 					}
 
 					dropped = true;
@@ -3445,6 +3493,7 @@ Task_Reroute_Power :: class : Task_Base {
 		// Check completion after any move/reveal; set success_time when solved.
 		if compute_connected_from_left(this) {
 			success_time = now;
+			rr_task_sfx(player, RR_TASK_SFX_ZAP, 0.7);
 		}
 
 		UI.push_layer(9700);
@@ -3460,6 +3509,11 @@ Task_Guide_The_Electron :: class : Task_Base {
 	last_update_time: float;
 	success_time: float;
 	fail_time: float;
+
+	// Lives
+	MAX_LIVES :: 3;
+	lives: int;
+	seen_attempt_id: int;
 
 	// Assets
 	bg_texture: Texture_Asset;
@@ -3507,6 +3561,7 @@ Task_Guide_The_Electron :: class : Task_Base {
 		last_update_time = 0.0;
 		success_time = 0.0;
 		fail_time = 0.0;
+		lives = MAX_LIVES;
 		rng_initialized = false;
 	}
 
@@ -3688,6 +3743,18 @@ Task_Guide_The_Electron :: class : Task_Base {
 			init_textures(this);
 		}
 
+		// Per-attempt init (start_attempt is not dynamically dispatched).
+		if seen_attempt_id != attempt_id {
+			seen_attempt_id = attempt_id;
+			ui_active = true;
+			layout_initialized = false;
+			last_update_time = 0.0;
+			success_time = 0.0;
+			fail_time = 0.0;
+			lives = MAX_LIVES;
+			rng_initialized = false;
+		}
+
 		now := get_time();
 		dt := 0.0;
 		if last_update_time > 0.0 {
@@ -3742,10 +3809,10 @@ Task_Guide_The_Electron :: class : Task_Base {
 			->grow_unscaled(finish_h * 0.5, finish_w * 0.5, finish_h * 0.5, finish_w * 0.5);
 		UI.quad(finish_rect, finish_texture, .{1, 1, 1, 1});
 
-		// Decorative start tokens (match template)
+		// Lives display (electron tokens on the left side)
 		token_h := play_rect->height() * 0.11;
 		token_w := token_h * start_token_texture->get_aspect();
-		for i: 0..2 {
+		for i: 0..lives-1 {
 			t := i.(float);
 			pct := 0.42 - t * 0.12;
 			p := v2.{play_rect.min.x + play_rect->width() * 0.15, play_rect.min.y + play_rect->height() * (0.5 + pct)};
@@ -3844,9 +3911,19 @@ Task_Guide_The_Electron :: class : Task_Base {
 
 		UI.pop_scissor();
 
-		// Collision response
-		if collided && success_time <= 0.0 {
+		// Collision response (invulnerable during fail flash so one hit = one life)
+		invulnerable := fail_time > 0.0 && (now - fail_time) < FAIL_FLASH_TIME;
+		if collided && success_time <= 0.0 && !invulnerable {
 			fail_time = now;
+			lives -= 1;
+			rr_task_sfx(player, RR_TASK_SFX_ZAP, 0.6);
+
+			if lives <= 0 {
+				// Out of lives - fail the task.
+				ui_active = false;
+				complete_attempt(this, player, false);
+				return;
+			}
 
 			// Reset to start
 			electron_pos = v2.{play_rect.min.x + play_rect->width() * 0.13, play_rect.min.y + play_rect->height() * 0.50};
@@ -3878,6 +3955,7 @@ Task_Guide_The_Electron :: class : Task_Base {
 			t := clamp(el / SUCCESS_DISPLAY_TIME, 0.0, 1.0);
 			UI.quad(play_rect, modal_bg, .{0.2, 1.0, 0.3, 0.14 * (1.0 - t)});
 		}
+
 	}
 }
 
@@ -4342,6 +4420,7 @@ Task_Catching_Butterflies :: class : Task_Base {
 				if net_sweeping && (cdx * cdx + cdy * cdy) <= (hoop_radius * hoop_radius) {
 					butterfly_caught[i] = true;
 					butterfly_catch_time[i] = now;
+					rr_task_sfx(player, RR_TASK_SFX_CATCH, 0.5);
 				}
 			}
 		}
@@ -4780,9 +4859,16 @@ Task_Signal_Sync :: class : Task_Base {
 		c_lock := (!c_done) && lock_ok && target_id == 3;
 
 		if !success_state {
+			prev_a := task.sat_a_fill;
+			prev_b := task.sat_b_fill;
+			prev_c := task.sat_c_fill;
 			if a_lock { task.sat_a_fill = clamp(task.sat_a_fill + delta_time * FILL_RATE, 0.0, 1.0); }
 			if b_lock { task.sat_b_fill = clamp(task.sat_b_fill + delta_time * FILL_RATE, 0.0, 1.0); }
 			if c_lock { task.sat_c_fill = clamp(task.sat_c_fill + delta_time * FILL_RATE, 0.0, 1.0); }
+			// Beep when a satellite just finished syncing.
+			if (prev_a < 1.0 && task.sat_a_fill >= 1.0) || (prev_b < 1.0 && task.sat_b_fill >= 1.0) || (prev_c < 1.0 && task.sat_c_fill >= 1.0) {
+				rr_task_sfx(player, RR_TASK_SFX_BEEP, 0.65);
+			}
 		}
 
 		// Draw satellites (stateful sprite)
@@ -5146,17 +5232,18 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		note_3_word = uppercase_word(this, get_word(decoy_2_idx));
 		note_4_word = uppercase_word(this, get_word(decoy_3_idx));
 
-		// Default note positions/angles (randomized a bit so you can tweak later)
-		// These are normalized within the window_rect. (0,0) bottom-left of window_rect.
-		note_1_pos = .{0.12 + rng_range_float(ref rr_rng_state.value, -0.03, 0.03), 0.8 + rng_range_float(ref rr_rng_state.value, -0.01, 0.01)};
-		note_2_pos = .{0.35 + rng_range_float(ref rr_rng_state.value, -0.03, 0.03), 0.80 + rng_range_float(ref rr_rng_state.value, -0.01, 0.01)};
-		note_3_pos = .{0.65 + rng_range_float(ref rr_rng_state.value, -0.03, 0.03), 0.8 + rng_range_float(ref rr_rng_state.value, -0.01, 0.01)};
-		note_4_pos = .{0.9 + rng_range_float(ref rr_rng_state.value, -0.03, 0.03), 0.78 + rng_range_float(ref rr_rng_state.value, -0.01, 0.01)};
+		// Fixed note positions/angles aligned to the paper art in anagram_bg.png.
+		// Normalized within window_rect: (0,0) = bottom-left, (1,1) = top-right.
+		note_1_pos = .{0.13, 0.81};  // Left paper (white, red pin)
+		note_2_pos = .{0.36, 0.80};  // Center-left paper (above monitor)
+		note_3_pos = .{0.68, 0.82};  // Center-right paper (above monitor)
+		note_4_pos = .{0.88, 0.80};  // Right paper (yellow, blue pin)
 
-		note_1_angle = rng_range_float(ref rr_rng_state.value, -12.0, 12.0);
-		note_2_angle = rng_range_float(ref rr_rng_state.value, -12.0, 12.0);
-		note_3_angle = rng_range_float(ref rr_rng_state.value, -12.0, 12.0);
-		note_4_angle = rng_range_float(ref rr_rng_state.value, -12.0, 12.0);
+		// Angles match the tilt of each paper in the background art.
+		note_1_angle = -6.0;  // Slight CCW lean
+		note_2_angle = -2.0;  // Nearly flat
+		note_3_angle = 3.0;   // Slight CW lean
+		note_4_angle = 8.0;   // Noticeable CW lean
 	}
 
 	rotate_about_point :: proc(using task: Task_Anagram_Puzzle, point: v2, degrees: float) -> Matrix4 {
@@ -5365,6 +5452,7 @@ Task_Anagram_Puzzle :: class : Task_Base {
 				UI.text(cell, btn_ts, label);
 
 				if interact.clicked && !fail_active {
+					rr_task_sfx(player, RR_TASK_SFX_KEY_PRESS, 0.4);
 					// Backspace
 					if idx == 26 {
 						if task.input_chars.elements.count > 0 {
@@ -5485,10 +5573,12 @@ Task_Anagram_Puzzle :: class : Task_Base {
 		if input_chars.elements.count == target_word.count && target_word.count > 0 {
 			if is_input_correct(this) {
 				success_time = get_time();
+				rr_task_sfx(player, RR_TASK_SFX_BEEP, 0.7);
 				draw_anagram_ui(this, player, true);
 				return;
 			} else {
 				fail_time = get_time();
+				rr_task_sfx(player, RR_TASK_SFX_ERROR, 0.6);
 				input_chars = List(u8).{};
 				draw_anagram_ui(this, player, false);
 				return;
@@ -5663,6 +5753,7 @@ Task_Calibrate_Teleporter :: class : Task_Base {
 			// Check for success
 			if distance < ALIGNMENT_THRESHOLD {
 				task.success_time = get_time();
+				rr_task_sfx(player, RR_TASK_SFX_BEEP, 0.7);
 			}
 			
 			// Calculate split offset based on distance (further = more split)
@@ -6019,7 +6110,16 @@ Task_Cypher :: class : Task_Base {
 				UI.quad(icon_rect, icon, .{1, 1, 1, 1});
 
 				if interact.clicked && !success_state && !fail_active {
+					prev_success := task.success_time;
+					prev_fail := task.fail_time;
 					task->handle_press(idx);
+					if task.success_time > 0.0 && prev_success <= 0.0 {
+						rr_task_sfx(player, RR_TASK_SFX_BEEP, 0.7);
+					} else if task.fail_time > prev_fail && task.fail_time > 0.0 {
+						rr_task_sfx(player, RR_TASK_SFX_ERROR, 0.6);
+					} else {
+						rr_task_sfx(player, RR_TASK_SFX_TILE_CLICK, 0.5);
+					}
 				}
 			}
 		}

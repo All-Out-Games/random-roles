@@ -126,6 +126,10 @@ Kill_Ability :: class : Ability_Base {
         if params.clicked && params.can_use {
             closest_alive_player := get_closest_alive_player(this, player);
             if closest_alive_player != null {
+				// Face the victim and play the base kill animation on the player rig.
+				player->set_facing_right(closest_alive_player.entity.world_position.x > player.entity.world_position.x);
+				player->set_trigger("traitor_kill");
+
                 closest_alive_player->kill_with_killer(player.entity.id);
 
 				// Traitor knife kill SFX (server-authoritative; replicates to clients).
@@ -139,6 +143,19 @@ Kill_Ability :: class : Ability_Base {
 					sfx.volume *= 0.25;
 					sfx.volume_perturb *= 0.25;
 					rr_play_sfx("sfx/traitor_kill_death.wav", sfx);
+
+					// GGG pounce/wrap SFX + animation on kill
+					if player.player_role == Player_Role.GOO_GOO_GAGA {
+						gm := player.entity->get_component(GGG_Module);
+						if gm != null && gm.is_creature_form {
+							pounce_sfx := SFX.default_sfx_desc();
+							pounce_sfx->set_position(closest_alive_player.entity.world_position);
+							pounce_sfx.volume = 0.15;
+							pounce_sfx.speed_perturb = 0.05;
+							rr_play_sfx("sfx/ggg_pounce_wrap.wav", pounce_sfx);
+							rr_ggg_creature_trigger(player, "pounce");
+						}
+					}
 				}
 
                 // GGG has a shorter kill cooldown.
@@ -152,6 +169,15 @@ Kill_Ability :: class : Ability_Base {
     }
 
 	on_draw_button :: proc(instance: Kill_Ability, rect: Rect) {
+		p := instance.player;
+		if p != null && p.player_role == Player_Role.GOO_GOO_GAGA {
+			gm := p.entity->get_component(GGG_Module);
+			if gm != null && gm.is_creature_form {
+				instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/kill_wrap_player.png");
+			} else {
+				instance.icon = get_asset(Texture_Asset, "sprites/icons/kill_ability.png");
+			}
+		}
 		draw_ability_name_label(rect, Kill_Ability.NAME);
 	}
 }
@@ -1842,6 +1868,7 @@ Shoot_Ability :: class : Ability_Base {
             if activation.activate {
                 sfx := SFX.default_sfx_desc();
                 sfx->set_position(player.entity.local_position);
+                sfx.volume = 0.5;
                 sfx.volume_perturb = 0.2;
                 sfx.speed_perturb = 0.1;
                 shoot_projectile(player.entity.world_position, activation.direction * 10.0, 1, 0.75, player.entity);

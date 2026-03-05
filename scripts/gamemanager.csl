@@ -413,46 +413,33 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 	return "none";
 }
 
+// Lowercase an entire string and normalize spaces to underscores.
+rr_to_lower :: proc(s: string) -> string {
+	lower := to_lower(s);
+	result := "";
+	for i: 0..lower.count-1 {
+		ch := string_substring(lower, i, 1);
+		if ch == " " { ch = "_"; }
+		result = format_string("%0%", .{result, ch});
+	}
+	return result;
+}
+
 rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
-	if role_name == "none" || role_name == "None" {
-		return Player_Role.NONE, true;
-	}
-	if role_name == "sheriff" || role_name == "Sheriff" {
-		return Player_Role.SHERIFF, true;
-	}
-	if role_name == "doctor" || role_name == "Doctor" {
-		return Player_Role.DOCTOR, true;
-	}
-	if role_name == "president" || role_name == "President" {
-		return Player_Role.PRESIDENT, true;
-	}
-	if role_name == "movie_star" || role_name == "movie star" || role_name == "Movie_Star" || role_name == "Movie Star" {
-		return Player_Role.MOVIE_STAR, true;
-	}
-	if role_name == "coroner" || role_name == "Coroner" {
-		return Player_Role.CORONER, true;
-	}
-	if role_name == "portal_maker" || role_name == "portal maker" || role_name == "Portal_Maker" || role_name == "Portal Maker" || role_name == "warper" || role_name == "Warper" || role_name == "WARPER" {
-		return Player_Role.PORTAL_MAKER, true;
-	}
-	if role_name == "prankster" || role_name == "Prankster" {
-		return Player_Role.PRANKSTER, true;
-	}
-	if role_name == "pyromaniac" || role_name == "Pyromaniac" {
-		return Player_Role.PYROMANIAC, true;
-	}
-	if role_name == "pirate" || role_name == "Pirate" {
-		return Player_Role.PIRATE, true;
-	}
-	if role_name == "hitman" || role_name == "Hitman" {
-		return Player_Role.HITMAN, true;
-	}
-	if role_name == "werewolf" || role_name == "Werewolf" {
-		return Player_Role.WEREWOLF, true;
-	}
-	if role_name == "goo_goo_gaga" || role_name == "goo goo gaga" || role_name == "Goo_Goo_Gaga" || role_name == "Goo Goo Gaga" || role_name == "googoo" || role_name == "GGG" {
-		return Player_Role.GOO_GOO_GAGA, true;
-	}
+	name := rr_to_lower(role_name);
+	if name == "none"                                          return Player_Role.NONE, true;
+	if name == "sheriff"                                       return Player_Role.SHERIFF, true;
+	if name == "doctor"                                        return Player_Role.DOCTOR, true;
+	if name == "president"                                     return Player_Role.PRESIDENT, true;
+	if name == "movie_star"                                    return Player_Role.MOVIE_STAR, true;
+	if name == "coroner"                                       return Player_Role.CORONER, true;
+	if name == "portal_maker" || name == "warper"              return Player_Role.PORTAL_MAKER, true;
+	if name == "prankster"                                     return Player_Role.PRANKSTER, true;
+	if name == "pyromaniac" || name == "pyro"                  return Player_Role.PYROMANIAC, true;
+	if name == "pirate"                                        return Player_Role.PIRATE, true;
+	if name == "hitman"                                        return Player_Role.HITMAN, true;
+	if name == "werewolf"                                      return Player_Role.WEREWOLF, true;
+	if name == "ggg" || name == "goo_goo_gaga" || name == "googoo" return Player_Role.GOO_GOO_GAGA, true;
 	return Player_Role.NONE, false;
 }
 
@@ -1793,14 +1780,14 @@ end_game_with_winners :: proc(victor: Player_Type, winners: List(Player)) {
 	}
 
 	// Increment leaderboard score for each winner
-	// if Game.is_server() {
-	// 	for i: 0..winners.elements.count-1 {
-	// 		w := winners.elements[i];
-	// 		if w != null && #alive(w.entity) {
-	// 			leaderboard_increment_score(w, "wins", 1.0);
-	// 		}
-	// 	}
-	// }
+	if Game.is_server() {
+		for i: 0..winners.elements.count-1 {
+			w := winners.elements[i];
+			if w != null && #alive(w.entity) {
+				leaderboard_increment_score(w, "wins", 1.0);
+			}
+		}
+	}
 
 	round_number += 1;
 }
@@ -1983,6 +1970,13 @@ rr_remove_movement_reason_all :: proc(player: Player, reason: string) {
 	}
 }
 
+rr_remove_freeze_reason_all :: proc(player: Player, reason: string) {
+	if player == null return;
+	for _i: 0..RR_UNSTUCK_REASON_REMOVE_PASSES-1 {
+		player->remove_freeze_reason(reason);
+	}
+}
+
 rr_unstuck_player :: proc(player: Player) {
 	if player == null return;
 	if player.entity == null return;
@@ -2031,6 +2025,16 @@ rr_unstuck_player :: proc(player: Player) {
 	if autograph_stun != null {
 		autograph_stun.active = false;
 	}
+	ggg_transform_lock := player.entity->get_component(GGG_Transform_Lock);
+	if ggg_transform_lock != null {
+		ggg_transform_lock.active = false;
+	}
+	ggg_trap_root := player.entity->get_component(GGG_Trap_Root_Effect);
+	if ggg_trap_root != null {
+		ggg_trap_root.active = false;
+	}
+	// Cancel active GGG wrap channel.
+	rr_ggg_cancel_wrap(player);
 
 	// Clear pyromaniac fire status through its own cleanup path.
 	fire_status := player.entity->get_component(RR_Player_On_Fire_Status);
@@ -2067,6 +2071,9 @@ rr_unstuck_player :: proc(player: Player) {
 	rr_remove_movement_reason_all(player, PRANK_STUN_REASON);
 	rr_remove_movement_reason_all(player, MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
 	rr_remove_movement_reason_all(player, MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+	rr_remove_movement_reason_all(player, GGG_TRANSFORM_LOCK_REASON);
+	rr_remove_movement_reason_all(player, GGG_TRAP_ROOT_REASON);
+	rr_remove_freeze_reason_all(player, GGG_WRAP_LOCK_REASON);
 
 	// Keep visual state coherent after force-clears.
 	player->remove_name_invisibility_reason("werewolf_transform");
@@ -2984,7 +2991,9 @@ assign_players_to_types :: proc() {
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 	append(ref traitor_roles_master, Player_Role.HITMAN);
 	append(ref traitor_roles_master, Player_Role.WEREWOLF);
-	append(ref traitor_roles_master, Player_Role.GOO_GOO_GAGA);
+	if rr_ggg_role_enabled {
+		append(ref traitor_roles_master, Player_Role.GOO_GOO_GAGA);
+	}
 
 	civ_players: List(Player);
 	an_players: List(Player);
@@ -3163,13 +3172,8 @@ assign_players_to_types :: proc() {
 		}
 
 		if p.player_role == Player_Role.GOO_GOO_GAGA {
+			// GGG has a dedicated role HUD panel (like werewolf) — no task list tasks.
 			p.active_tasks = List(Task_Base).{};
-
-			wrap := new(Task_GGG_Wrap);
-			wrap.id = "ggg_wrap_3";
-			wrap.started = true;
-			wrap.goal = 3;
-			append(ref p.active_tasks, wrap);
 		}
 
 		if p.player_role == Player_Role.PYROMANIAC {
