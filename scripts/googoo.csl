@@ -117,6 +117,15 @@ GGG_NAME_INVIS_REASON :: "ggg_creature_form";
 GGG_FOIL_WHIP_PULL_REASON :: "ggg_foil_whip_pull";
 GGG_LIVE_DRAG_REASON :: "ggg_live_drag";
 
+ggg_voice_rng: u64;
+
+rr_ggg_random_voice_sfx :: proc() -> string {
+	if ggg_voice_rng == 0 { ggg_voice_rng = rng_seed_time(); }
+	idx := rng_range_int(ref ggg_voice_rng, 1, 3);
+	if idx == 1 return "sfx/ggg1.wav";
+	if idx == 2 return "sfx/ggg2.wav";
+	return "sfx/ggg3.wav";
+}
 
 // ============================================================================
 // Kill Hook
@@ -477,9 +486,9 @@ rr_ggg_spawn_consume_flash :: proc(pos: v2) {
 	if Game.is_server() {
 		sfx := SFX.default_sfx_desc();
 		sfx->set_position(pos);
-		sfx.volume = 0.5;
+		sfx.volume = 0.375;
 		sfx.speed_perturb = 0.1;
-		rr_play_sfx("sfx/ggg1.wav", sfx);
+		rr_play_sfx(rr_ggg_random_voice_sfx(), sfx);
 	}
 }
 
@@ -1034,6 +1043,38 @@ rr_ggg_place_trap :: proc(player: Player, world_pos: v2) {
 	ggg_traps->append(entry);
 }
 
+// Doctor "Free" interactable — only visible to the Doctor role
+GGG_Free_Trapped_Interactable :: class : Interactable {
+	ao_start :: method() {
+		this->set_listener(this);
+		this->set_text("Free");
+		this->set_hold_text("Freeing...");
+		radius = 3.0;
+		required_hold_time = 1.5;
+		prompt_offset = v2.{0, 1.5};
+		priority = 70;
+	}
+
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role != Player_Role.DOCTOR return false;
+		root := entity->get_component(GGG_Trap_Root_Effect);
+		if root == null return false;
+		if !root.active return false;
+		return true;
+	}
+
+	on_interact :: method(player: Player) {
+		root := entity->get_component(GGG_Trap_Root_Effect);
+		if root != null {
+			root->heal();
+			player->Notify("You freed a player from chocolate foil!");
+		}
+	}
+}
+
 // Root + Blind effect component (added to trapped players)
 GGG_Trap_Root_Effect :: class : Component {
 	root_end_time: float;
@@ -1053,13 +1094,18 @@ GGG_Trap_Root_Effect :: class : Component {
 			p->add_disable_movement_input_reason(GGG_TRAP_ROOT_REASON);
 			p->set_trigger("ggg_trapped_start");
 		}
+		// Add doctor-only free interactable
+		existing := entity->get_component(GGG_Free_Trapped_Interactable);
+		if existing == null {
+			entity->add_component(GGG_Free_Trapped_Interactable);
+		}
 		// Play "GOO GOO GA GA" blast for trapped player
 		if Game.is_server() {
 			sfx := SFX.default_sfx_desc();
 			sfx.entity_to_follow = entity.id;
-			sfx.volume = 0.8;
+			sfx.volume = 0.6;
 			sfx.speed_perturb = 0.05;
-			rr_play_sfx("sfx/ggg1.wav", sfx);
+			rr_play_sfx(rr_ggg_random_voice_sfx(), sfx);
 		}
 	}
 
@@ -1072,21 +1118,8 @@ GGG_Trap_Root_Effect :: class : Component {
 			p->set_trigger("RESET");
 			active = false;
 			is_blinded = false;
+	
 			return;
-		}
-		// Doctor proximity healing
-		foreach doc: component_iterator(Player) {
-			if doc == null continue;
-			if !#alive(doc.entity) continue;
-			if doc.player_state != Player_State.ALIVE continue;
-			if doc.player_role != Player_Role.DOCTOR continue;
-			if doc.entity.id == entity.id continue;
-			dist := length(doc.entity.world_position - entity.world_position);
-			if dist < 2.0 {
-				heal();
-				doc->Notify("You freed a player from chocolate foil!");
-				return;
-			}
 		}
 		now := get_time();
 		// Blind expires
@@ -1099,6 +1132,7 @@ GGG_Trap_Root_Effect :: class : Component {
 			p->set_trigger("ggg_trapped_end");
 			active = false;
 			is_blinded = false;
+	
 		}
 	}
 
@@ -1111,8 +1145,10 @@ GGG_Trap_Root_Effect :: class : Component {
 		}
 		active = false;
 		is_blinded = false;
+
 	}
 }
+
 
 GGG_TRAP_BLIND_LOS_INNER :: 1.0;
 GGG_TRAP_BLIND_LOS_OUTER :: 1.5;
@@ -1526,8 +1562,8 @@ GGG_Decoy :: class : Component {
 				// Play "GOO GOO GA GA" for this target
 				sfx_desc2 := SFX.default_sfx_desc();
 				sfx_desc2.entity_to_follow = target.entity.id;
-				sfx_desc2.volume = 0.6;
-				rr_play_sfx("sfx/ggg1.wav", sfx_desc2);
+				sfx_desc2.volume = 0.45;
+				rr_play_sfx(rr_ggg_random_voice_sfx(), sfx_desc2);
 				entity->destroy();
 				return;
 			}
@@ -1986,12 +2022,12 @@ GGG_Transform_Ability :: class : Ability_Base {
 					ggg_sfx := SFX.default_sfx_desc();
 					ggg_sfx.speed_perturb = 0.05;
 					if rr_power_outage_active {
-						ggg_sfx.volume = 0.3;
+						ggg_sfx.volume = 0.225;
 					} else {
 						ggg_sfx->set_position(player.entity.world_position);
-						ggg_sfx.volume = 0.3;
+						ggg_sfx.volume = 0.225;
 					}
-					rr_play_sfx("sfx/ggg1.wav", ggg_sfx);
+					rr_play_sfx(rr_ggg_random_voice_sfx(), ggg_sfx);
 				}
 			}
 		}
