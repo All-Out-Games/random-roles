@@ -1523,6 +1523,32 @@ setup_ingame :: proc() {
 	fake_meeting_cooldown_ends_at = get_time() + INITIAL_ROUND_ATTACK_LOCKOUT_SECONDS;
 }
 
+rr_werewolf_force_revert_for_meeting :: proc(player: Player) {
+	if player == null return;
+	now := get_time();
+	// Revert infected players' wolf look
+	if player.werewolf_infected {
+		player.werewolf_skin_enable_at = 0.0;
+		player.werewolf_skin_disable_at = now;
+		player.werewolf_infected_transform_trigger_at = 0.0;
+	}
+	// Revert actual werewolf transform
+	if player.player_role != Player_Role.WEREWOLF || player.player_type != Player_Type.TRAITOR return;
+	wm := player.entity->get_component(Werewolf_Module);
+	if wm == null return;
+	if wm.is_wolf_form {
+		player->set_trigger("RESET");
+	}
+	wm.is_wolf_form = false;
+	wm.transform_ends_at = 0.0;
+	if wm.speed_boost_active {
+		player.agent.movement_speed = wm.speed_original;
+		wm.speed_boost_active = false;
+	}
+	player.werewolf_skin_enable_at = 0.0;
+	player.werewolf_skin_disable_at = now;
+}
+
 setup_voting :: proc() {
 	game_state = Game_State.VOTING;
 	voting_start_time = get_time();
@@ -1537,6 +1563,13 @@ setup_voting :: proc() {
 		player.has_voted = false;
 		player.voted_skip = false;
 		player.votes_received = 0;
+
+		// Force-revert all transforming roles at teleport time (same frame)
+		// so nearby players never see the revert animation.
+		rr_ggg_force_revert(player);
+		rr_mimicer_force_revert(player);
+		rr_werewolf_force_revert_for_meeting(player);
+
 		world_references->teleport_to_voting(player);
 	}
 }
@@ -2234,6 +2267,78 @@ cd :: proc(player: Player) {
 unstuck :: proc(player: Player) {
 	rr_unstuck_player(player);
 	Chat.server_send_message("Unstuck applied: cleared active effects and movement locks.", player);
+} @chat_command @youtuber
+
+// Chat command: /unlock
+// Maxes out all ability-unlock counters for the calling player's current role.
+unlock :: proc(player: Player) {
+	if player == null return;
+	if player.player_state != Player_State.ALIVE {
+		Chat.server_send_message("Must be alive to unlock abilities.", player);
+		return;
+	}
+
+	role := player.player_role;
+
+	// GGG: nest points
+	if role == Player_Role.GOO_GOO_GAGA {
+		gm := player.entity->get_component(GGG_Module);
+		if gm != null {
+			gm.nest_points = max(gm.nest_points, GGG_SWARM_UNLOCK_NEST_POINTS);
+		}
+	}
+	// Werewolf: kills
+	if role == Player_Role.WEREWOLF {
+		wm := player.entity->get_component(Werewolf_Module);
+		if wm != null {
+			wm.kills = max(wm.kills, WEREWOLF_CLAW_UNLOCK_KILLS);
+		}
+	}
+	// Hitman: kills
+	if role == Player_Role.HITMAN {
+		hm := player.entity->get_component(Hitman_Module);
+		if hm != null {
+			hm.kills = max(hm.kills, HITMAN_SNIPER_UNLOCK_KILLS);
+		}
+	}
+	// Pirate: treasure
+	if role == Player_Role.PIRATE {
+		pm := player.entity->get_component(Pirate_Module);
+		if pm != null {
+			pm.treasure = max(pm.treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST);
+		}
+	}
+	// Mimicer: kills
+	if role == Player_Role.MIMICER {
+		mm := player.entity->get_component(Mimicer_Module);
+		if mm != null {
+			mm.kills = max(mm.kills, MIMICER_UNLEASH_UNLOCK_KILLS);
+		}
+	}
+	// Prankster: jester win unlock
+	if role == Player_Role.PRANKSTER {
+		prk := player.entity->get_component(Prankster_Module);
+		if prk != null {
+			prk.prank_count = max(prk.prank_count, 3);
+			prk.fake_meetings_called = max(prk.fake_meetings_called, 1);
+			if prk.jester_unlocked_time <= 0.0 {
+				prk.jester_unlocked_time = get_time();
+			}
+		}
+	}
+	// Pyromaniac: world fire unlock
+	if role == Player_Role.PYROMANIAC {
+		pyro := player.entity->get_component(Pyro_Module);
+		if pyro != null {
+			pyro.corpses_burned = max(pyro.corpses_burned, 1);
+			pyro.rooms_burned_out = max(pyro.rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET);
+			if pyro.world_fire_unlocked_time <= 0.0 {
+				pyro.world_fire_unlocked_time = get_time();
+			}
+		}
+	}
+
+	Chat.server_send_message("All abilities unlocked for your role.", player);
 } @chat_command @youtuber
 
 

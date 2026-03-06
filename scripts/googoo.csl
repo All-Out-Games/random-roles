@@ -54,6 +54,9 @@ GGG_Module :: class : Component {
 	// Hold drag animation during nest consume arc
 	nest_consume_hold_drag_until: float;
 
+	// Nest burned by pyro — lockout timer
+	nest_burned_at: float;
+
 	// Nest placement request (client sets, server reads + acts)
 	nest_place_requested: bool;
 	nest_place_world_pos: v2;
@@ -101,6 +104,7 @@ GGG_SWARM_ROOT_SECONDS :: 15.0;
 GGG_HIVE_MIND_SPEED_PER_POINT :: 0.02;
 GGG_NIGHT_CRAWL_SPEED_BONUS :: 0.50;
 
+GGG_NEST_REBUILD_DELAY :: 15.0;
 GGG_NEST_RIG :: "anims/hive/Nest.spine";
 GGG_NEST_CONSUME_RANGE :: 1.8;
 GGG_NEST_SHERIFF_REVEAL_SECONDS :: 30.0;
@@ -229,12 +233,46 @@ rr_ggg_destroy_nest :: proc(gm: GGG_Module) {
 	if !gm.nest_placed return;
 	if gm.nest_destroyed return;
 	gm.nest_destroyed = true;
+	gm.nest_burned_at = get_time();
 
 	if gm.nest_entity != null && #alive(gm.nest_entity) {
 		spine := gm.nest_entity->get_component(Spine_Animator);
 		if spine != null && spine.instance != null && spine.instance.state_machine != null {
 			spine.instance.state_machine->set_trigger("destroy");
 		}
+	}
+
+	// Force revert to human form and notify
+	player := gm.entity->get_component(Player);
+	if player != null {
+		if gm.is_creature_form {
+			rr_ggg_force_revert(player);
+		}
+		player->Notify("Your nest was burned! Abilities locked for 15s.");
+	}
+}
+
+rr_ggg_is_nest_burn_locked :: proc(gm: GGG_Module) -> bool {
+	if gm == null return false;
+	if !gm.nest_destroyed return false;
+	if gm.nest_burned_at <= 0.0 return false;
+	return get_time() < gm.nest_burned_at + GGG_NEST_REBUILD_DELAY;
+}
+
+rr_ggg_update_nest_burn_recovery :: proc(gm: GGG_Module) {
+	if gm == null return;
+	if !gm.nest_destroyed return;
+	if gm.nest_burned_at <= 0.0 return;
+	if get_time() < gm.nest_burned_at + GGG_NEST_REBUILD_DELAY return;
+
+	// Lockout expired — allow re-placing the nest
+	gm.nest_placed = false;
+	gm.nest_destroyed = false;
+	gm.nest_burned_at = 0.0;
+
+	player := gm.entity->get_component(Player);
+	if player != null {
+		player->Notify("Nest lockout expired — you can place a new nest!");
 	}
 }
 
@@ -744,11 +782,9 @@ rr_ggg_update :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	// Meetings: force revert
+	// Meetings: stop updating but defer visual revert until teleport
+	// (setup_voting handles the actual revert so nearby players don't see it)
 	if game_state != Game_State.INGAME {
-		if gm.is_creature_form || gm.creature_visible {
-			rr_ggg_force_revert(player);
-		}
 		return;
 	}
 
@@ -820,6 +856,9 @@ rr_ggg_update :: proc(player: Player, dt: float) {
 
 	// Nest consumption check
 	rr_ggg_check_nest_consumption(player);
+
+	// Nest burn recovery (re-enable nest placement after delay)
+	rr_ggg_update_nest_burn_recovery(gm);
 }
 
 
@@ -1150,8 +1189,8 @@ GGG_Trap_Root_Effect :: class : Component {
 }
 
 
-GGG_TRAP_BLIND_LOS_INNER :: 1.0;
-GGG_TRAP_BLIND_LOS_OUTER :: 1.5;
+GGG_TRAP_BLIND_LOS_INNER :: 0.5;
+GGG_TRAP_BLIND_LOS_OUTER :: 0.8;
 
 // Draw blind overlay for trapped+blinded local player
 rr_ggg_draw_trap_blind_overlay :: proc(player: Player) {
@@ -1987,10 +2026,18 @@ GGG_Transform_Ability :: class : Ability_Base {
 		if player->has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.GOO_GOO_GAGA return false;
+		gm := player.entity->get_component(GGG_Module);
+		if gm != null && rr_ggg_is_nest_burn_locked(gm) return false;
 		return true;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && !params.can_use {
+			gm := player.entity->get_component(GGG_Module);
+			if gm != null && rr_ggg_is_nest_burn_locked(gm) {
+				player->Notify("Nest burned — abilities locked!");
+			}
+		}
 		if params.clicked && params.can_use {
 			gm := player.entity->get_component(GGG_Module);
 			if gm == null return;
@@ -2065,6 +2112,7 @@ GGG_Crawl_Ability :: class : Ability_Base {
 		if player.player_role != Player_Role.GOO_GOO_GAGA return false;
 		gm := player.entity->get_component(GGG_Module);
 		if gm == null return false;
+		if rr_ggg_is_nest_burn_locked(gm) return false;
 		if !gm.is_creature_form return false;
 		if gm.nest_points < GGG_CRAWL_UNLOCK_NEST_POINTS return false;
 		return true;
@@ -2073,7 +2121,9 @@ GGG_Crawl_Ability :: class : Ability_Base {
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && !params.can_use {
 			gm := player.entity->get_component(GGG_Module);
-			if player != null && player.player_role == Player_Role.GOO_GOO_GAGA && gm != null && gm.is_creature_form && gm.nest_points < GGG_CRAWL_UNLOCK_NEST_POINTS {
+			if gm != null && rr_ggg_is_nest_burn_locked(gm) {
+				player->Notify("Nest burned — abilities locked!");
+			} else if player != null && player.player_role == Player_Role.GOO_GOO_GAGA && gm != null && gm.is_creature_form && gm.nest_points < GGG_CRAWL_UNLOCK_NEST_POINTS {
 				player->Notify(format_string("Crawl locked: %/% nest points to unlock.", .{
 					gm.nest_points, GGG_CRAWL_UNLOCK_NEST_POINTS
 				}));
@@ -2235,6 +2285,7 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 		if player.player_role != Player_Role.GOO_GOO_GAGA return false;
 		gm := player.entity->get_component(GGG_Module);
 		if gm == null return false;
+		if rr_ggg_is_nest_burn_locked(gm) return false;
 		if !gm.is_creature_form return false;
 		if gm.nest_points < GGG_FOIL_WHIP_UNLOCK_NEST_POINTS return false;
 		return true;
@@ -2243,7 +2294,9 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && !params.can_use {
 			gm := player.entity->get_component(GGG_Module);
-			if player != null && player.player_role == Player_Role.GOO_GOO_GAGA && gm != null && gm.is_creature_form && gm.nest_points < GGG_FOIL_WHIP_UNLOCK_NEST_POINTS {
+			if gm != null && rr_ggg_is_nest_burn_locked(gm) {
+				player->Notify("Nest burned — abilities locked!");
+			} else if player != null && player.player_role == Player_Role.GOO_GOO_GAGA && gm != null && gm.is_creature_form && gm.nest_points < GGG_FOIL_WHIP_UNLOCK_NEST_POINTS {
 				player->Notify(format_string("Foil Whip locked: %/% nest points.", .{
 					gm.nest_points, GGG_FOIL_WHIP_UNLOCK_NEST_POINTS
 				}));

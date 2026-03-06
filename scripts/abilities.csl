@@ -3386,13 +3386,18 @@ Stunned_By_Autograph_Effect :: class : Component {
 			seconds = 0.1;
 		}
 		stun_end_time = get_time() + seconds;
-		active = true;
 
 		p := entity->get_component(Player);
 		if p != null {
+			// Clean up previous stun state before re-applying
+			if active {
+				p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+			}
 			p->add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+			p->set_trigger("RESET");
 			p->set_trigger("stunned_by_autograph_loop");
 		}
+		active = true;
 	}
 
 	ao_update :: proc(using this: Stunned_By_Autograph_Effect, dt: float) {
@@ -3452,6 +3457,13 @@ Autograph_Ability :: class : Ability_Base {
 			writer := player.entity->get_component(Movie_Star_Write_Autograph);
 			if writer == null {
 				writer = player.entity->add_component(Movie_Star_Write_Autograph);
+			} else {
+				// Reset for reuse (ao_start only runs on first add)
+				writer.placed = false;
+				writer.done = false;
+				writer.end_time = get_time() + MOVIE_STAR_AUTOGRAPH_PLACE_TIME_SECONDS;
+				player->add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
+				player->set_trigger("write_place_autograph");
 			}
 		}
 	}
