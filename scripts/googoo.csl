@@ -50,6 +50,9 @@ GGG_Module :: class : Component {
 	// Dragging live trapped player
 	dragging_live_player_id: u64;
 
+	// Hold drag animation during nest consume arc
+	nest_consume_hold_drag_until: float;
+
 	// Nest placement request (client sets, server reads + acts)
 	nest_place_requested: bool;
 	nest_place_world_pos: v2;
@@ -157,6 +160,13 @@ rr_ggg_place_nest :: proc(player: Player, world_pos: v2) {
 	if gm == null return;
 	if gm.nest_placed return;
 
+	// Snap position onto the navmesh
+	nav_point: v2;
+	triangle_hint: s64 = -1;
+	if try_find_closest_point_on_navmesh(world_pos, ref nav_point, ref triangle_hint) {
+		world_pos = nav_point;
+	}
+
 	nest_e := Scene.create_entity();
 	nest_e->set_local_position(world_pos);
 	nest_e->set_local_scale(v2.{1, 1});
@@ -236,14 +246,16 @@ rr_ggg_check_nest_consumption :: proc(player: Player) {
 		victim := get_player_by_entity_id(gm.dragging_live_player_id);
 		if victim != null && #alive(victim.entity) && victim.player_state == Player_State.ALIVE {
 			victim_role := victim.player_role;
+			// Release drag lock before killing
+			victim->remove_disable_movement_input_reason(GGG_LIVE_DRAG_REASON);
 			// Kill the live player (consumed by nest)
 			victim->kill_with_killer(player.entity.id);
-			// Destroy their corpse
+			// Animate corpse into the nest
 			foreach corpse: component_iterator(Corpse) {
 				if corpse == null continue;
 				if !#alive(corpse.entity) continue;
 				if corpse.entity.world_position.x == victim.entity.world_position.x && corpse.entity.world_position.y == victim.entity.world_position.y {
-					corpse.entity->destroy();
+					rr_ggg_start_consume_anim(corpse.entity, gm.nest_world_pos, gm.nest_entity);
 					break;
 				}
 			}
@@ -256,8 +268,8 @@ rr_ggg_check_nest_consumption :: proc(player: Player) {
 			// Check consume bonuses
 			rr_ggg_check_consume_bonus(player, gm, victim_role);
 			player->Notify(format_string("Live feed! +3 nest points (%)", .{gm.nest_points}));
-			// Stop dragging
-			gm.dragging_live_player_id = 0;
+			// Hold drag anim during consume arc, then clear
+			gm.nest_consume_hold_drag_until = get_time() + GGG_CONSUME_DURATION;
 		}
 		return;
 	}
@@ -270,14 +282,14 @@ rr_ggg_check_nest_consumption :: proc(player: Player) {
 		if !#alive(corpse.entity) continue;
 		if corpse.entity.id != player.dragging_corpse_entity_id continue;
 
-		// Consume the body
-		player.dragging_corpse_entity_id = 0;
+		// Consume the body — clear drag state so it doesn't re-trigger
 		corpse.dragged_by_player_entity_id = 0;
+		player.dragging_corpse_entity_id = 0;
 		if player.drag_body_sfx_id != 0 {
 			SFX.stop(player.drag_body_sfx_id);
 			player.drag_body_sfx_id = 0;
 		}
-		corpse.entity->destroy();
+		rr_ggg_start_consume_anim(corpse.entity, gm.nest_world_pos, gm.nest_entity);
 
 		gm.nest_points += 1;
 		nest_comp := gm.nest_entity->get_component(GGG_Nest);
@@ -315,6 +327,151 @@ rr_ggg_clear_nest :: proc() {
 		}
 	}
 }
+
+
+// ============================================================================
+// Nest Consume Animation
+// ============================================================================
+
+GGG_CONSUME_DURATION :: 0.65;
+GGG_CONSUME_ARC_HEIGHT :: 3.0;
+GGG_CONSUME_FLASH_DURATION :: 0.35;
+GGG_CONSUME_GULP_DURATION :: 0.25;
+
+GGG_Nest_Consume_Anim :: class : Component {
+	start_pos: v2;
+	end_pos: v2;
+	start_time: float;
+	start_scale: v2;
+	nest_entity_id: u64;
+
+	ao_update :: method(dt: float) {
+		t := (get_time() - start_time) / GGG_CONSUME_DURATION;
+
+		if t >= 1.0 {
+			rr_ggg_spawn_consume_flash(end_pos);
+			rr_ggg_trigger_nest_gulp(nest_entity_id);
+			entity->destroy();
+			return;
+		}
+
+		// Position: lerp + parabolic arc upward
+		x := lerp(start_pos.x, end_pos.x, t);
+		y := lerp(start_pos.y, end_pos.y, t);
+		arc := 4.0 * t * (1.0 - t) * GGG_CONSUME_ARC_HEIGHT;
+		entity->set_local_position(v2.{x, y + arc});
+
+		// Scale: squash-stretch at peak, shrink to nothing
+		peak := 4.0 * t * (1.0 - t);
+		shrink := 1.0 - t * t * t;
+		sx := start_scale.x * shrink * (1.0 + peak * 0.3);
+		sy := start_scale.y * shrink * (1.0 - peak * 0.15);
+		entity->set_local_scale(v2.{sx, sy});
+	}
+}
+
+GGG_Nest_Consume_Flash :: class : Component {
+	start_time: float;
+
+	ao_start :: method() {
+		start_time = get_time();
+	}
+
+	ao_update :: method(dt: float) {
+		t := (get_time() - start_time) / GGG_CONSUME_FLASH_DURATION;
+		if t >= 1.0 {
+			entity->destroy();
+			return;
+		}
+
+		// Scale up, fade out
+		scale := lerp(0.3, 2.5, t);
+		entity->set_local_scale(v2.{scale, scale});
+
+		sprite := entity->get_component(Sprite_Renderer);
+		if sprite != null {
+			alpha := (1.0 - t) * 0.8;
+			sprite.color = v4.{1.0, 0.95, 0.7, alpha};
+		}
+	}
+}
+
+GGG_Nest_Gulp :: class : Component {
+	start_time: float;
+	base_scale: v2;
+	active: bool;
+
+	trigger :: method() {
+		start_time = get_time();
+		base_scale = entity.local_scale;
+		active = true;
+	}
+
+	ao_update :: method(dt: float) {
+		if !active return;
+		t := (get_time() - start_time) / GGG_CONSUME_GULP_DURATION;
+		if t >= 1.0 {
+			entity->set_local_scale(base_scale);
+			active = false;
+			return;
+		}
+		// Quick bulge then settle
+		bulge := sin(t * 3.14159) * 0.15;
+		entity->set_local_scale(v2.{base_scale.x * (1.0 + bulge), base_scale.y * (1.0 + bulge)});
+	}
+}
+
+rr_ggg_start_consume_anim :: proc(target: Entity, nest_pos: v2, nest_entity: Entity) {
+	if target == null return;
+	if !#alive(target) return;
+
+	anim := target->add_component(GGG_Nest_Consume_Anim);
+	anim.start_pos = target.world_position;
+	anim.end_pos = nest_pos;
+	anim.start_time = get_time();
+	anim.start_scale = target.local_scale;
+	if nest_entity != null && #alive(nest_entity) {
+		anim.nest_entity_id = nest_entity.id;
+	}
+}
+
+rr_ggg_spawn_consume_flash :: proc(pos: v2) {
+	flash_e := Scene.create_entity();
+	flash_e->set_local_position(pos);
+	flash_e->set_local_scale(v2.{0.3, 0.3});
+
+	sprite := flash_e->add_component(Sprite_Renderer);
+	sprite->set_texture(get_asset(Texture_Asset, "$AO/white.png"));
+	sprite.color = v4.{1.0, 0.95, 0.7, 0.8};
+	sprite.layer = 100;
+
+	flash_e->add_component(GGG_Nest_Consume_Flash);
+
+	if Game.is_server() {
+		sfx := SFX.default_sfx_desc();
+		sfx->set_position(pos);
+		sfx.volume = 0.5;
+		sfx.speed_perturb = 0.1;
+		rr_play_sfx("sfx/ggg1.wav", sfx);
+	}
+}
+
+rr_ggg_trigger_nest_gulp :: proc(nest_entity_id: u64) {
+	if nest_entity_id == 0 return;
+	foreach nest: component_iterator(GGG_Nest) {
+		if nest == null continue;
+		if !#alive(nest.entity) continue;
+		if nest.entity.id == nest_entity_id {
+			gulp := nest.entity->get_component(GGG_Nest_Gulp);
+			if gulp == null {
+				gulp = nest.entity->add_component(GGG_Nest_Gulp);
+			}
+			gulp->trigger();
+			return;
+		}
+	}
+}
+
 
 // Minimap inverse: convert UI coordinates to world coordinates
 rr_ggg_minimap_ui_to_world :: proc(map_rect: Rect, ui_pos: v2) -> v2 {
@@ -1165,6 +1322,9 @@ GGG_Decoy_Entry :: class {
 
 ggg_decoys: [..]GGG_Decoy_Entry;
 
+GGG_SWARM_BURST_DURATION :: 0.5;
+GGG_SWARM_BURST_SPEED :: 6.0;
+
 GGG_Decoy :: class : Component {
 	rng: u64;
 	speed: float;
@@ -1175,6 +1335,9 @@ GGG_Decoy :: class : Component {
 	target_player_id: u64;
 	retarget_at: float;
 	has_rooted: bool;
+	target_index: s64;
+	burst_dir: v2;
+	burst_until: float;
 
 	ao_start :: method() {
 		rng = rng_seed(entity.id);
@@ -1185,24 +1348,27 @@ GGG_Decoy :: class : Component {
 		}
 		retarget_at = 0.0;
 		sfx_next_play_at = get_time() + rng_range_float(ref rng, 0.0, 4.0);
+		burst_until = get_time() + GGG_SWARM_BURST_DURATION;
 	}
 
 	find_nearest_civilian :: method() {
-		best_dist := 999999.0;
-		best_id: u64 = 0;
+		// Collect all valid civilians
+		civilian_ids: [..]u64;
 		for j: 0..players.elements.count-1 {
 			p := players.elements[j];
 			if p == null continue;
 			if !#alive(p.entity) continue;
 			if p.player_state != Player_State.ALIVE continue;
 			if p.player_type == Player_Type.TRAITOR continue;
-			dist := length(p.entity.world_position - entity.world_position);
-			if dist < best_dist {
-				best_dist = dist;
-				best_id = p.entity.id;
-			}
+			civilian_ids->append(p.entity.id);
 		}
-		target_player_id = best_id;
+		if civilian_ids.count > 0 {
+			idx := target_index % civilian_ids.count;
+			if idx < 0 { idx = idx + civilian_ids.count; }
+			target_player_id = civilian_ids[idx];
+		} else {
+			target_player_id = 0;
+		}
 		retarget_at = get_time() + rng_range_float(ref rng, 1.5, 3.0);
 	}
 
@@ -1218,6 +1384,19 @@ GGG_Decoy :: class : Component {
 
 		if now >= expires_at {
 			entity->destroy();
+			return;
+		}
+
+		// Burst scatter phase — move outward from nest before chasing
+		if now < burst_until {
+			new_pos := entity.world_position + burst_dir * GGG_SWARM_BURST_SPEED * dt;
+			entity->set_local_position(new_pos);
+			s := entity.local_scale;
+			if burst_dir.x > 0.01 {
+				entity->set_local_scale(v2.{abs(s.x), s.y});
+			} else if burst_dir.x < -0.01 {
+				entity->set_local_scale(v2.{-abs(s.x), s.y});
+			}
 			return;
 		}
 
@@ -1311,8 +1490,16 @@ rr_ggg_spawn_swarm :: proc(player: Player) {
 	now := get_time();
 	spawn_rng: u64 = rng_seed_time();
 	for i: 0..crawler_count-1 {
+		// Scatter spawn positions in a ring around the nest
+		angle := i.(float) / crawler_count.(float) * 6.2832;
+		angle_offset := rng_range_float(ref spawn_rng, -0.4, 0.4);
+		angle = angle + angle_offset;
+		dir_x := cos(angle);
+		dir_y := sin(angle);
+		spawn_offset := v2.{dir_x * 0.5, dir_y * 0.5};
+
 		decoy_e := Scene.create_entity();
-		decoy_e->set_local_position(gm.nest_world_pos);
+		decoy_e->set_local_position(v2.{gm.nest_world_pos.x + spawn_offset.x, gm.nest_world_pos.y + spawn_offset.y});
 		decoy_e->set_local_scale(v2.{0.7, 0.7});
 
 		spine := decoy_e->add_component(Spine_Animator);
@@ -1330,6 +1517,8 @@ rr_ggg_spawn_swarm :: proc(player: Player) {
 		stagger := rng_range_float(ref spawn_rng, 0.0, 2.0);
 		decoy_comp := decoy_e->add_component(GGG_Decoy);
 		decoy_comp.expires_at = now + GGG_SWARM_DURATION_SECONDS + stagger;
+		decoy_comp.target_index = i.(s64);
+		decoy_comp.burst_dir = v2.{dir_x, dir_y};
 
 		entry := new(GGG_Decoy_Entry);
 		entry.decoy_entity = decoy_e;
@@ -1418,7 +1607,6 @@ rr_ggg_get_closest_draggable_trapped_player :: proc(player: Player) -> Player {
 		root := p.entity->get_component(GGG_Trap_Root_Effect);
 		if root == null continue;
 		if !root.active continue;
-		if !root.is_blinded continue;
 		// Check not already being dragged
 		gm := player.entity->get_component(GGG_Module);
 		if gm != null && gm.dragging_live_player_id == p.entity.id continue;
@@ -1455,6 +1643,16 @@ rr_ggg_stop_live_drag :: proc(player: Player) {
 rr_ggg_update_live_drag :: proc(player: Player, gm: GGG_Module, dt: float) {
 	if gm == null return;
 	if gm.dragging_live_player_id == 0 return;
+
+	// Hold drag anim during nest consume arc
+	if gm.nest_consume_hold_drag_until > 0.0 && get_time() < gm.nest_consume_hold_drag_until {
+		return;
+	}
+	if gm.nest_consume_hold_drag_until > 0.0 {
+		gm.nest_consume_hold_drag_until = 0.0;
+		gm.dragging_live_player_id = 0;
+		return;
+	}
 
 	target := get_player_by_entity_id(gm.dragging_live_player_id);
 	if target == null || !#alive(target.entity) || target.player_state != Player_State.ALIVE {
@@ -1539,8 +1737,7 @@ GGG_Place_Nest_Ability :: class : Ability_Base {
 	NAME :: "Place Nest";
 
 	on_init :: proc(instance: GGG_Place_Nest_Ability) {
-		// TODO: proper nest icon
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/swarm.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/Nest_icon.png");
 	}
 
 	can_use :: method() -> bool {
@@ -1566,6 +1763,27 @@ GGG_Place_Nest_Ability :: class : Ability_Base {
 
 	on_draw_button :: proc(instance: GGG_Place_Nest_Ability, rect: Rect) {
 		draw_ability_name_label(rect, GGG_Place_Nest_Ability.NAME);
+
+		// Pulsing circular glow (soft gradient so it reads as a glow behind the icon)
+		t := get_time() * 3.5;
+		pulse := sin(t) * 0.5 + 0.5;
+		glow_alpha := pulse * 0.5;
+		glow_rect := rect->grow_unscaled(14.0, 14.0, 14.0, 14.0);
+		circle := get_asset(Texture_Asset, "sprites/Shapes/shape_circle_blurred.png");
+		UI.quad(glow_rect, circle, v4.{1.0, 0.85, 0.0, glow_alpha});
+
+		// "TAP!" bouncing label above the button
+		bounce := sin(t) * 3.0;
+		label_rect := rect->top_center_rect()->offset(0.0, 20.0 + bounce)->grow(16.0, 60.0, 16.0, 60.0);
+		ts := UI.default_text_settings();
+		ts.size = 34;
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.color = v4.{1.0, 0.85, 0.0, 1.0};
+		ts.do_outline = true;
+		ts.outline_thickness = 2;
+		ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(label_rect, ts, "TAP!");
 	}
 }
 

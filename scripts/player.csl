@@ -2549,6 +2549,13 @@ rr_drag_body_update_anim_state :: proc(player: Player, dt: float) {
 	if player.agent == null return;
 
 	dragging := player.dragging_corpse_entity_id != 0;
+	// Also trigger drag anim when live-dragging a trapped player (GGG)
+	if !dragging {
+		gm := player.entity->get_component(GGG_Module);
+		if gm != null && gm.dragging_live_player_id != 0 {
+			dragging = true;
+		}
+	}
 	moving := false;
 	// Use facing from scale sign (positive = right, negative = left).
 	desired_right := player.drag_body_is_right;
@@ -3526,8 +3533,7 @@ update_minimap_ui :: proc(player: Player) {
 
 			// Draw nest marker on minimap (if placed)
 			if gm_map.nest_placed {
-				// TODO: proper nest icon
-				nest_icon := get_asset(Texture_Asset, "sprites/icons/ggg/swarm.png");
+				nest_icon := get_asset(Texture_Asset, "sprites/icons/ggg/Nest_icon.png");
 				if nest_icon != null {
 					nest_size := map_rect->height() * 0.035;
 					if nest_size < 16.0 { nest_size = 16.0; }
