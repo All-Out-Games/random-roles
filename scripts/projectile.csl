@@ -96,6 +96,33 @@ RR_Projectile :: class : Component {
             }
         }
 
+		// Check for GGG nest collisions (Sheriff shoots nest → reveals on minimap)
+		if !destroy_self {
+			owner_player: Player = null;
+			if #alive(owner) {
+				owner_player = owner->get_component(Player);
+			}
+			if owner_player != null && owner_player.player_role == Player_Role.SHERIFF {
+				foreach nest: component_iterator(GGG_Nest) {
+					if nest == null continue;
+					if nest.destroyed continue;
+					if nest.entity == null || !#alive(nest.entity) continue;
+					if in_range(nest.entity.world_position - entity.world_position, hit_radius + 1.0) {
+						nest.sheriff_revealed = true;
+						nest.sheriff_reveal_ends_at = get_time() + GGG_NEST_SHERIFF_REVEAL_SECONDS;
+						for pi: 0..players.elements.count-1 {
+							p := players.elements[pi];
+							if p == null continue;
+							if p.player_state == Player_State.DEAD continue;
+							p->Notify("A nest has been revealed on the minimap!");
+						}
+						destroy_self = true;
+						break;
+					}
+				}
+			}
+		}
+
         if time_alive >= lifetime {
             destroy_self = true;
         }

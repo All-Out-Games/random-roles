@@ -818,13 +818,14 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 				append(ref results, Help_Ability_Entry.{"sprites/icons/werewolf/claw_slash.png", "Claw", "Unlocked after kills. Wolf form only. Slash at range."});
 			}
 			case .GOO_GOO_GAGA: {
-				append(ref results, Help_Ability_Entry.{"sprites/icons/transform_evil.png", "Transform", "Switch between schleem and creature form. Faster cooldown during power outage."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/kill_wrap_player.png", "Kill", "Creature form. Killing a player automatically wraps them."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/wrap_corpse.png", "Wrap", "Creature form. Wrap a nearby dead body in tinfoil. Wraps unlock new abilities."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/crawl_speedup.png", "Crawl", "Unlocked at 1 wrap. Creature form. Shrink down and move faster. Boosted during power outage."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/santa_trap.png", "Trap", "Unlocked at 2 wraps. Creature form. Place a chocolate trap that roots civilians."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/swarm.png", "Swarm", "Unlocked at 3 wraps. Creature form. Summon decoy creatures to cause chaos."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/power_outage.png", "Night Crawler", "Passive. During power outage: faster Transform CD, boosted Crawl speed, and goo goo ga ga SFX heard globally."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/swarm.png", "Place Nest", "Place your nest on the map via minimap. Drag bodies to it for nest points."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/transform_evil.png", "Transform", "Free toggle between schleem and creature form. Creature form is faster."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/kill_wrap_player.png", "Kill", "Both forms. Kills auto-wrap victims. Creature form has extended lunge range."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/santa_trap.png", "Trap", "Human form. Place a chocolate trap that roots + blinds civilians. Drag them alive to nest for 3 points!"});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/crawl_speedup.png", "Crawl", "1 nest point. Creature form. Shrink and scuttle fast. Boosted during power outage."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/kill_wrap_player.png", "Foil Whip", "3 nest points. Creature form. Fire a whip that pulls targets to you."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/ggg/swarm.png", "Swarm", "5 nest points. Creature form. Crawlers erupt from nest and root civilians."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/power_outage.png", "Passives", "Hive Mind: +2%% speed per nest point. Night Crawler: boosted crawl in darkness. Radio Hijack: goo goo ga ga during comms sabotage."});
 			}
 			case .MIMICER: {
 				append(ref results, Help_Ability_Entry.{"sprites/icons/transform_evil.png", "Transform", "Toggle between schleem and monster form."}); // TODO: mimicer icons
@@ -1643,7 +1644,7 @@ update_tasks_ui :: proc(player: Player) {
 				gt := task.(Task_GGG_Wrap);
 				ggm := player.entity->get_component(GGG_Module);
 				ggg_w := 0;
-				if ggm != null { ggg_w = ggm.wraps; }
+				if ggm != null { ggg_w = ggm.nest_points; }
 				task_progress = format_string("%/%", .{ggg_w, gt.goal});
 			}
 		}
@@ -1772,7 +1773,7 @@ Task_GGG_Wrap :: class : Task_Base {
 	update_task :: proc(using this: Task_GGG_Wrap, player: Player) {
 		if completed return;
 		ggm := player.entity->get_component(GGG_Module);
-		if ggm != null && ggm.wraps >= goal {
+		if ggm != null && ggm.nest_points >= goal {
 			complete_attempt(this, player, true);
 		}
 	}

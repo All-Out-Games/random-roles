@@ -84,7 +84,15 @@ Kill_Ability :: class : Ability_Base {
     }
 
     get_closest_alive_player :: proc(instance: Kill_Ability, player: Player) -> Player {
-        finder := make_finder(Player, player.entity.world_position, 5.0);
+		// GGG creature form has extended kill range (lunge)
+		kill_range := 5.0;
+		if player.player_role == Player_Role.GOO_GOO_GAGA {
+			gm := player.entity->get_component(GGG_Module);
+			if gm != null && gm.is_creature_form {
+				kill_range = GGG_CREATURE_KILL_RANGE;
+			}
+		}
+        finder := make_finder(Player, player.entity.world_position, kill_range);
         for i: 0..players.elements.count-1 {
             target := players.elements[i];
             if target == null {
@@ -239,17 +247,54 @@ Drag_Body_Ability :: class : Ability_Base {
 
 		// Allow button to stay enabled while already dragging (so you can drop).
 		if player.dragging_corpse_entity_id != 0 return true;
+		// GGG: also allow if dragging a live player
+		if player.player_role == Player_Role.GOO_GOO_GAGA {
+			gm := player.entity->get_component(GGG_Module);
+			if gm != null && gm.dragging_live_player_id != 0 return true;
+		}
+		// GGG human form: can also grab trapped+blinded live players
+		if player.player_role == Player_Role.GOO_GOO_GAGA {
+			gm2 := player.entity->get_component(GGG_Module);
+			if gm2 != null && !gm2.is_creature_form {
+				trapped := rr_ggg_get_closest_draggable_trapped_player(player);
+				if trapped != null return true;
+			}
+		}
 		return rr_drag_body_get_closest_draggable_corpse(player) != null;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
 		dragging := player != null && player.dragging_corpse_entity_id != 0;
+		// GGG: also check live drag
+		ggg_live_dragging := false;
+		if player != null && player.player_role == Player_Role.GOO_GOO_GAGA {
+			gm_drag := player.entity->get_component(GGG_Module);
+			if gm_drag != null && gm_drag.dragging_live_player_id != 0 {
+				ggg_live_dragging = true;
+			}
+		}
 
 		// Toggle grab/drop.
 		if params.clicked && params.can_use && Game.is_server() {
 			if dragging {
 				rr_drag_body_force_drop_for_player(player);
 				return;
+			}
+			if ggg_live_dragging {
+				rr_ggg_stop_live_drag(player);
+				return;
+			}
+
+			// GGG human form: try to grab a trapped+blinded live player first
+			if player.player_role == Player_Role.GOO_GOO_GAGA {
+				gm_grab := player.entity->get_component(GGG_Module);
+				if gm_grab != null && !gm_grab.is_creature_form {
+					trapped := rr_ggg_get_closest_draggable_trapped_player(player);
+					if trapped != null {
+						rr_ggg_start_live_drag(player, trapped);
+						return;
+					}
+				}
 			}
 
 			corpse := rr_drag_body_get_closest_draggable_corpse(player);
@@ -1641,27 +1686,61 @@ DNA_Sample_Ability :: class : Ability_Base {
 		return finder.closest;
 	}
 
+	get_closest_sampleable_nest :: proc(instance: DNA_Sample_Ability, coroner: Player) -> GGG_Nest {
+		best: GGG_Nest = null;
+		best_dist_sq := 0.0;
+		r_sq := CORONER_DNA_SAMPLE_RANGE * CORONER_DNA_SAMPLE_RANGE;
+		foreach nest: component_iterator(GGG_Nest) {
+			if nest == null continue;
+			if nest.destroyed continue;
+			if nest.entity == null || !#alive(nest.entity) continue;
+			d := nest.entity.world_position - coroner.entity.world_position;
+			dist_sq := length_squared(d);
+			if dist_sq > r_sq continue;
+			if best == null || dist_sq < best_dist_sq {
+				best = nest;
+				best_dist_sq = dist_sq;
+			}
+		}
+		return best;
+	}
+
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player->has_task_in_progress() return false;
 		if player.player_type != Player_Type.CIVILIAN return false;
 		if player.player_role != Player_Role.CORONER return false;
-		return get_closest_sampleable_corpse(this, player) != null;
+		if get_closest_sampleable_corpse(this, player) != null return true;
+		if get_closest_sampleable_nest(this, player) != null return true;
+		return false;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
+			// Prefer corpse over nest
 			corpse := get_closest_sampleable_corpse(this, player);
-			if corpse == null return;
-
-			corpse.has_dna_been_sampled = true;
-			cm := player.entity->get_component(Coroner_Module);
-			if cm != null {
-				cm.dna_vials->append(corpse.killer_player_entity_id);
+			if corpse != null {
+				corpse.has_dna_been_sampled = true;
+				cm := player.entity->get_component(Coroner_Module);
+				if cm != null {
+					cm.dna_vials->append(corpse.killer_player_entity_id);
+				}
+				current_cooldown = 1.0;
+				return;
 			}
 
-			current_cooldown = 1.0;
+			// Investigate nest: get DNA from owner + notify body count
+			nest := get_closest_sampleable_nest(this, player);
+			if nest != null {
+				cm := player.entity->get_component(Coroner_Module);
+				if cm != null && nest.owner_player_entity_id != 0 {
+					cm.dna_vials->append(nest.owner_player_entity_id);
+				}
+				player->Notify(format_string("Nest has consumed % bodies.", {nest.bodies_consumed}));
+				current_cooldown = 1.0;
+				return;
+			}
 		}
 	}
 
@@ -2734,6 +2813,26 @@ rr_pyro_get_closest_unlit_prop :: proc(player: Player) -> Entity {
 	return best;
 }
 
+rr_pyro_get_closest_nest :: proc(player: Player) -> GGG_Nest {
+	if player == null return null;
+	best: GGG_Nest = null;
+	best_dist_sq := 0.0;
+	r_sq := PYRO_LIGHT_FIRE_RANGE * PYRO_LIGHT_FIRE_RANGE;
+	foreach nest: component_iterator(GGG_Nest) {
+		if nest == null continue;
+		if nest.destroyed continue;
+		if nest.entity == null || !#alive(nest.entity) continue;
+		d := nest.entity.world_position - player.entity.world_position;
+		dist_sq := length_squared(d);
+		if dist_sq > r_sq continue;
+		if best == null || dist_sq < best_dist_sq {
+			best = nest;
+			best_dist_sq = dist_sq;
+		}
+	}
+	return best;
+}
+
 Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 	NAME :: "Light Fire";
 
@@ -2751,8 +2850,9 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 		if p.player_type != Player_Type.ANARCHIST return false;
 		if p.player_role != Player_Role.PYROMANIAC return false;
 		if p.pyro_on_fire return false;
-		// Disabled when no valid nearby prop target.
-		return rr_pyro_get_closest_unlit_prop(p) != null;
+		if rr_pyro_get_closest_unlit_prop(p) != null return true;
+		if rr_pyro_get_closest_nest(p) != null return true;
+		return false;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -2770,31 +2870,57 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 				options.far  = true;
 				options.near = true;
 				rr_draw_tutorial_arrow(player, target.world_position, options);
+			} else {
+				// Arrow toward nest if no prop
+				nest := rr_pyro_get_closest_nest(player);
+				if nest != null && nest.entity != null && #alive(nest.entity) {
+					options := Tutorial_Arrow.default_options();
+					options.alpha = 1.0;
+					options.far  = true;
+					options.near = true;
+					rr_draw_tutorial_arrow(player, nest.entity.world_position, options);
+				}
 			}
 		}
 
 		// Feedback when pressed while disabled.
 		if params.clicked && !params.can_use {
 			if player != null && !player.pyro_on_fire {
-				if rr_pyro_get_closest_unlit_prop(player) == null {
+				if rr_pyro_get_closest_unlit_prop(player) == null && rr_pyro_get_closest_nest(player) == null {
 					player->Notify("No nearby props to ignite!");
 				}
 			}
 		}
 
 		if params.clicked && params.can_use {
-			// Server authoritative: spawns gameplay-relevant fire instance.
 			if Game.is_server() {
-				target := rr_pyro_get_closest_unlit_prop(player);
-				if target != null {
-					fire := target->get_component(RR_Prop_Fire_Target);
-					if fire == null {
-						fire = target->add_component(RR_Prop_Fire_Target);
+				// Check for nest first (priority target)
+				nest := rr_pyro_get_closest_nest(player);
+				if nest != null {
+					// Find the GGG_Module that owns this nest and destroy it
+					foreach ggg_player: component_iterator(Player) {
+						if ggg_player == null continue;
+						if ggg_player.player_role != Player_Role.GOO_GOO_GAGA continue;
+						gm := ggg_player.entity->get_component(GGG_Module);
+						if gm == null continue;
+						if gm.nest_entity == nest.entity {
+							rr_ggg_destroy_nest(gm);
+							player->Notify("Nest destroyed!");
+							player->set_trigger("pyro_snap_fingers");
+							break;
+						}
 					}
-					fire->ignite(player);
-					// Cosmetic but should replicate: trigger snap animation on merged rig.
-					player->set_trigger("pyro_snap_fingers");
-					rr_pyro_register_prop_ignited(player);
+				} else {
+					target := rr_pyro_get_closest_unlit_prop(player);
+					if target != null {
+						fire := target->get_component(RR_Prop_Fire_Target);
+						if fire == null {
+							fire = target->add_component(RR_Prop_Fire_Target);
+						}
+						fire->ignite(player);
+						player->set_trigger("pyro_snap_fingers");
+						rr_pyro_register_prop_ignited(player);
+					}
 				}
 			}
 			current_cooldown = PYRO_LIGHT_FIRE_COOLDOWN_SECONDS;

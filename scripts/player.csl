@@ -333,6 +333,7 @@ Player :: class : Player_Base {
 			}
 			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
 			rr_draw_power_outage_overlay_if_needed(this);
+			rr_ggg_draw_trap_blind_overlay(this);
 			// Global civilian progress bar – always visible at top-center (except lobby/cinematics).
 			rr_draw_civilian_progress_bar(this);
             update_tasks_ui(this);
@@ -366,7 +367,7 @@ Player :: class : Player_Base {
 		// Server-authoritative werewolf transform timing.
 		if Game.is_server() {
 			rr_werewolf_update_transform(this, delta_time);
-			rr_ggg_update_transform(this, delta_time);
+			rr_ggg_update(this, delta_time);
 		}
 
 		// Cosmetic: apply scheduled skin toggles on all clients.
@@ -445,6 +446,12 @@ Player :: class : Player_Base {
 			game_state == Game_State.ANIM_VICTORY;
 		if is_anim_state {
 			return v2.{999.0, 999.0};
+		}
+
+		// GGG trap blind: super tiny LOS
+		root := this.entity->get_component(GGG_Trap_Root_Effect);
+		if root != null && root.active && root.is_blinded {
+			return v2.{GGG_TRAP_BLIND_LOS_INNER, GGG_TRAP_BLIND_LOS_OUTER};
 		}
 
 		radii := v2.{PLAYER_LIGHT_BASE_INNER_RADIUS, PLAYER_LIGHT_BASE_OUTER_RADIUS};
@@ -654,27 +661,35 @@ Player :: class : Player_Base {
 							}
 						} else if player_role == Player_Role.GOO_GOO_GAGA {
 							ggm := this.entity->get_component(GGG_Module);
-							if ggm != null && ggm.is_creature_form {
-								// Creature form: Kill + Transform + Wrap + Crawl/Trap/Swarm (progressive unlock).
+							if ggm != null && !ggm.nest_placed {
+								// Before nest placed: Place Nest + Kill + Transform
+								draw_ability_button(this, GGG_Place_Nest_Ability, abilityIndex);
+								abilityIndex += 1;
 								draw_ability_button(this, Kill_Ability, abilityIndex);
 								abilityIndex += 1;
 								draw_ability_button(this, GGG_Transform_Ability, abilityIndex);
 								abilityIndex += 1;
-								draw_ability_button(this, GGG_Wrap_Ability, abilityIndex);
+							} else if ggm != null && ggm.is_creature_form {
+								// Creature form: Kill + Transform + Crawl + Foil Whip + Swarm
+								draw_ability_button(this, Kill_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, GGG_Transform_Ability, abilityIndex);
 								abilityIndex += 1;
 								draw_ability_button(this, GGG_Crawl_Ability, abilityIndex);
 								abilityIndex += 1;
-								draw_ability_button(this, GGG_Chocolate_Trap_Ability, abilityIndex);
+								draw_ability_button(this, GGG_Foil_Whip_Ability, abilityIndex);
 								abilityIndex += 1;
 								draw_ability_button(this, GGG_Swarm_Ability, abilityIndex);
 								abilityIndex += 1;
 							} else {
-								// Human form: Kill + Drag + Transform.
+								// Human form: Kill + Transform + Chocolate Trap + Drag
 								draw_ability_button(this, Kill_Ability, abilityIndex);
 								abilityIndex += 1;
-								draw_ability_button(this, Drag_Body_Ability, abilityIndex);
-								abilityIndex += 1;
 								draw_ability_button(this, GGG_Transform_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, GGG_Chocolate_Trap_Ability, abilityIndex);
+								abilityIndex += 1;
+								draw_ability_button(this, Drag_Body_Ability, abilityIndex);
 								abilityIndex += 1;
 							}
 						} else if player_role == Player_Role.MIMICER {
@@ -1527,7 +1542,7 @@ draw_ggg_role_hud :: proc(player: Player) {
 	LIST_PAD :: 10.0;
 	DROPDOWN_SLICE_PX :: 16.0;
 
-	row_count := 4;
+	row_count := 5;
 	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 
 	header_rect := rr_draw_task_list_header(safe, false, player);
@@ -1554,32 +1569,28 @@ draw_ggg_role_hud :: proc(player: Player) {
 
 	list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 	gm := player.entity->get_component(GGG_Module);
-	ggg_wraps := 0;
-	ggg_is_creature := false;
-	ggg_form_ends := 0.0;
+	ggg_pts := 0;
 	if gm != null {
-		ggg_wraps = gm.wraps;
-		ggg_is_creature = gm.is_creature_form;
-		ggg_form_ends = gm.creature_form_ends_at;
+		ggg_pts = gm.nest_points;
 	}
-	// Row 1: wrap count
+	// Row 1: Nest Points
 	{
 		entry_rect := list_content->cut_top(ROW_H);
 		list_content->cut_top(2.0);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		entry_content->cut_left(24.0);
 		row_ts := base_ts;
-		row_ts.color = v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Wraps: %", .{ggg_wraps}));
+		row_ts.color = v4.{1.0, 0.85, 0.0, 1.0};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Nest Points: %", .{ggg_pts}));
 	}
-	// Row 3: Crawl unlock
+	// Row 2: Crawl unlock (1 pt)
 	{
 		entry_rect := list_content->cut_top(ROW_H);
 		list_content->cut_top(2.0);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		checkbox_slot := entry_content->cut_left(24.0);
 		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-		crawl_unlocked := ggg_wraps >= GGG_CRAWL_UNLOCK_WRAPS;
+		crawl_unlocked := ggg_pts >= GGG_CRAWL_UNLOCK_NEST_POINTS;
 		if crawl_unlocked {
 			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
@@ -1587,32 +1598,33 @@ draw_ggg_role_hud :: proc(player: Player) {
 		}
 		row_ts := base_ts;
 		row_ts.color = crawl_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Crawl: %/%", .{min(ggg_wraps, GGG_CRAWL_UNLOCK_WRAPS), GGG_CRAWL_UNLOCK_WRAPS}));
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Crawl: %/%", .{min(ggg_pts, GGG_CRAWL_UNLOCK_NEST_POINTS), GGG_CRAWL_UNLOCK_NEST_POINTS}));
 	}
-	// Row 4: Trap unlock
+	// Row 3: Foil Whip unlock (3 pts)
 	{
 		entry_rect := list_content->cut_top(ROW_H);
 		list_content->cut_top(2.0);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		checkbox_slot := entry_content->cut_left(24.0);
 		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-		trap_unlocked := ggg_wraps >= GGG_TRAP_UNLOCK_WRAPS;
-		if trap_unlocked {
+		whip_unlocked := ggg_pts >= GGG_FOIL_WHIP_UNLOCK_NEST_POINTS;
+		if whip_unlocked {
 			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
 			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
-		row_ts.color = trap_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Trap: %/%", .{min(ggg_wraps, GGG_TRAP_UNLOCK_WRAPS), GGG_TRAP_UNLOCK_WRAPS}));
+		row_ts.color = whip_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Foil Whip: %/%", .{min(ggg_pts, GGG_FOIL_WHIP_UNLOCK_NEST_POINTS), GGG_FOIL_WHIP_UNLOCK_NEST_POINTS}));
 	}
-	// Row 5: Swarm unlock
+	// Row 4: Swarm unlock (5 pts)
 	{
 		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		checkbox_slot := entry_content->cut_left(24.0);
 		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-		swarm_unlocked := ggg_wraps >= GGG_SWARM_UNLOCK_WRAPS;
+		swarm_unlocked := ggg_pts >= GGG_SWARM_UNLOCK_NEST_POINTS;
 		if swarm_unlocked {
 			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
@@ -1620,7 +1632,30 @@ draw_ggg_role_hud :: proc(player: Player) {
 		}
 		row_ts := base_ts;
 		row_ts.color = swarm_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Swarm: %/%", .{min(ggg_wraps, GGG_SWARM_UNLOCK_WRAPS), GGG_SWARM_UNLOCK_WRAPS}));
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Swarm: %/%", .{min(ggg_pts, GGG_SWARM_UNLOCK_NEST_POINTS), GGG_SWARM_UNLOCK_NEST_POINTS}));
+	}
+	// Row 5: Consume bonuses
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		row_ts.size = 18;
+		bonuses := "";
+		if gm != null && gm.consumed_portal_maker {
+			bonuses = "Portal TP";
+		}
+		if gm != null && gm.consumed_doctor {
+			if bonuses.count > 0 {
+				bonuses = "Portal TP | 2x Trap";
+			} else {
+				bonuses = "2x Trap";
+			}
+		}
+		if bonuses.count > 0 {
+			row_ts.color = v4.{0.5, 0.9, 1.0, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, bonuses);
+		}
 	}
 	} // end task_list_open
 }
@@ -3387,7 +3422,15 @@ update_minimap_ui :: proc(player: Player) {
 
 	// Tap anywhere on the dark overlay to dismiss the map (drawn first so map
 	// buttons drawn later take priority for clicks).
-	{
+	// Skip when GGG is in nest placement mode so the placement click isn't eaten.
+	ggg_placing := false;
+	if player.player_role == Player_Role.GOO_GOO_GAGA {
+		gm_dismiss := player.entity->get_component(GGG_Module);
+		if gm_dismiss != null && gm_dismiss.nest_placing && !gm_dismiss.nest_placed {
+			ggg_placing = true;
+		}
+	}
+	if !ggg_placing {
 		UI.push_id("minimap_dismiss");
 		defer UI.pop_id();
 		dismiss_bs: Button_Settings = .{};
@@ -3442,6 +3485,94 @@ update_minimap_ui :: proc(player: Player) {
 				r := Rect{p_ui, p_ui}->grow_unscaled(size, size, size, size);
 				UI.quad(r->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
 			}
+		}
+	}
+
+	// --- GGG Nest: placement mode (runs on local+server so both sides see the click) ---
+	if player->is_local_or_server() && player.player_role == Player_Role.GOO_GOO_GAGA {
+		gm_map := player.entity->get_component(GGG_Module);
+		if gm_map != null {
+			// Nest placement mode: click on map to place
+			if gm_map.nest_placing && !gm_map.nest_placed {
+				// Show instructions
+				ts_place := UI.default_text_settings();
+				ts_place.size = 24;
+				ts_place.halign = .CENTER;
+				ts_place.valign = .BOTTOM;
+				ts_place.do_outline = true;
+				ts_place.outline_thickness = 2;
+				ts_place.outline_color = v4.{0, 0, 0, 1};
+				ts_place.color = v4.{1.0, 0.85, 0.0, 1.0};
+				label_rect := map_rect->cut_bottom(40);
+				UI.text(label_rect, ts_place, "Tap to place your Nest");
+
+				// Detect click on map
+				UI.push_id("ggg_nest_place");
+				defer UI.pop_id();
+				place_bs: Button_Settings = .{};
+				place_bs.sprite = core_globals.white_sprite;
+				place_bs.color = v4.{0, 0, 0, 0};
+				place_bs.hovered_color = v4.{0.3, 0.2, 0.0, 0.15};
+				place_bs.pressed_color = v4.{0.5, 0.3, 0.0, 0.2};
+				place_bs.background_color_multiplier = v4.{0, 0, 0, 0};
+				place_interact := UI.button(map_rect, place_bs, .{}, "");
+				if place_interact.clicked {
+					mouse_pos := get_mouse_screen_position();
+					world_pos := rr_ggg_minimap_ui_to_world(map_rect, mouse_pos);
+					rr_ggg_place_nest(player, world_pos);
+					player.show_minimap = false;
+				}
+			}
+
+			// Draw nest marker on minimap (if placed)
+			if gm_map.nest_placed {
+				// TODO: proper nest icon
+				nest_icon := get_asset(Texture_Asset, "sprites/icons/ggg/swarm.png");
+				if nest_icon != null {
+					nest_size := map_rect->height() * 0.035;
+					if nest_size < 16.0 { nest_size = 16.0; }
+					if nest_size > 48.0 { nest_size = 48.0; }
+					nest_ui := rr_minimap_world_to_ui(map_rect, gm_map.nest_world_pos);
+					nest_r := Rect{nest_ui, nest_ui}->grow_unscaled(nest_size, nest_size, nest_size, nest_size);
+					nest_color := v4.{1.0, 0.85, 0.0, 1.0};
+					if gm_map.nest_destroyed {
+						nest_color = v4.{0.4, 0.4, 0.4, 0.6};
+					}
+					UI.quad(nest_r->fit_aspect(nest_icon->get_aspect()), nest_icon, nest_color);
+				}
+
+				// Teleport button (if consumed portal maker)
+				if gm_map.consumed_portal_maker && !gm_map.nest_destroyed {
+					UI.push_id("ggg_nest_tp");
+					defer UI.pop_id();
+					tp_size := map_rect->height() * 0.06;
+					if tp_size < 30.0 { tp_size = 30.0; }
+					nest_ui2 := rr_minimap_world_to_ui(map_rect, gm_map.nest_world_pos);
+					tp_rect := Rect{nest_ui2, nest_ui2}->grow_unscaled(tp_size, tp_size, tp_size, tp_size)->offset_unscaled(0.0, tp_size * 2.0);
+					tp_bs: Button_Settings = .{};
+					rr_ui_apply_button_click_sound(ref tp_bs);
+					tp_interact := UI.button(tp_rect, tp_bs, .{}, "TP");
+					if tp_interact.clicked {
+						rr_ggg_teleport_to_nest(player);
+						player.show_minimap = false;
+					}
+				}
+			}
+		}
+	}
+
+	// Draw nest marker for ALL players if sheriff revealed it
+	foreach nest_comp: component_iterator(GGG_Nest) {
+		if nest_comp == null continue;
+		if !nest_comp.sheriff_revealed continue;
+		if !#alive(nest_comp.entity) continue;
+		nest_icon2 := get_asset(Texture_Asset, "sprites/icons/ggg/swarm.png");
+		if nest_icon2 != null {
+			n_size := map_rect->height() * 0.035;
+			if n_size < 16.0 { n_size = 16.0; }
+			n_ui := rr_minimap_world_to_ui(map_rect, nest_comp.entity.world_position);
+			n_r := Rect{n_ui, n_ui}->grow_unscaled(n_size, n_size, n_size, n_size);
+			UI.quad(n_r->fit_aspect(nest_icon2->get_aspect()), nest_icon2, v4.{1.0, 0.3, 0.3, 1.0});
 		}
 	}
 

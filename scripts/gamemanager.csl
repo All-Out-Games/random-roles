@@ -1430,6 +1430,7 @@ setup_lobby :: proc() {
 	rr_hitman_clear_mines();
 	rr_ggg_clear_traps();
 	rr_ggg_clear_decoys();
+	rr_ggg_clear_nest();
 	rr_pyro_extinguish_all_fires();
 	// Reset sabotages
 	rr_power_outage_active = false;
@@ -2035,10 +2036,10 @@ rr_unstuck_player :: proc(player: Player) {
 	}
 	ggg_trap_root := player.entity->get_component(GGG_Trap_Root_Effect);
 	if ggg_trap_root != null {
-		ggg_trap_root.active = false;
+		ggg_trap_root->heal();
 	}
-	// Cancel active GGG wrap channel.
-	rr_ggg_cancel_wrap(player);
+	// Cancel active GGG live drag.
+	rr_ggg_stop_live_drag(player);
 
 	// Clear pyromaniac fire status through its own cleanup path.
 	fire_status := player.entity->get_component(RR_Player_On_Fire_Status);
@@ -2082,7 +2083,7 @@ rr_unstuck_player :: proc(player: Player) {
 	rr_remove_movement_reason_all(player, MOVIE_STAR_AUTOGRAPH_STUN_REASON);
 	rr_remove_movement_reason_all(player, GGG_TRANSFORM_LOCK_REASON);
 	rr_remove_movement_reason_all(player, GGG_TRAP_ROOT_REASON);
-	rr_remove_freeze_reason_all(player, GGG_WRAP_LOCK_REASON);
+	rr_remove_movement_reason_all(player, GGG_FOIL_WHIP_PULL_REASON);
 	rr_remove_movement_reason_all(player, MIMICER_TRANSFORM_LOCK_REASON);
 	rr_remove_movement_reason_all(player, MIMICER_VOID_LUNGE_LOCK_REASON);
 	rr_remove_movement_reason_all(player, MIMICER_STUN_REASON);
@@ -2242,6 +2243,7 @@ ao_update_ingame :: proc(dt: float) {
 	update_hitman_mines();
 	update_ggg_traps();
 	update_ggg_decoys();
+	rr_ggg_update_radio_hijack();
 	rr_update_comms_lever_visuals();
 	// Keep prankster fake-meeting targets valid (reassign if dead/left).
 	for i: 0..players.elements.count-1 {
@@ -3141,18 +3143,21 @@ assign_players_to_types :: proc() {
 			if ggm == null {
 				ggm = p.entity->add_component(GGG_Module);
 			}
-			ggm.wraps = 0;
+			ggm.nest_points = 0;
+			ggm.nest_placed = false;
+			ggm.nest_destroyed = false;
+			ggm.nest_placing = false;
+			ggm.consumed_portal_maker = false;
+			ggm.consumed_doctor = false;
 			ggm.is_creature_form = false;
-			ggm.creature_form_ends_at = 0.0;
 			ggm.speed_boost_active = false;
 			ggm.is_crawling = false;
 			ggm.crawl_ends_at = 0.0;
 			ggm.crawl_speed_active = false;
-			ggm.wrap_channel_active = false;
-			ggm.wrap_channel_corpse_id = 0;
-			ggm.wrap_channel_end_at = 0.0;
 			ggm.skeleton_swap_at = 0.0;
 			ggm.creature_visible = false;
+			ggm.foil_whip_active = false;
+			ggm.dragging_live_player_id = 0;
 		}
 
 		// Pyromaniac
