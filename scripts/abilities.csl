@@ -131,6 +131,20 @@ Kill_Ability :: class : Ability_Base {
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
+        // GGG: queue kill during active whip pull → insta-kill on arrival
+		if params.clicked && player.player_role == Player_Role.GOO_GOO_GAGA {
+			gm_whip := player.entity->get_component(GGG_Module);
+			if gm_whip != null && gm_whip.foil_whip_active && !gm_whip.foil_whip_kill_on_arrive {
+				gm_whip.foil_whip_kill_on_arrive = true;
+				if player.player_role == Player_Role.GOO_GOO_GAGA {
+					current_cooldown = GGG_KILL_COOLDOWN_SECONDS;
+				} else {
+					current_cooldown = KILL_COOLDOWN_SECONDS;
+				}
+				return;
+			}
+		}
+
         if params.clicked && params.can_use {
             closest_alive_player := get_closest_alive_player(this, player);
             if closest_alive_player != null {

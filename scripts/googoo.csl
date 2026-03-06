@@ -46,6 +46,7 @@ GGG_Module :: class : Component {
 	foil_whip_pull_end_pos: v2;
 	foil_whip_pull_start_time: float;
 	foil_whip_pull_duration: float;
+	foil_whip_kill_on_arrive: bool;
 
 	// Dragging live trapped player
 	dragging_live_player_id: u64;
@@ -74,6 +75,7 @@ GGG_CRAWL_SFX_RADIUS :: 15.0;
 
 GGG_TRAP_COOLDOWN_SECONDS :: 30.0;
 GGG_TRAP_PLACE_DISTANCE :: 4.0;
+GGG_NEST_PLACE_DISTANCE :: 5.0;
 GGG_TRAP_ROOT_SECONDS :: 15.0;
 GGG_TRAP_BLIND_SECONDS :: 15.0;
 GGG_TRAP_DOUBLE_CC_SECONDS :: 30.0;
@@ -100,7 +102,7 @@ GGG_HIVE_MIND_SPEED_PER_POINT :: 0.02;
 GGG_NIGHT_CRAWL_SPEED_BONUS :: 0.50;
 
 GGG_NEST_RIG :: "anims/hive/Nest.spine";
-GGG_NEST_CONSUME_RANGE :: 2.5;
+GGG_NEST_CONSUME_RANGE :: 1.8;
 GGG_NEST_SHERIFF_REVEAL_SECONDS :: 30.0;
 
 // Rig paths
@@ -333,10 +335,10 @@ rr_ggg_clear_nest :: proc() {
 // Nest Consume Animation
 // ============================================================================
 
-GGG_CONSUME_DURATION :: 0.65;
-GGG_CONSUME_ARC_HEIGHT :: 3.0;
-GGG_CONSUME_FLASH_DURATION :: 0.35;
-GGG_CONSUME_GULP_DURATION :: 0.25;
+GGG_CONSUME_DURATION :: 1.1;
+GGG_CONSUME_ARC_HEIGHT :: 3.5;
+GGG_CONSUME_FLASH_DURATION :: 0.45;
+GGG_CONSUME_GULP_DURATION :: 0.35;
 
 GGG_Nest_Consume_Anim :: class : Component {
 	start_pos: v2;
@@ -344,11 +346,36 @@ GGG_Nest_Consume_Anim :: class : Component {
 	start_time: float;
 	start_scale: v2;
 	nest_entity_id: u64;
+	original_spine_depth: float;
+	original_sprite_depth: float;
+	saved_depths: bool;
+
+	ao_start :: method() {
+		// Raise the entity above the world so the arc renders on top
+		spine := entity->get_component(Spine_Animator);
+		if spine != null {
+			original_spine_depth = spine.depth_offset;
+			spine.depth_offset = 999.0;
+		}
+		sprite := entity->get_component(Sprite_Renderer);
+		if sprite != null {
+			original_sprite_depth = sprite.depth_offset;
+			sprite.depth_offset = 999.0;
+		}
+		saved_depths = true;
+	}
 
 	ao_update :: method(dt: float) {
 		t := (get_time() - start_time) / GGG_CONSUME_DURATION;
 
 		if t >= 1.0 {
+			// Restore depth before destroy
+			if saved_depths {
+				spine := entity->get_component(Spine_Animator);
+				if spine != null { spine.depth_offset = original_spine_depth; }
+				sr := entity->get_component(Sprite_Renderer);
+				if sr != null { sr.depth_offset = original_sprite_depth; }
+			}
 			rr_ggg_spawn_consume_flash(end_pos);
 			rr_ggg_trigger_nest_gulp(nest_entity_id);
 			entity->destroy();
@@ -1295,18 +1322,72 @@ rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) 
 	// Update pull end position to GGG's current position (in case GGG moves)
 	gm.foil_whip_pull_end_pos = player.entity.world_position;
 
+	// Lerp target toward GGG
+	new_pos := v2.{
+		lerp(gm.foil_whip_pull_start_pos.x, gm.foil_whip_pull_end_pos.x, t),
+		lerp(gm.foil_whip_pull_start_pos.y, gm.foil_whip_pull_end_pos.y, t),
+	};
 	if t >= 1.0 {
-		// Pull complete
-		target.entity->set_local_position(gm.foil_whip_pull_end_pos);
+		new_pos = gm.foil_whip_pull_end_pos;
+	}
+	target.entity->set_local_position(new_pos);
+
+	// Check if pulled target enters nest range while trapped → auto-consume
+	if Game.is_server() && gm.nest_placed && !gm.nest_destroyed {
+		target_pos := target.entity.world_position;
+		nest_dist := length(target_pos - gm.nest_world_pos);
+		root := target.entity->get_component(GGG_Trap_Root_Effect);
+		if nest_dist <= GGG_NEST_CONSUME_RANGE && root != null && root.active {
+			// Release whip pull
+			target->remove_disable_movement_input_reason(GGG_FOIL_WHIP_PULL_REASON);
+			gm.foil_whip_active = false;
+			gm.foil_whip_kill_on_arrive = false;
+			// Kill and consume
+			victim_role := target.player_role;
+			target->kill_with_killer(player.entity.id);
+			foreach corpse: component_iterator(Corpse) {
+				if corpse == null continue;
+				if !#alive(corpse.entity) continue;
+				if corpse.entity.world_position.x == target.entity.world_position.x && corpse.entity.world_position.y == target.entity.world_position.y {
+					rr_ggg_start_consume_anim(corpse.entity, gm.nest_world_pos, gm.nest_entity);
+					break;
+				}
+			}
+			gm.nest_points += 3;
+			nest_comp := gm.nest_entity->get_component(GGG_Nest);
+			if nest_comp != null {
+				nest_comp.bodies_consumed += 1;
+			}
+			rr_ggg_check_consume_bonus(player, gm, victim_role);
+			player->Notify(format_string("Whip feed! +3 nest points (%)", .{gm.nest_points}));
+			return;
+		}
+	}
+
+	// Kill on arrive: if kill was queued during whip pull
+	if t >= 1.0 && Game.is_server() && gm.foil_whip_kill_on_arrive {
+		gm.foil_whip_kill_on_arrive = false;
 		target->remove_disable_movement_input_reason(GGG_FOIL_WHIP_PULL_REASON);
 		gm.foil_whip_active = false;
-	} else {
-		// Lerp target toward GGG
-		new_pos := v2.{
-			lerp(gm.foil_whip_pull_start_pos.x, gm.foil_whip_pull_end_pos.x, t),
-			lerp(gm.foil_whip_pull_start_pos.y, gm.foil_whip_pull_end_pos.y, t),
-		};
-		target.entity->set_local_position(new_pos);
+		player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
+		player->set_trigger("traitor_kill");
+		target->kill_with_killer(player.entity.id);
+		rr_ggg_creature_trigger(player, "pounce");
+		if Game.is_server() {
+			pounce_sfx := SFX.default_sfx_desc();
+			pounce_sfx->set_position(target.entity.world_position);
+			pounce_sfx.volume = 0.15;
+			pounce_sfx.speed_perturb = 0.05;
+			rr_play_sfx("sfx/ggg_pounce_wrap.wav", pounce_sfx);
+		}
+		return;
+	}
+
+	if t >= 1.0 {
+		// Pull complete — release
+		target->remove_disable_movement_input_reason(GGG_FOIL_WHIP_PULL_REASON);
+		gm.foil_whip_active = false;
+		gm.foil_whip_kill_on_arrive = false;
 	}
 }
 
@@ -1736,8 +1817,12 @@ rr_ggg_update_radio_hijack :: proc() {
 GGG_Place_Nest_Ability :: class : Ability_Base {
 	NAME :: "Place Nest";
 
+	was_targeting: bool;
+	activated_this_session: bool;
+
 	on_init :: proc(instance: GGG_Place_Nest_Ability) {
 		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/Nest_icon.png");
+		instance.is_aimed_ability = true;
 	}
 
 	can_use :: method() -> bool {
@@ -1751,39 +1836,100 @@ GGG_Place_Nest_Ability :: class : Ability_Base {
 		return true;
 	}
 
+	cleanup_targeting :: method() {
+		was_targeting = false;
+		activated_this_session = false;
+	}
+
 	on_update :: method(params: ref Ability_Update_Params) {
-		if params.clicked && params.can_use {
-			gm := player.entity->get_component(GGG_Module);
-			if gm == null return;
-			// Open minimap in placement mode
-			gm.nest_placing = true;
-			player.show_minimap = true;
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		targeting := targeted.targeting;
+
+		if targeting && !params.can_use {
+			player.active_ability = null;
+			cleanup_targeting();
+			return;
+		}
+
+		if targeting && !was_targeting {
+			activated_this_session = false;
+			was_targeting = true;
+		}
+		if !targeting {
+			if was_targeting {
+				cleanup_targeting();
+			}
+			return;
+		}
+
+		aiming := Ability_Utilities.update_aiming_ability(player, ref params);
+		if aiming.cancel {
+			player.active_ability = null;
+			cleanup_targeting();
+			return;
+		}
+
+		target_pos := get_mouse_world_position();
+		{
+			origin := player.entity.world_position;
+			delta := target_pos - origin;
+			max_r := GGG_NEST_PLACE_DISTANCE;
+			if length_squared(delta) > max_r * max_r {
+				if length_squared(delta) < 0.001 {
+					delta = v2.{1, 0};
+				} else {
+					delta = normalize(delta);
+				}
+				target_pos = origin + delta * max_r;
+			}
+		}
+
+		// Preview
+		if player->is_local() {
+			UI.push_world_draw_context();
+			defer UI.pop_draw_context();
+			UI.push_z(target_pos.y);
+			defer UI.pop_z();
+
+			// Range circle
+			reticle := get_asset(Texture_Asset, GROUND_RETICLE_TEXTURE_PATH);
+			reticle_rect := Rect{target_pos, target_pos}->grow(1.0, 1.0, 1.0, 1.0);
+			UI.quad(reticle_rect->fit_aspect(reticle->get_aspect()), reticle, v4.{1, 1, 1, 0.8});
+
+			// Nest icon preview
+			nest_preview := get_asset(Texture_Asset, "sprites/icons/ggg/Nest_icon.png");
+			pulse := sin(get_time() * 3.5) * 0.5 + 0.5;
+			preview_alpha := 0.35 + pulse * 0.2;
+			preview_rect := Rect{target_pos, target_pos}->grow(0.75, 0.75, 0.75, 0.75);
+			UI.quad(preview_rect->fit_aspect(nest_preview->get_aspect()), nest_preview, v4.{1.0, 0.85, 0.0, preview_alpha});
+		}
+
+		if activated_this_session return;
+
+		if aiming.activate && params.can_use {
+			activated_this_session = true;
+			rr_ggg_place_nest(player, target_pos);
+			player.active_ability = null;
+			cleanup_targeting();
 		}
 	}
 
 	on_draw_button :: proc(instance: GGG_Place_Nest_Ability, rect: Rect) {
 		draw_ability_name_label(rect, GGG_Place_Nest_Ability.NAME);
 
-		// Pulsing circular glow (soft gradient so it reads as a glow behind the icon)
-		t := get_time() * 3.5;
-		pulse := sin(t) * 0.5 + 0.5;
-		glow_alpha := pulse * 0.5;
-		glow_rect := rect->grow_unscaled(14.0, 14.0, 14.0, 14.0);
-		circle := get_asset(Texture_Asset, "sprites/Shapes/shape_circle_blurred.png");
-		UI.quad(glow_rect, circle, v4.{1.0, 0.85, 0.0, glow_alpha});
-
-		// "TAP!" bouncing label above the button
-		bounce := sin(t) * 3.0;
-		label_rect := rect->top_center_rect()->offset(0.0, 20.0 + bounce)->grow(16.0, 60.0, 16.0, 60.0);
-		ts := UI.default_text_settings();
-		ts.size = 34;
-		ts.halign = .CENTER;
-		ts.valign = .CENTER;
-		ts.color = v4.{1.0, 0.85, 0.0, 1.0};
-		ts.do_outline = true;
-		ts.outline_thickness = 2;
-		ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(label_rect, ts, "TAP!");
+		p := instance.player;
+		if p != null {
+			gm := p.entity->get_component(GGG_Module);
+			if gm != null && !gm.nest_placed {
+				// Pulsing circular glow
+				t := get_time() * 3.5;
+				pulse := sin(t) * 0.5 + 0.5;
+				glow_alpha := pulse * 0.5;
+				glow_rect := rect->grow_unscaled(14.0, 14.0, 14.0, 14.0);
+				circle := get_asset(Texture_Asset, "sprites/Shapes/shape_circle_blurred.png");
+				UI.quad(glow_rect, circle, v4.{1.0, 0.85, 0.0, glow_alpha});
+			}
+		}
 	}
 }
 

@@ -3433,15 +3433,7 @@ update_minimap_ui :: proc(player: Player) {
 
 	// Tap anywhere on the dark overlay to dismiss the map (drawn first so map
 	// buttons drawn later take priority for clicks).
-	// Skip when GGG is in nest placement mode so the placement click isn't eaten.
-	ggg_placing := false;
-	if player.player_role == Player_Role.GOO_GOO_GAGA {
-		gm_dismiss := player.entity->get_component(GGG_Module);
-		if gm_dismiss != null && gm_dismiss.nest_placing && !gm_dismiss.nest_placed {
-			ggg_placing = true;
-		}
-	}
-	if !ggg_placing {
+	{
 		UI.push_id("minimap_dismiss");
 		defer UI.pop_id();
 		dismiss_bs: Button_Settings = .{};
@@ -3503,38 +3495,6 @@ update_minimap_ui :: proc(player: Player) {
 	if player->is_local_or_server() && player.player_role == Player_Role.GOO_GOO_GAGA {
 		gm_map := player.entity->get_component(GGG_Module);
 		if gm_map != null {
-			// Nest placement mode: click on map to place
-			if gm_map.nest_placing && !gm_map.nest_placed {
-				// Show instructions
-				ts_place := UI.default_text_settings();
-				ts_place.size = 24;
-				ts_place.halign = .CENTER;
-				ts_place.valign = .BOTTOM;
-				ts_place.do_outline = true;
-				ts_place.outline_thickness = 2;
-				ts_place.outline_color = v4.{0, 0, 0, 1};
-				ts_place.color = v4.{1.0, 0.85, 0.0, 1.0};
-				label_rect := map_rect->cut_bottom(40);
-				UI.text(label_rect, ts_place, "Tap to place your Nest");
-
-				// Detect click on map
-				UI.push_id("ggg_nest_place");
-				defer UI.pop_id();
-				place_bs: Button_Settings = .{};
-				place_bs.sprite = core_globals.white_sprite;
-				place_bs.color = v4.{0, 0, 0, 0};
-				place_bs.hovered_color = v4.{0.3, 0.2, 0.0, 0.15};
-				place_bs.pressed_color = v4.{0.5, 0.3, 0.0, 0.2};
-				place_bs.background_color_multiplier = v4.{0, 0, 0, 0};
-				place_interact := UI.button(map_rect, place_bs, .{}, "");
-				if place_interact.clicked {
-					mouse_pos := get_mouse_screen_position();
-					world_pos := rr_ggg_minimap_ui_to_world(map_rect, mouse_pos);
-					rr_ggg_place_nest(player, world_pos);
-					player.show_minimap = false;
-				}
-			}
-
 			// Draw nest marker on minimap (if placed)
 			if gm_map.nest_placed {
 				nest_icon := get_asset(Texture_Asset, "sprites/icons/ggg/Nest_icon.png");
