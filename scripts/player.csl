@@ -155,6 +155,9 @@ Player :: class : Player_Base {
 	drag_body_speed_original: float;
 	// Track drag end to reset animations.
 	drag_body_was_dragging: bool;
+	// True while being pulled/dragged by GGG whip (synced, drives caught animation on all clients).
+	whip_caught: bool;
+	whip_caught_anim_applied: bool; // local tracking to avoid re-setting every frame
 
     is_frozen: bool;
 
@@ -314,6 +317,15 @@ Player :: class : Player_Base {
 		destroy_pirate_dig_spots_for_player(this.entity.id);
 
 		rr_cleanup_door_unlock_interactable(this);
+
+		// Clear any voted_for references pointing to the disconnecting player
+		// to prevent stale component access in vote reveal UI.
+		foreach p: component_iterator(Player) {
+			if p.voted_for == this {
+				p.voted_for = null;
+			}
+		}
+
         unordered_remove_by_value(ref players, this);
 
 		if this->is_local() {
@@ -384,6 +396,9 @@ Player :: class : Player_Base {
 		// GGG creature animation controller (runs on all clients).
 		rr_ggg_update_creature_anims(this, delta_time);
 
+		// GGG whip chord visual (runs on all clients).
+		rr_ggg_draw_whip_chord_if_needed(this);
+
 		// Mimicer per-frame update (transform, prowl, disguise, void lunge).
 		rr_mimicer_update(this, delta_time);
 
@@ -404,6 +419,14 @@ Player :: class : Player_Base {
 
 		// Drag body animation state (runs on all clients).
 		rr_drag_body_update_anim_state(this, delta_time);
+
+		// GGG whip caught animation (runs on all clients).
+		if this.whip_caught && !this.whip_caught_anim_applied {
+			this.whip_caught_anim_applied = true;
+			this->set_trigger("ggg_whip_caught");
+		} else if !this.whip_caught && this.whip_caught_anim_applied {
+			this.whip_caught_anim_applied = false;
+		}
 
 		// Server-authoritative: fiery room exposure countdown.
 		rr_pyro_update_room_exposure(this, delta_time);
@@ -2338,6 +2361,10 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		ggg_trapped_end_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_End", false, 0.5);
 		layer->create_global_transition(ggg_trapped_end_state, false)->create_trigger_condition(ggg_trapped_end_var);
 		layer->create_transition(ggg_trapped_end_state, idle_state, true);
+
+		ggg_whip_caught_var := sm->create_variable("ggg_whip_caught", State_Machine_Variable.Kind.TRIGGER);
+		ggg_whip_caught_state := layer->create_state("004RAND_GOOGOOGAGA/Caught_By_Whip_Loop", true, 0.0);
+		layer->create_global_transition(ggg_whip_caught_state, false)->create_trigger_condition(ggg_whip_caught_var);
 	}
 
 	rr_sm_setup_drag_body :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {

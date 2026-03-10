@@ -1354,6 +1354,11 @@ GGG_Foil_Whip_Projectile :: class : Component {
 						gm.foil_whip_pull_start_time = now;
 						gm.foil_whip_pull_duration = GGG_FOIL_WHIP_PULL_DURATION;
 						p->add_disable_movement_input_reason(GGG_FOIL_WHIP_PULL_REASON);
+						// Mark as caught (synced to all clients for animation).
+						root := p.entity->get_component(GGG_Trap_Root_Effect);
+						if root == null || !root.active {
+							p.whip_caught = true;
+						}
 					}
 				}
 				entity->destroy();
@@ -1381,12 +1386,64 @@ rr_ggg_fire_foil_whip :: proc(player: Player, direction: v2) {
 	whip.owner_entity_id = player.entity.id;
 }
 
+rr_ggg_whip_release_target :: proc(target: Player) {
+	if target == null return;
+	target.whip_caught = false;
+	target->set_trigger("RESET");
+}
+
+rr_ggg_draw_whip_chord :: proc(from_pos: v2, to_pos: v2) {
+	chord_tex := get_asset(Texture_Asset, "sprites/Foil_Whip_Chord.png");
+	if chord_tex == null return;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+
+	mid := v2.{(from_pos.x + to_pos.x) * 0.5, (from_pos.y + to_pos.y) * 0.5};
+
+	// Z-order at the midpoint y so the chord renders at character depth.
+	UI.push_z(mid.y);
+	defer UI.pop_z();
+	diff := to_pos - from_pos;
+	dist := length(diff);
+	if dist < 0.01 return;
+
+	half_len := dist * 0.5;
+	half_width := 0.08;
+	chord_rect := Rect.{
+		v2.{mid.x - half_len, mid.y - half_width},
+		v2.{mid.x + half_len, mid.y + half_width},
+	};
+
+	angle := to_degrees(atan2(diff.y, diff.x));
+	UI.push_matrix(Matrix4.rotate_about_point(mid, angle));
+	defer UI.pop_matrix();
+	UI.quad(chord_rect, chord_tex, v4.{1, 1, 1, 1});
+}
+
+// Draw whip chord if this player has an active whip pull. Runs on all clients.
+rr_ggg_draw_whip_chord_if_needed :: proc(player: Player) {
+	if player == null return;
+	gm := player.entity->get_component(GGG_Module);
+	if gm == null return;
+	if !gm.foil_whip_active return;
+
+	target := get_player_by_entity_id(gm.foil_whip_target_id);
+	if target == null || !#alive(target.entity) return;
+
+	WHIP_CHORD_Y_OFFSET :: 0.7;
+	from := player.entity.world_position + v2.{0, WHIP_CHORD_Y_OFFSET};
+	to := target.entity.world_position + v2.{0, WHIP_CHORD_Y_OFFSET};
+	rr_ggg_draw_whip_chord(from, to);
+}
+
 rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) {
 	if gm == null return;
 	if !gm.foil_whip_active return;
 
 	target := get_player_by_entity_id(gm.foil_whip_target_id);
 	if target == null || !#alive(target.entity) || target.player_state != Player_State.ALIVE {
+		if target != null { rr_ggg_whip_release_target(target); }
 		gm.foil_whip_active = false;
 		return;
 	}
@@ -1395,8 +1452,15 @@ rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) 
 	elapsed := now - gm.foil_whip_pull_start_time;
 	t := elapsed / gm.foil_whip_pull_duration;
 
-	// Update pull end position to GGG's current position (in case GGG moves)
-	gm.foil_whip_pull_end_pos = player.entity.world_position;
+	// Update pull end position slightly behind GGG (avoids z-overlap).
+	pull_dir := player.entity.world_position - gm.foil_whip_pull_start_pos;
+	pull_len := length(pull_dir);
+	if pull_len > 0.1 {
+		offset := pull_dir * (1.0 / pull_len) * -0.1;
+		gm.foil_whip_pull_end_pos = player.entity.world_position + offset;
+	} else {
+		gm.foil_whip_pull_end_pos = gm.foil_whip_pull_start_pos;
+	}
 
 	// Lerp target toward GGG
 	new_pos := v2.{
@@ -1416,6 +1480,7 @@ rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) 
 		if nest_dist <= GGG_NEST_CONSUME_RANGE && root != null && root.active {
 			// Release whip pull
 			target->remove_disable_movement_input_reason(GGG_FOIL_WHIP_PULL_REASON);
+			rr_ggg_whip_release_target(target);
 			gm.foil_whip_active = false;
 			gm.foil_whip_kill_on_arrive = false;
 			// Kill and consume
@@ -1444,6 +1509,7 @@ rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) 
 	if t >= 1.0 && Game.is_server() && gm.foil_whip_kill_on_arrive {
 		gm.foil_whip_kill_on_arrive = false;
 		target->remove_disable_movement_input_reason(GGG_FOIL_WHIP_PULL_REASON);
+		rr_ggg_whip_release_target(target);
 		gm.foil_whip_active = false;
 		player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
 		player->set_trigger("traitor_kill");
@@ -1462,6 +1528,7 @@ rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) 
 	if t >= 1.0 {
 		// Pull complete — release
 		target->remove_disable_movement_input_reason(GGG_FOIL_WHIP_PULL_REASON);
+		rr_ggg_whip_release_target(target);
 		gm.foil_whip_active = false;
 		gm.foil_whip_kill_on_arrive = false;
 	}
