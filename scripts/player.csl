@@ -131,6 +131,7 @@ Player :: class : Player_Base {
 	// Delayed infected transform: game-time at which to fire the "werewolf_infected_transform" trigger.
 	// 0 = no pending trigger.
 	werewolf_infected_transform_trigger_at: float;
+	werewolf_infection_expires_at: float;  // 0 = no expiry, otherwise game-time when infection auto-reverts
 
 	// --- Goo Goo Gaga (Traitor role) ---
 	// All GGG fields live in GGG_Module (only on GGG player).
@@ -174,6 +175,9 @@ Player :: class : Player_Base {
 	ao_can_use_ability :: proc(using this: Player, ability: Ability_Base) -> bool {
 		// While on fire, you can only move.
 		if pyro_on_fire return false;
+		// Trapped or being dragged by GGG — no abilities.
+		root := entity->get_component(GGG_Trap_Root_Effect);
+		if root != null && root.active return false;
 		return true;
 	}
 
@@ -2101,6 +2105,12 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 
 	// Non-werewolf: just manage skin schedules for infected civilians.
 	if player.player_role != Player_Role.WEREWOLF || player.player_type != Player_Type.TRAITOR {
+		// Auto-revert infection after timer expires.
+		if player.werewolf_infected && player.werewolf_infection_expires_at > 0.0 && now >= player.werewolf_infection_expires_at {
+			if Game.is_server() {
+				rr_werewolf_clear_infection(player);
+			}
+		}
 		if !player.werewolf_infected {
 			player.werewolf_skin_enable_at = 0.0;
 			player.werewolf_skin_disable_at = now;

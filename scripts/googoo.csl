@@ -97,7 +97,7 @@ GGG_FOIL_WHIP_MISS_HANG_SECONDS :: 0.5;
 
 GGG_SWARM_COOLDOWN_SECONDS :: 75.0;
 GGG_SWARM_UNLOCK_NEST_POINTS :: 5;
-GGG_SWARM_CRAWLER_SPEED :: 4.0;
+GGG_SWARM_CRAWLER_SPEED :: 6.0;
 GGG_SWARM_DURATION_SECONDS :: 12.0;
 GGG_SWARM_ROOT_SECONDS :: 15.0;
 
@@ -1150,6 +1150,7 @@ GGG_Trap_Root_Effect :: class : Component {
 
 	ao_update :: method(dt: float) {
 		if !active return;
+		if !Game.is_server() return;
 		p := entity->get_component(Player);
 		if p == null { active = false; return; }
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
@@ -1157,7 +1158,7 @@ GGG_Trap_Root_Effect :: class : Component {
 			p->set_trigger("RESET");
 			active = false;
 			is_blinded = false;
-	
+
 			return;
 		}
 		now := get_time();
@@ -1171,7 +1172,7 @@ GGG_Trap_Root_Effect :: class : Component {
 			p->set_trigger("ggg_trapped_end");
 			active = false;
 			is_blinded = false;
-	
+
 		}
 	}
 
@@ -1637,9 +1638,9 @@ rr_ggg_spawn_swarm :: proc(player: Player) {
 	nest_comp := gm.nest_entity->get_component(GGG_Nest);
 	if nest_comp == null return;
 
-	crawler_count := nest_comp.bodies_consumed;
+	crawler_count := gm.nest_points;
 	if crawler_count <= 0 {
-		player->Notify("No bodies consumed — no crawlers to spawn!");
+		player->Notify("No nest points — no crawlers to spawn!");
 		return;
 	}
 

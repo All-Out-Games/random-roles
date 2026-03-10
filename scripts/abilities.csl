@@ -389,6 +389,7 @@ WEREWOLF_INFECTION_STUN_SECONDS :: 1.0;
 // Delay before applying the werewolf skin on infected targets.
 // The target stays looking normal for this long before the transformation visual kicks in.
 WEREWOLF_INFECTED_SKIN_DELAY_SECONDS :: 10.0;
+WEREWOLF_INFECTION_DURATION_SECONDS :: 45.0; // infection auto-reverts after this
 WEREWOLF_INFECT_TO_CURE_TASK_ID :: "werewolf_infect_to_cure";
 
 rr_werewolf_apply_infected_task_override :: proc(target: Player) {
@@ -418,6 +419,25 @@ rr_werewolf_clear_infected_task_override :: proc(player: Player) {
 	player.active_tasks = player.werewolf_saved_tasks;
 	player.werewolf_saved_tasks = List(Task_Base).{};
 	player.werewolf_saved_tasks_active = false;
+}
+
+// Clears infection state and reverts visuals/tasks. Called on timer expiry or cleanup.
+rr_werewolf_clear_infection :: proc(player: Player) {
+	if player == null return;
+	if !player.werewolf_infected return;
+
+	player.werewolf_infected = false;
+	player.werewolf_infected_from_id = 0;
+	player.werewolf_infection_expires_at = 0.0;
+	rr_werewolf_clear_infected_task_override(player);
+
+	// Revert wolf look.
+	player->set_trigger("RESET");
+	player.werewolf_skin_enable_at = 0.0;
+	player.werewolf_skin_disable_at = get_time();
+	player.werewolf_infected_transform_trigger_at = 0.0;
+
+	player->Notify("The infection wore off!");
 }
 
 rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_werewolf: bool) -> Player {
@@ -456,11 +476,12 @@ rr_werewolf_apply_infection :: proc(infector: Player, target: Player) {
 
 	target.werewolf_infected = true;
 	target.werewolf_infected_from_id = infector.entity.id;
+	target.werewolf_infection_expires_at = get_time() + WEREWOLF_INFECTION_DURATION_SECONDS;
 
 	// Bite animation plays immediately on the infector.
 	infector->set_trigger("werewolf_infection_bite");
 	// The victim's transform animation + skin change is delayed so they look normal for a while.
-	// For the full delay period nothing visible happens to the victim â€” no stun, no notification,
+	// For the full delay period nothing visible happens to the victim -- no stun, no notification,
 	// no task swap. Everything reveals at the transform moment.
 	// The animation trigger fires 1s before the skin swap so the howl/transform anim leads into it.
 	target.werewolf_infected_transform_trigger_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS - 1.0;
@@ -486,10 +507,12 @@ rr_werewolf_pass_infection :: proc(biter: Player, new_target: Player) {
 	from_id := biter.werewolf_infected_from_id;
 	biter.werewolf_infected = false;
 	biter.werewolf_infected_from_id = 0;
+	biter.werewolf_infection_expires_at = 0.0;
 	rr_werewolf_clear_infected_task_override(biter);
 
 	new_target.werewolf_infected = true;
 	new_target.werewolf_infected_from_id = from_id;
+	new_target.werewolf_infection_expires_at = get_time() + WEREWOLF_INFECTION_DURATION_SECONDS;
 
 	// Restore the cured player's look.
 	biter->set_trigger("RESET");
@@ -497,7 +520,7 @@ rr_werewolf_pass_infection :: proc(biter: Player, new_target: Player) {
 	biter.werewolf_skin_disable_at = get_time();
 	biter.werewolf_infected_transform_trigger_at = 0.0;
 
-	// Civilian-to-civilian pass is instant â€” no stealth delay.
+	// Civilian-to-civilian pass is instant â€" no stealth delay.
 	// Fire transform animation now and skin swap 1s later (animation duration).
 	new_target.werewolf_infected_transform_trigger_at = get_time();
 	new_target.werewolf_skin_enable_at = get_time() + 1.0;
@@ -650,7 +673,7 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 				player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
 				player->set_trigger("werewolf_infection_bite");
 
-				// Devour consumes the target entirely â€” no corpse left behind.
+				// Devour consumes the target entirely â€" no corpse left behind.
 				target->kill_with_killer_no_corpse(player.entity.id);
 				current_cooldown = WEREWOLF_DEVOUR_COOLDOWN_SECONDS;
 			}
@@ -905,7 +928,7 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 				player.werewolf_skin_enable_at = get_time() + WEREWOLF_TRANSFORM_HOWL_SKIN_DELAY;
 				player.werewolf_skin_disable_at = 0.0;
 
-				// No cooldown while in wolf form â€” the button stays active to allow reverting.
+				// No cooldown while in wolf form â€" the button stays active to allow reverting.
 				current_cooldown = 0.0;
 			}
 		}
