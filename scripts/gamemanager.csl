@@ -333,6 +333,7 @@ rr_comms_outage_remove_enable_comms_task_from_player :: proc(player: Player) {
 
 Game_State :: enum {
     LOBBY;
+	ANIM_ROLE_SPIN;
 	ANIM_INTRO;
 	INGAME;
 	ANIM_BODY_FOUND;
@@ -1703,6 +1704,7 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 
 body_found_popup: Body_Found_Popup;
 meeting_called_popup: Meeting_Called_Popup;
+role_spin_popup: Role_Spin_Popup;
 intro_popup: Intro_Popup;
 victory_popup: Victory_Popup;
 
@@ -1714,6 +1716,8 @@ ao_start :: proc() {
 	body_found_popup->init();
 	meeting_called_popup = new();
 	meeting_called_popup->init();
+	role_spin_popup = new();
+	role_spin_popup->init();
 	intro_popup = new();
 	intro_popup->init();
 	victory_popup = new();
@@ -1728,6 +1732,8 @@ ao_update :: proc(dt: float) {
 
 	if(game_state == Game_State.LOBBY) {
 		ao_update_lobby(dt);
+	} else if(game_state == Game_State.ANIM_ROLE_SPIN) {
+		ao_update_role_spin(dt);
 	} else if(game_state == Game_State.ANIM_INTRO) {
 		ao_update_intro(dt);
 	} else if(game_state == Game_State.INGAME) {
@@ -2578,6 +2584,15 @@ ao_update_meeting_called :: proc(dt: float) {
 	if meeting_called_popup->is_finished() {
 		meeting_called_popup->hide();
 		setup_voting();
+	}
+}
+
+ao_update_role_spin :: proc(dt: float) {
+	// Time-based finish, just like other popups
+	if role_spin_popup->is_finished() {
+		role_spin_popup->hide();
+		intro_popup->show();
+		game_state = Game_State.ANIM_INTRO;
 	}
 }
 
@@ -3488,9 +3503,7 @@ assign_players_to_types :: proc() {
 		rr_prankster_assign_target(p);
 	}
 	
-	// Show intro popup for local player
-	intro_popup->show();
-	
-	// Switch to intro animation state
-	game_state = Game_State.ANIM_INTRO;
+	// Start the role spin animation (spin will trigger intro popup when done)
+	role_spin_popup->show();
+	game_state = Game_State.ANIM_ROLE_SPIN;
 }

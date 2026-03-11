@@ -3,6 +3,14 @@ import "core:ao"
 POPUP_DURATION: float : 2.0;
 SCROLL_DURATION: float : 2.0;
 
+// --- Role Spin Constants ---
+SPIN_TOTAL_DURATION: float : 4.5;   // total time the spin runs
+SPIN_CARD_WIDTH: float : 240.0;     // width of each role card (at 1080p)
+SPIN_CARD_HEIGHT: float : 320.0;    // height of each role card
+SPIN_CARD_GAP: float : 16.0;        // gap between cards
+SPIN_STRIP_COUNT :: 40;             // how many cards in the scrolling strip
+NUM_REAL_ROLES :: 13;               // number of actual roles (excl NONE)
+
 // Ensure intro/victory popups always draw above gameplay UI.
 POPUP_UI_LAYER :: 10000;
 
@@ -311,6 +319,323 @@ render_popup :: proc(using popup: Intro_Popup, elapsed: float) {
 	label_rect := screen->center_rect()->grow(150);
 	label_rect = label_rect->offset(0, 200);
 	UI.text(label_rect, label_ts, "You are a...");
+}
+
+// ============================================================
+// Role Spin Popup - CS:GO style role roulette
+// ============================================================
+
+// Map index 0..12 to a Player_Role (all roles except NONE)
+spin_index_to_role :: proc(idx: int) -> Player_Role {
+	switch idx {
+		case 0:  return Player_Role.SHERIFF;
+		case 1:  return Player_Role.DOCTOR;
+		case 2:  return Player_Role.PRESIDENT;
+		case 3:  return Player_Role.MOVIE_STAR;
+		case 4:  return Player_Role.CORONER;
+		case 5:  return Player_Role.PORTAL_MAKER;
+		case 6:  return Player_Role.PRANKSTER;
+		case 7:  return Player_Role.PYROMANIAC;
+		case 8:  return Player_Role.PIRATE;
+		case 9:  return Player_Role.HITMAN;
+		case 10: return Player_Role.WEREWOLF;
+		case 11: return Player_Role.GOO_GOO_GAGA;
+		case 12: return Player_Role.MIMICER;
+	}
+	return Player_Role.SHERIFF;
+}
+
+spin_role_to_icon :: proc(role: Player_Role) -> Texture_Asset {
+	switch role {
+		case .SHERIFF:      return get_asset(Texture_Asset, "sprites/icons/roles/sheriff_icon.png");
+		case .DOCTOR:       return get_asset(Texture_Asset, "sprites/icons/roles/doctor_icon.png");
+		case .PRESIDENT:    return get_asset(Texture_Asset, "sprites/icons/roles/president_icon.png");
+		case .MOVIE_STAR:   return get_asset(Texture_Asset, "sprites/icons/roles/moviestar_icon.png");
+		case .CORONER:      return get_asset(Texture_Asset, "sprites/icons/roles/coroner_icon.png");
+		case .PORTAL_MAKER: return get_asset(Texture_Asset, "sprites/icons/roles/portalmaker_icon.png");
+		case .PRANKSTER:    return get_asset(Texture_Asset, "sprites/icons/roles/trickster_icon.png");
+		case .PYROMANIAC:   return get_asset(Texture_Asset, "sprites/icons/roles/pyromaniac_icon.png");
+		case .PIRATE:       return get_asset(Texture_Asset, "sprites/icons/roles/pirate_icon.png");
+		case .HITMAN:       return get_asset(Texture_Asset, "sprites/icons/roles/hitman_icon.png");
+		case .WEREWOLF:     return get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png");
+		case .GOO_GOO_GAGA: return get_asset(Texture_Asset, "sprites/icons/roles/googoogaga_icon.png");
+		case .MIMICER:      return get_asset(Texture_Asset, "sprites/icons/roles/googoogaga_icon.png");
+	}
+	return null;
+}
+
+SPIN_HOLD_TIME: float : 0.8;
+SPIN_FULL_DURATION: float : 5.3; // SPIN_TOTAL_DURATION + SPIN_HOLD_TIME
+SPIN_LANDING_POS :: SPIN_STRIP_COUNT - 8;
+
+// Find the spin index (0..12) for a given role
+spin_role_to_index :: proc(role: Player_Role) -> int {
+	for i: 0..NUM_REAL_ROLES-1 {
+		if spin_index_to_role(i) == role {
+			return i;
+		}
+	}
+	return 0;
+}
+
+Role_Spin_Popup :: class {
+	// --- Synced state (set by show(), runs on both server + client) ---
+	is_visible: bool;
+	show_start_time: float;
+
+	// --- Local state (set per-frame by set_local_player, like Intro_Popup) ---
+	target_role: Player_Role;
+	target_type: Player_Type;
+
+	// Textures
+	star_gold: Texture_Asset;
+	star_empty: Texture_Asset;
+
+	init :: proc(using this: Role_Spin_Popup) {
+		is_visible = false;
+		show_start_time = 0.0;
+		star_gold = get_asset(Texture_Asset, "ui/star_gold 2.png");
+		star_empty = get_asset(Texture_Asset, "ui/star_empty2 2.png");
+	}
+
+	// Called from game state code (runs on server + client)
+	show :: proc(using this: Role_Spin_Popup) {
+		is_visible = true;
+		show_start_time = get_time();
+	}
+
+	hide :: proc(using this: Role_Spin_Popup) {
+		is_visible = false;
+	}
+
+	// Time-based, just like Intro_Popup
+	is_finished :: proc(using this: Role_Spin_Popup) -> bool {
+		if !is_visible { return true; }
+		elapsed := get_time() - show_start_time;
+		return elapsed >= SPIN_FULL_DURATION;
+	}
+
+	// Called per-frame from player ao_late_update (like intro_popup->set_local_player)
+	set_local_player :: proc(using this: Role_Spin_Popup, player: Player) {
+		this.target_role = player.player_role;
+		this.target_type = player.player_type;
+	}
+
+	update :: proc(using this: Role_Spin_Popup, delta_time: float) {
+		if !is_visible { return; }
+
+		elapsed := get_time() - show_start_time;
+
+		if elapsed >= SPIN_FULL_DURATION {
+			is_visible = false;
+			return;
+		}
+
+		// Skip rendering for NONE role (crewmates with no special role)
+		if target_role == Player_Role.NONE {
+			return;
+		}
+
+		render_spin(this, elapsed);
+	}
+}
+
+// Generate the role index for a given strip position, deterministically.
+// The target role is always placed at SPIN_LANDING_POS; all others are random.
+spin_get_card_role_idx :: proc(strip_pos: int, seed: u64, target_role_idx: int) -> int {
+	if strip_pos == SPIN_LANDING_POS {
+		return target_role_idx;
+	}
+	// Deterministic per-card seed so the strip is stable across frames
+	card_seed: u64 = rng_seed(seed + strip_pos.(u64) * 7919);
+	return rng_range_int(ref card_seed, 0, NUM_REAL_ROLES - 1);
+}
+
+render_spin :: proc(using popup: Role_Spin_Popup, elapsed: float) {
+	UI.push_layer(POPUP_UI_LAYER + 1);
+	defer UI.pop_layer();
+
+	screen := UI.get_screen_rect();
+	scale := UI.get_current_scale_factor();
+
+	// Black background with fade-in
+	bg_alpha := clamp(elapsed / 0.3, 0.0, 0.98);
+	UI.quad(screen, core_globals.white_sprite, v4.{0, 0, 0, bg_alpha});
+
+	// Card dimensions (in scaled px)
+	card_w := SPIN_CARD_WIDTH;
+	card_h := SPIN_CARD_HEIGHT;
+	card_stride := card_w + SPIN_CARD_GAP;
+
+	// Center of screen
+	cx := (screen.min.x + screen.max.x) / 2.0;
+	cy := (screen.min.y + screen.max.y) / 2.0;
+
+	// Compute scroll offset from elapsed time (cubic ease-out)
+	target_offset := SPIN_LANDING_POS.(float) * card_stride;
+	scroll_t := clamp(elapsed / SPIN_TOTAL_DURATION, 0.0, 1.0);
+	ease := 1.0 - (1.0 - scroll_t) * (1.0 - scroll_t) * (1.0 - scroll_t);
+	scroll_offset := ease * target_offset;
+
+	// Strip start: card 0 centered, then shifted left by scroll
+	strip_start_x := cx - scroll_offset * scale;
+
+	// Clipping bounds
+	screen_left := screen.min.x - card_w * scale;
+	screen_right := screen.max.x + card_w * scale;
+
+	// Deterministic seed from show_start_time (same on every frame)
+	strip_seed: u64 = (show_start_time * 100000.0).(u64);
+	target_role_idx := spin_role_to_index(target_role);
+
+	for i: 0..SPIN_STRIP_COUNT-1 {
+		// Card center x in screen pixels
+		card_cx := strip_start_x + i.(float) * card_stride * scale;
+
+		// Skip if off screen
+		if card_cx < screen_left || card_cx > screen_right {
+			continue;
+		}
+
+		role_idx := spin_get_card_role_idx(i, strip_seed, target_role_idx);
+		role := spin_index_to_role(role_idx);
+		rtype := rr_get_role_type(role);
+		type_color := get_type_color(rtype);
+
+		// Build card rect centered at (card_cx, cy)
+		half_w := card_w * scale / 2.0;
+		half_h := card_h * scale / 2.0;
+		card_rect := Rect.{
+			v2.{card_cx - half_w, cy - half_h},
+			v2.{card_cx + half_w, cy + half_h}
+		};
+
+		// Card background
+		bg_color := v4.{0.12, 0.12, 0.15, 0.95};
+		UI.quad(card_rect, core_globals.white_sprite, bg_color);
+
+		// Colored top bar
+		bar_rect := Rect.{
+			v2.{card_rect.min.x, card_rect.max.y - 6.0 * scale},
+			v2.{card_rect.max.x, card_rect.max.y}
+		};
+		UI.quad(bar_rect, core_globals.white_sprite, type_color);
+
+		// Colored side accents
+		side_w := 3.0 * scale;
+		left_side := Rect.{
+			v2.{card_rect.min.x, card_rect.min.y},
+			v2.{card_rect.min.x + side_w, card_rect.max.y}
+		};
+		right_side := Rect.{
+			v2.{card_rect.max.x - side_w, card_rect.min.y},
+			v2.{card_rect.max.x, card_rect.max.y}
+		};
+		border_color := type_color;
+		border_color.w = 0.5;
+		UI.quad(left_side, core_globals.white_sprite, border_color);
+		UI.quad(right_side, core_globals.white_sprite, border_color);
+
+		// Role name at top
+		name_rect := Rect.{
+			v2.{card_rect.min.x, card_rect.max.y - 70.0 * scale},
+			v2.{card_rect.max.x, card_rect.max.y - 12.0 * scale}
+		};
+		ts := UI.default_text_settings();
+		ts.size = 28;
+		ts.color = type_color;
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 2;
+		ts.outline_color = v4.{0, 0, 0, 1};
+		ts.do_autofit = true;
+		ts.autofit_min_size = 18;
+		ts.autofit_max_size = 28;
+		ts.autofit_iters = 4;
+		UI.text(name_rect, ts, get_role_name(role));
+
+		// Role icon in center
+		icon_tex := spin_role_to_icon(role);
+		if icon_tex != null {
+			icon_size := 95.0 * scale;
+			icon_cy := (card_rect.min.y + card_rect.max.y) / 2.0 + 5.0 * scale;
+			icon_rect := Rect.{
+				v2.{card_cx - icon_size / 2.0, icon_cy - icon_size / 2.0},
+				v2.{card_cx + icon_size / 2.0, icon_cy + icon_size / 2.0}
+			};
+			UI.quad(icon_rect->fit_aspect(icon_tex->get_aspect()), icon_tex, v4.{1, 1, 1, 1});
+		}
+
+		// Star rating at bottom
+		difficulty := rr_get_role_difficulty(role, rtype);
+		STAR_SIZE := 18.0 * scale;
+		STAR_GAP := 5.0 * scale;
+		star_cy := card_rect.min.y + 35.0 * scale;
+		for s: 0..2 {
+			offset_x := (s.(float) - 1.0) * (STAR_SIZE * 2.0 + STAR_GAP);
+			star_rect := Rect.{
+				v2.{card_cx + offset_x - STAR_SIZE, star_cy - STAR_SIZE},
+				v2.{card_cx + offset_x + STAR_SIZE, star_cy + STAR_SIZE}
+			};
+			star_tex := star_empty;
+			if s < difficulty { star_tex = star_gold; }
+			if star_tex != null {
+				UI.quad(star_rect->fit_aspect(star_tex->get_aspect()), star_tex, v4.{1, 1, 1, 1});
+			}
+		}
+	}
+
+	// Center indicator line (the selector tick)
+	tick_w := 3.0 * scale;
+	tick_h := (card_h + 30.0) * scale;
+	tick_rect := Rect.{
+		v2.{cx - tick_w, cy - tick_h / 2.0},
+		v2.{cx + tick_w, cy + tick_h / 2.0}
+	};
+	UI.quad(tick_rect, core_globals.white_sprite, v4.{1, 1, 1, 0.9});
+
+	// Small triangles above and below center
+	tri_size := 10.0 * scale;
+	top_tri := Rect.{
+		v2.{cx - tri_size, cy + tick_h / 2.0},
+		v2.{cx + tri_size, cy + tick_h / 2.0 + tri_size}
+	};
+	bottom_tri := Rect.{
+		v2.{cx - tri_size, cy - tick_h / 2.0 - tri_size},
+		v2.{cx + tri_size, cy - tick_h / 2.0}
+	};
+	UI.quad(top_tri, core_globals.white_sprite, v4.{1, 1, 1, 0.9});
+	UI.quad(bottom_tri, core_globals.white_sprite, v4.{1, 1, 1, 0.9});
+
+	// "ROLE SELECT" title at top
+	title_ts := UI.default_text_settings();
+	title_ts.size = 52;
+	title_ts.color = v4.{1, 1, 1, clamp(elapsed / 0.3, 0.0, 0.9)};
+	title_ts.halign = .CENTER;
+	title_ts.valign = .CENTER;
+	title_ts.do_outline = true;
+	title_ts.outline_thickness = 3;
+	title_ts.outline_color = v4.{0, 0, 0, 1};
+	title_rect := screen->center_rect()->grow_unscaled(0, screen->width() / 2.0, 0, screen->width() / 2.0)->offset(0, card_h / 2.0 + 60.0);
+	UI.text(title_rect, title_ts, "ROLE SELECT");
+
+	// After landing, flash the selected card with a pulsing glow
+	if elapsed >= SPIN_TOTAL_DURATION {
+		flash_t := elapsed - SPIN_TOTAL_DURATION;
+		pulse := 0.5 + 0.5 * sin(flash_t * 8.0);
+		glow_color := get_type_color(target_type);
+		glow_color.w = 0.3 * pulse;
+
+		landing_cx := strip_start_x + SPIN_LANDING_POS.(float) * card_stride * scale;
+		half_w := card_w * scale / 2.0;
+		half_h := card_h * scale / 2.0;
+		glow_rect := Rect.{
+			v2.{landing_cx - half_w - 4.0 * scale, cy - half_h - 4.0 * scale},
+			v2.{landing_cx + half_w + 4.0 * scale, cy + half_h + 4.0 * scale}
+		};
+		UI.quad(glow_rect, core_globals.white_sprite, glow_color);
+	}
 }
 
 VICTORY_POPUP_DURATION: float : 2;
