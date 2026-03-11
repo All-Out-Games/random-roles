@@ -2239,7 +2239,7 @@ kill :: proc(player: Player, target: Player = null) {
 		return;
 	}
 	victim->kill();
-} @chat_command
+} @chat_command @youtuber
 
 // Chat command: /revive
 // /revive — revive yourself. /revive <player> — revive a specific player.
@@ -2255,7 +2255,7 @@ revive :: proc(player: Player, target: Player = null) {
 	}
 	on_player_go_alive(victim);
 	Chat.server_send_message(format_string("% has been revived.", {victim->get_username()}), player);
-} @chat_command
+} @chat_command @youtuber
 
 // Chat command: /cd
 // Clears this player's ability cooldown timers.
@@ -2364,6 +2364,54 @@ unlock :: proc(player: Player) {
 	Chat.server_send_message("All abilities unlocked for your role.", player);
 } @chat_command @youtuber
 
+// Chat command: /task_progress 75
+// Force-completes civilian tasks until overall progress reaches the given percentage.
+task_progress :: proc(player: Player, percent: int = 100) {
+	if game_state != Game_State.INGAME {
+		Chat.server_send_message("You can only use /task_progress during a round.", player);
+		return;
+	}
+	target := clamp(percent, 0, 100);
+
+	total := 0;
+	remaining := 0;
+	rr_get_civilian_task_counts(ref total, ref remaining);
+	if total <= 0 {
+		Chat.server_send_message("No tasks found.", player);
+		return;
+	}
+
+	target_completed := (total * target) / 100;
+	current_completed := total - remaining;
+
+	if target_completed <= current_completed {
+		Chat.server_send_message(format_string("Task progress already at %% (%/%).", .{percent, current_completed, total}), player);
+		return;
+	}
+
+	need_to_complete := target_completed - current_completed;
+	completed_count := 0;
+
+	for i: 0..players.elements.count-1 {
+		if completed_count >= need_to_complete break;
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if p.player_state == Player_State.PASSIVE continue;
+		if p.player_type != Player_Type.CIVILIAN continue;
+
+		for j: 0..p.active_tasks.elements.count-1 {
+			if completed_count >= need_to_complete break;
+			t := p.active_tasks.elements[j];
+			if t == null continue;
+			if t.completed continue;
+			t.completed = true;
+			completed_count += 1;
+		}
+	}
+
+	Chat.server_send_message(format_string("Task progress set to ~%0%% (% tasks force-completed).", .{target, completed_count}), player);
+} @chat_command
 
 ao_update_ingame :: proc(dt: float) {
 	update_temporary_resurrections();
