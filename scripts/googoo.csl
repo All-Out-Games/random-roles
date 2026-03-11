@@ -92,8 +92,9 @@ GGG_TRAP_ACTIVATE_DURATION :: 1.2;
 GGG_FOIL_WHIP_COOLDOWN_SECONDS :: 30.0;
 GGG_FOIL_WHIP_UNLOCK_NEST_POINTS :: 3;
 GGG_FOIL_WHIP_PULL_DURATION :: 1.0;
-GGG_FOIL_WHIP_PROJECTILE_SPEED :: 12.0;
+GGG_FOIL_WHIP_PROJECTILE_SPEED :: 16.0;
 GGG_FOIL_WHIP_MISS_HANG_SECONDS :: 0.5;
+GGG_FOIL_WHIP_CAMERA_ZOOMED_OUT_SIZE :: 9.0;
 
 GGG_SWARM_COOLDOWN_SECONDS :: 75.0;
 GGG_SWARM_UNLOCK_NEST_POINTS :: 5;
@@ -395,6 +396,8 @@ GGG_Nest_Consume_Anim :: class : Component {
 	nest_entity_id: u64;
 	original_spine_depth: float;
 	original_sprite_depth: float;
+	original_spine_layer: s32;
+	original_sprite_layer: s32;
 	saved_depths: bool;
 
 	ao_start :: method() {
@@ -402,12 +405,16 @@ GGG_Nest_Consume_Anim :: class : Component {
 		spine := entity->get_component(Spine_Animator);
 		if spine != null {
 			original_spine_depth = spine.depth_offset;
+			original_spine_layer = spine.layer;
 			spine.depth_offset = 999.0;
+			spine.layer = 100;
 		}
 		sprite := entity->get_component(Sprite_Renderer);
 		if sprite != null {
 			original_sprite_depth = sprite.depth_offset;
+			original_sprite_layer = sprite.layer;
 			sprite.depth_offset = 999.0;
+			sprite.layer = 100;
 		}
 		saved_depths = true;
 	}
@@ -419,9 +426,9 @@ GGG_Nest_Consume_Anim :: class : Component {
 			// Restore depth before destroy
 			if saved_depths {
 				spine := entity->get_component(Spine_Animator);
-				if spine != null { spine.depth_offset = original_spine_depth; }
+				if spine != null { spine.depth_offset = original_spine_depth; spine.layer = original_spine_layer; }
 				sr := entity->get_component(Sprite_Renderer);
-				if sr != null { sr.depth_offset = original_sprite_depth; }
+				if sr != null { sr.depth_offset = original_sprite_depth; sr.layer = original_sprite_layer; }
 			}
 			rr_ggg_spawn_consume_flash(end_pos);
 			rr_ggg_trigger_nest_gulp(nest_entity_id);
@@ -1303,7 +1310,7 @@ GGG_Foil_Whip_Projectile :: class : Component {
 
 	ao_start :: method() {
 		spawn_time = get_time();
-		lifetime = 2.0;
+		lifetime = 3.0;
 	}
 
 	ao_update :: method(dt: float) {
@@ -1736,7 +1743,7 @@ rr_ggg_spawn_swarm :: proc(player: Player) {
 		}
 
 		agent := decoy_e->add_component(Movement_Agent);
-		agent.movement_speed = GGG_SWARM_CRAWLER_SPEED;
+		agent.movement_speed = 0;
 
 		stagger := rng_range_float(ref spawn_rng, 0.0, 2.0);
 		decoy_comp := decoy_e->add_component(GGG_Decoy);
@@ -2339,6 +2346,9 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 GGG_Foil_Whip_Ability :: class : Ability_Base {
 	NAME :: "Foil Whip";
 
+	camera_zoom_active: bool;
+	camera_original_size: float;
+
 	on_init :: proc(instance: GGG_Foil_Whip_Ability) {
 		// TODO: proper foil whip icon
 		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/kill_wrap_player.png");
@@ -2359,6 +2369,22 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 		return true;
 	}
 
+	set_camera_zoom :: proc(using this: GGG_Foil_Whip_Ability, active: bool) {
+		if !player->is_local_or_server() return;
+		if active {
+			if !camera_zoom_active {
+				camera_original_size = player.camera.size;
+				player.camera.size = GGG_FOIL_WHIP_CAMERA_ZOOMED_OUT_SIZE;
+				camera_zoom_active = true;
+			}
+		} else {
+			if camera_zoom_active {
+				player.camera.size = camera_original_size;
+				camera_zoom_active = false;
+			}
+		}
+	}
+
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && !params.can_use {
 			gm := player.entity->get_component(GGG_Module);
@@ -2371,8 +2397,12 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 			}
 		}
 
+		targeting := player.active_ability != null && player.active_ability.#type == GGG_Foil_Whip_Ability;
+		this->set_camera_zoom(targeting);
+
 		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
 		if params.can_use && activation.activate {
+			this->set_camera_zoom(false);
 			rr_ggg_fire_foil_whip(player, activation.direction);
 			current_cooldown = GGG_FOIL_WHIP_COOLDOWN_SECONDS;
 		}

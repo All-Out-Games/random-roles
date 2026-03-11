@@ -2241,6 +2241,22 @@ kill :: proc(player: Player, target: Player = null) {
 	victim->kill();
 } @chat_command
 
+// Chat command: /revive
+// /revive — revive yourself. /revive <player> — revive a specific player.
+revive :: proc(player: Player, target: Player = null) {
+	if game_state != Game_State.INGAME {
+		Chat.server_send_message("You can only use /revive during a round.", player);
+		return;
+	}
+	victim := target != null ? target : player;
+	if victim.player_state != Player_State.DEAD {
+		Chat.server_send_message("That player is not dead.", player);
+		return;
+	}
+	on_player_go_alive(victim);
+	Chat.server_send_message(format_string("% has been revived.", {victim->get_username()}), player);
+} @chat_command
+
 // Chat command: /cd
 // Clears this player's ability cooldown timers.
 cd :: proc(player: Player) {
