@@ -60,6 +60,9 @@ GGG_Module :: class : Component {
 	// Nest placement request (client sets, server reads + acts)
 	nest_place_requested: bool;
 	nest_place_world_pos: v2;
+
+	// Foil Whip targeting state (for LOS boost)
+	foil_whip_targeting: bool;
 }
 
 // --- Constants ---
@@ -94,7 +97,9 @@ GGG_FOIL_WHIP_UNLOCK_NEST_POINTS :: 3;
 GGG_FOIL_WHIP_PULL_DURATION :: 1.0;
 GGG_FOIL_WHIP_PROJECTILE_SPEED :: 16.0;
 GGG_FOIL_WHIP_MISS_HANG_SECONDS :: 0.5;
-GGG_FOIL_WHIP_CAMERA_ZOOMED_OUT_SIZE :: 9.0;
+GGG_FOIL_WHIP_CAMERA_ZOOMED_OUT_SIZE :: 14.0;
+GGG_FOIL_WHIP_LOS_INNER :: 14.0;
+GGG_FOIL_WHIP_LOS_OUTER :: 18.0;
 
 GGG_SWARM_COOLDOWN_SECONDS :: 75.0;
 GGG_SWARM_UNLOCK_NEST_POINTS :: 5;
@@ -109,6 +114,7 @@ GGG_NEST_REBUILD_DELAY :: 15.0;
 GGG_NEST_RIG :: "anims/hive/Nest.spine";
 GGG_NEST_CONSUME_RANGE :: 1.8;
 GGG_NEST_SHERIFF_REVEAL_SECONDS :: 30.0;
+GGG_NEST_VISIBILITY_RANGE :: 8.0;
 
 // Rig paths
 GGG_PLAYER_RIG :: "anims/player/004RAND_Base.spine";
@@ -169,6 +175,34 @@ GGG_Nest :: class : Component {
 	}
 }
 
+GGG_Nest_Visibility :: class : Component {
+	ao_update :: method(dt: float) {
+		spine := entity->get_component(Spine_Animator);
+		if spine == null return;
+		if spine.instance == null return;
+
+		local_player, ok := Game.get_local_player();
+		if !ok {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 0};
+			return;
+		}
+		// GGG owner always sees their nest
+		if local_player.player_type == Player_Type.TRAITOR {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
+			return;
+		}
+		// Other players only see the nest when close
+		dist := length(local_player.entity.world_position - entity.world_position);
+		if dist <= GGG_NEST_VISIBILITY_RANGE {
+			alpha := 1.0 - clamp((dist - GGG_NEST_VISIBILITY_RANGE + 2.0) / 2.0, 0.0, 1.0);
+			alpha = clamp(alpha, 0.0, 1.0);
+			spine.instance.color_multiplier = v4.{1, 1, 1, alpha};
+		} else {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 0};
+		}
+	}
+}
+
 rr_ggg_place_nest :: proc(player: Player, world_pos: v2) {
 	if player == null return;
 	if !Game.is_server() return;
@@ -200,6 +234,8 @@ rr_ggg_place_nest :: proc(player: Player, world_pos: v2) {
 
 	nest_comp := nest_e->add_component(GGG_Nest);
 	nest_comp.owner_player_entity_id = player.entity.id;
+
+	nest_e->add_component(GGG_Nest_Visibility);
 
 	gm.nest_entity = nest_e;
 	gm.nest_placed = true;
@@ -1026,12 +1062,6 @@ GGG_Trap_Visibility :: class : Component {
 		spine := entity->get_component(Spine_Animator);
 		if spine == null return;
 		if spine.instance == null return;
-
-		trap_anim := entity->get_component(GGG_Trap_Animator);
-		if trap_anim != null && trap_anim.state != 1 {
-			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
-			return;
-		}
 
 		local_player, ok := Game.get_local_player();
 		if !ok {
@@ -2371,17 +2401,20 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 
 	set_camera_zoom :: proc(using this: GGG_Foil_Whip_Ability, active: bool) {
 		if !player->is_local_or_server() return;
+		gm := player.entity->get_component(GGG_Module);
 		if active {
 			if !camera_zoom_active {
 				camera_original_size = player.camera.size;
 				player.camera.size = GGG_FOIL_WHIP_CAMERA_ZOOMED_OUT_SIZE;
 				camera_zoom_active = true;
 			}
+			if gm != null { gm.foil_whip_targeting = true; }
 		} else {
 			if camera_zoom_active {
 				player.camera.size = camera_original_size;
 				camera_zoom_active = false;
 			}
+			if gm != null { gm.foil_whip_targeting = false; }
 		}
 	}
 
@@ -2397,12 +2430,13 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 			}
 		}
 
+		gm := player.entity->get_component(GGG_Module);
 		targeting := player.active_ability != null && player.active_ability.#type == GGG_Foil_Whip_Ability;
-		this->set_camera_zoom(targeting);
+		pulling := gm != null && gm.foil_whip_active;
+		this->set_camera_zoom(targeting || pulling);
 
 		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
 		if params.can_use && activation.activate {
-			this->set_camera_zoom(false);
 			rr_ggg_fire_foil_whip(player, activation.direction);
 			current_cooldown = GGG_FOIL_WHIP_COOLDOWN_SECONDS;
 		}
