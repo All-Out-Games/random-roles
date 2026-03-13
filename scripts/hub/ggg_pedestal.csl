@@ -1,0 +1,35 @@
+GGG_PRODUCT_ID :: "69b1aa6e3a1668e54467c5d4";
+
+ao_purchase_handler :: proc(player: Player, id: string) -> bool {
+    if id == GGG_PRODUCT_ID {
+        foreach pedestal: component_iterator(GGG_Pedestal) {
+            pedestal.bought = true;
+        }
+        Notifier.notify(player, "Goo Goo Ga Ga unlocked!");
+        return true;
+    }
+    return false;
+}
+
+GGG_Pedestal :: class : Interactable {
+    bought: bool;
+
+    ao_start :: method() {
+        this->set_listener(this);
+        this->set_text("Buy Goo Goo Ga Ga");
+    }
+
+    can_use :: method(player: Player) -> bool {
+        if player == null return false;
+        if bought || Purchasing.owns_product(player, GGG_PRODUCT_ID) {
+            this->set_text("Bought!");
+            return false;
+        }
+        this->set_text("Buy Goo Goo Ga Ga");
+        return true;
+    }
+
+    on_interact :: method(player: Player) {
+        Purchasing.prompt_purchase(player, GGG_PRODUCT_ID);
+    }
+}
