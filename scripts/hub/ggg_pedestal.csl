@@ -1,7 +1,21 @@
 GGG_PRODUCT_ID :: "69b1aa6e3a1668e54467c5d4";
 
+stamp_product_purchase :: proc(player: Player, product_id: string, reason: string) {
+    if Game.is_server() {
+        save_key := format_string("purchase_timestamp_%", {product_id});
+        existing := Save.get_string(player, save_key, "");
+        if existing.count > 0 return;
+
+        timestamp := format_string("%", {get_real_time()});
+        Save.set_string(player, save_key, timestamp);
+
+        log_info("[Purchase] Stamped product % for % (%). Reason: %", {product_id, player->get_username(), player->get_user_id(), reason});
+    }
+}
+
 ao_purchase_handler :: proc(player: Player, id: string) -> bool {
     if id == GGG_PRODUCT_ID {
+        stamp_product_purchase(player, GGG_PRODUCT_ID, "purchase");
         foreach pedestal: component_iterator(GGG_Pedestal) {
             pedestal.bought = true;
         }
@@ -9,6 +23,12 @@ ao_purchase_handler :: proc(player: Player, id: string) -> bool {
         return true;
     }
     return false;
+}
+
+check_owned_products :: proc(player: Player) {
+    if Purchasing.owns_product(player, GGG_PRODUCT_ID) {
+        stamp_product_purchase(player, GGG_PRODUCT_ID, "corrective");
+    }
 }
 
 GGG_Pedestal :: class : Interactable {
