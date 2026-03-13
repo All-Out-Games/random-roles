@@ -3126,57 +3126,25 @@ assign_players_to_types :: proc() {
 		remaining_civ += unforced_count - total_remaining;
 	}
 
-	// Create the type list for unforced players only.
-	type_list: []Player_Type = new(Player_Type, unforced_count);
-	index := 0;
-	for i: 0..remaining_civ-1 {
-		if index >= unforced_count break;
-		type_list[index] = Player_Type.CIVILIAN;
-		index += 1;
-	}
-	for i: 0..remaining_an-1 {
-		if index >= unforced_count break;
-		type_list[index] = Player_Type.ANARCHIST;
-		index += 1;
-	}
-	for i: 0..remaining_tr-1 {
-		if index >= unforced_count break;
-		type_list[index] = Player_Type.TRAITOR;
-		index += 1;
-	}
-	// Fill any remaining slots with civilian (safety).
-	while index < unforced_count {
-		type_list[index] = Player_Type.CIVILIAN;
-		index += 1;
-	}
-	
-	// Shuffle the type list using Fisher-Yates algorithm
+	// Build unforced player list and assign types with purchase boosts.
 	rng := rng_seed((player_count.(u64) + round_number.(u64)));
-	for i: 0..type_list.count-1 {
-		j := rng_range_int(ref rng, i, type_list.count-1);
-		temp := type_list[i];
-		type_list[i] = type_list[j];
-		type_list[j] = temp;
+	unforced_for_types: [..]Player;
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if p.forced_role_next_round != Player_Role.NONE continue;
+		unforced_for_types->append(p);
 	}
-	
-	// Assign types to players.
-	// Forced-role players get their type from the forced role.
-	// Unforced players draw from the shuffled type_list.
-	unforced_idx := 0;
+	rp_assign_player_types(ref unforced_for_types, remaining_civ, remaining_an, remaining_tr, ref rng);
+
+	// Apply forced types, go-alive, and tasks.
 	for i: 0..players.elements.count-1 {
 		on_player_go_alive(players.elements[i]);
 		forced_role := players.elements[i].forced_role_next_round;
 		if forced_role != Player_Role.NONE {
 			players.elements[i].player_type = rr_get_role_type(forced_role);
-		} else {
-			if unforced_idx < type_list.count {
-				players.elements[i].player_type = type_list[unforced_idx];
-				unforced_idx += 1;
-			} else {
-				players.elements[i].player_type = Player_Type.CIVILIAN;
-			}
 		}
-		
+
 		// Clear old tasks and assign new tasks to civilians
 		players.elements[i].active_tasks = List(Task_Base).{};
 		if players.elements[i].player_type == Player_Type.CIVILIAN {
@@ -3224,24 +3192,10 @@ assign_players_to_types :: proc() {
 		}
 	}
 
-	// Shuffle who receives roles within each type for extra randomness.
-	shuffle_player_list(ref civ_players);
-	shuffle_player_list(ref an_players);
-	shuffle_player_list(ref tr_players);
-
-	civ_roles := draw_roles_from_bag(ref civilian_role_bag, civilian_roles_master, civ_players.elements.count);
-	an_roles := draw_roles_from_bag(ref anarchist_role_bag, anarchist_roles_master, an_players.elements.count);
-	tr_roles := draw_roles_from_bag(ref traitor_role_bag, traitor_roles_master, tr_players.elements.count);
-
-	for i: 0..civ_roles.elements.count-1 {
-		civ_players.elements[i].player_role = civ_roles.elements[i];
-	}
-	for i: 0..an_roles.elements.count-1 {
-		an_players.elements[i].player_role = an_roles.elements[i];
-	}
-	for i: 0..tr_roles.elements.count-1 {
-		tr_players.elements[i].player_role = tr_roles.elements[i];
-	}
+	// Assign roles with purchase-weighted boosting (handles shuffle + bag draw internally).
+	rp_assign_roles_for_type(ref civ_players, ref civilian_role_bag, civilian_roles_master, ref rng);
+	rp_assign_roles_for_type(ref an_players, ref anarchist_role_bag, anarchist_roles_master, ref rng);
+	rp_assign_roles_for_type(ref tr_players, ref traitor_role_bag, traitor_roles_master, ref rng);
 
 	// Apply forced roles for this round (one-time).
 	for i: 0..players.elements.count-1 {
