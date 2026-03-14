@@ -206,19 +206,48 @@ refill_role_bag_if_needed :: proc(bag: ref List(Player_Role), master: List(Playe
 	shuffle_role_list(ref bag);
 }
 
-draw_roles_from_bag :: proc(bag: ref List(Player_Role), master: List(Player_Role), count: int) -> List(Player_Role) {
+draw_roles_from_bag :: proc(bag: ref List(Player_Role), master: List(Player_Role), count: int, allow_duplicate_fallback: bool) -> List(Player_Role) {
 	drawn: List(Player_Role);
 	if count <= 0 return drawn;
 	if master.elements.count <= 0 return drawn;
 
-	// Never draw more than the number of distinct roles available (no duplicates per round).
-	to_draw := min(count, master.elements.count);
+	to_draw := count;
+	if !allow_duplicate_fallback {
+		// Hard cap — never draw more than the number of distinct roles.
+		to_draw = min(count, master.elements.count);
+	}
+
 	for i: 0..to_draw-1 {
 		refill_role_bag_if_needed(ref bag, master);
-		// Bag is guaranteed non-empty here if master non-empty.
-		role := bag.elements[bag.elements.count - 1];
-		pop(ref bag);
-		append(ref drawn, role);
+
+		// Try to find a role in the bag that hasn't been drawn this round.
+		found_unique := false;
+		for s: 0..bag.elements.count-1 #reverse {
+			candidate := bag.elements[s];
+			already_drawn := false;
+			for d: 0..drawn.elements.count-1 {
+				if drawn.elements[d] == candidate { already_drawn = true; break; }
+			}
+			if !already_drawn {
+				unordered_remove_by_index(ref bag, s);
+				append(ref drawn, candidate);
+				found_unique = true;
+				break;
+			}
+		}
+
+		if !found_unique {
+			if allow_duplicate_fallback {
+				// All unique roles exhausted — allow a duplicate.
+				refill_role_bag_if_needed(ref bag, master);
+				role := bag.elements[bag.elements.count - 1];
+				pop(ref bag);
+				append(ref drawn, role);
+			} else {
+				// No duplicates allowed — stop drawing.
+				break;
+			}
+		}
 	}
 	return drawn;
 }
@@ -3193,9 +3222,9 @@ assign_players_to_types :: proc() {
 	}
 
 	// Assign roles with purchase-weighted boosting (handles shuffle + bag draw internally).
-	rp_assign_roles_for_type(ref civ_players, ref civilian_role_bag, civilian_roles_master, ref rng);
-	rp_assign_roles_for_type(ref an_players, ref anarchist_role_bag, anarchist_roles_master, ref rng);
-	rp_assign_roles_for_type(ref tr_players, ref traitor_role_bag, traitor_roles_master, ref rng);
+	rp_assign_roles_for_type(ref civ_players, ref civilian_role_bag, civilian_roles_master, ref rng, allow_duplicates=true);
+	rp_assign_roles_for_type(ref an_players, ref anarchist_role_bag, anarchist_roles_master, ref rng, allow_duplicates=false);
+	rp_assign_roles_for_type(ref tr_players, ref traitor_role_bag, traitor_roles_master, ref rng, allow_duplicates=false);
 
 	// Apply forced roles for this round (one-time).
 	for i: 0..players.elements.count-1 {
@@ -3457,6 +3486,16 @@ assign_players_to_types :: proc() {
 		rr_prankster_assign_target(p);
 	}
 	
+	// Rebuild the spinner's role list so it only shows enabled roles.
+	spin_rebuild_enabled_roles();
+	// Ensure admin-forced roles (e.g. Mimicer) appear in the spinner.
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p != null {
+			spin_ensure_role(p.player_role);
+		}
+	}
+
 	// Start the role spin animation (spin will trigger intro popup when done)
 	role_spin_popup->show();
 	game_state = Game_State.ANIM_ROLE_SPIN;

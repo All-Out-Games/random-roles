@@ -9,7 +9,6 @@ SPIN_CARD_WIDTH: float : 240.0;     // width of each role card (at 1080p)
 SPIN_CARD_HEIGHT: float : 320.0;    // height of each role card
 SPIN_CARD_GAP: float : 16.0;        // gap between cards
 SPIN_STRIP_COUNT :: 40;             // how many cards in the scrolling strip
-NUM_REAL_ROLES :: 13;               // number of actual roles (excl NONE)
 
 // Ensure intro/victory popups always draw above gameplay UI.
 POPUP_UI_LAYER :: 10000;
@@ -295,9 +294,9 @@ render_popup :: proc(using popup: Intro_Popup, elapsed: float) {
 	type_rect = type_rect->offset(0, 0.0 + 30.0 * (1.0 - type_ease));
 	UI.text(type_rect, ts, type_name);
 	
-	// Role text below type (if player has a role)
+	// Role text below type (if player has a special role)
 	role_name := get_role_name(player_role);
-	if role_name != "" {
+	if player_role != Player_Role.NONE && role_name != "" {
 		rs := UI.default_text_settings();
 		rs.size = 64;
 		rs.color = .{1.0, 0.9, 0.3, role_ease}; // Golden color for roles
@@ -325,22 +324,43 @@ render_popup :: proc(using popup: Intro_Popup, elapsed: float) {
 // Role Spin Popup - CS:GO style role roulette
 // ============================================================
 
-// Map index 0..12 to a Player_Role (all roles except NONE)
+// Enabled roles for the current round (rebuilt each round by game manager).
+spin_enabled_roles: [..]Player_Role;
+
+// Rebuild the list of roles that should appear in the spinner.
+// Called at round start, before the spin popup is shown.
+spin_rebuild_enabled_roles :: proc() {
+	#unsafe spin_enabled_roles.count = 0;
+	spin_enabled_roles->append(Player_Role.SHERIFF);
+	spin_enabled_roles->append(Player_Role.DOCTOR);
+	spin_enabled_roles->append(Player_Role.PRESIDENT);
+	spin_enabled_roles->append(Player_Role.MOVIE_STAR);
+	spin_enabled_roles->append(Player_Role.CORONER);
+	spin_enabled_roles->append(Player_Role.PORTAL_MAKER);
+	spin_enabled_roles->append(Player_Role.PRANKSTER);
+	spin_enabled_roles->append(Player_Role.PYROMANIAC);
+	spin_enabled_roles->append(Player_Role.PIRATE);
+	spin_enabled_roles->append(Player_Role.HITMAN);
+	spin_enabled_roles->append(Player_Role.WEREWOLF);
+	if rr_ggg_role_enabled {
+		spin_enabled_roles->append(Player_Role.GOO_GOO_GAGA);
+	}
+	// Mimicer is never shown in the spinner (not player-ownable).
+}
+
+// Ensure a role appears in the spinner (e.g. admin-forced roles like Mimicer).
+spin_ensure_role :: proc(role: Player_Role) {
+	if role == Player_Role.NONE return;
+	for i: 0..spin_enabled_roles.count-1 {
+		if spin_enabled_roles[i] == role return;
+	}
+	spin_enabled_roles->append(role);
+}
+
+// Map index to a Player_Role from the enabled set.
 spin_index_to_role :: proc(idx: int) -> Player_Role {
-	switch idx {
-		case 0:  return Player_Role.SHERIFF;
-		case 1:  return Player_Role.DOCTOR;
-		case 2:  return Player_Role.PRESIDENT;
-		case 3:  return Player_Role.MOVIE_STAR;
-		case 4:  return Player_Role.CORONER;
-		case 5:  return Player_Role.PORTAL_MAKER;
-		case 6:  return Player_Role.PRANKSTER;
-		case 7:  return Player_Role.PYROMANIAC;
-		case 8:  return Player_Role.PIRATE;
-		case 9:  return Player_Role.HITMAN;
-		case 10: return Player_Role.WEREWOLF;
-		case 11: return Player_Role.GOO_GOO_GAGA;
-		case 12: return Player_Role.MIMICER;
+	if idx >= 0 && idx < spin_enabled_roles.count {
+		return spin_enabled_roles[idx];
 	}
 	return Player_Role.SHERIFF;
 }
@@ -368,10 +388,10 @@ SPIN_HOLD_TIME: float : 0.8;
 SPIN_FULL_DURATION: float : 5.3; // SPIN_TOTAL_DURATION + SPIN_HOLD_TIME
 SPIN_LANDING_POS :: SPIN_STRIP_COUNT - 8;
 
-// Find the spin index (0..12) for a given role
+// Find the spin index for a given role in the enabled set.
 spin_role_to_index :: proc(role: Player_Role) -> int {
-	for i: 0..NUM_REAL_ROLES-1 {
-		if spin_index_to_role(i) == role {
+	for i: 0..spin_enabled_roles.count-1 {
+		if spin_enabled_roles[i] == role {
 			return i;
 		}
 	}
@@ -431,8 +451,9 @@ Role_Spin_Popup :: class {
 			return;
 		}
 
-		// Skip rendering for NONE role (crewmates with no special role)
+		// Players with no special role see a brief "CIVILIAN" splash instead of a spinner.
 		if target_role == Player_Role.NONE {
+			render_no_role_splash(this, elapsed);
 			return;
 		}
 
@@ -448,7 +469,50 @@ spin_get_card_role_idx :: proc(strip_pos: int, seed: u64, target_role_idx: int) 
 	}
 	// Deterministic per-card seed so the strip is stable across frames
 	card_seed: u64 = rng_seed(seed + strip_pos.(u64) * 7919);
-	return rng_range_int(ref card_seed, 0, NUM_REAL_ROLES - 1);
+	return rng_range_int(ref card_seed, 0, spin_enabled_roles.count - 1);
+}
+
+render_no_role_splash :: proc(using popup: Role_Spin_Popup, elapsed: float) {
+	UI.push_layer(POPUP_UI_LAYER + 1);
+	defer UI.pop_layer();
+
+	screen := UI.get_screen_rect();
+
+	// Quick fade in / out
+	fade_in := clamp(elapsed / 0.3, 0.0, 1.0);
+	fade_out := clamp((SPIN_FULL_DURATION - elapsed) / 0.3, 0.0, 1.0);
+	alpha := min(fade_in, fade_out);
+
+	// Dim background
+	UI.quad(screen, core_globals.white_sprite, v4.{0, 0, 0, 0.85 * alpha});
+
+	// Type name
+	type_color := get_type_color(target_type);
+	type_color.w = alpha;
+
+	ts := UI.default_text_settings();
+	ts.size = 96;
+	ts.color = type_color;
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 3;
+	ts.outline_color = v4.{0, 0, 0, alpha};
+
+	text_rect := screen->center_rect()->grow(300);
+	text_rect = text_rect->offset(0, 40.0);
+	UI.text(text_rect, ts, get_type_name(target_type));
+
+	// Subtitle
+	sub := UI.default_text_settings();
+	sub.size = 48;
+	sub.color = v4.{1, 1, 1, 0.7 * alpha};
+	sub.halign = .CENTER;
+	sub.valign = .CENTER;
+
+	sub_rect := screen->center_rect()->grow(200);
+	sub_rect = sub_rect->offset(0, -40.0);
+	UI.text(sub_rect, sub, "No special role");
 }
 
 render_spin :: proc(using popup: Role_Spin_Popup, elapsed: float) {

@@ -164,10 +164,11 @@ rp_assign_player_types :: proc(
 // from the bag as usual.  At most one player can claim each boosted
 // role per round.
 rp_assign_roles_for_type :: proc(
-    type_players: ref List(Player),
-    bag:          ref List(Player_Role),
-    master:       List(Player_Role),
-    rng:          ref u64
+    type_players:     ref List(Player),
+    bag:              ref List(Player_Role),
+    master:           List(Player_Role),
+    rng:              ref u64,
+    allow_duplicates: bool
 ) {
     count := type_players.elements.count;
     if count <= 0 return;
@@ -214,7 +215,7 @@ rp_assign_roles_for_type :: proc(
     // ── Draw remaining roles from bag ───────────────────────────────
     normal_count := count - boost_winner_count;
 
-    // Build filtered master excluding claimed roles (prevents duplicates).
+    // Build filtered master excluding claimed boost roles.
     filtered_master: List(Player_Role);
     for m: 0..master.elements.count - 1 {
         is_claimed := false;
@@ -239,7 +240,7 @@ rp_assign_roles_for_type :: proc(
     }
     bag = cleaned_bag;
 
-    drawn := draw_roles_from_bag(ref bag, filtered_master, normal_count);
+    drawn := draw_roles_from_bag(ref bag, filtered_master, normal_count, allow_duplicates);
 
     // ── Final assignment ────────────────────────────────────────────
     draw_idx := 0;
