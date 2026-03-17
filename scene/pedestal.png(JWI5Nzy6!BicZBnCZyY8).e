@@ -5,7 +5,7 @@
   "name": "pedestal.png",
   "local_enabled": true,
   "local_position": {
-    "X": -45.9965209960937500,
+    "X": -46.3137321472167969,
     "Y": 16.5442295074462891
   },
   "local_rotation": 0,
@@ -38,6 +38,7 @@
     "required_hold_time": 0.6000000238418579,
     "prompt_offset": {
       "Y": 1
-    }
+    },
+    "spine": "91135723351555:1773413060447223500"
   }
 }

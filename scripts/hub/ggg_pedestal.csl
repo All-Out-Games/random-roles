@@ -30,12 +30,49 @@ check_owned_products :: proc(player: Player) {
     }
 }
 
+POUNCE_INTERVAL :: 15.0;
+
 GGG_Pedestal :: class : Interactable {
     bought: bool;
+    spine: Spine_Animator @ao_serialize;
+    pounce_timer: float;
+    state_machine: State_Machine;
 
     ao_start :: method() {
         this->set_listener(this);
         this->set_text("Buy Goo Goo Ga Ga");
+        pounce_timer = POUNCE_INTERVAL;
+
+        if spine != null {
+            spine->awaken();
+
+            state_machine = State_Machine.create();
+            pounce_trigger := state_machine->create_variable("pounce", .TRIGGER);
+
+            layer := state_machine->create_layer("main", 0);
+
+            idle_state := layer->create_state("Idle", true);
+            pounce_state := layer->create_state("PounceWrap", false);
+
+            layer->set_initial_state(idle_state);
+
+            to_pounce := layer->create_global_transition(pounce_state, true);
+            to_pounce->create_trigger_condition(pounce_trigger);
+
+            pounce_to_idle := layer->create_transition(pounce_state, idle_state, true);
+
+            spine.instance->set_state_machine(state_machine, true);
+        }
+    }
+
+    ao_update :: method(dt: float) {
+        if spine == null return;
+
+        pounce_timer -= dt;
+        if pounce_timer <= 0.0 {
+            pounce_timer = POUNCE_INTERVAL;
+            state_machine->set_trigger("pounce");
+        }
     }
 
     can_use :: method(player: Player) -> bool {

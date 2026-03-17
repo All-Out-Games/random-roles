@@ -1,5 +1,4 @@
 RG_NUM_ROLES :: 14;
-rr_ggg_role_visible: bool;
 
 Rg_Ability_Entry :: struct {
     icon_path: string;
@@ -81,7 +80,7 @@ rg_get_role_description :: proc(idx: int) -> string {
         case 10: return "A swashbuckling traitor. Loot treasure maps from bodies and dig for buried treasure to unlock powerful new abilities.";
         case 11: return "A cold and calculating assassin. Silently snap necks up close. Rack up kills to unlock proximity mines and a sniper rifle.";
         case 12: return "A shape-shifting beast hiding among civilians. Switch between schleem and wolf form. Earn kills to unlock Infect and Claw.";
-        case 13: return "A horrifying creature hiding in plain sight. Transform into a monster and wrap dead bodies in tinfoil to unlock powerful abilities. Crawl through vents, lay chocolate traps, and summon decoy swarms.";
+        case 13: return "A horrifying creature hiding in plain sight. Place a nest and consume bodies to earn nest points that unlock powerful abilities. Transform, crawl, lay traps, whip targets, and summon swarms.";
     }
     return "";
 }
@@ -163,12 +162,13 @@ rg_get_role_abilities :: proc(idx: int, results: ref [..]Rg_Ability_Entry) {
             append(ref results, Rg_Ability_Entry.{"sprites/icons/werewolf/claw_slash.png",         "Claw",            "Unlocked with kills. Slash at nearby enemies with deadly claws."});
         }
         case 13: {
-            append(ref results, Rg_Ability_Entry.{"sprites/icons/transform_evil.png",              "Transform",       "Switch between schleem and creature form."});
-            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/kill_wrap_player.png",        "Kill",            "Eliminate a nearby civilian. Killing automatically wraps the body."});
-            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/wrap_corpse.png",             "Wrap",            "Wrap a nearby dead body in tinfoil. Wraps unlock new abilities."});
-            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/crawl_speedup.png",           "Crawl",           "Unlocked with 1 wrap. Shrink down and move faster."});
-            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/santa_trap.png",              "Trap",            "Unlocked with 2 wraps. Place a chocolate trap that roots civilians."});
-            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/swarm.png",                   "Swarm",           "Unlocked with 3 wraps. Summon decoy creatures to cause chaos."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/Nest_icon.png",               "Place Nest",      "Place a nest to consume bodies and earn nest points for new abilities."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/transform_evil.png",              "Transform",       "Switch between schleem and creature form. Creature form is invisible."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/kill_wrap_player.png",        "Kill",            "Eliminate a nearby civilian. Drag bodies to the nest to consume them."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/crawl_speedup.png",           "Crawl",           "Unlocked with 1 nest point. Shrink down and move faster."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/santa_trap.png",              "Trap",            "Place a chocolate trap that roots and blinds civilians."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/kill_wrap_player.png",        "Foil Whip",       "Unlocked with 2 nest points. Fire a projectile that pulls targets to you."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/swarm.png",                   "Swarm",           "Unlocked with 4 nest points. Summon decoy creatures from the nest."});
         }
     }
 }
@@ -211,7 +211,7 @@ rg_get_role_tips :: proc(idx: int) -> string {
         case 10: return "Loot bodies for treasure maps to unlock your strongest abilities.";
         case 11: return "Neck snap for silent kills. Build kills to unlock mines and sniper.";
         case 12: return "Schleem form to blend in, wolf form to hunt. Switch wisely!";
-        case 13: return "Wrap dead bodies to unlock abilities. More wraps = more power!";
+        case 13: return "Place your nest early and drag bodies to it. More nest points = more abilities!";
     }
     return "";
 }
@@ -385,8 +385,7 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
             found := false;
             for fi: 1..RG_NUM_ROLES-1 {
                 if fi == 9 continue;
-                if fi == 13 && !rr_ggg_role_visible continue;
-                if !found && rg_get_role_team(fi) == filter_team {
+                    if !found && rg_get_role_team(fi) == filter_team {
                     player.roles_guide_selected = fi;
                     found = true;
                 }
@@ -419,7 +418,6 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
 
         for i: 1..RG_NUM_ROLES-1 {
             if i == 9 continue;
-            if i == 13 && !rr_ggg_role_visible continue;
 
             team := rg_get_role_team(i);
 
