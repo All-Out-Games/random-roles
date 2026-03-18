@@ -199,13 +199,25 @@ rr_mimicer_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 
 rr_mimicer_setup_creature_actions :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 	slash_trigger := sm->create_variable("slash", .TRIGGER);
+	slash_escalated_trigger := sm->create_variable("slash_escalated", .TRIGGER);
 	spew_trigger := sm->create_variable("spew", .TRIGGER);
 	scream_trigger := sm->create_variable("scream", .TRIGGER);
+	prowl_lunge_trigger := sm->create_variable("prowl_lunge", .TRIGGER);
 
-	// Slash (kill)
+	// Slash (kill — standard)
 	slash_state := layer->create_state("004RAND/Slash_With_Hand", false, 0.8);
 	layer->create_global_transition(slash_state, false)->create_trigger_condition(slash_trigger);
 	layer->create_transition(slash_state, idle_state, true);
+
+	// Slash (kill — escalated, 2+ kills)
+	slash_esc_state := layer->create_state("004RAND/Furious_Strikes_1_End", false, 1.0);
+	layer->create_global_transition(slash_esc_state, false)->create_trigger_condition(slash_escalated_trigger);
+	layer->create_transition(slash_esc_state, idle_state, true);
+
+	// Prowl Lunge (Creepy_Crawly_Attack — used when lunging in prowl mode)
+	prowl_lunge_state := layer->create_state("004RAND/Creepy_Crawly_Attack", false, 0.5);
+	layer->create_global_transition(prowl_lunge_state, false)->create_trigger_condition(prowl_lunge_trigger);
+	layer->create_transition(prowl_lunge_state, idle_state, true);
 
 	// Spew Corruption
 	spew_state := layer->create_state("004RAND/Spew_Corruption", false, 1.0);
@@ -275,6 +287,40 @@ rr_mimicer_force_revert :: proc(player: Player) {
 }
 
 // =============================================================================
+// Hitman Interaction — disguised Mimicer survives Hitman contract kill
+// =============================================================================
+
+// Returns true if the kill should be blocked (Mimicer survives).
+rr_mimicer_should_survive_hitman_kill :: proc(killer: Player, victim: Player) -> bool {
+	if killer == null return false;
+	if victim == null return false;
+	if killer.player_role != Player_Role.HITMAN return false;
+	if victim.player_role != Player_Role.MIMICER return false;
+
+	mm := victim.entity->get_component(Mimicer_Module);
+	if mm == null return false;
+	if !mm.is_disguised return false;
+
+	hm := killer.entity->get_component(Hitman_Module);
+	if hm == null return false;
+	if hm.contract_target_id == 0 return false;
+
+	// Check if the Mimicer is disguised as the Hitman's contract target
+	if mm.disguise_target_id == hm.contract_target_id {
+		// Failed contract — Mimicer survives, Hitman loses contract
+		hm.contract_target_id = 0;
+		hm.kill_cooldown_adjust_seconds += HITMAN_OFF_CONTRACT_KILL_COOLDOWN_ADJUST_SECONDS;
+		Notifier.notify(killer, "Contract failed! That was a Mimicer in disguise!");
+
+		// Break the disguise
+		rr_mimicer_end_disguise(victim);
+		Notifier.notify(victim, "Your disguise saved you from the Hitman!");
+		return true;
+	}
+	return false;
+}
+
+// =============================================================================
 // Kill Tracking
 // =============================================================================
 
@@ -290,11 +336,19 @@ rr_mimicer_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_
 
 	mm.kills += 1;
 
-	// Play kill animation on creature rig if in monster form
+	// Play kill animation — escalated version after 2 kills
 	if mm.is_monster_form && mm.creature_visible {
-		rr_mimicer_creature_trigger(killer, "slash");
+		if mm.kills >= 2 {
+			rr_mimicer_creature_trigger(killer, "slash_escalated");
+		} else {
+			rr_mimicer_creature_trigger(killer, "slash");
+		}
 	} else {
-		killer->set_trigger("mimicer_kill_slash");
+		if mm.kills >= 2 {
+			killer->set_trigger("mimicer_kill_furious");
+		} else {
+			killer->set_trigger("mimicer_kill_slash");
+		}
 	}
 
 	if mm.kills == MIMICER_VOID_LUNGE_UNLOCK_KILLS {
@@ -479,6 +533,7 @@ rr_mimicer_start_disguise :: proc(player: Player, target: Player) {
 	}
 	mm.disguise_saved_color = player.avatar_color;
 	mm.disguise_target_id = target.entity.id;
+	mm.disguise_target_name = target.entity->get_name();
 
 	// Apply target's appearance
 	target_skins := target.animator.instance->get_skins();
@@ -489,8 +544,7 @@ rr_mimicer_start_disguise :: proc(player: Player, target: Player) {
 	player.animator.instance->refresh_skins();
 	player.animator.instance->set_color_replace_color(target.avatar_color);
 
-	// Hide own name and show target's
-	// TODO: proper name spoofing — for now we just hide our name
+	// Hide own name — the spoofed name is drawn in rr_mimicer_draw_disguise_name.
 	player->add_name_invisibility_reason("mimicer_disguise");
 
 	mm.is_disguised = true;
@@ -520,6 +574,7 @@ rr_mimicer_end_disguise :: proc(player: Player) {
 	mm.is_disguised = false;
 	mm.disguise_ends_at = 0.0;
 	mm.disguise_target_id = 0;
+	mm.disguise_target_name = "";
 
 	rr_mimicer_spawn_vfx(player.entity.world_position, "004RAND/Mimic_Poof", 1.0);
 }
@@ -569,9 +624,13 @@ rr_mimicer_start_void_lunge :: proc(player: Player, target_pos: v2) {
 
 	player->add_disable_movement_input_reason(MIMICER_VOID_LUNGE_LOCK_REASON);
 
-	// Play lunge animation
-	if mm.is_monster_form && mm.creature_visible {
-		rr_mimicer_creature_trigger(player, "lunge");
+	// Play lunge animation — prowl uses Creepy_Crawly_Attack
+	if mm.creature_visible {
+		if mm.is_prowling {
+			rr_mimicer_creature_trigger(player, "prowl_lunge");
+		} else {
+			rr_mimicer_creature_trigger(player, "lunge");
+		}
 	}
 
 	// Break disguise
@@ -782,7 +841,7 @@ rr_mimicer_place_flame_pillar :: proc(player: Player, position: v2) {
 	pillar_spine->awaken();
 	if pillar_spine.instance != null {
 		pillar_spine.instance->set_skeleton(get_asset(Spine_Asset, MIMICER_VFX_RIG));
-		pillar_spine.instance->set_animation("004RAND/Teleport", true, 0);
+		pillar_spine.instance->set_animation("004RAND/Dark_Flame_Pillar_Idle", true, 0);
 	}
 
 	// Add interactable for consuming fire
@@ -886,6 +945,33 @@ Mimicer_VFX_Cleanup :: class : Component {
 			entity->destroy();
 		}
 	}
+}
+
+// =============================================================================
+// Disguise Name Rendering (draws target's name above disguised Mimicer)
+// =============================================================================
+
+rr_mimicer_draw_disguise_name :: proc(player: Player) {
+	mm := player.entity->get_component(Mimicer_Module);
+	if mm == null return;
+	if !mm.is_disguised return;
+	if mm.disguise_target_name == "" return;
+
+	pos := player.entity.world_position;
+	// Draw at standard nameplate height (~1.6 m above entity origin).
+	label_pos := pos + v2.{0.0, 1.6};
+	label_rect := Rect{label_pos, label_pos}->grow(0.10, 1.00, 0.10, 1.00);
+
+	ts := UI.default_text_settings();
+	ts.size = 0.26;
+	ts.color = v4.{1.0, 1.0, 1.0, 1.0};
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 0.03;
+	ts.outline_color = v4.{0.0, 0.0, 0.0, 1.0};
+
+	UI.text(label_rect, ts, mm.disguise_target_name);
 }
 
 // =============================================================================
@@ -1013,8 +1099,7 @@ Mimicer_Prowl_Ability :: class : Ability_Base {
 	NAME :: "Prowl";
 
 	on_init :: proc(instance: Mimicer_Prowl_Ability) {
-		// TODO: prowl-specific icon
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/trickster/disguise.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/mimicer/prowl.png");
 	}
 
 	can_use :: method() -> bool {
@@ -1050,8 +1135,7 @@ Mimicer_Void_Lunge_Ability :: class : Ability_Base {
 	NAME :: "Void Lunge";
 
 	on_init :: proc(instance: Mimicer_Void_Lunge_Ability) {
-		// TODO: void lunge icon
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/werewolf/claw_slash.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/mimicer/void_lunge.png");
 		instance.is_aimed_ability = true;
 	}
 
@@ -1096,8 +1180,7 @@ Mimicer_Mimic_Ability :: class : Ability_Base {
 	NAME :: "Mimic";
 
 	on_init :: proc(instance: Mimicer_Mimic_Ability) {
-		// TODO: mimic-specific icon
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/trickster/disguise.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/mimicer/mimic.png");
 	}
 
 	can_use :: method() -> bool {
@@ -1141,8 +1224,7 @@ Mimicer_Spew_Ability :: class : Ability_Base {
 	NAME :: "Spew Corruption";
 
 	on_init :: proc(instance: Mimicer_Spew_Ability) {
-		// TODO: spew-specific icon
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/pyro/set_fire.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/mimicer/spew_corruption.png");
 	}
 
 	can_use :: method() -> bool {
@@ -1181,8 +1263,7 @@ Mimicer_Unleash_Ability :: class : Ability_Base {
 	NAME :: "Unleash";
 
 	on_init :: proc(instance: Mimicer_Unleash_Ability) {
-		// TODO: unleash-specific icon
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/pyro/worldfire.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/mimicer/unleash_ultimate.png");
 	}
 
 	can_use :: method() -> bool {

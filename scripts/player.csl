@@ -404,6 +404,9 @@ Player :: class : Player_Base {
 		// Mimicer per-frame update (transform, prowl, disguise, void lunge).
 		rr_mimicer_update(this, delta_time);
 
+		// Mimicer disguise name (draws target's name above disguised player).
+		rr_mimicer_draw_disguise_name(this);
+
 		// Mimicer blind/distort effect (cross-player, runs on all clients).
 		rr_mimicer_update_blind(this, delta_time);
 
@@ -989,6 +992,11 @@ Player :: class : Player_Base {
 
 	kill_with_killer_and_corpse :: proc(using this: Player, killer_player_entity_id: u64, spawn_corpse: bool) {
         //freeze_player = true;
+		// Hitman vs disguised Mimicer: Mimicer survives if disguised as contract target.
+		killer_check := get_player_by_entity_id(killer_player_entity_id);
+		if rr_mimicer_should_survive_hitman_kill(killer_check, this) {
+			return;
+		}
 		// If we were dragging a body, drop it immediately.
 		rr_drag_body_force_drop_for_player(this);
 		// If this player was temporarily resurrected, clear the flag so tasks/UI don't get stuck.

@@ -1539,6 +1539,18 @@ Resurrect_Ability :: class : Ability_Base {
         return finder.closest;
     }
 
+    get_closest_spew_victim :: proc(instance: Resurrect_Ability, doctor: Player) -> Player {
+        finder := make_finder(Player, doctor.entity.world_position, 5.0);
+        foreach p: component_iterator(Player) {
+            if p == null continue;
+            if p.entity.id == doctor.entity.id continue;
+            if p.player_state != Player_State.ALIVE continue;
+            if !p.mimicer_blinded && p.mimicer_distorted_until <= 0.0 continue;
+            finder->check(p, p.entity.world_position);
+        }
+        return finder.closest;
+    }
+
     can_use :: method() -> bool {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
@@ -1548,13 +1560,26 @@ Resurrect_Ability :: class : Ability_Base {
         dm := player.entity->get_component(Doctor_Module);
         if dm == null return false;
         if dm.resurrects_used >= DOCTOR_RESURRECTS_PER_ROUND return false;
-        return get_closest_resurrectable_corpse(this, player) != null;
+        if get_closest_resurrectable_corpse(this, player) != null return true;
+        // Also usable to cure Spew Corruption on nearby alive players.
+        if get_closest_spew_victim(this, player) != null return true;
+        return false;
     }
 
     on_update :: proc(instance: Resurrect_Ability, params: ref Ability_Update_Params) {
         if params.clicked && params.can_use {
             corpse := instance->get_closest_resurrectable_corpse(instance.player);
-            if corpse == null return;
+            if corpse == null {
+                // No corpse — try curing a nearby Spew victim instead.
+                spew_victim := instance->get_closest_spew_victim(instance.player);
+                if spew_victim != null {
+                    rr_mimicer_cure_spew(spew_victim);
+                    instance.player->Notify(format_string("Cured %!", .{spew_victim.entity->get_name()}));
+                    spew_victim->Notify("The Doctor cured your corruption!");
+                    instance.current_cooldown = 1.0;
+                }
+                return;
+            }
 
             target := get_player_by_entity_id(corpse.owner_player_entity_id);
             if target == null return;
