@@ -101,6 +101,8 @@ Player :: class : Player_Base {
 	mimicer_blinded: bool;
 	mimicer_blinded_until: float;
 	mimicer_distorted_until: float;
+	mim_jumpscare_until: float;
+	mim_jumpscare_spine: Spine_Instance;
 
 	// Per-player portal interaction (anyone can use portals)
 	portal_standing_on_portal: Entity;
@@ -358,6 +360,7 @@ Player :: class : Player_Base {
 			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
 			rr_draw_power_outage_overlay_if_needed(this);
 			rr_ggg_draw_trap_blind_overlay(this);
+			rr_draw_mim_jumpscare(this, delta_time);
 			// Global civilian progress bar – always visible at top-center (except lobby/cinematics).
 			rr_draw_civilian_progress_bar(this);
             update_tasks_ui(this);
@@ -1727,6 +1730,24 @@ draw_ggg_role_hud :: proc(player: Player) {
 		}
 	}
 	} // end task_list_open
+}
+
+rr_draw_mim_jumpscare :: proc(player: Player, dt: float) {
+	if player.mim_jumpscare_until <= 0.0 return;
+	if get_time() >= player.mim_jumpscare_until return;
+
+	if player.mim_jumpscare_spine == null {
+		player.mim_jumpscare_spine = Spine_Instance.create();
+		player.mim_jumpscare_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Mimicer/vfx/012MIM_mimicerjumpscare.spine"));
+		player.mim_jumpscare_spine->set_animation("mimicer_jumpscare2", false, 0, 0.75);
+	}
+
+	player.mim_jumpscare_spine->update(dt);
+
+	UI.push_layer(POPUP_UI_LAYER + 100);
+	defer UI.pop_layer();
+	screen := UI.get_screen_rect();
+	UI.spine(screen->center(), player.mim_jumpscare_spine, .{150, 150}, 0.0);
 }
 
 // --- Mimicer ability unlock progress: left side ---

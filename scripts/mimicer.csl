@@ -786,15 +786,13 @@ rr_mimicer_begin_unleash :: proc(player: Player) {
 		rr_mimicer_creature_trigger(player, "scream");
 	}
 
-	// Jumpscare for all players
-	if Game.is_server() {
-		foreach p: component_iterator(Player) {
-			if p == null continue;
-			if p.player_state != Player_State.ALIVE continue;
-			if p.entity.id == player.entity.id continue;
-			Notifier.notify(p, "The Mimicer has UNLEASHED!");
-			// TODO: fullscreen jumpscare VFX entity for each player
-		}
+	// Jumpscare all non-mimicer players
+	jumpscare_end := get_time() + MIMICER_JUMPSCARE_DURATION;
+	foreach p: component_iterator(Player) {
+		if p == null continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.entity.id == player.entity.id continue;
+		p.mim_jumpscare_until = jumpscare_end;
 	}
 
 	// Zoom out camera for pillar selection
