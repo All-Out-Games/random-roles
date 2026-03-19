@@ -15,9 +15,7 @@ stamp_product_purchase :: proc(player: Player, product_id: string, reason: strin
 ao_purchase_handler :: proc(player: Player, id: string) -> bool {
     if id == GGG_PRODUCT_ID {
         stamp_product_purchase(player, GGG_PRODUCT_ID, "purchase");
-        foreach pedestal: component_iterator(GGG_Pedestal) {
-            pedestal.bought = true;
-        }
+        player.ggg_bought = true;
         Notifier.notify(player, "Goo Goo Ga Ga unlocked!");
         return true;
     }
@@ -33,7 +31,6 @@ check_owned_products :: proc(player: Player) {
 POUNCE_INTERVAL :: 15.0;
 
 GGG_Pedestal :: class : Interactable {
-    bought: bool;
     spine: Spine_Animator @ao_serialize;
     pounce_timer: float;
     state_machine: State_Machine;
@@ -77,7 +74,7 @@ GGG_Pedestal :: class : Interactable {
 
     can_use :: method(player: Player) -> bool {
         if player == null return false;
-        if bought || Purchasing.owns_product(player, GGG_PRODUCT_ID) {
+        if player.ggg_bought || Purchasing.owns_product(player, GGG_PRODUCT_ID) {
             this->set_text("Bought!");
             return false;
         }
