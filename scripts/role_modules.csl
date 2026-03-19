@@ -96,4 +96,27 @@ Mimicer_Module :: class : Component {
 	selecting_pillars: bool;
 	selecting_pillars_camera_active: bool;
 	selecting_pillars_camera_original_size: float;
+
+	// Client-side prowl invisibility for non-traitors
+	ao_on_state_sync :: method() {
+		local_player, ok := Game.get_local_player();
+		if !ok return;
+
+		player := entity->get_component(Player);
+		if player == null return;
+
+		if is_prowling && local_player.player_type != Player_Type.TRAITOR {
+			player->add_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+			player->add_name_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+			if creature_visible && creature_entity != null {
+				creature_entity->set_local_enabled(false);
+			}
+		} else {
+			player->remove_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+			player->remove_name_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+			if creature_visible && creature_entity != null {
+				creature_entity->set_local_enabled(true);
+			}
+		}
+	}
 }

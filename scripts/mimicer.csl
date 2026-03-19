@@ -49,6 +49,7 @@ MIMICER_UNLEASH_LOCK_REASON :: "mimicer_unleash_lock";
 MIMICER_STUN_REASON :: "mimicer_void_lunge_stun";
 MIMICER_INVIS_REASON :: "mimicer_monster_form";
 MIMICER_NAME_INVIS_REASON :: "mimicer_monster_form";
+MIMICER_PROWL_INVIS_REASON :: "mimicer_prowl";
 
 // =============================================================================
 // Creature Entity Management (follows GGG pattern)
@@ -82,6 +83,8 @@ rr_mimicer_ensure_creature_entity :: proc(player: Player) {
 rr_mimicer_destroy_creature_entity :: proc(player: Player) {
 	player->remove_invisibility_reason(MIMICER_INVIS_REASON);
 	player->remove_name_invisibility_reason(MIMICER_NAME_INVIS_REASON);
+	player->remove_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+	player->remove_name_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
 
 	mm := player.entity->get_component(Mimicer_Module);
 	if mm != null {
@@ -336,7 +339,9 @@ rr_mimicer_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_
 
 	mm.kills += 1;
 
-	// Play kill animation — escalated version after 2 kills
+	// Play kill animation — escalated version after 2 kills.
+	// In monster form, use creature rig anims. Otherwise use the normal
+	// player kill anim (traitor_kill) — the schleem rig has no custom kill anims.
 	if mm.is_monster_form && mm.creature_visible {
 		if mm.kills >= 2 {
 			rr_mimicer_creature_trigger(killer, "slash_escalated");
@@ -344,11 +349,7 @@ rr_mimicer_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_
 			rr_mimicer_creature_trigger(killer, "slash");
 		}
 	} else {
-		if mm.kills >= 2 {
-			killer->set_trigger("mimicer_kill_furious");
-		} else {
-			killer->set_trigger("mimicer_kill_slash");
-		}
+		killer->set_trigger("traitor_kill");
 	}
 
 	if mm.kills == MIMICER_VOID_LUNGE_UNLOCK_KILLS {
@@ -457,6 +458,10 @@ rr_mimicer_end_prowl :: proc(player: Player) {
 		// Restore alpha
 		rr_mimicer_set_player_alpha(player, MIMICER_PROWL_NORMAL_ALPHA);
 	}
+
+	// Remove prowl invisibility (ao_on_state_sync will also clear on clients)
+	player->remove_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+	player->remove_name_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
 
 	if !mm.is_monster_form {
 		player->set_trigger("mimicer_prowl_end");

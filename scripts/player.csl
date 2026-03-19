@@ -161,6 +161,14 @@ Player :: class : Player_Base {
 
     is_frozen: bool;
 
+	// --- Intro role animation (per-player, used by Intro_Popup) ---
+	intro_role_spine: Spine_Instance;
+	intro_role_spine_ready: bool;
+	intro_is_creature_rig: bool;
+	intro_second_anim_name: string;
+	intro_second_anim_at: float;
+	intro_second_anim_started: bool;
+
 	// True when the local player has any task attempt currently open/in progress.
 	// Used to suppress ability input while interacting with task UI.
 	has_task_in_progress :: proc(using this: Player) -> bool {
@@ -376,6 +384,18 @@ Player :: class : Player_Base {
                 role_spin_popup->update(delta_time);
             }
             if game_state == Game_State.ANIM_INTRO {
+                rr_intro_ensure_role_spine(this);
+                if intro_role_spine_ready {
+                    intro_role_spine->update(delta_time);
+                    // Trigger second animation for transforming roles
+                    if intro_second_anim_at > 0.0 && !intro_second_anim_started {
+                        elapsed := get_time() - intro_popup.show_start_time;
+                        if elapsed >= intro_second_anim_at {
+                            intro_role_spine->set_animation(intro_second_anim_name, false, 0);
+                            intro_second_anim_started = true;
+                        }
+                    }
+                }
                 intro_popup->set_local_player(this);
                 intro_popup->update(delta_time);
             }
@@ -1046,24 +1066,6 @@ player_role_to_string :: proc(player: Player) -> string {
 	return "CREW";
 }
 
-player_role_to_icon_texture :: proc(role: Player_Role) -> Texture_Asset {
-	switch role {
-		case .SHERIFF:      return get_asset(Texture_Asset, "sprites/icons/roles/sheriff_icon.png");
-		case .DOCTOR:       return get_asset(Texture_Asset, "sprites/icons/roles/doctor_icon.png");
-		case .PRESIDENT:    return get_asset(Texture_Asset, "sprites/icons/roles/president_icon.png");
-		case .MOVIE_STAR:   return get_asset(Texture_Asset, "sprites/icons/roles/moviestar_icon.png");
-		case .CORONER:      return get_asset(Texture_Asset, "sprites/icons/roles/coroner_icon.png");
-		case .PORTAL_MAKER: return get_asset(Texture_Asset, "sprites/icons/roles/portalmaker_icon.png");
-		case .PRANKSTER:    return get_asset(Texture_Asset, "sprites/icons/roles/trickster_icon.png");
-		case .PYROMANIAC:   return get_asset(Texture_Asset, "sprites/icons/roles/pyromaniac_icon.png");
-		case .PIRATE:       return get_asset(Texture_Asset, "sprites/icons/roles/pirate_icon.png");
-		case .HITMAN:       return get_asset(Texture_Asset, "sprites/icons/roles/hitman_icon.png");
-		case .WEREWOLF:      return get_asset(Texture_Asset, "sprites/icons/roles/werewolf_icon.png");
-		case .GOO_GOO_GAGA:  return get_asset(Texture_Asset, "sprites/icons/roles/googoogaga_icon.png");
-		case .MIMICER:       return get_asset(Texture_Asset, "sprites/icons/roles/googoogaga_icon.png"); // TODO: mimicer role icon
-	}
-	return null;
-}
 
 // Draw a countdown timer above every temporarily resurrected player's head.
 // Called once per frame from the local player's ao_update.
@@ -2477,11 +2479,6 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer->create_global_transition(mimicer_blinded_end_state, false)->create_trigger_condition(mimicer_blinded_end_var);
 		layer->create_transition(mimicer_blinded_end_state, idle_state, true);
 
-		// Kill slash in human form (one-shot) -> back to Idle
-		mimicer_kill_slash_var := sm->create_variable("mimicer_kill_slash", State_Machine_Variable.Kind.TRIGGER);
-		mimicer_kill_slash_state := layer->create_state("004RAND/Death_Slash", false, 1.0);
-		layer->create_global_transition(mimicer_kill_slash_state, false)->create_trigger_condition(mimicer_kill_slash_var);
-		layer->create_transition(mimicer_kill_slash_state, idle_state, true);
 	}
 
 	// Adds the animation state machine.
@@ -3834,5 +3831,124 @@ rr_cleanup_door_unlock_interactable :: proc(player: Player) {
 	}
 	player.door_unlock_entity = null;
 	player.door_unlock_interactable = null;
+}
+
+// ============================================================
+// Intro role animation (per-player Spine_Instance)
+// ============================================================
+
+rr_intro_ensure_role_spine :: proc(player: Player) {
+	if player.intro_role_spine_ready { return; }
+
+	role := player.player_role;
+	if role == Player_Role.NONE || role == Player_Role.PRESIDENT {
+		return;
+	}
+
+	player.intro_role_spine = Spine_Instance.create();
+	player.intro_role_spine_ready = true;
+	player.intro_is_creature_rig = false;
+	player.intro_second_anim_at = 0.0;
+	player.intro_second_anim_started = false;
+
+	// --- Transforming roles (creature rig: transform-in then attack) ---
+	if role == Player_Role.MIMICER {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Mimicer/004RAND_Mimicer.spine"));
+		player.intro_role_spine->enable_skin("normal");
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND/Transform_Monster_End", false, 0);
+		player.intro_is_creature_rig = true;
+		player.intro_second_anim_name = "004RAND/Slash_With_Hand";
+		player.intro_second_anim_at = 1.3;
+		return;
+	}
+	if role == Player_Role.WEREWOLF {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Werewolf/RAND004_werewolf.spine"));
+		player.intro_role_spine->enable_skin("004RAND/werewolf");
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND_werewolf/Infected_Bitten_Transform", false, 0);
+		player.intro_second_anim_name = "004RAND_werewolf/howl";
+		player.intro_second_anim_at = 1.3;
+		return;
+	}
+	if role == Player_Role.GOO_GOO_GAGA {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Ggg/004RAND_GooGooGaGa.spine"));
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("Transform_Monster_End", false, 0);
+		player.intro_is_creature_rig = true;
+		player.intro_second_anim_name = "Pounce";
+		player.intro_second_anim_at = 1.3;
+		return;
+	}
+
+	// --- Non-transforming roles (role rig with intro/skill anim) ---
+	if role == Player_Role.SHERIFF {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Sheriff/RAND004_sheriff.spine"));
+		player.intro_role_spine->enable_skin("004RAND/sheriff");
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND_sheriff/Sheriff_Intro", false, 0);
+	} else if role == Player_Role.DOCTOR {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Doctor/RAND004_doctor.spine"));
+		player.intro_role_spine->enable_skin("004RAND/doctor");
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND_doctor/Intro_Anim", false, 0);
+	} else if role == Player_Role.HITMAN {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Hitman/RAND004_hitman.spine"));
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND_hitman/Intro_Hitman", false, 0);
+	} else if role == Player_Role.PIRATE {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Pirate/RAND004_pirate.spine"));
+		player.intro_role_spine->enable_skin("004RAND/pirate");
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND_pirate/intro_anim", false, 0);
+	} else if role == Player_Role.CORONER {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Coroner/RAND004_coroner.spine"));
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND_Coroner/Intro_Anim", false, 0);
+	} else if role == Player_Role.PRANKSTER {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Trickster/004RAND_Trickster.spine"));
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND_trickster/Trickster_Intro_Anim", false, 0);
+	} else if role == Player_Role.PYROMANIAC {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Pyro/playercharacter.spine"));
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND_pyromaniac/Pyromaniac_Intro", false, 0);
+	} else if role == Player_Role.MOVIE_STAR {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Movie Star/playercharacter.spine"));
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("004RAND_movie_star/Intro_Movie_Star_start", false, 0);
+	} else if role == Player_Role.PORTAL_MAKER {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Portal Maker/RAND004_portal_maker.spine"));
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("Portal_Maker/shoot_portal_red", false, 0);
+	} else {
+		player.intro_role_spine->destroy();
+		player.intro_role_spine_ready = false;
+	}
+}
+
+rr_intro_copy_player_skins :: proc(player: Player) {
+	skins := player.animator.instance->get_skins();
+	for i: 0..skins.count-1 {
+		player.intro_role_spine->enable_skin(skins[i]);
+	}
+	player.intro_role_spine->set_color_replace_color(player.avatar_color);
+}
+
+rr_intro_cleanup_role_spine :: proc(player: Player) {
+	if player.intro_role_spine_ready {
+		player.intro_role_spine->destroy();
+		player.intro_role_spine_ready = false;
+	}
 }
 
