@@ -1362,6 +1362,9 @@ on_player_go_dead :: proc(player: Player) {
 	// Safe to call even if already dropped (guard inside checks dragging_corpse_entity_id == 0).
 	rr_drag_body_force_drop_for_player(player);
 
+	// Reset GGG whip/creature state so a mid-pull whip doesn't persist as a ghost.
+	rr_ggg_force_revert(player);
+
 	player.player_state = Player_State.DEAD;
 	// Safety: temporary resurrection should always end when dead.
 	player.is_temporarily_resurrected = false;
@@ -2870,10 +2873,25 @@ end_voting :: proc() {
 		rr_last_vote_prankster_got_voted = false;
 
 		// Credit the prankster's fake-meeting task when their assigned target
-		// is the sole top-voted player (the prankster tricked the crew).
+		// would have been ejected (sole top-voted player AND beats skip votes).
 		caller := get_player_by_entity_id(fake_meeting_caller_id);
 		if caller != null && #alive(caller.entity) && caller.player_role == Player_Role.PRANKSTER {
-			// Tally votes to see who would have been ejected.
+			// Tally skip votes (weighted, same rules as real meetings).
+			fm_skip_votes := 0;
+			for i: 0..players.elements.count-1 {
+				v := players.elements[i];
+				if v == null continue;
+				if v.player_state != Player_State.ALIVE continue;
+				if !v.has_voted continue;
+				if !v.voted_skip continue;
+				if v.player_role == Player_Role.PRESIDENT {
+					fm_skip_votes += 2;
+				} else {
+					fm_skip_votes += 1;
+				}
+			}
+
+			// Tally player votes to see who would have been ejected.
 			fm_max_votes := 0;
 			fm_max_player: Player = null;
 			fm_max_count := 0;
@@ -2889,9 +2907,10 @@ end_voting :: proc() {
 					fm_max_count += 1;
 				}
 			}
-			// Success: the prankster's assigned target is the sole top-voted player.
+			// Success: target is the sole top-voted player AND their votes beat skips
+			// (mirrors real meeting ejection rules — skip wins means no credit).
 			prk := caller.entity->get_component(Prankster_Module);
-			if prk != null && fm_max_count == 1 && fm_max_player != null && fm_max_votes > 0 && prk.fake_meeting_target_id != 0 && fm_max_player.entity.id == prk.fake_meeting_target_id {
+			if prk != null && fm_max_count == 1 && fm_max_player != null && fm_max_votes > 0 && fm_skip_votes <= fm_max_votes && prk.fake_meeting_target_id != 0 && fm_max_player.entity.id == prk.fake_meeting_target_id {
 				prk.fake_meetings_called += 1;
 				prankster_check_unlock_jester_win(caller);
 				rr_last_vote_prankster_got_voted = true;
