@@ -31,9 +31,10 @@
   "internal_component_type": "GGG_Pedestal",
   "data": {
     "text": "Buy GGG",
-    "radius": 2,
+    "radius": 3,
     "offset": {
-      "X": -0.5000000000000000
+      "X": -0.5000000000000000,
+      "Y": -0.2500000000000000
     },
     "required_hold_time": 0.6000000238418579,
     "prompt_offset": {

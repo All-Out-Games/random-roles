@@ -62,6 +62,153 @@ GGG_Pedestal :: class : Interactable {
         }
     }
 
+    ao_late_update :: method(dt: float) {
+        if Game.is_server() return;
+
+        pos := entity.world_position;
+
+        UI.push_world_draw_context();
+        defer UI.pop_draw_context();
+
+        // Push z well above everything (lower y = renders on top in world space)
+        UI.push_z(pos.y - 10.0);
+        defer UI.pop_z();
+
+        t := get_real_time();
+
+        // Floating banner at podium height
+        bob := sin(t * 2.5) * 0.06;
+        banner_y := pos.y + 0.1 + bob;
+        banner_pos := v2.{pos.x, banner_y};
+
+        // Pulsing color
+        pulse := (sin(t * 3.0) + 1.0) * 0.5;
+        banner_r := lerp(0.6, 0.75, pulse);
+        banner_g := lerp(0.08, 0.2, pulse);
+        banner_b := lerp(0.05, 0.12, pulse);
+
+        // Starburst glow behind the banner
+        starburst_tex := get_asset(Texture_Asset, "$AO/ui/starburst.png");
+        if starburst_tex != null {
+            spin := t * 15.0;
+            starburst_rect := Rect.{banner_pos, banner_pos}->grow(1.1, 1.1, 1.1, 1.1);
+            UI.push_matrix(Matrix4.rotate_about_point(banner_pos, spin));
+            defer UI.pop_matrix();
+            UI.quad(starburst_rect, starburst_tex, v4.{1.0, 0.85, 0.2, 0.25});
+        }
+
+        // Banner background with proper ribbon ends
+        banner_tex := get_asset(Texture_Asset, "$AO/ui/kit/Modal Augments/modal_banner_small/modal_banner_red.png");
+        banner_rect := Rect.{banner_pos, banner_pos}->grow(0.85, 1.6, 0.85, 1.6);
+        if banner_tex != null {
+            UI.quad(banner_rect->fit_aspect(banner_tex->get_aspect()), banner_tex, v4.{banner_r, banner_g, banner_b, 1.0});
+        }
+
+        // "50% OFF" top line
+        off_rect := Rect.{banner_pos, banner_pos}->grow(0.0, 1.2, 0.0, 1.2)->offset(0, 0.10);
+
+        off_ts := UI.default_text_settings();
+        off_ts.size = 0.32;
+        off_ts.halign = .CENTER;
+        off_ts.valign = .CENTER;
+        off_ts.color = v4.{1.0, 1.0, 0.85, 1.0};
+        off_ts.do_outline = true;
+        off_ts.outline_thickness = 0.025;
+        off_ts.outline_color = v4.{0.3, 0.05, 0.0, 1.0};
+        off_ts.do_drop_shadow = true;
+        off_ts.drop_shadow_offset = v2.{0.012, -0.012};
+        off_ts.drop_shadow_color = v4.{0.0, 0.0, 0.0, 0.6};
+        UI.text(off_rect, off_ts, "50% OFF");
+
+        // Price comparison inside banner, below 50% OFF
+        sparks_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/sparks/spark_small.png");
+        price_y := banner_pos.y - 0.10;
+        price_center := v2.{banner_pos.x, price_y};
+
+        // Old price "999" (darkened, crossed out) - shifted left
+        old_price_pos := v2.{price_center.x - 0.30, price_y};
+        old_rect := Rect.{old_price_pos, old_price_pos}->grow(0.0, 0.5, 0.0, 0.5);
+
+        old_ts := UI.default_text_settings();
+        old_ts.size = 0.15;
+        old_ts.halign = .CENTER;
+        old_ts.valign = .CENTER;
+        old_ts.color = v4.{0.5, 0.35, 0.3, 0.7};
+        old_ts.do_outline = true;
+        old_ts.outline_thickness = 0.01;
+        old_ts.outline_color = v4.{0.15, 0.0, 0.0, 0.5};
+        UI.text(old_rect, old_ts, "999");
+
+        // Sparks icon next to old price (darkened)
+        if sparks_tex != null {
+            SPARK_OLD :: 0.07;
+            old_spark_rect := Rect.{old_price_pos, old_price_pos}->offset(0.22, 0)->grow(SPARK_OLD, SPARK_OLD, SPARK_OLD, SPARK_OLD);
+            UI.quad(old_spark_rect->fit_aspect(sparks_tex->get_aspect()), sparks_tex, v4.{0.5, 0.35, 0.3, 0.7});
+        }
+
+        // Strikethrough line over old price
+        strike_rect := Rect.{old_price_pos, old_price_pos}->grow(0.01, 0.32, 0.01, 0.32);
+        UI.quad(strike_rect, core_globals.white_sprite, v4.{0.8, 0.2, 0.15, 0.8});
+
+        // New price "499" (bright) - shifted right
+        new_price_pos := v2.{price_center.x + 0.30, price_y};
+        new_rect := Rect.{new_price_pos, new_price_pos}->grow(0.0, 0.5, 0.0, 0.5);
+
+        new_ts := UI.default_text_settings();
+        new_ts.size = 0.20;
+        new_ts.halign = .CENTER;
+        new_ts.valign = .CENTER;
+        new_ts.color = v4.{1.0, 1.0, 0.5, 1.0};
+        new_ts.do_outline = true;
+        new_ts.outline_thickness = 0.018;
+        new_ts.outline_color = v4.{0.3, 0.1, 0.0, 1.0};
+        new_ts.do_drop_shadow = true;
+        new_ts.drop_shadow_offset = v2.{0.008, -0.008};
+        new_ts.drop_shadow_color = v4.{0.0, 0.0, 0.0, 0.6};
+        UI.text(new_rect, new_ts, "499");
+
+        // Sparks icon next to new price (bright)
+        if sparks_tex != null {
+            SPARK_NEW :: 0.09;
+            new_spark_rect := Rect.{new_price_pos, new_price_pos}->offset(0.26, 0)->grow(SPARK_NEW, SPARK_NEW, SPARK_NEW, SPARK_NEW);
+            UI.quad(new_spark_rect->fit_aspect(sparks_tex->get_aspect()), sparks_tex, v4.{1.0, 0.9, 0.3, 1.0});
+        }
+
+        // Small star ribbons overlapping the banner edges
+        ribbon_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/star_ribbons/star_ribbons_large/ribbon_star_yellow.png");
+        if ribbon_tex != null {
+            RIBBON_HALF :: 0.20;
+            left_ribbon := Rect.{banner_pos, banner_pos}->offset(-1.15, 0.03)->grow(RIBBON_HALF, RIBBON_HALF, RIBBON_HALF, RIBBON_HALF);
+            right_ribbon := Rect.{banner_pos, banner_pos}->offset(1.15, 0.03)->grow(RIBBON_HALF, RIBBON_HALF, RIBBON_HALF, RIBBON_HALF);
+            UI.quad(left_ribbon->fit_aspect(ribbon_tex->get_aspect()), ribbon_tex, v4.{1, 1, 1, 0.9});
+            UI.quad(right_ribbon->fit_aspect(ribbon_tex->get_aspect()), ribbon_tex, v4.{1, 1, 1, 0.9});
+        }
+
+        // "BUY NOW!" above GGG if not bought
+        local_player, lok := Game.get_local_player();
+        if lok && !local_player.ggg_bought && !Purchasing.owns_product(local_player, GGG_PRODUCT_ID) || (lok && local_player->is_admin()) {
+            buy_head_y := pos.y + 2.4 + bob;
+            buy_head_pos := v2.{pos.x, buy_head_y};
+
+            buy_head_ts := UI.default_text_settings();
+            buy_head_ts.font = get_asset(Font_Asset, "$AO/fonts/Barlow-Black.ttf");
+            buy_head_ts.size = 0.42;
+            buy_head_ts.halign = .CENTER;
+            buy_head_ts.valign = .CENTER;
+            buy_head_ts.color = v4.{1.0, 0.78, 0.0, 1.0};
+            buy_head_ts.spacing_multiplier = 1.15;
+            buy_head_ts.do_outline = true;
+            buy_head_ts.outline_thickness = 6.0;
+            buy_head_ts.outline_color = v4.{0.0, 0.0, 0.0, 1.0};
+            buy_head_ts.do_drop_shadow = true;
+            buy_head_ts.drop_shadow_offset = v2.{0.012, -0.012};
+            buy_head_ts.drop_shadow_color = v4.{0.0, 0.0, 0.0, 0.5};
+
+            buy_head_rect := Rect.{buy_head_pos, buy_head_pos}->grow(0.0, 1.0, 0.0, 1.0);
+            UI.text(buy_head_rect, buy_head_ts, "BUY NOW!");
+        }
+    }
+
     ao_update :: method(dt: float) {
         if spine == null return;
 
@@ -74,6 +221,7 @@ GGG_Pedestal :: class : Interactable {
 
     can_use :: method(player: Player) -> bool {
         if player == null return false;
+        if player->is_admin() return true;
         if player.ggg_bought || Purchasing.owns_product(player, GGG_PRODUCT_ID) {
             this->set_text("Bought!");
             return false;
