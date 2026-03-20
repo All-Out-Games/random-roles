@@ -217,9 +217,9 @@ rr_mimicer_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 	layer->create_transition(spawn_in_state, idle_state, true);
 
 	// Lunge
-	lunge_state := layer->create_state("004RAND/Furious_Strikes_Quick", false, 0.5);
+	lunge_state := layer->create_state("004RAND/Void_Lunge", false, 0.5);
 	layer->create_global_transition(lunge_state, false)->create_trigger_condition(lunge_trigger);
-	lunge_end_state := layer->create_state("004RAND/Flinch", false, 0.5);
+	lunge_end_state := layer->create_state("004RAND/Void_Lunge_end", false, 0.5);
 	layer->create_global_transition(lunge_end_state, false)->create_trigger_condition(lunge_end_trigger);
 	layer->create_transition(lunge_end_state, idle_state, true);
 
@@ -231,16 +231,22 @@ rr_mimicer_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 
 rr_mimicer_setup_creature_actions :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 	slash_trigger := sm->create_variable("slash", .TRIGGER);
+	slash_prowl_trigger := sm->create_variable("slash_prowl", .TRIGGER);
 	slash_escalated_trigger := sm->create_variable("slash_escalated", .TRIGGER);
 	spew_trigger := sm->create_variable("spew", .TRIGGER);
 	scream_trigger := sm->create_variable("scream", .TRIGGER);
 	prowl_lunge_trigger := sm->create_variable("prowl_lunge", .TRIGGER);
 	corrupt_trigger := sm->create_variable("corrupt", .TRIGGER);
 
-	// Slash (kill — standard)
+	// Slash (kill — standard upright)
 	slash_state := layer->create_state("004RAND/Slash_With_Hand", false, 0.8);
 	layer->create_global_transition(slash_state, false)->create_trigger_condition(slash_trigger);
 	layer->create_transition(slash_state, idle_state, true);
+
+	// Slash (kill — all fours / prowl)
+	slash_prowl_state := layer->create_state("004RAND/Slash_With_Hand_All_Fours", false, 0.8);
+	layer->create_global_transition(slash_prowl_state, false)->create_trigger_condition(slash_prowl_trigger);
+	layer->create_transition(slash_prowl_state, idle_state, true);
 
 	// Slash (kill — escalated, 2+ stolen faces)
 	slash_esc_state := layer->create_state("004RAND/Furious_Strikes_1_End", false, 1.0);
@@ -248,7 +254,7 @@ rr_mimicer_setup_creature_actions :: proc(sm: State_Machine, layer: State_Machin
 	layer->create_transition(slash_esc_state, idle_state, true);
 
 	// Prowl Lunge
-	prowl_lunge_state := layer->create_state("004RAND/Creepy_Crawly_Attack", false, 0.5);
+	prowl_lunge_state := layer->create_state("004RAND/Creepy_Crawly_Full", false, 0.5);
 	layer->create_global_transition(prowl_lunge_state, false)->create_trigger_condition(prowl_lunge_trigger);
 	layer->create_transition(prowl_lunge_state, idle_state, true);
 
@@ -257,12 +263,12 @@ rr_mimicer_setup_creature_actions :: proc(sm: State_Machine, layer: State_Machin
 	layer->create_global_transition(spew_state, false)->create_trigger_condition(spew_trigger);
 	layer->create_transition(spew_state, idle_state, true);
 
-	// Scream (unleash)
-	scream_state := layer->create_state("004RAND/Scream", false, 1.0);
+	// Unleash transformation
+	scream_state := layer->create_state("004RAND/Transform_Into_Ultimate_Form", false, 1.0);
 	layer->create_global_transition(scream_state, false)->create_trigger_condition(scream_trigger);
 	layer->create_transition(scream_state, idle_state, true);
 
-	// Corrupt (darkness_slam → Slash_With_Hand_Dark)
+	// Corrupt channeling
 	corrupt_state := layer->create_state("004RAND/Slash_With_Hand_Dark", false, 1.0);
 	layer->create_global_transition(corrupt_state, false)->create_trigger_condition(corrupt_trigger);
 	layer->create_transition(corrupt_state, idle_state, true);
@@ -374,6 +380,8 @@ rr_mimicer_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_
 	if mm.is_monster_form && mm.creature_visible {
 		if mm.stolen_faces >= MIMICER_KILL_ESCALATION_FACES {
 			rr_mimicer_creature_trigger(killer, "slash_escalated");
+		} else if mm.is_prowling {
+			rr_mimicer_creature_trigger(killer, "slash_prowl");
 		} else {
 			rr_mimicer_creature_trigger(killer, "slash");
 		}
@@ -1528,11 +1536,9 @@ Mimicer_Kill_Ability :: class : Ability_Base {
 		}
 
 		finder := make_finder(Player, player.entity.world_position, kill_range);
-		for i: 0..players.elements.count-1 {
-			target := players.elements[i];
+		foreach target: component_iterator(Player) {
 			if target == null continue;
-			if !#alive(target.entity) continue;
-			if target == player continue;
+			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
 			finder->check(target, target.entity.world_position);
@@ -1776,11 +1782,9 @@ Mimicer_Spew_Ability :: class : Ability_Base {
 
 	get_closest_spew_target :: proc(instance: Mimicer_Spew_Ability, player: Player) -> Player {
 		finder := make_finder(Player, player.entity.world_position, MIMICER_SPEW_RANGE);
-		for i: 0..players.elements.count-1 {
-			target := players.elements[i];
+		foreach target: component_iterator(Player) {
 			if target == null continue;
-			if !#alive(target.entity) continue;
-			if target == player continue;
+			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
 			finder->check(target, target.entity.world_position);
 		}
