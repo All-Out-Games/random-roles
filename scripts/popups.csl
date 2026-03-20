@@ -354,9 +354,8 @@ spin_rebuild_enabled_roles :: proc() {
 	spin_enabled_roles->append(Player_Role.PIRATE);
 	spin_enabled_roles->append(Player_Role.HITMAN);
 	spin_enabled_roles->append(Player_Role.WEREWOLF);
-	if rr_ggg_role_enabled {
-		spin_enabled_roles->append(Player_Role.GOO_GOO_GAGA);
-	}
+	// GGG: always show in spinner. Non-owners see a lock overlay.
+	spin_enabled_roles->append(Player_Role.GOO_GOO_GAGA);
 	// Mimicer is never shown in the spinner (not player-ownable).
 }
 
@@ -659,6 +658,49 @@ render_spin :: proc(using popup: Role_Spin_Popup, elapsed: float) {
 			if star_tex != null {
 				UI.quad(star_rect->fit_aspect(star_tex->get_aspect()), star_tex, v4.{1, 1, 1, 1});
 			}
+		}
+
+		// Lock overlay for roles the local player doesn't have access to
+		is_locked := false;
+		if role == Player_Role.MIMICER && !rr_mimicer_role_enabled && role != target_role {
+			is_locked = true;
+		}
+		if role == Player_Role.GOO_GOO_GAGA && role != target_role {
+			lock_local_p, lock_local_ok := Game.get_local_player();
+			if !lock_local_ok || lock_local_p == null || !Purchasing.owns_product(lock_local_p, GGG_PRODUCT_ID) {
+				is_locked = true;
+			}
+		}
+		if is_locked {
+			// Dark overlay
+			UI.quad(card_rect, core_globals.white_sprite, v4.{0, 0, 0, 0.7});
+
+			// Lock icon (centered in card)
+			lock_size := 60.0 * scale;
+			lock_cy := (card_rect.min.y + card_rect.max.y) / 2.0 + 20.0 * scale;
+			lock_rect := Rect.{
+				v2.{card_cx - lock_size / 2.0, lock_cy - lock_size / 2.0},
+				v2.{card_cx + lock_size / 2.0, lock_cy + lock_size / 2.0}
+			};
+			lock_tex := get_asset(Texture_Asset, "icon/Lock Outline 64.png");
+			if lock_tex != null {
+				UI.quad(lock_rect->fit_aspect(lock_tex->get_aspect()), lock_tex, v4.{1, 1, 1, 0.9});
+			}
+
+			// "LOCKED" text below icon
+			lock_ts := UI.default_text_settings();
+			lock_ts.size = 28;
+			lock_ts.color = v4.{1, 1, 1, 0.9};
+			lock_ts.halign = .CENTER;
+			lock_ts.valign = .CENTER;
+			lock_ts.do_outline = true;
+			lock_ts.outline_thickness = 3;
+			lock_ts.outline_color = v4.{0, 0, 0, 1};
+			lock_text_rect := Rect.{
+				v2.{card_rect.min.x, lock_cy - lock_size - 25.0 * scale},
+				v2.{card_rect.max.x, lock_cy - lock_size}
+			};
+			UI.text(lock_text_rect, lock_ts, "LOCKED");
 		}
 	}
 

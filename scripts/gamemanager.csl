@@ -3180,7 +3180,7 @@ assign_players_to_types :: proc() {
 	}
 
 	// Build unforced player list and assign types with purchase boosts.
-	rng := rng_seed((player_count.(u64) + round_number.(u64)));
+	rng := rng_seed((get_real_time() * 1000000.0).(u64) + player_count.(u64) + round_number.(u64));
 	unforced_for_types: [..]Player;
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
@@ -3221,7 +3221,16 @@ assign_players_to_types :: proc() {
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 	append(ref traitor_roles_master, Player_Role.HITMAN);
 	append(ref traitor_roles_master, Player_Role.WEREWOLF);
-	if rr_ggg_role_enabled {
+	// GGG: add to master if any connected player owns the product.
+	ggg_any_owner := false;
+	for i: 0..players.elements.count-1 {
+		p_check := players.elements[i];
+		if p_check != null && Purchasing.owns_product(p_check, GGG_PRODUCT_ID) {
+			ggg_any_owner = true;
+			break;
+		}
+	}
+	if ggg_any_owner {
 		append(ref traitor_roles_master, Player_Role.GOO_GOO_GAGA);
 	}
 	if rr_mimicer_role_enabled {

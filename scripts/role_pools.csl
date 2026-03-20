@@ -276,3 +276,19 @@ is_boost :: proc(player: Player, product_id: string) {
         Chat.server_send_message(format_string("Owned. Uses: %. Boost: %0%%.", {usage, format_float(chance * 100.0, decimals=0)}), player);
     }
 } @chat_command
+
+// ════════════════════════════════════════════════════════════════════
+//  Admin command — /reset_boost <product_id>
+// ════════════════════════════════════════════════════════════════════
+reset_boost :: proc(player: Player, product_id: string) {
+    owns := Purchasing.owns_product(player, product_id);
+    if !owns {
+        Chat.server_send_message(format_string("You do NOT own product %.", {product_id}), player);
+        return;
+    }
+
+    usage_key := format_string("purchase_usage_%", {product_id});
+    Save.set_int(player, usage_key, 0);
+    chance := rp_get_boost_chance(0);
+    Chat.server_send_message(format_string("Boost reset! Uses: 0. Boost: %0%%.", {format_float(chance * 100.0, decimals=0)}), player);
+} @chat_command
