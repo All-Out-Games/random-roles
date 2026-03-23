@@ -54,6 +54,8 @@ MIMICER_SPEW_COOLDOWN :: 50.0;
 MIMICER_SPEW_BLIND_SECONDS :: 10.0;
 MIMICER_SPEW_DISTORT_SECONDS :: 20.0;
 MIMICER_SPEW_RANGE :: 2.5;
+MIMICER_SPEW_BLIND_LOS_INNER :: 0.5;
+MIMICER_SPEW_BLIND_LOS_OUTER :: 0.8;
 
 // Stolen Faces unlock thresholds
 MIMICER_VOID_LUNGE_UNLOCK_FACES :: 1;
@@ -787,14 +789,12 @@ rr_mimicer_stun_player :: proc(target: Player, seconds: float) {
 // =============================================================================
 
 rr_mimicer_spew_corruption :: proc(player: Player, target: Player) {
-	if !Game.is_server() return;
 	mm := player.entity->get_component(Mimicer_Module);
 	if mm == null return;
 
 	target.mimicer_blinded = true;
 	target.mimicer_blinded_until = get_time() + MIMICER_SPEW_BLIND_SECONDS;
 	target.mimicer_distorted_until = get_time() + MIMICER_SPEW_DISTORT_SECONDS;
-
 	target->set_trigger("mimicer_blinded_start");
 	target->add_disable_movement_input_reason(MIMICER_SPEW_LOCK_REASON);
 
@@ -1275,17 +1275,10 @@ rr_mimicer_begin_unleash :: proc(player: Player) {
 	}
 
 	mm.swarm_active = true;
-	mm.swarm_end_time = get_time() + 1.5 + MIMICER_SWARM_DURATION;
+	mm.swarm_scream_until = get_time() + 1.5;
+	mm.swarm_end_time = mm.swarm_scream_until + MIMICER_SWARM_DURATION;
 	mm.swarm_current_index = 0;
-
-	// After scream animation (1.5s), unlock movement and inhabit first clone
-	// Use a delayed action via the update loop
-	player->remove_disable_movement_input_reason(MIMICER_UNLEASH_LOCK_REASON);
-
-	// Inhabit first clone immediately after unlock
-	if mm.swarm_clones.count > 0 {
-		rr_mimicer_inhabit_clone(player, 0);
-	}
+	mm.swarm_clone_framed = false;
 }
 
 rr_mimicer_spawn_shadow_clone :: proc(pillar: Void_Pillar) -> Entity {
@@ -1335,6 +1328,9 @@ rr_mimicer_inhabit_clone :: proc(player: Player, index: int) {
 
 	clone := clone_entity->get_component(Mimicer_Shadow_Clone);
 	if clone == null return;
+
+	// Reset framing state when switching clones
+	mm.swarm_clone_framed = false;
 
 	// End current disguise if active
 	if mm.is_disguised {
@@ -1443,6 +1439,16 @@ rr_mimicer_update_swarm :: proc(player: Player, dt: float) {
 	if mm == null return;
 
 	now := get_time();
+
+	// Wait for scream animation to finish before inhabiting first clone
+	if mm.swarm_scream_until > 0.0 && now >= mm.swarm_scream_until {
+		mm.swarm_scream_until = 0.0;
+		player->remove_disable_movement_input_reason(MIMICER_UNLEASH_LOCK_REASON);
+		if mm.swarm_clones.count > 0 {
+			rr_mimicer_inhabit_clone(player, 0);
+		}
+	}
+
 	if now >= mm.swarm_end_time {
 		rr_mimicer_end_swarm(player);
 		return;
@@ -1454,6 +1460,8 @@ rr_mimicer_end_swarm :: proc(player: Player) {
 	if mm == null return;
 
 	mm.swarm_active = false;
+	mm.swarm_clone_framed = false;
+	mm.swarm_scream_until = 0.0;
 
 	// Destroy all remaining clone entities
 	for i: 0..mm.swarm_clones.count-1 {
@@ -1468,6 +1476,12 @@ rr_mimicer_end_swarm :: proc(player: Player) {
 		rr_mimicer_end_disguise(player);
 	}
 
+	// Restore creature form — Mimicer was in monster form before unleash
+	if mm.is_monster_form && !mm.creature_visible {
+		rr_mimicer_swap_to_creature(player);
+	}
+
+	player->remove_disable_movement_input_reason(MIMICER_UNLEASH_LOCK_REASON);
 	Notifier.notify(player, "Doppelganger Swarm ended.");
 }
 
@@ -1546,6 +1560,21 @@ rr_mimicer_update_blind :: proc(player: Player, dt: float) {
 		player.mimicer_distorted_until = 0.0;
 	}
 }
+
+// Client-side: draw dark overlay when spew-blinded (like GGG trap).
+rr_draw_mim_blind_overlay :: proc(player: Player) {
+	if player == null return;
+	if !player->is_local() return;
+	if !player.mimicer_blinded return;
+
+	screen := UI.get_screen_rect();
+	UI.push_layer(9998);
+	defer UI.pop_layer();
+
+	bg := get_asset(Texture_Asset, "$AO/white.png");
+	UI.quad(screen, bg, v4.{0.0, 0.0, 0.0, 0.92});
+}
+
 
 // Doctor cure helper
 rr_mimicer_cure_spew :: proc(target: Player) {
@@ -1659,6 +1688,56 @@ Mimicer_Transform_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			mm := player.entity->get_component(Mimicer_Module);
 			if mm == null return;
+
+			// Swarm-specific transform: framing a clone's identity
+			if mm.swarm_active {
+				if mm.swarm_clone_framed {
+					// Reverting after framing — destroy the current clone
+					mm.is_monster_form = false;
+					mm.skeleton_swap_at = 0.0;
+					rr_mimicer_swap_to_player(player);
+					player->set_trigger("mimicer_revert");
+					player->add_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
+
+					if mm.is_disguised {
+						rr_mimicer_end_disguise(player);
+					}
+					mm.swarm_clone_framed = false;
+
+					// Destroy the inhabited clone
+					idx := mm.swarm_current_index;
+					if idx >= 0 && idx < mm.swarm_clones.count {
+						clone_entity := mm.swarm_clones[idx];
+						if clone_entity != null && #alive(clone_entity) {
+							clone_entity->destroy();
+						}
+					}
+
+					lock := player.entity->get_component(Mimicer_Transform_Lock);
+					if lock == null {
+						lock = player.entity->add_component(Mimicer_Transform_Lock);
+					}
+					lock.end_time = get_time() + MIMICER_TRANSFORM_ANIM_SECONDS;
+					lock.player_entity_id = player.entity.id;
+					lock.active = true;
+				} else {
+					// Transform while inhabiting clone — shift into creature, framing the identity
+					mm.is_monster_form = true;
+					mm.swarm_clone_framed = true;
+					player->set_trigger("mimicer_transform");
+					player->add_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
+					mm.skeleton_swap_at = get_time() + MIMICER_TRANSFORM_ANIM_SECONDS;
+
+					lock := player.entity->get_component(Mimicer_Transform_Lock);
+					if lock == null {
+						lock = player.entity->add_component(Mimicer_Transform_Lock);
+					}
+					lock.end_time = get_time() + MIMICER_TRANSFORM_ANIM_SECONDS;
+					lock.player_entity_id = player.entity.id;
+					lock.active = true;
+				}
+				return;
+			}
 
 			if mm.is_monster_form {
 				// Revert to schleem — transforming back breaks disguise

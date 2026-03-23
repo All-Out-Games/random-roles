@@ -360,6 +360,7 @@ Player :: class : Player_Base {
 			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
 			rr_draw_power_outage_overlay_if_needed(this);
 			rr_ggg_draw_trap_blind_overlay(this);
+			rr_draw_mim_blind_overlay(this);
 			rr_draw_mim_jumpscare(this, delta_time);
 			// Global civilian progress bar – always visible at top-center (except lobby/cinematics).
 			rr_draw_civilian_progress_bar(this);
@@ -434,6 +435,7 @@ Player :: class : Player_Base {
 
 		// Mimicer blind/distort effect (cross-player, runs on all clients).
 		rr_mimicer_update_blind(this, delta_time);
+
 
 		// Drive prowl locomotion bools on player state machine
 		if this.player_role == Player_Role.MIMICER {
@@ -513,6 +515,11 @@ Player :: class : Player_Base {
 		root := this.entity->get_component(GGG_Trap_Root_Effect);
 		if root != null && root.active && root.is_blinded {
 			return v2.{GGG_TRAP_BLIND_LOS_INNER, GGG_TRAP_BLIND_LOS_OUTER};
+		}
+
+		// Mimicer spew blind: same LOS reduction
+		if this.mimicer_blinded {
+			return v2.{MIMICER_SPEW_BLIND_LOS_INNER, MIMICER_SPEW_BLIND_LOS_OUTER};
 		}
 
 		radii := v2.{PLAYER_LIGHT_BASE_INNER_RADIUS, PLAYER_LIGHT_BASE_OUTER_RADIUS};
