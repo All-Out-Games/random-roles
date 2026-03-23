@@ -801,6 +801,121 @@ rr_mimicer_spew_corruption :: proc(player: Player, target: Player) {
 	if mm.is_monster_form && mm.creature_visible {
 		rr_mimicer_creature_trigger(player, "spew");
 	}
+
+	// Spawn hallucination mimicer creatures on every other alive player.
+	// Created disabled; the blinded client's on_state_sync will enable them locally.
+	rr_mimicer_spawn_halluc_creatures(target);
+}
+
+// =============================================================================
+// Spew Hallucination — blinded player sees everyone as a Mimicer
+// =============================================================================
+
+MIMICER_HALLUC_INVIS_REASON :: "mimicer_halluc";
+
+Mim_Halluc_Creature :: class : Component {
+	blinded_player_id: u64;
+	halluc_spine: Spine_Animator;
+
+	ao_on_state_sync :: method() {
+		local_player, ok := Game.get_local_player();
+		if !ok return;
+
+		if local_player.entity.id == blinded_player_id {
+			entity->set_local_enabled(true);
+			parent := entity.parent;
+			if parent != null {
+				p := parent->get_component(Player);
+				if p != null {
+					p->add_invisibility_reason(MIMICER_HALLUC_INVIS_REASON);
+					p->add_name_invisibility_reason(MIMICER_HALLUC_INVIS_REASON);
+				}
+			}
+		} else {
+			entity->set_local_enabled(false);
+		}
+	}
+
+	ao_update :: method(dt: float) {
+		if halluc_spine == null return;
+		if halluc_spine.instance == null return;
+		sm := halluc_spine.instance.state_machine;
+		if sm == null return;
+
+		parent := entity.parent;
+		if parent == null return;
+		p := parent->get_component(Player);
+		if p == null return;
+
+		moving := length_squared(p.agent.velocity) > 0.01;
+		sm->set_bool("is_moving", moving);
+	}
+
+	ao_end :: method() {
+		parent := entity.parent;
+		if parent != null {
+			p := parent->get_component(Player);
+			if p != null {
+				p->remove_invisibility_reason(MIMICER_HALLUC_INVIS_REASON);
+				p->remove_name_invisibility_reason(MIMICER_HALLUC_INVIS_REASON);
+			}
+		}
+	}
+}
+
+rr_mimicer_setup_halluc_state_machine :: proc(ca: Spine_Animator) {
+	sm := State_Machine.create();
+	layer := sm->create_layer("main", 0);
+
+	is_moving := sm->create_variable("is_moving", .BOOL);
+
+	idle_state := layer->create_state("004RAND/Idle", true, 0.0);
+	move_state := layer->create_state("004RAND/Move", true, 0.0);
+	layer->set_initial_state(idle_state);
+
+	idle_to_move := layer->create_transition(idle_state, move_state, false);
+	idle_to_move->create_bool_condition(is_moving, true);
+	move_to_idle := layer->create_transition(move_state, idle_state, false);
+	move_to_idle->create_bool_condition(is_moving, false);
+
+	ca.instance->set_state_machine(sm, true);
+}
+
+rr_mimicer_spawn_halluc_creatures :: proc(blinded_player: Player) {
+	foreach p: component_iterator(Player) {
+		if p == null continue;
+		if p.entity.id == blinded_player.entity.id continue;
+		if p.player_state != Player_State.ALIVE continue;
+
+		he := Scene.create_entity();
+		he->set_parent(p.entity, false);
+		he->set_local_position(v2.{0, 0});
+		he->set_local_scale(v2.{1, 1});
+		he->set_local_rotation(0.0);
+
+		ha := he->add_component(Spine_Animator);
+		ha->awaken();
+		if ha.instance != null {
+			ha.instance->set_skeleton(get_asset(Spine_Asset, MIMICER_CREATURE_RIG));
+			ha.instance->set_skin("normal");
+			ha.instance->set_animation("004RAND/Idle", true, 0);
+			rr_mimicer_setup_halluc_state_machine(ha);
+		}
+
+		hc := he->add_component(Mim_Halluc_Creature);
+		hc.blinded_player_id = blinded_player.entity.id;
+		hc.halluc_spine = ha;
+	}
+}
+
+rr_mimicer_destroy_halluc_creatures :: proc(player: Player) {
+	foreach hc: component_iterator(Mim_Halluc_Creature) {
+		if hc == null continue;
+		if hc.blinded_player_id != player.entity.id continue;
+		if hc.entity != null && #alive(hc.entity) {
+			hc.entity->destroy();
+		}
+	}
 }
 
 // =============================================================================
@@ -1558,6 +1673,7 @@ rr_mimicer_update_blind :: proc(player: Player, dt: float) {
 
 	if player.mimicer_distorted_until > 0.0 && now >= player.mimicer_distorted_until {
 		player.mimicer_distorted_until = 0.0;
+		rr_mimicer_destroy_halluc_creatures(player);
 	}
 }
 
@@ -1583,6 +1699,7 @@ rr_mimicer_cure_spew :: proc(target: Player) {
 	target.mimicer_distorted_until = 0.0;
 	target->remove_disable_movement_input_reason(MIMICER_SPEW_LOCK_REASON);
 	target->set_trigger("mimicer_blinded_end");
+	rr_mimicer_destroy_halluc_creatures(target);
 }
 
 // =============================================================================
