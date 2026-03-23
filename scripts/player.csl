@@ -1950,13 +1950,13 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 	mim := player.entity->get_component(Mimicer_Module);
 	if mim == null return abilityIndex;
 
-	// During Doppelganger Swarm: Cycle Clone, Transform, Kill
+	// During Doppelganger Swarm: Kill, Transform, Cycle Clone
 	if mim.swarm_active {
 		draw_ability_button(player, Mimicer_Kill_Ability, abilityIndex);
 		abilityIndex += 1;
-		draw_ability_button(player, Mimicer_Cycle_Clone_Ability, abilityIndex);
-		abilityIndex += 1;
 		draw_ability_button(player, Mimicer_Transform_Ability, abilityIndex);
+		abilityIndex += 1;
+		draw_ability_button(player, Mimicer_Cycle_Clone_Ability, abilityIndex);
 		abilityIndex += 1;
 		return abilityIndex;
 	}
@@ -1980,24 +1980,17 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 		if mim.stolen_faces >= MIMICER_UNLEASH_UNLOCK_FACES && !mim.unleash_used {
 			draw_ability_button(player, Mimicer_Unleash_Ability, abilityIndex);
 			abilityIndex += 1;
-		} else if rr_mimicer_get_active_pillar_count(player) > 0 {
-			draw_ability_button(player, Mimicer_Teleport_Ability, abilityIndex);
-			abilityIndex += 1;
 		}
 	} else {
-		// Schleem form: Kill, Drag Body, Transform, Prowl + Teleport
+		// Schleem form: Kill, Transform, Drag Body, Prowl + Teleport
 		draw_ability_button(player, Mimicer_Kill_Ability, abilityIndex);
-		abilityIndex += 1;
-		draw_ability_button(player, Drag_Body_Ability, abilityIndex);
 		abilityIndex += 1;
 		draw_ability_button(player, Mimicer_Transform_Ability, abilityIndex);
 		abilityIndex += 1;
+		draw_ability_button(player, Drag_Body_Ability, abilityIndex);
+		abilityIndex += 1;
 		draw_ability_button(player, Mimicer_Prowl_Ability, abilityIndex);
 		abilityIndex += 1;
-		if rr_mimicer_get_active_pillar_count(player) > 0 {
-			draw_ability_button(player, Mimicer_Teleport_Ability, abilityIndex);
-			abilityIndex += 1;
-		}
 	}
 	return abilityIndex;
 }
@@ -3642,6 +3635,62 @@ update_minimap_ui :: proc(player: Player) {
 			n_ui := rr_minimap_world_to_ui(map_rect, nest_comp.entity.world_position);
 			n_r := Rect{n_ui, n_ui}->grow_unscaled(n_size, n_size, n_size, n_size);
 			UI.quad(n_r->fit_aspect(nest_icon2->get_aspect()), nest_icon2, v4.{1.0, 0.3, 0.3, 1.0});
+		}
+	}
+
+	// --- Mimicer: Void Pillar icons + click-to-teleport ---
+	if player->is_local_or_server() && player.player_role == Player_Role.MIMICER {
+		mm_map := player.entity->get_component(Mimicer_Module);
+		if mm_map != null {
+			tp_icon := get_asset(Texture_Asset, "sprites/icons/mimicer/teleport.png");
+			if tp_icon != null {
+				for pi: 0..mm_map.void_pillars.count-1 {
+					pillar_ent := mm_map.void_pillars[pi];
+					if pillar_ent == null continue;
+					if !#alive(pillar_ent) continue;
+					vp_comp := pillar_ent->get_component(Void_Pillar);
+					if vp_comp == null continue;
+
+					is_active := !vp_comp.is_smoldered;
+
+					pillar_ui := rr_minimap_world_to_ui(map_rect, pillar_ent.world_position);
+					pillar_size := map_rect->height() * 0.035;
+					if pillar_size < 16.0 { pillar_size = 16.0; }
+					if pillar_size > 48.0 { pillar_size = 48.0; }
+					pillar_r := Rect{pillar_ui, pillar_ui}->grow_unscaled(pillar_size, pillar_size, pillar_size, pillar_size);
+
+					// Smoldered pillars are dim/grey, active are purple
+					pillar_col: v4;
+					if is_active {
+						pillar_col = v4.{0.7, 0.3, 1.0, 1.0};
+					} else {
+						pillar_col = v4.{0.4, 0.4, 0.4, 0.5};
+					}
+
+					// Clickable button for active pillars to teleport
+					if is_active && player.player_state == Player_State.ALIVE {
+						UI.push_id(format_string("mim_tp_%", {pi}));
+						defer UI.pop_id();
+						tp_bs: Button_Settings = .{};
+						rr_ui_apply_button_click_sound(ref tp_bs);
+						tp_interact := UI.button(pillar_r, tp_bs, .{}, "");
+						UI.quad(pillar_r->fit_aspect(tp_icon->get_aspect()), tp_icon, pillar_col);
+
+						can_tp := mm_map.teleport_cooldown <= 0.0 && game_state == Game_State.INGAME;
+						if !can_tp {
+							// Draw cooldown overlay
+							UI.quad(pillar_r, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.5});
+						}
+
+						if tp_interact.clicked && can_tp {
+							rr_mimicer_teleport_to_pillar(player, pillar_ent);
+							player.show_minimap = false;
+						}
+					} else {
+						UI.quad(pillar_r->fit_aspect(tp_icon->get_aspect()), tp_icon, pillar_col);
+					}
+				}
+			}
 		}
 	}
 

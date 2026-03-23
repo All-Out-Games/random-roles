@@ -485,6 +485,7 @@ rr_mimicer_start_prowl :: proc(player: Player) {
 	if mm == null return;
 
 	mm.is_prowling = true;
+	mm.prowl_near_wall = false;
 	mm.prowl_speed_original = player.agent.movement_speed;
 	mm.prowl_speed_active = true;
 	player.agent.movement_speed = mm.prowl_speed_original * MIMICER_PROWL_SPEED_MULTIPLIER;
@@ -1064,8 +1065,27 @@ Void_Pillar_Civilian_Interact :: class : Interactable {
 }
 
 // =============================================================================
-// Teleport (to next active Void Pillar)
+// Teleport (to a specific or next active Void Pillar)
 // =============================================================================
+
+rr_mimicer_teleport_to_pillar :: proc(player: Player, target_pillar: Entity) {
+	mm := player.entity->get_component(Mimicer_Module);
+	if mm == null return;
+	if mm.teleport_cooldown > 0.0 return;
+
+	if target_pillar == null return;
+	if !#alive(target_pillar) return;
+	vp := target_pillar->get_component(Void_Pillar);
+	if vp == null return;
+	if vp.is_smoldered return;
+
+	pos := target_pillar.world_position;
+	player.entity->set_local_position(pos);
+
+	rr_mimicer_spawn_vfx(pos, "004RAND/Teleport", 1.5);
+
+	mm.teleport_cooldown = MIMICER_TELEPORT_COOLDOWN;
+}
 
 rr_mimicer_teleport_to_next_pillar :: proc(player: Player) {
 	mm := player.entity->get_component(Mimicer_Module);

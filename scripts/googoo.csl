@@ -1147,6 +1147,7 @@ GGG_Free_Trapped_Interactable :: class : Interactable {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.player_role != Player_Role.DOCTOR return false;
+		if player.entity == entity return false;
 		root := entity->get_component(GGG_Trap_Root_Effect);
 		if root == null return false;
 		if !root.active return false;
@@ -1172,14 +1173,22 @@ GGG_Trap_Root_Effect :: class : Component {
 	arm :: method(root_seconds: float, blind_seconds: float) {
 		if root_seconds <= 0.0 { root_seconds = 0.1; }
 		if blind_seconds <= 0.0 { blind_seconds = 0.1; }
-		root_end_time = get_time() + root_seconds;
-		blind_end_time = get_time() + blind_seconds;
-		active = true;
-		is_blinded = true;
-		p := entity->get_component(Player);
-		if p != null {
-			p->add_disable_movement_input_reason(GGG_TRAP_ROOT_REASON);
-			p->set_trigger("ggg_trapped_start");
+		now := get_time();
+		if active {
+			// Extend existing timers instead of resetting
+			root_end_time = root_end_time + root_seconds;
+			blind_end_time = blind_end_time + blind_seconds;
+			is_blinded = true;
+		} else {
+			root_end_time = now + root_seconds;
+			blind_end_time = now + blind_seconds;
+			active = true;
+			is_blinded = true;
+			p := entity->get_component(Player);
+			if p != null {
+				p->add_disable_movement_input_reason(GGG_TRAP_ROOT_REASON);
+				p->set_trigger("ggg_trapped_start");
+			}
 		}
 		// Add doctor-only free interactable
 		existing := entity->get_component(GGG_Free_Trapped_Interactable);
