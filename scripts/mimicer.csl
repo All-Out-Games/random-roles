@@ -569,6 +569,26 @@ rr_mimicer_set_player_alpha :: proc(player: Player, alpha: float) {
 }
 
 // =============================================================================
+// Fake Nameplate helpers for disguise
+// =============================================================================
+
+rr_mimicer_ensure_fake_nameplate :: proc(player: Player, name: string) {
+	fnp := player.entity->get_component(Fake_Nameplate);
+	if fnp == null {
+		fnp = player.entity->add_component(Fake_Nameplate);
+	}
+	fnp.display_name = name;
+	fnp.hidden = false;
+}
+
+rr_mimicer_remove_fake_nameplate :: proc(player: Player) {
+	fnp := player.entity->get_component(Fake_Nameplate);
+	if fnp == null return;
+	fnp.display_name = "";
+	fnp.hidden = true;
+}
+
+// =============================================================================
 // Disguise (from Void Pillars)
 // =============================================================================
 
@@ -598,6 +618,9 @@ rr_mimicer_start_disguise_from_pillar :: proc(player: Player, pillar: Void_Pilla
 
 	player->add_name_invisibility_reason("mimicer_disguise");
 
+	// Show victim's name via a fake nameplate on the player entity.
+	rr_mimicer_ensure_fake_nameplate(player, pillar.stored_victim_name);
+
 	mm.is_disguised = true;
 	mm.disguise_ends_at = get_time() + MIMICER_DISGUISE_DURATION;
 
@@ -619,6 +642,9 @@ rr_mimicer_end_disguise :: proc(player: Player) {
 	}
 
 	player->remove_name_invisibility_reason("mimicer_disguise");
+
+	// Remove the fake nameplate from the player entity.
+	rr_mimicer_remove_fake_nameplate(player);
 
 	mm.is_disguised = false;
 	mm.disguise_ends_at = 0.0;
@@ -1291,6 +1317,10 @@ rr_mimicer_spawn_shadow_clone :: proc(pillar: Void_Pillar) -> Entity {
 	clone.victim_color = pillar.stored_victim_color;
 	clone.clone_spine = clone_spine;
 
+	// Fake nameplate so the clone shows the victim's name like a real player.
+	fnp := clone_entity->add_component(Fake_Nameplate);
+	fnp.display_name = pillar.stored_victim_name;
+
 	return clone_entity;
 }
 
@@ -1334,6 +1364,10 @@ rr_mimicer_inhabit_clone :: proc(player: Player, index: int) {
 	}
 
 	player->add_name_invisibility_reason("mimicer_disguise");
+
+	// Show victim's name via a fake nameplate on the player entity.
+	rr_mimicer_ensure_fake_nameplate(player, clone.victim_name);
+
 	mm.is_disguised = true;
 	mm.disguise_ends_at = 0.0;
 
