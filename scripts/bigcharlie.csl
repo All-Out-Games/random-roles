@@ -261,16 +261,21 @@ BC_Lil_Nugget :: class : Component {
 			dist := length(dir);
 			if dist > 0.5 {
 				move := normalize(dir) * BC_STAMPEDE_NUGGET_SPEED * dt;
-				entity->set_local_position(entity.local_position + move);
+				new_pos := entity.local_position + move;
+
+				// Clamp to navmesh so nuggets don't escape
+				nav_point: v2;
+				nav_hint: s64;
+				if try_find_closest_point_on_navmesh(new_pos, ref nav_point, ref nav_hint) {
+					entity->set_local_position(nav_point);
+				} else {
+					entity->set_local_position(new_pos);
+				}
 			}
 			return;
 		}
 
-		// Idle wandering
-		time := get_time() - spawn_time;
-		wobble_x := sin(time * 1.5 + entity.id.(float) * 0.3) * 0.3;
-		wobble_y := cos(time * 1.2 + entity.id.(float) * 0.7) * 0.15;
-		entity->set_local_position(entity.local_position + v2.{wobble_x * dt, wobble_y * dt});
+		// Idle: stay put, just animate
 	}
 }
 
@@ -644,6 +649,8 @@ rr_bc_heal_trample :: proc(player: Player) {
 // Camera System (Nugget Scouting Network)
 // =============================================================================
 
+BC_CAMERA_ZOOM_SIZE :: 6.0;
+
 rr_bc_enter_camera :: proc(player: Player) {
 	bc := player.entity->get_component(Big_Charlie_Module);
 	if bc == null return;
@@ -655,6 +662,13 @@ rr_bc_enter_camera :: proc(player: Player) {
 	bc.camera_active = true;
 	bc.camera_nugget_index = 0;
 	player->add_freeze_reason(BC_CAMERA_LOCK_REASON);
+
+	// Override camera
+	if player->is_local() {
+		bc.camera_original_size = player.camera.size;
+		player.camera.follow_player = false;
+		player.camera.size = BC_CAMERA_ZOOM_SIZE;
+	}
 }
 
 rr_bc_exit_camera :: proc(player: Player) {
@@ -664,6 +678,12 @@ rr_bc_exit_camera :: proc(player: Player) {
 
 	bc.camera_active = false;
 	player->remove_freeze_reason(BC_CAMERA_LOCK_REASON);
+
+	// Restore camera
+	if player->is_local() {
+		player.camera.follow_player = true;
+		player.camera.size = bc.camera_original_size;
+	}
 }
 
 rr_bc_camera_next :: proc(player: Player) {
@@ -909,7 +929,8 @@ rr_bc_start_revert :: proc(player: Player) {
 	player->add_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
 
 	rr_bc_swap_to_player(player);
-	bc.skeleton_swap_at = 0.0;
+	// Schedule unlock after revert animation plays
+	bc.skeleton_swap_at = get_time() + BC_TRANSFORM_ANIM_SECONDS;
 }
 
 rr_bc_force_revert :: proc(player: Player) {
@@ -1004,6 +1025,18 @@ rr_bc_update :: proc(player: Player, dt: float) {
 		rr_bc_end_rampage(player, bc);
 	}
 
+	// Camera: override every frame on local client (server sync resets follow_player)
+	if bc.camera_active && player->is_local() {
+		player.camera.follow_player = false;
+		player.camera.size = BC_CAMERA_ZOOM_SIZE;
+		nugget := rr_bc_get_camera_nugget(player);
+		if nugget != null && #alive(nugget) {
+			player.camera.position = nugget.world_position;
+		} else {
+			rr_bc_exit_camera(player);
+		}
+	}
+
 	// Stampede nugget movement tracking
 	has_stampeding := false;
 	for i: 0..bc.nugget_entities.count-1 {
@@ -1074,15 +1107,11 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	screen := UI.get_screen_rect();
+	safe := UI.get_safe_screen_rect();
 	UI.push_layer(9990);
 	defer UI.pop_layer();
 
-	// Dark overlay to emphasize camera mode
-	bg := get_asset(Texture_Asset, "$AO/white.png");
-	UI.quad(screen, bg, v4.{0.0, 0.0, 0.0, 0.3});
-
-	// Camera label
+	// Camera label at top
 	ts := UI.default_text_settings();
 	ts.size = 32;
 	ts.color = v4.{1.0, 0.8, 0.8, 1.0};
@@ -1093,14 +1122,35 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 	ts.outline_color = v4.{0, 0, 0, 1};
 
 	rr_bc_cleanup_dead_nuggets(bc);
-	label_rect := screen->cut_top(50)->offset(0, 20);
+	label_rect := safe->top_center_rect()->grow(25, 150, 25, 150)->offset(0, -30);
 	UI.text(label_rect, ts, "Nugget Camera %/%", {bc.camera_nugget_index + 1, bc.nugget_entities.count});
 
-	// Navigation hints
-	ts.size = 24;
-	ts.valign = .BOTTOM;
-	nav_rect := screen->cut_bottom(50)->offset(0, -20);
-	UI.text(nav_rect, ts, "< Prev | Next >");
+	// Prev / Next buttons at bottom
+	if bc.nugget_entities.count > 1 {
+		bs := UI.default_button_settings();
+		bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png");
+		btn_ts := UI.default_text_settings();
+		btn_ts.size = 28;
+		btn_ts.do_outline = true;
+		btn_ts.outline_thickness = 2;
+		btn_ts.outline_color = v4.{0, 0, 0, 1};
+
+		btn_area := safe->bottom_center_rect()->grow(30, 200, 30, 200)->offset(0, 80);
+		prev_rect := btn_area->subrect(0.0, 0.0, 0.45, 1.0);
+		next_rect := btn_area->subrect(0.55, 0.0, 1.0, 1.0);
+
+		UI.push_id("bc_cam_prev", {});
+		defer UI.pop_id();
+		if UI.button(prev_rect, bs, btn_ts, "< Prev").clicked {
+			rr_bc_camera_prev(player);
+		}
+
+		UI.push_id("bc_cam_next", {});
+		defer UI.pop_id();
+		if UI.button(next_rect, bs, btn_ts, "Next >").clicked {
+			rr_bc_camera_next(player);
+		}
+	}
 }
 
 // =============================================================================

@@ -1090,6 +1090,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .WEREWOLF:      return "WEREWOLF";
 		case .GOO_GOO_GAGA:  return "GOO GOO GAGA";
 		case .MIMICER:       return "MIMICER";
+		case .BIG_CHARLIE:   return "BIG CHARLIE";
 	}
 	return "CREW";
 }
@@ -1605,6 +1606,7 @@ draw_player_role_hud :: proc(player: Player) {
 
 	draw_ggg_role_hud(player);
 	draw_mimicer_role_hud(player);
+	draw_bc_role_hud(player);
 }
 
 // --- GGG ability unlock progress: left side ---
@@ -1901,6 +1903,139 @@ rr_mimicer_draw_hud_rows :: proc(player: Player, mm: Mimicer_Module, faces: int,
 		label := used ? "Unleash: USED" : format_string("Unleash: %/%", .{min(faces, MIMICER_UNLEASH_UNLOCK_FACES), MIMICER_UNLEASH_UNLOCK_FACES});
 		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, label);
 	}
+}
+
+// --- Big Charlie Flesh Mass progress: left side ---
+draw_bc_role_hud :: proc(player: Player) {
+	if player == null return;
+	if player.player_role != Player_Role.BIG_CHARLIE return;
+	if !player->is_local_or_server() return;
+	if player.player_type != Player_Type.TRAITOR return;
+
+	bc := player.entity->get_component(Big_Charlie_Module);
+	if bc == null return;
+
+	safe := UI.get_safe_screen_rect();
+	PANEL_W :: 300.0;
+	ROW_H :: 32.0;
+	LIST_PAD :: 10.0;
+	DROPDOWN_SLICE_PX :: 16.0;
+
+	row_count := 6;
+	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
+
+	header_rect := rr_draw_task_list_header(safe, false, player);
+
+	if player.task_list_open {
+	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+
+	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
+	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
+	checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
+
+	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
+
+	base_ts := UI.default_text_settings();
+	base_ts.size = 20;
+	base_ts.halign = .LEFT;
+	base_ts.valign = .CENTER;
+	base_ts.do_outline = true;
+	base_ts.outline_thickness = 3;
+	base_ts.outline_color = v4.{0, 0, 0, 1};
+
+	list_content := list_rect->inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
+	mass := bc.flesh_mass;
+
+	// Row 1: Form status
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		if bc.rampage_active {
+			row_ts.color = v4.{1.0, 0.1, 0.1, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "RAMPAGE");
+		} else if bc.is_monster_form {
+			row_ts.color = v4.{1.0, 0.4, 0.3, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "BIG CHARLIE");
+		} else {
+			row_ts.color = v4.{0.9, 0.9, 0.9, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Schleem");
+		}
+	}
+	// Row 2: Flesh Mass + Nuggets
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		row_ts.color = v4.{1.0, 0.6, 0.7, 1.0};
+		rr_bc_cleanup_dead_nuggets(bc);
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Flesh Mass: % | Nuggets: %", .{mass, bc.nugget_entities.count}));
+	}
+	// Row 3: Unlock Slough (1 Flesh Mass)
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := mass >= 1;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Slough: %/1", .{min(mass, 1)}));
+	}
+	// Row 4: Unlock Marrow (2 Flesh Mass)
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := mass >= 2;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Marrow: %/2", .{min(mass, 2)}));
+	}
+	// Row 5: Unlock Stampede (3 Flesh Mass)
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := mass >= 3;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Stampede: %/3", .{min(mass, 3)}));
+	}
+	// Row 6: Nests count
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		row_ts.size = 18;
+		rr_bc_cleanup_dead_nests(bc);
+		nest_count := bc.nest_entities.count;
+		if nest_count > 0 {
+			row_ts.color = v4.{0.5, 0.9, 1.0, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Active Nests: %", .{nest_count}));
+		}
+	}
+	} // end task_list_open
 }
 
 // --- Werewolf transform (ability-driven, server authoritative) ---
