@@ -1545,7 +1545,9 @@ Resurrect_Ability :: class : Ability_Base {
             if p == null continue;
             if p.entity.id == doctor.entity.id continue;
             if p.player_state != Player_State.ALIVE continue;
-            if !p.mimicer_blinded && p.mimicer_distorted_until <= 0.0 continue;
+            has_spew := p.mimicer_blinded || p.mimicer_distorted_until > 0.0;
+            has_trample := p.bc_trampled;
+            if !has_spew && !has_trample continue;
             finder->check(p, p.entity.world_position);
         }
         return finder.closest;
@@ -1570,12 +1572,19 @@ Resurrect_Ability :: class : Ability_Base {
         if params.clicked && params.can_use {
             corpse := instance->get_closest_resurrectable_corpse(instance.player);
             if corpse == null {
-                // No corpse — try curing a nearby Spew victim instead.
+                // No corpse — try curing a nearby Spew/Trample victim instead.
                 spew_victim := instance->get_closest_spew_victim(instance.player);
                 if spew_victim != null {
-                    rr_mimicer_cure_spew(spew_victim);
-                    instance.player->Notify(format_string("Cured %!", .{spew_victim.entity->get_name()}));
-                    spew_victim->Notify("The Doctor cured your corruption!");
+                    if spew_victim.mimicer_blinded || spew_victim.mimicer_distorted_until > 0.0 {
+                        rr_mimicer_cure_spew(spew_victim);
+                        instance.player->Notify(format_string("Cured %!", .{spew_victim.entity->get_name()}));
+                        spew_victim->Notify("The Doctor cured your corruption!");
+                    }
+                    if spew_victim.bc_trampled {
+                        rr_bc_heal_trample(spew_victim);
+                        instance.player->Notify(format_string("Healed %!", .{spew_victim.entity->get_name()}));
+                        spew_victim->Notify("The Doctor healed your injuries!");
+                    }
                     instance.current_cooldown = 1.0;
                 }
                 return;
@@ -1743,6 +1752,7 @@ DNA_Sample_Ability :: class : Ability_Base {
 			if corpse.has_been_reported continue;
 			if corpse.has_dna_been_sampled continue;
 			if corpse.ggg_is_wrapped continue;
+			if corpse.bc_nested continue;
 			// Only corpses with known player killers yield a vial.
 			if corpse.killer_player_entity_id == 0 continue;
 			finder->check(corpse, corpse.entity.world_position);
@@ -3586,4 +3596,359 @@ Blue_Portal_Ability :: class : Ability_Base {
 	on_draw_button :: proc(instance: Blue_Portal_Ability, rect: Rect) {
 		draw_ability_name_label(rect, Blue_Portal_Ability.NAME);
 	}
+}
+
+// =============================================================================
+// Big Charlie Abilities
+// =============================================================================
+
+// --- Bone Snap (Kill) ---
+// Replaces the default Kill_Ability for Big Charlie. Melee range kill that
+// spawns a Lil' Nugget and plays the Bone Snap animation.
+
+BC_Bone_Snap_Ability :: class : Ability_Base {
+	NAME :: "Bone Snap";
+
+	on_init :: method() {
+		name = NAME;
+		icon = get_asset(Texture_Asset, "sprites/icons/big_charlie/abilities/Bone_Snap_Icon.png");
+	}
+
+	get_closest_target :: proc(instance: BC_Bone_Snap_Ability, player: Player) -> Player {
+		bc := player.entity->get_component(Big_Charlie_Module);
+		kill_range := BC_KILL_RANGE;
+		if bc != null && bc.rampage_active {
+			kill_range = BC_STAMPEDE_RAMPAGE_KILL_RANGE;
+		}
+
+		finder := make_finder(Player, player.entity.world_position, kill_range);
+		foreach target: component_iterator(Player) {
+			if target == null continue;
+			if !#alive(target.entity) continue;
+			if target == player continue;
+			if target.player_state != Player_State.ALIVE continue;
+			if player.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR continue;
+			finder->check(target, target.entity.world_position);
+		}
+		return finder.closest;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player->has_task_in_progress() return false;
+
+		bc := player.entity->get_component(Big_Charlie_Module);
+		if bc != null && bc.camera_active return false;
+
+		return get_closest_target(this, player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			target := get_closest_target(this, player);
+			if target != null {
+				player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
+
+				target->kill_with_killer(player.entity.id);
+
+				// SFX
+				if Game.is_server() {
+					sfx := SFX.default_sfx_desc();
+					sfx->set_position(target.entity.world_position);
+					sfx.volume = 0.35;
+					sfx.volume_perturb = 0.08;
+					sfx.speed_perturb = 0.06;
+					// Global SFX mix
+					sfx.volume *= 0.25;
+					sfx.volume_perturb *= 0.25;
+					rr_play_sfx("sfx/traitor_kill_death.wav", sfx);
+				}
+
+				bc := player.entity->get_component(Big_Charlie_Module);
+				if bc != null && bc.rampage_active {
+					current_cooldown = BC_STAMPEDE_RAMPAGE_KILL_CD;
+				} else {
+					current_cooldown = BC_KILL_COOLDOWN;
+				}
+			}
+		}
+	}
+
+	on_draw_button :: method(rect: Rect) {
+		draw_ability_name_label(rect, NAME);
+	}
+}
+
+// --- Transform Ability ---
+
+BC_Transform_Ability :: class : Ability_Base {
+	NAME :: "Transform";
+
+	on_init :: method() {
+		name = NAME;
+		icon = get_asset(Texture_Asset, "sprites/icons/big_charlie/Big_Charlie.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role != Player_Role.BIG_CHARLIE return false;
+		bc := player.entity->get_component(Big_Charlie_Module);
+		if bc == null return false;
+		if bc.camera_active return false;
+		if bc.skeleton_swap_at > 0.0 return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			bc := player.entity->get_component(Big_Charlie_Module);
+			if bc == null return;
+
+			if bc.is_monster_form {
+				rr_bc_start_revert(player);
+			} else {
+				rr_bc_start_transform(player);
+			}
+			current_cooldown = 2.0;
+		}
+	}
+
+	on_draw_button :: method(rect: Rect) {
+		bc := player.entity->get_component(Big_Charlie_Module);
+		if bc != null && bc.is_monster_form {
+			draw_ability_name_label(rect, "Revert");
+		} else {
+			draw_ability_name_label(rect, NAME);
+		}
+	}
+}
+
+// --- Slough (1 Flesh Mass) ---
+
+BC_Slough_Ability :: class : Ability_Base {
+	NAME :: "Slough";
+
+	on_init :: method() {
+		name = NAME;
+		icon = get_asset(Texture_Asset, "sprites/icons/big_charlie/abilities/Slough_Icon.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role != Player_Role.BIG_CHARLIE return false;
+
+		bc := player.entity->get_component(Big_Charlie_Module);
+		if bc == null return false;
+		if bc.flesh_mass < 1 return false;
+		if bc.camera_active return false;
+		if !bc.is_monster_form return false;
+
+		// Need at least one nugget nearby
+		rr_bc_cleanup_dead_nuggets(bc);
+		player_pos := player.entity.world_position;
+		for i: 0..bc.nugget_entities.count-1 {
+			nugget := bc.nugget_entities[i];
+			if nugget == null || !#alive(nugget) continue;
+			dist := length(nugget.world_position - player_pos);
+			if dist < BC_SLOUGH_NUGGET_ABSORB_RANGE return true;
+		}
+		return false;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			rr_bc_perform_slough(player);
+			current_cooldown = BC_SLOUGH_COOLDOWN;
+		}
+	}
+
+	on_draw_button :: method(rect: Rect) {
+		draw_ability_name_label(rect, NAME);
+	}
+}
+
+// --- Marrow (2 Flesh Mass) ---
+
+BC_Marrow_Ability :: class : Ability_Base {
+	NAME :: "Marrow";
+
+	on_init :: method() {
+		name = NAME;
+		icon = get_asset(Texture_Asset, "sprites/icons/big_charlie/abilities/Marrow_Icon.png");
+	}
+
+	get_closest_corpse :: proc(instance: BC_Marrow_Ability, p: Player) -> Corpse {
+		finder := make_finder(Corpse, p.entity.world_position, BC_MARROW_RANGE);
+		foreach corpse: component_iterator(Corpse) {
+			if corpse == null continue;
+			if !#alive(corpse.entity) continue;
+			if corpse.bc_nested continue;
+			finder->check(corpse, corpse.entity.world_position);
+		}
+		return finder.closest;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role != Player_Role.BIG_CHARLIE return false;
+
+		bc := player.entity->get_component(Big_Charlie_Module);
+		if bc == null return false;
+		if bc.flesh_mass < 2 return false;
+		if bc.camera_active return false;
+		if !bc.is_monster_form return false;
+
+		return get_closest_corpse(this, player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			corpse := get_closest_corpse(this, player);
+			if corpse != null {
+				// Play tendril animation on creature
+				rr_bc_creature_trigger(player, "tendril");
+
+				// Create nest over corpse
+				rr_bc_create_nest(corpse.entity, player.entity.id);
+
+				current_cooldown = BC_MARROW_COOLDOWN;
+			}
+		}
+	}
+
+	on_draw_button :: method(rect: Rect) {
+		draw_ability_name_label(rect, NAME);
+	}
+}
+
+// --- Stampede (3 Flesh Mass) ---
+
+BC_Stampede_Ability :: class : Ability_Base {
+	NAME :: "Stampede";
+
+	on_init :: method() {
+		name = NAME;
+		icon = get_asset(Texture_Asset, "sprites/icons/big_charlie/abilities/Stampede_Icon.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role != Player_Role.BIG_CHARLIE return false;
+
+		bc := player.entity->get_component(Big_Charlie_Module);
+		if bc == null return false;
+		if bc.flesh_mass < 3 return false;
+		if bc.camera_active return false;
+		if !bc.is_monster_form return false;
+		if bc.rampage_active return false;
+
+		// Need at least one nugget
+		rr_bc_cleanup_dead_nuggets(bc);
+		return bc.nugget_entities.count > 0;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			rr_bc_start_stampede(player);
+			current_cooldown = BC_STAMPEDE_COOLDOWN;
+		}
+	}
+
+	on_draw_button :: method(rect: Rect) {
+		draw_ability_name_label(rect, NAME);
+	}
+}
+
+// --- Nugget Camera ---
+
+BC_Camera_Ability :: class : Ability_Base {
+	NAME :: "Scouting";
+
+	on_init :: method() {
+		name = NAME;
+		icon = get_asset(Texture_Asset, "sprites/icons/big_charlie/Lil_Nugget.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role != Player_Role.BIG_CHARLIE return false;
+
+		bc := player.entity->get_component(Big_Charlie_Module);
+		if bc == null return false;
+
+		// If already in camera, can always toggle off
+		if bc.camera_active return true;
+
+		// Need at least one nugget to enter camera
+		rr_bc_cleanup_dead_nuggets(bc);
+		return bc.nugget_entities.count > 0;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			bc := player.entity->get_component(Big_Charlie_Module);
+			if bc == null return;
+
+			if bc.camera_active {
+				rr_bc_exit_camera(player);
+			} else {
+				rr_bc_enter_camera(player);
+			}
+			current_cooldown = 1.0;
+		}
+	}
+
+	on_draw_button :: method(rect: Rect) {
+		bc := player.entity->get_component(Big_Charlie_Module);
+		if bc != null && bc.camera_active {
+			draw_ability_name_label(rect, "Exit Camera");
+		} else {
+			draw_ability_name_label(rect, NAME);
+		}
+	}
+}
+
+// --- Big Charlie ability draw helper ---
+
+rr_bc_draw_abilities :: proc(player: Player, index: int) -> int {
+	bc := player.entity->get_component(Big_Charlie_Module);
+
+	// Always show: Bone Snap (kill) + Transform
+	draw_ability_button(player, BC_Bone_Snap_Ability, index);
+	idx := index + 1;
+
+	draw_ability_button(player, BC_Transform_Ability, idx);
+	idx += 1;
+
+	// Camera (always available once you have nuggets)
+	draw_ability_button(player, BC_Camera_Ability, idx);
+	idx += 1;
+
+	if bc != null {
+		// Slough (1 Flesh Mass)
+		if bc.flesh_mass >= 1 {
+			draw_ability_button(player, BC_Slough_Ability, idx);
+			idx += 1;
+		}
+
+		// Marrow (2 Flesh Mass)
+		if bc.flesh_mass >= 2 {
+			draw_ability_button(player, BC_Marrow_Ability, idx);
+			idx += 1;
+		}
+
+		// Stampede (3 Flesh Mass)
+		if bc.flesh_mass >= 3 {
+			draw_ability_button(player, BC_Stampede_Ability, idx);
+			idx += 1;
+		}
+	}
+
+	return idx;
 }

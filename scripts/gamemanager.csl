@@ -404,6 +404,7 @@ Player_Role :: enum {
 	WEREWOLF;
 	GOO_GOO_GAGA;
 	MIMICER;
+	BIG_CHARLIE;
 }
 
 rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
@@ -421,6 +422,7 @@ rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
 		case .WEREWOLF:      return Player_Type.TRAITOR;
 		case .GOO_GOO_GAGA:  return Player_Type.TRAITOR;
 		case .MIMICER:       return Player_Type.TRAITOR;
+		case .BIG_CHARLIE:   return Player_Type.TRAITOR;
 		case .NONE:          return Player_Type.CIVILIAN;
 	}
 	return Player_Type.CIVILIAN;
@@ -441,6 +443,7 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .WEREWOLF:      return "werewolf";
 		case .GOO_GOO_GAGA:  return "goo_goo_gaga";
 		case .MIMICER:       return "mimicer";
+		case .BIG_CHARLIE:   return "big_charlie";
 		case .NONE:          return "none";
 	}
 	return "none";
@@ -474,6 +477,7 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	if name == "werewolf"                                      return Player_Role.WEREWOLF, true;
 	if name == "ggg" || name == "goo_goo_gaga" || name == "googoo" return Player_Role.GOO_GOO_GAGA, true;
 	if name == "mimicer" || name == "mim"                        return Player_Role.MIMICER, true;
+	if name == "big_charlie" || name == "bigcharlie" || name == "charlie" return Player_Role.BIG_CHARLIE, true;
 	return Player_Role.NONE, false;
 }
 
@@ -2170,10 +2174,15 @@ rr_unstuck_player :: proc(player: Player) {
 	rr_remove_movement_reason_all(player, MIMICER_SPEW_LOCK_REASON);
 	rr_remove_movement_reason_all(player, MIMICER_UNLEASH_LOCK_REASON);
 
+	rr_remove_movement_reason_all(player, BC_TRANSFORM_LOCK_REASON);
+	rr_remove_freeze_reason_all(player, BC_CAMERA_LOCK_REASON);
+
 	// Keep visual state coherent after force-clears.
 	player->remove_name_invisibility_reason("werewolf_transform");
 	player->remove_invisibility_reason(MIMICER_INVIS_REASON);
 	player->remove_name_invisibility_reason(MIMICER_NAME_INVIS_REASON);
+	player->remove_invisibility_reason(BC_INVIS_REASON);
+	player->remove_name_invisibility_reason(BC_NAME_INVIS_REASON);
 }
 
 // Chat command: /start
@@ -2194,7 +2203,7 @@ start :: proc(player: Player) {
 r :: proc(player: Player, role_name: string) {
 	role, ok := rr_parse_role_name(role_name);
 	if !ok {
-		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, warper, prankster, pyromaniac, pirate, hitman, werewolf, googoo, none.", player);
+		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, warper, prankster, pyromaniac, pirate, hitman, werewolf, googoo, charlie, none.", player);
 		return;
 	}
 
@@ -3238,6 +3247,9 @@ assign_players_to_types :: proc() {
 	if rr_mimicer_role_enabled {
 		append(ref traitor_roles_master, Player_Role.MIMICER);
 	}
+	if rr_bigcharlie_role_enabled {
+		append(ref traitor_roles_master, Player_Role.BIG_CHARLIE);
+	}
 
 	civ_players: List(Player);
 	an_players: List(Player);
@@ -3439,6 +3451,30 @@ assign_players_to_types :: proc() {
 			mm.swarm_active = false;
 			mm.swarm_clones->clear();
 			mm.swarm_current_index = 0;
+			p.active_tasks = List(Task_Base).{};
+		}
+
+		// Big Charlie
+		rr_bc_cleanup(p);
+		if p.player_role == Player_Role.BIG_CHARLIE {
+			bcm := p.entity->get_component(Big_Charlie_Module);
+			if bcm == null {
+				bcm = p.entity->add_component(Big_Charlie_Module);
+			}
+			bcm.flesh_mass = 0;
+			bcm.is_monster_form = false;
+			bcm.creature_visible = false;
+			bcm.skeleton_swap_at = 0.0;
+			bcm.current_scale = BC_BASE_SCALE;
+			bcm.target_scale = BC_BASE_SCALE;
+			bcm.rampage_active = false;
+			bcm.rampage_ends_at = 0.0;
+			bcm.slough_speed_active = false;
+			bcm.slough_speed_ends_at = 0.0;
+			bcm.camera_active = false;
+			bcm.camera_nugget_index = 0;
+			bcm.nugget_entities->clear();
+			bcm.nest_entities->clear();
 			p.active_tasks = List(Task_Base).{};
 		}
 

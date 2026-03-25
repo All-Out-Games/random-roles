@@ -101,6 +101,11 @@ Player :: class : Player_Base {
 	mimicer_blinded: bool;
 	mimicer_blinded_until: float;
 	mimicer_distorted_until: float;
+
+	// --- Big Charlie (cross-player: any player can be trampled) ---
+	bc_trampled: bool;
+	bc_trampled_until: float;
+	bc_trampled_blind_until: float;
 	mim_jumpscare_until: float;
 	mim_jumpscare_spine: Spine_Instance;
 
@@ -361,6 +366,8 @@ Player :: class : Player_Base {
 			rr_draw_power_outage_overlay_if_needed(this);
 			rr_ggg_draw_trap_blind_overlay(this);
 			rr_draw_mim_blind_overlay(this);
+			rr_bc_draw_trampled_overlay(this);
+			rr_bc_draw_camera_ui(this, delta_time);
 			rr_draw_mim_jumpscare(this, delta_time);
 			// Global civilian progress bar – always visible at top-center (except lobby/cinematics).
 			rr_draw_civilian_progress_bar(this);
@@ -429,6 +436,12 @@ Player :: class : Player_Base {
 
 		// Mimicer per-frame update (transform, prowl, disguise, void lunge).
 		rr_mimicer_update(this, delta_time);
+
+		// Big Charlie per-frame update (transform, growth, stampede, slough).
+		rr_bc_update(this, delta_time);
+
+		// Big Charlie trampled status update.
+		rr_bc_update_trampled(this, delta_time);
 
 		// Mimicer disguise name (draws target's name above disguised player).
 		rr_mimicer_draw_disguise_name(this);
@@ -769,13 +782,15 @@ Player :: class : Player_Base {
 							}
 						} else if player_role == Player_Role.MIMICER {
 							abilityIndex = rr_mimicer_draw_abilities(this, abilityIndex);
+						} else if player_role == Player_Role.BIG_CHARLIE {
+							abilityIndex = rr_bc_draw_abilities(this, abilityIndex);
 						} else {
                         	draw_ability_button(this, Kill_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
 
 						// All traitors (except werewolf and GGG, handled above) can drag bodies.
-						if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA && player_role != Player_Role.MIMICER {
+						if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA && player_role != Player_Role.MIMICER && player_role != Player_Role.BIG_CHARLIE {
 							draw_ability_button(this, Drag_Body_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
@@ -1054,6 +1069,7 @@ Player :: class : Player_Base {
 		rr_werewolf_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_ggg_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_mimicer_on_player_killed(killer_player_entity_id, this.entity.id);
+		rr_bc_on_player_killed(killer_player_entity_id, this.entity.id);
         log(format_string("Player % killed (killer=%)", .{this.entity.id, killer_player_entity_id}));
 	}
 
@@ -2508,6 +2524,58 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 
 	}
 
+	// Big Charlie player-rig state machine states.
+	rr_sm_setup_big_charlie :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		// Transform to monster (one-shot, 1s) -> back to Idle.
+		bc_transform_var := sm->create_variable("bc_transform", State_Machine_Variable.Kind.TRIGGER);
+		bc_transform_state := layer->create_state("004RAND_BIGCHARLIE/Transform_Monster_Start", false, 1.0);
+		layer->create_global_transition(bc_transform_state, false)->create_trigger_condition(bc_transform_var);
+		layer->create_transition(bc_transform_state, idle_state, true);
+
+		// Revert from monster (one-shot, 1s) -> back to Idle.
+		bc_revert_var := sm->create_variable("bc_revert", State_Machine_Variable.Kind.TRIGGER);
+		bc_revert_state := layer->create_state("004RAND_BIGCHARLIE/Transform_Player_End", false, 1.0);
+		layer->create_global_transition(bc_revert_state, false)->create_trigger_condition(bc_revert_var);
+		layer->create_transition(bc_revert_state, idle_state, true);
+
+		// Trampled: Start -> Loop (stays until healed or expired)
+		bc_trampled_start_var := sm->create_variable("bc_trampled_start", State_Machine_Variable.Kind.TRIGGER);
+		bc_trampled_start_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Start", false, 0.5);
+		layer->create_global_transition(bc_trampled_start_state, false)->create_trigger_condition(bc_trampled_start_var);
+
+		bc_trampled_idle_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Idle", true, 0.0);
+		layer->create_transition(bc_trampled_start_state, bc_trampled_idle_state, true);
+
+		bc_trampled_run_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Run", true, 0.0);
+		bc_trampled_moving_var := sm->create_variable("bc_trampled_moving", State_Machine_Variable.Kind.BOOL);
+		trampled_idle_to_run := layer->create_transition(bc_trampled_idle_state, bc_trampled_run_state, false);
+		trampled_idle_to_run->create_bool_condition(bc_trampled_moving_var, true);
+		trampled_run_to_idle := layer->create_transition(bc_trampled_run_state, bc_trampled_idle_state, false);
+		trampled_run_to_idle->create_bool_condition(bc_trampled_moving_var, false);
+
+		// Healed naturally -> back to Idle.
+		bc_trampled_heal_natural_var := sm->create_variable("bc_trampled_heal_natural", State_Machine_Variable.Kind.TRIGGER);
+		bc_trampled_heal_natural_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Heal_Natural", false, 0.5);
+		layer->create_global_transition(bc_trampled_heal_natural_state, false)->create_trigger_condition(bc_trampled_heal_natural_var);
+		layer->create_transition(bc_trampled_heal_natural_state, idle_state, true);
+
+		// Healed by Doctor -> back to Idle.
+		bc_trampled_heal_player_var := sm->create_variable("bc_trampled_heal_player", State_Machine_Variable.Kind.TRIGGER);
+		bc_trampled_heal_player_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Heal_Player", false, 0.5);
+		layer->create_global_transition(bc_trampled_heal_player_state, false)->create_trigger_condition(bc_trampled_heal_player_var);
+		layer->create_transition(bc_trampled_heal_player_state, idle_state, true);
+
+		// Open Cocoon (breaking a nest)
+		bc_cocoon_loop_var := sm->create_variable("bc_cocoon_loop", State_Machine_Variable.Kind.TRIGGER);
+		bc_cocoon_loop_state := layer->create_state("004RAND_BIGCHARLIE/Open_Cocoon_Loop", true, 0.0);
+		layer->create_global_transition(bc_cocoon_loop_state, false)->create_trigger_condition(bc_cocoon_loop_var);
+
+		bc_cocoon_success_var := sm->create_variable("bc_cocoon_success", State_Machine_Variable.Kind.TRIGGER);
+		bc_cocoon_success_state := layer->create_state("004RAND_BIGCHARLIE/Open_Cocoon_Success", false, 0.5);
+		layer->create_global_transition(bc_cocoon_success_state, false)->create_trigger_condition(bc_cocoon_success_var);
+		layer->create_transition(bc_cocoon_success_state, idle_state, true);
+	}
+
 	// Adds the animation state machine.
 	ensure_anim_state_machine :: proc(using this: Player) {
 		if sm_inited {
@@ -2542,6 +2610,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		rr_sm_setup_pirate(sm, layer, idle_state);
 		rr_sm_setup_ggg(sm, layer, idle_state);
 		rr_mimicer_setup_player_state_machine(sm, layer, idle_state);
+		rr_sm_setup_big_charlie(sm, layer, idle_state);
 		rr_sm_setup_drag_body(sm, layer, idle_state);
 
 		sm_inited = true;
@@ -3003,6 +3072,8 @@ Corpse :: class : Component {
 	ggg_pre_wrap_death_anim: string;
 	// Mimicer: true if the Mimicer killed this player while disguised.
 	mimicer_disguised_kill: bool;
+	// Big Charlie: true if this corpse is covered by a Nest (blocks Coroner).
+	bc_nested: bool;
 
 	// --- Drag Body ---
 	// 0 = not being dragged; otherwise entity id of the dragging player.
@@ -3965,6 +4036,16 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 		player.intro_role_spine->set_animation("Transform_Monster_End", false, 0);
 		player.intro_is_creature_rig = true;
 		player.intro_second_anim_name = "Pounce";
+		player.intro_second_anim_at = 1.3;
+		return;
+	}
+	if role == Player_Role.BIG_CHARLIE {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, BC_CREATURE_RIG));
+		player.intro_role_spine->set_skin("BigCharlie_Base");
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("Spawn_Nugget", false, 0);
+		player.intro_is_creature_rig = true;
+		player.intro_second_anim_name = "Bone_Snap_Kill";
 		player.intro_second_anim_at = 1.3;
 		return;
 	}
