@@ -106,6 +106,7 @@ Player :: class : Player_Base {
 	bc_trampled: bool;
 	bc_trampled_until: float;
 	bc_trampled_blind_until: float;
+	bc_trample_sfx_id: u64;
 	mim_jumpscare_until: float;
 	mim_jumpscare_spine: Spine_Instance;
 
@@ -367,7 +368,6 @@ Player :: class : Player_Base {
 			rr_ggg_draw_trap_blind_overlay(this);
 			rr_draw_mim_blind_overlay(this);
 			rr_bc_draw_trampled_overlay(this);
-			rr_bc_draw_camera_ui(this, delta_time);
 			rr_draw_mim_jumpscare(this, delta_time);
 			// Global civilian progress bar – always visible at top-center (except lobby/cinematics).
 			rr_draw_civilian_progress_bar(this);
@@ -604,6 +604,14 @@ Player :: class : Player_Base {
 		if local_light == null || local_light_caster == null return;
 
 		radii := this->get_local_light_radii();
+		bc := this.entity->get_component(Big_Charlie_Module);
+		if bc != null && bc.camera_active {
+			// Blow out the light range so the nugget camera view is never in shadow.
+			radii.x = 999.0;
+			radii.y = 999.0;
+		}
+		local_light_entity->set_local_position(v2.{0.0, 0.0});
+
 		local_light.radii = radii;
 		local_light_caster.radii = radii;
 		// Disable LOS occlusion during lights-out so players are not fully hidden by shadows.
@@ -618,6 +626,8 @@ Player :: class : Player_Base {
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
         if this->is_local_or_server() {
+			rr_bc_draw_camera_ui(this, delta_time);
+
 			// Ghost QoL: zoom the local dead player's camera out a bit so they can
 			// see more of the map while spectating.
 			//
@@ -1971,7 +1981,7 @@ draw_bc_role_hud :: proc(player: Player) {
 		row_ts := base_ts;
 		row_ts.color = v4.{1.0, 0.6, 0.7, 1.0};
 		rr_bc_cleanup_dead_nuggets(bc);
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Flesh Mass: % | Nuggets: %", .{mass, bc.nugget_entities.count}));
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Flesh Mass: % | Nuggets: %/%", .{mass, bc.nugget_entities.count, BC_MAX_NUGGETS}));
 	}
 	// Row 3: Unlock Slough (1 Flesh Mass)
 	{
@@ -2021,7 +2031,7 @@ draw_bc_role_hud :: proc(player: Player) {
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
 		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Stampede: %/3", .{min(mass, 3)}));
 	}
-	// Row 6: Nests count
+	// Row 6: Live status callout
 	{
 		entry_rect := list_content->cut_top(ROW_H);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
@@ -2030,9 +2040,22 @@ draw_bc_role_hud :: proc(player: Player) {
 		row_ts.size = 18;
 		rr_bc_cleanup_dead_nests(bc);
 		nest_count := bc.nest_entities.count;
-		if nest_count > 0 {
+		if bc.camera_active {
+			row_ts.color = v4.{1.0, 0.85, 0.45, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Scouting: ACTIVE - You are vulnerable");
+		} else if bc.rampage_active {
+			row_ts.color = v4.{1.0, 0.25, 0.25, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Rampage: ACTIVE");
+		} else if nest_count > 0 {
 			row_ts.color = v4.{0.5, 0.9, 1.0, 1.0};
 			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Active Nests: %", .{nest_count}));
+		} else if mass < 3 {
+			next_goal := mass + 1;
+			row_ts.color = v4.{0.9, 0.9, 0.9, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Next unlock at Flesh Mass %", .{next_goal}));
+		} else {
+			row_ts.color = v4.{0.6, 1.0, 0.4, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "All ability unlocks online");
 		}
 	}
 	} // end task_list_open

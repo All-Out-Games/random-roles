@@ -225,7 +225,7 @@ rr_bc_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 rr_bc_get_target_scale :: proc(bc: Big_Charlie_Module) -> float {
 	base := BC_BASE_SCALE + bc.flesh_mass.(float) * BC_GROWTH_PER_MASS;
 	if bc.rampage_active {
-		base = BC_BASE_SCALE + BC_RAMPAGE_GROWTH;
+		base = base + BC_RAMPAGE_GROWTH;
 	}
 	return base;
 }
@@ -249,12 +249,22 @@ BC_Lil_Nugget :: class : Component {
 	is_stampeding: bool;
 	stampede_target_pos: v2;
 	rng: u64;
+	destroy_at: float;
+	pending_destroy: bool;
 
 	ao_start :: method() {
 		rng = rng_seed(entity.id);
 	}
 
 	ao_update :: method(dt: float) {
+		// Delayed destruction (let absorbed animation play)
+		if pending_destroy {
+			if get_time() >= destroy_at {
+				entity->destroy();
+			}
+			return;
+		}
+
 		if is_stampeding {
 			// Move toward Big Charlie
 			dir := stampede_target_pos - entity.world_position;
@@ -394,6 +404,8 @@ BC_Nest :: class : Component {
 	bonus_nuggets_spawned: int;
 	break_progress: float;
 	players_breaking: int;
+	pending_break: bool;
+	break_destroy_at: float;
 
 	ao_start :: method() {
 		created_at = get_time();
@@ -402,6 +414,14 @@ BC_Nest :: class : Component {
 
 	ao_update :: method(dt: float) {
 		now := get_time();
+
+		// Delayed destroy after break animation
+		if pending_break {
+			if now >= break_destroy_at {
+				entity->destroy();
+			}
+			return;
+		}
 
 		// Spawn bonus nuggets periodically
 		if bonus_nuggets_spawned < BC_MARROW_NEST_MAX_BONUS_NUGGETS {
@@ -456,6 +476,35 @@ BC_Nest_Break_Interactable :: class : Interactable {
 	}
 }
 
+// Doctor-only interactable to reverse nesting within the time window
+BC_Nest_Doctor_Reverse_Interactable :: class : Interactable {
+	nest: BC_Nest;
+
+	ao_start :: method() {
+		this->set_listener(this);
+		this->set_text("Reverse Nesting");
+		this->set_hold_text("Reversing...");
+		required_hold_time = 2.0;
+		radius = 2.5;
+	}
+
+	can_use :: method(player: Player) -> bool {
+		if nest == null return false;
+		if player.player_role != Player_Role.DOCTOR return false;
+		// Only within the doctor reverse window
+		if get_time() - nest.created_at > BC_MARROW_DOCTOR_REVERSE_WINDOW return false;
+		return true;
+	}
+
+	on_interact :: method(player: Player) {
+		if nest == null return;
+		rr_bc_break_nest(nest);
+		if Game.is_server() {
+			Notifier.notify(player, "Nest reversed!");
+		}
+	}
+}
+
 rr_bc_create_nest :: proc(corpse_entity: Entity, owner_player_entity_id: u64) -> Entity {
 	if corpse_entity == null || !#alive(corpse_entity) return null;
 
@@ -479,6 +528,10 @@ rr_bc_create_nest :: proc(corpse_entity: Entity, owner_player_entity_id: u64) ->
 	// Add break interactable
 	brk := nest_entity->add_component(BC_Nest_Break_Interactable);
 	brk.nest = nest;
+
+	// Add doctor reverse interactable (time-limited)
+	doc := nest_entity->add_component(BC_Nest_Doctor_Reverse_Interactable);
+	doc.nest = nest;
 
 	// Track nest
 	bc_player := get_player_by_entity_id(owner_player_entity_id);
@@ -525,9 +578,9 @@ rr_bc_break_nest :: proc(nest: BC_Nest) {
 		}
 	}
 
-	// Destroy nest after a short delay (let animation play)
-	// For now, destroy immediately — the break animation will show
-	nest.entity->destroy();
+	// Delay destroy so break animation plays
+	nest.pending_break = true;
+	nest.break_destroy_at = get_time() + 1.5;
 }
 
 rr_bc_cleanup_dead_nests :: proc(bc: Big_Charlie_Module) {
@@ -584,14 +637,17 @@ rr_bc_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_entit
 		killer->set_trigger("traitor_kill");
 	}
 
-	// Growth pulse
-	rr_bc_creature_trigger(killer, "growth");
+	// Delay growth pulse so bone snap animation plays first
+	bc.growth_pulse_at = get_time() + 1.5;
 
 	// Spawn a Lil' Nugget at the victim's position
 	victim := get_player_by_entity_id(victim_player_entity_id);
 	if victim != null {
 		rr_bc_spawn_nugget(victim.entity.world_position, killer_player_entity_id);
 	}
+
+	// Brief lockout prevents camera from auto-opening right after a kill
+	bc.camera_lockout_until = get_time() + 2.0;
 }
 
 // =============================================================================
@@ -610,6 +666,15 @@ rr_bc_apply_trample :: proc(target: Player, source_player_entity_id: u64) {
 
 	// Trigger trampled animation on victim
 	target->set_trigger("bc_trampled_start");
+
+	// Wet squelch SFX loop while trampled (server-only to prevent double-play)
+	if Game.is_server() {
+		desc := SFX.default_sfx_desc();
+		desc.entity_to_follow = target.entity.id;
+		desc.volume = 0.3;
+		// TODO: replace with dedicated wet squelch SFX when available
+		target.bc_trample_sfx_id = SFX.play(get_asset(SFX_Asset, "sfx/drag_body_loop.wav"), desc);
+	}
 }
 
 rr_bc_update_trampled :: proc(player: Player, dt: float) {
@@ -633,6 +698,10 @@ rr_bc_update_trampled :: proc(player: Player, dt: float) {
 	// Full trample expired
 	if now >= player.bc_trampled_until {
 		player.bc_trampled = false;
+		if Game.is_server() && player.bc_trample_sfx_id != 0 {
+			SFX.stop(player.bc_trample_sfx_id);
+			player.bc_trample_sfx_id = 0;
+		}
 		player->set_trigger("bc_trampled_heal_natural");
 	}
 }
@@ -642,6 +711,10 @@ rr_bc_heal_trample :: proc(player: Player) {
 	player.bc_trampled = false;
 	player.bc_trampled_until = 0.0;
 	player.bc_trampled_blind_until = 0.0;
+	if Game.is_server() && player.bc_trample_sfx_id != 0 {
+		SFX.stop(player.bc_trample_sfx_id);
+		player.bc_trample_sfx_id = 0;
+	}
 	player->set_trigger("bc_trampled_heal_player");
 }
 
@@ -650,11 +723,14 @@ rr_bc_heal_trample :: proc(player: Player) {
 // =============================================================================
 
 BC_CAMERA_ZOOM_SIZE :: 6.0;
+BC_CAMERA_LOS_INNER :: 14.0;
+BC_CAMERA_LOS_OUTER :: 18.0;
 
 rr_bc_enter_camera :: proc(player: Player) {
 	bc := player.entity->get_component(Big_Charlie_Module);
 	if bc == null return;
 	if bc.camera_active return;
+	if get_time() < bc.camera_lockout_until return;
 
 	rr_bc_cleanup_dead_nuggets(bc);
 	if bc.nugget_entities.count == 0 return;
@@ -717,6 +793,22 @@ rr_bc_camera_prev :: proc(player: Player) {
 	}
 }
 
+rr_bc_camera_select :: proc(player: Player, index: int) {
+	bc := player.entity->get_component(Big_Charlie_Module);
+	if bc == null return;
+	if !bc.camera_active return;
+
+	rr_bc_cleanup_dead_nuggets(bc);
+	if bc.nugget_entities.count == 0 {
+		rr_bc_exit_camera(player);
+		return;
+	}
+
+	if index < 0 return;
+	if index >= bc.nugget_entities.count return;
+	bc.camera_nugget_index = index;
+}
+
 rr_bc_get_camera_nugget :: proc(player: Player) -> Entity {
 	bc := player.entity->get_component(Big_Charlie_Module);
 	if bc == null return null;
@@ -743,6 +835,13 @@ rr_bc_start_stampede :: proc(player: Player) {
 
 	// Play roar animation on creature
 	rr_bc_creature_trigger(player, "stampede");
+
+	// Global bellow SFX — all players hear it (design: "deep guttural bellow")
+	if Game.is_server() {
+		desc := SFX.default_sfx_desc();
+		// TODO: replace with dedicated Big Charlie bellow SFX when available
+		SFX.play(get_asset(SFX_Asset, "killer_transform.wav"), desc);
+	}
 
 	// Send all nuggets toward Big Charlie
 	for i: 0..bc.nugget_entities.count-1 {
@@ -779,6 +878,7 @@ rr_bc_update_stampede :: proc(player: Player, bc: Big_Charlie_Module, dt: float)
 		nugget := nugget_entity->get_component(BC_Lil_Nugget);
 		if nugget == null continue;
 
+		if nugget.pending_destroy continue;
 		if !nugget.is_stampeding continue;
 
 		// Update target to follow Big Charlie
@@ -801,7 +901,7 @@ rr_bc_update_stampede :: proc(player: Player, bc: Big_Charlie_Module, dt: float)
 		// Check if arrived
 		dist := length(nugget_entity.world_position - player_pos);
 		if dist < 1.0 {
-			// Absorbed — trigger absorbed animation then destroy
+			// Absorbed — trigger animation, delay destroy so it plays
 			nugget_spine := nugget_entity->get_component(Spine_Animator);
 			if nugget_spine != null && nugget_spine.instance != null {
 				if nugget_spine.instance.state_machine != null {
@@ -809,7 +909,8 @@ rr_bc_update_stampede :: proc(player: Player, bc: Big_Charlie_Module, dt: float)
 				}
 			}
 			nugget.is_stampeding = false;
-			nugget_entity->destroy();
+			nugget.pending_destroy = true;
+			nugget.destroy_at = get_time() + 0.5;
 		} else {
 			all_arrived = false;
 		}
@@ -911,6 +1012,21 @@ rr_bc_start_transform :: proc(player: Player) {
 	if bc == null return;
 	if bc.is_monster_form return;
 
+	// Intro animation: spawn a nugget that looks up at Big Charlie on first transform
+	if !bc.intro_played {
+		bc.intro_played = true;
+		intro_offset := v2.{1.2, -0.3};
+		intro_nugget := rr_bc_spawn_nugget(player.entity.world_position + intro_offset, player.entity.id);
+		if intro_nugget != null {
+			nugget_spine := intro_nugget->get_component(Spine_Animator);
+			if nugget_spine != null && nugget_spine.instance != null {
+				if nugget_spine.instance.state_machine != null {
+					nugget_spine.instance.state_machine->set_trigger("look_up");
+				}
+			}
+		}
+	}
+
 	bc.is_monster_form = true;
 	bc.skeleton_swap_at = get_time() + BC_TRANSFORM_ANIM_SECONDS;
 
@@ -995,6 +1111,12 @@ rr_bc_update :: proc(player: Player, dt: float) {
 		if bc.is_monster_form && !bc.creature_visible {
 			rr_bc_swap_to_creature(player);
 		}
+	}
+
+	// Delayed growth pulse (after bone snap animation)
+	if bc.growth_pulse_at > 0.0 && now >= bc.growth_pulse_at {
+		bc.growth_pulse_at = 0.0;
+		rr_bc_creature_trigger(player, "growth");
 	}
 
 	// Growth update
@@ -1095,7 +1217,7 @@ rr_bc_draw_trampled_overlay :: proc(player: Player) {
 
 rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 	if player == null return;
-	if !player->is_local() return;
+	if !player->is_local_or_server() return;
 
 	bc := player.entity->get_component(Big_Charlie_Module);
 	if bc == null return;
@@ -1111,9 +1233,11 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 	UI.push_layer(9990);
 	defer UI.pop_layer();
 
-	// Camera label at top
+	rr_bc_cleanup_dead_nuggets(bc);
+
+	// Camera label — positioned below Total Progress bar
 	ts := UI.default_text_settings();
-	ts.size = 32;
+	ts.size = 28;
 	ts.color = v4.{1.0, 0.8, 0.8, 1.0};
 	ts.halign = .CENTER;
 	ts.valign = .TOP;
@@ -1121,23 +1245,85 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 	ts.outline_thickness = 2;
 	ts.outline_color = v4.{0, 0, 0, 1};
 
-	rr_bc_cleanup_dead_nuggets(bc);
-	label_rect := safe->top_center_rect()->grow(25, 150, 25, 150)->offset(0, -30);
+	label_rect := safe->top_center_rect()->grow(22, 200, 22, 200)->offset(0, -120);
 	UI.text(label_rect, ts, "Nugget Camera %/%", {bc.camera_nugget_index + 1, bc.nugget_entities.count});
 
-	// Prev / Next buttons at bottom
-	if bc.nugget_entities.count > 1 {
-		bs := UI.default_button_settings();
-		bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png");
-		btn_ts := UI.default_text_settings();
-		btn_ts.size = 28;
-		btn_ts.do_outline = true;
-		btn_ts.outline_thickness = 2;
-		btn_ts.outline_color = v4.{0, 0, 0, 1};
+	// Warning text below label
+	info_ts := UI.default_text_settings();
+	info_ts.size = 18;
+	info_ts.color = v4.{1.0, 0.7, 0.7, 0.9};
+	info_ts.halign = .CENTER;
+	info_ts.valign = .TOP;
+	info_ts.do_outline = true;
+	info_ts.outline_thickness = 2;
+	info_ts.outline_color = v4.{0, 0, 0, 1};
 
-		btn_area := safe->bottom_center_rect()->grow(30, 200, 30, 200)->offset(0, 80);
-		prev_rect := btn_area->subrect(0.0, 0.0, 0.45, 1.0);
-		next_rect := btn_area->subrect(0.55, 0.0, 1.0, 1.0);
+	warn_rect := label_rect->offset(0, -32);
+	UI.text(warn_rect, info_ts, "You are frozen and vulnerable");
+
+	bs := UI.default_button_settings();
+	bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png");
+	btn_ts := UI.default_text_settings();
+	btn_ts.size = 28;
+	btn_ts.do_outline = true;
+	btn_ts.outline_thickness = 2;
+	btn_ts.outline_color = v4.{0, 0, 0, 1};
+
+	control_area := safe->bottom_center_rect()->grow(34, 300, 34, 300)->offset(0, 86);
+	exit_rect := control_area->subrect(0.32, 0.0, 0.68, 1.0);
+
+	if bc.nugget_entities.count > 1 {
+		list_bg_rect := control_area->offset(0, 86)->grow(62, 0, 62, 0);
+		UI.quad(list_bg_rect, core_globals.white_sprite, v4.{0.05, 0.02, 0.02, 0.72});
+
+		list_label_rect := list_bg_rect->top_center_rect()->grow(14, 160, 14, 160)->offset(0, -10);
+		UI.text(list_label_rect, info_ts, "Jump to Nugget");
+
+		list_content := list_bg_rect->inset(36, 18, 16, 18);
+		row_top := list_content->cut_top(44);
+		row_bottom := list_content;
+
+		top_count := min(bc.nugget_entities.count, 5);
+		top_layout := UI.make_directional_layout(row_top, .RIGHT);
+
+		for i: 0..top_count-1 {
+			UI.push_id("bc_cam_pick_top_%", {i});
+			defer UI.pop_id();
+
+			select_bs := bs;
+			if i == bc.camera_nugget_index {
+				select_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_5.png");
+			}
+
+			button_label := format_string("%", {i + 1});
+			if UI.button(top_layout->next(88), select_bs, btn_ts, button_label).clicked {
+				rr_bc_camera_select(player, i);
+			}
+		}
+
+		if bc.nugget_entities.count > 5 {
+			bottom_count := bc.nugget_entities.count - 5;
+			bottom_layout := UI.make_directional_layout(row_bottom, .RIGHT);
+
+			for i: 0..bottom_count-1 {
+				nugget_index := i + 5;
+				UI.push_id("bc_cam_pick_bottom_%", {nugget_index});
+				defer UI.pop_id();
+
+				select_bs := bs;
+				if nugget_index == bc.camera_nugget_index {
+					select_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_5.png");
+				}
+
+				button_label := format_string("%", {nugget_index + 1});
+				if UI.button(bottom_layout->next(88), select_bs, btn_ts, button_label).clicked {
+					rr_bc_camera_select(player, nugget_index);
+				}
+			}
+		}
+
+		prev_rect := control_area->subrect(0.0, 0.0, 0.28, 1.0);
+		next_rect := control_area->subrect(0.72, 0.0, 1.0, 1.0);
 
 		UI.push_id("bc_cam_prev", {});
 		defer UI.pop_id();
@@ -1150,6 +1336,12 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 		if UI.button(next_rect, bs, btn_ts, "Next >").clicked {
 			rr_bc_camera_next(player);
 		}
+	}
+
+	UI.push_id("bc_cam_exit", {});
+	defer UI.pop_id();
+	if UI.button(exit_rect, bs, btn_ts, "Exit").clicked {
+		rr_bc_exit_camera(player);
 	}
 }
 

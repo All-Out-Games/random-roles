@@ -3637,6 +3637,7 @@ BC_Bone_Snap_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player->has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 
 		bc := player.entity->get_component(Big_Charlie_Module);
 		if bc != null && bc.camera_active return false;
@@ -3645,6 +3646,11 @@ BC_Bone_Snap_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			target := get_closest_target(this, player);
 			if target != null {
@@ -3866,6 +3872,42 @@ BC_Stampede_Ability :: class : Ability_Base {
 
 // --- Nugget Camera ---
 
+BC_SCOUTING_PLACE_RANGE :: 5.0;
+BC_SCOUTING_NUGGET_NEAR_RANGE :: 3.0;
+
+// Check if there is a corpse nearby that doesn't already have a nugget next to it.
+rr_bc_find_unmonitored_corpse :: proc(player: Player) -> Corpse {
+	bc := player.entity->get_component(Big_Charlie_Module);
+	if bc == null return null;
+
+	player_pos := player.entity.world_position;
+	finder := make_finder(Corpse, player_pos, BC_SCOUTING_PLACE_RANGE);
+
+	foreach corpse: component_iterator(Corpse) {
+		if corpse == null continue;
+		if !#alive(corpse.entity) continue;
+		if corpse.bc_nested continue;
+
+		corpse_pos := corpse.entity.world_position;
+
+		// Skip if there's already a nugget near this corpse
+		has_nugget := false;
+		rr_bc_cleanup_dead_nuggets(bc);
+		for i: 0..bc.nugget_entities.count-1 {
+			nugget := bc.nugget_entities[i];
+			if nugget == null || !#alive(nugget) continue;
+			if length(nugget.world_position - corpse_pos) < BC_SCOUTING_NUGGET_NEAR_RANGE {
+				has_nugget = true;
+				break;
+			}
+		}
+		if has_nugget continue;
+
+		finder->check(corpse, corpse_pos);
+	}
+	return finder.closest;
+}
+
 BC_Camera_Ability :: class : Ability_Base {
 	NAME :: "Scouting";
 
@@ -3885,7 +3927,10 @@ BC_Camera_Ability :: class : Ability_Base {
 		// If already in camera, can always toggle off
 		if bc.camera_active return true;
 
-		// Need at least one nugget to enter camera
+		// Can place a nugget on a nearby unmonitored corpse
+		if rr_bc_find_unmonitored_corpse(player) != null return true;
+
+		// Can open camera if nuggets exist
 		rr_bc_cleanup_dead_nuggets(bc);
 		return bc.nugget_entities.count > 0;
 	}
@@ -3897,9 +3942,20 @@ BC_Camera_Ability :: class : Ability_Base {
 
 			if bc.camera_active {
 				rr_bc_exit_camera(player);
-			} else {
-				rr_bc_enter_camera(player);
+				current_cooldown = 1.0;
+				return;
 			}
+
+			// If near an unmonitored corpse, place a nugget instead of opening camera
+			corpse := rr_bc_find_unmonitored_corpse(player);
+			if corpse != null {
+				rr_bc_spawn_nugget(corpse.entity.world_position, player.entity.id);
+				current_cooldown = 2.0;
+				return;
+			}
+
+			// Otherwise open camera
+			rr_bc_enter_camera(player);
 			current_cooldown = 1.0;
 		}
 	}
@@ -3908,6 +3964,8 @@ BC_Camera_Ability :: class : Ability_Base {
 		bc := player.entity->get_component(Big_Charlie_Module);
 		if bc != null && bc.camera_active {
 			draw_ability_name_label(rect, "Exit Camera");
+		} else if rr_bc_find_unmonitored_corpse(player) != null {
+			draw_ability_name_label(rect, "Place Camera");
 		} else {
 			draw_ability_name_label(rect, NAME);
 		}
