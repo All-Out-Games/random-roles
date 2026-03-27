@@ -51,8 +51,8 @@ MIMICER_VOID_LUNGE_HIT_RADIUS :: 1.5;
 
 // Spew Corruption
 MIMICER_SPEW_COOLDOWN :: 50.0;
-MIMICER_SPEW_BLIND_SECONDS :: 10.0;
-MIMICER_SPEW_DISTORT_SECONDS :: 20.0;
+MIMICER_SPEW_BLIND_SECONDS :: 5.0;
+MIMICER_SPEW_DISTORT_SECONDS :: 40.0;
 MIMICER_SPEW_RANGE :: 2.5;
 MIMICER_SPEW_BLIND_LOS_INNER :: 0.5;
 MIMICER_SPEW_BLIND_LOS_OUTER :: 0.8;
@@ -716,16 +716,12 @@ rr_mimicer_update_void_lunge :: proc(player: Player, dt: float) {
 			rr_mimicer_creature_trigger(player, "lunge_end");
 		}
 
-		if Game.is_server() {
-			nearby: [..]Player;
-			Scene.get_all_components_in_range(mm.void_lunge_target_pos, MIMICER_VOID_LUNGE_HIT_RADIUS, ref nearby);
-			for i: 0..nearby.count-1 {
-				hit := nearby[i];
-				if hit == null continue;
-				if hit.entity.id == player.entity.id continue;
-				if hit.player_state != Player_State.ALIVE continue;
-				rr_mimicer_stun_player(hit, MIMICER_VOID_LUNGE_STUN_SECONDS);
-			}
+		foreach hit: component_iterator(Player) {
+			if hit == null continue;
+			if hit.entity.id == player.entity.id continue;
+			if hit.player_state != Player_State.ALIVE continue;
+			if !in_range(hit.entity.world_position - mm.void_lunge_target_pos, MIMICER_VOID_LUNGE_HIT_RADIUS) continue;
+			rr_mimicer_stun_player(hit, MIMICER_VOID_LUNGE_STUN_SECONDS);
 		}
 		return;
 	}
@@ -736,16 +732,12 @@ rr_mimicer_update_void_lunge :: proc(player: Player, dt: float) {
 	};
 	player.entity->set_local_position(new_pos);
 
-	if Game.is_server() {
-		nearby: [..]Player;
-		Scene.get_all_components_in_range(new_pos, MIMICER_VOID_LUNGE_HIT_RADIUS, ref nearby);
-		for i: 0..nearby.count-1 {
-			hit := nearby[i];
-			if hit == null continue;
-			if hit.entity.id == player.entity.id continue;
-			if hit.player_state != Player_State.ALIVE continue;
-			rr_mimicer_stun_player(hit, MIMICER_VOID_LUNGE_STUN_SECONDS);
-		}
+	foreach hit: component_iterator(Player) {
+		if hit == null continue;
+		if hit.entity.id == player.entity.id continue;
+		if hit.player_state != Player_State.ALIVE continue;
+		if !in_range(hit.entity.world_position - new_pos, MIMICER_VOID_LUNGE_HIT_RADIUS) continue;
+		rr_mimicer_stun_player(hit, MIMICER_VOID_LUNGE_STUN_SECONDS);
 	}
 }
 
@@ -1482,7 +1474,9 @@ rr_mimicer_inhabit_clone :: proc(player: Player, index: int) {
 	mm.is_disguised = true;
 	mm.disguise_ends_at = 0.0;
 
-	// If in monster form, swap to player for disguise
+	// Revert to schleem form when inhabiting a clone
+	mm.is_monster_form = false;
+	mm.skeleton_swap_at = 0.0;
 	if mm.creature_visible {
 		rr_mimicer_swap_to_player(player);
 	}
@@ -1555,13 +1549,10 @@ rr_mimicer_update_swarm :: proc(player: Player, dt: float) {
 
 	now := get_time();
 
-	// Wait for scream animation to finish before inhabiting first clone
+	// Wait for scream animation to finish before unlocking movement
 	if mm.swarm_scream_until > 0.0 && now >= mm.swarm_scream_until {
 		mm.swarm_scream_until = 0.0;
 		player->remove_disable_movement_input_reason(MIMICER_UNLEASH_LOCK_REASON);
-		if mm.swarm_clones.count > 0 {
-			rr_mimicer_inhabit_clone(player, 0);
-		}
 	}
 
 	if now >= mm.swarm_end_time {
@@ -1839,6 +1830,7 @@ Mimicer_Transform_Ability :: class : Ability_Base {
 					lock.active = true;
 				} else {
 					// Transform while inhabiting clone — shift into creature, framing the identity
+					rr_drag_body_force_drop_for_player(player);
 					mm.is_monster_form = true;
 					mm.swarm_clone_framed = true;
 					player->set_trigger("mimicer_transform");
@@ -1877,7 +1869,8 @@ Mimicer_Transform_Ability :: class : Ability_Base {
 				lock.player_entity_id = player.entity.id;
 				lock.active = true;
 			} else {
-				// Transform to monster (115% speed)
+				// Transform to monster (115% speed) — drop any dragged body first
+				rr_drag_body_force_drop_for_player(player);
 				mm.is_monster_form = true;
 				player->set_trigger("mimicer_transform");
 				player->add_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
@@ -1990,7 +1983,7 @@ Mimicer_Void_Lunge_Ability :: class : Ability_Base {
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
-		activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
+		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
 		if params.can_use && activation.activate {
 			if current_cooldown > 0.0 return;
 
@@ -2052,6 +2045,27 @@ Mimicer_Spew_Ability :: class : Ability_Base {
 			} else {
 				Notifier.notify(player, "No target in range!");
 			}
+		}
+
+		// Draw range indicator while holding the button.
+		if params.active && params.can_use && current_cooldown <= 0.0 && player != null {
+			scale := 1.0 / player.camera.size * 4;
+			UI.push_layer(-10);
+			UI.push_scale_factor(UI.get_current_scale_factor() * scale);
+
+			center := world_to_screen(player.entity.world_position);
+			edge := world_to_screen(v2.{player.entity.world_position.x + MIMICER_SPEW_RANGE, player.entity.world_position.y});
+			radius := abs(edge.x - center.x);
+
+			circle_tex := get_asset(Texture_Asset, "sprites/Shapes/shape_circle.png");
+			circle_rect := Rect.{
+				v2.{center.x - radius, center.y - radius},
+				v2.{center.x + radius, center.y + radius}
+			};
+			UI.quad(circle_rect, circle_tex, v4.{0.6, 0.0, 0.8, 0.35});
+
+			UI.pop_scale_factor();
+			UI.pop_layer();
 		}
 	}
 
