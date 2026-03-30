@@ -676,6 +676,22 @@ Player :: class : Player_Base {
 						ghost_camera_zoom_active = false;
 					}
 				}
+
+				// Mimicer unleash: enforce camera zoom during placement,
+				// restore to default when placement ends (overrides server sync).
+				if this.player_role == Player_Role.MIMICER {
+					mim_cam := this.entity->get_component(Mimicer_Module);
+					if mim_cam != null {
+						if mim_cam.unleash_placing {
+							this.camera.follow_player = false;
+							this.camera.size = MIMICER_UNLEASH_CAMERA_SIZE;
+						} else if mim_cam.unleash_active && camera_default_size_saved {
+							// Just finished placing — ensure camera is restored
+							this.camera.follow_player = true;
+							this.camera.size = camera_default_size;
+						}
+					}
+				}
 			}
 
 			// If we were overriding the camera for a win cinematic and it ended,
@@ -1794,6 +1810,12 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	if !player->is_local_or_server() return;
 	if player.player_type != Player_Type.TRAITOR return;
 
+	UI.push_layer(1600);
+	defer UI.pop_layer();
+
+	_pushed_scale := rr_push_mobile_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
 	mm := player.entity->get_component(Mimicer_Module);
 	if mm == null return;
 
@@ -1803,7 +1825,7 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	LIST_PAD :: 10.0;
 	DROPDOWN_SLICE_PX :: 16.0;
 
-	row_count := 6;
+	row_count := 5;
 	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 
 	header_rect := rr_draw_task_list_header(safe, false, player);
@@ -1818,48 +1840,34 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
 
 	base_ts := UI.default_text_settings();
-	base_ts.size = 20;
+	base_ts.size = 24;
 	base_ts.halign = .LEFT;
 	base_ts.valign = .CENTER;
 	base_ts.do_outline = true;
-	base_ts.outline_thickness = 3;
-	base_ts.outline_color = v4.{0, 0, 0, 1};
+	base_ts.outline_thickness = 4;
+	base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+	base_ts.do_autofit = true;
+	base_ts.autofit_min_size = 14;
+	base_ts.autofit_max_size = 24;
 
-	list_content := list_rect->inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
+	list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 	faces := mm.stolen_faces;
+	pillar_count := rr_mimicer_get_active_pillar_count(player);
 
-	rr_mimicer_draw_hud_rows(player, mm, faces, ref list_content, base_ts, checkbox, checkbox_filled, ROW_H);
-	} // end task_list_open
-}
-
-rr_mimicer_draw_hud_rows :: proc(player: Player, mm: Mimicer_Module, faces: int, list_content: ref Rect, base_ts: Text_Settings, checkbox: Texture_Asset, checkbox_filled: Texture_Asset, ROW_H: float) {
-	// Form status
+	// Row 1: Stolen Faces (SF)
 	{
 		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		entry_content->cut_left(24.0);
 		row_ts := base_ts;
-		if mm.is_monster_form {
-			row_ts.color = v4.{1.0, 0.25, 0.25, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "MONSTER");
-		} else {
-			row_ts.color = v4.{0.9, 0.9, 0.9, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Schleem");
-		}
+		row_ts.color = v4.{1.0, 0.85, 0.0, 1.0};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Stolen Faces (SF): %", .{faces}));
 	}
-	// Stolen Faces count + Pillars
+	// Row 2: Unlock Void Lunge
 	{
 		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
-		row_ts := base_ts;
-		row_ts.color = v4.{0.8, 0.5, 1.0, 1.0};
-		pillar_count := rr_mimicer_get_active_pillar_count(player);
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Stolen Faces: % | Pillars: %", .{faces, pillar_count}));
-	}
-	// Void Lunge (1 face)
-	{
-		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		checkbox_slot := entry_content->cut_left(24.0);
 		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
@@ -1871,11 +1879,12 @@ rr_mimicer_draw_hud_rows :: proc(player: Player, mm: Mimicer_Module, faces: int,
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Void Lunge: %/%", .{min(faces, MIMICER_VOID_LUNGE_UNLOCK_FACES), MIMICER_VOID_LUNGE_UNLOCK_FACES}));
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Void Lunge: %/% SF", .{min(faces, MIMICER_VOID_LUNGE_UNLOCK_FACES), MIMICER_VOID_LUNGE_UNLOCK_FACES}));
 	}
-	// Spew Corruption (3 faces)
+	// Row 3: Unlock Spew Corruption
 	{
 		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		checkbox_slot := entry_content->cut_left(24.0);
 		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
@@ -1887,16 +1896,17 @@ rr_mimicer_draw_hud_rows :: proc(player: Player, mm: Mimicer_Module, faces: int,
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Spew: %/%", .{min(faces, MIMICER_SPEW_UNLOCK_FACES), MIMICER_SPEW_UNLOCK_FACES}));
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Spew: %/% SF", .{min(faces, MIMICER_SPEW_UNLOCK_FACES), MIMICER_SPEW_UNLOCK_FACES}));
 	}
-	// Unleash (5 faces)
+	// Row 4: Unlock Unleash
 	{
 		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		checkbox_slot := entry_content->cut_left(24.0);
 		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-		unlocked := faces >= MIMICER_UNLEASH_UNLOCK_FACES && !mm.unleash_used;
 		used := mm.unleash_used;
+		unlocked := faces >= MIMICER_UNLEASH_UNLOCK_FACES;
 		if used {
 			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{0.5, 0.5, 0.5, 1});
 		} else if unlocked {
@@ -1910,9 +1920,30 @@ rr_mimicer_draw_hud_rows :: proc(player: Player, mm: Mimicer_Module, faces: int,
 		} else {
 			row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
 		}
-		label := used ? "Unleash: USED" : format_string("Unleash: %/%", .{min(faces, MIMICER_UNLEASH_UNLOCK_FACES), MIMICER_UNLEASH_UNLOCK_FACES});
+		label := used ? "Unleash: USED" : format_string("Unlock Unleash: %/% SF", .{min(faces, MIMICER_UNLEASH_UNLOCK_FACES), MIMICER_UNLEASH_UNLOCK_FACES});
 		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, label);
 	}
+	// Row 5: Passive stats
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		row_ts.size = 18;
+		hunger_reduction := rr_mimicer_get_void_hunger_reduction(player);
+		tether_active := mm.tether_speed_active;
+		if tether_active {
+			row_ts.color = v4.{0.5, 1.0, 0.8, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Tether +20%% | Hunger -%s Kill CD", .{format_float(hunger_reduction, decimals=0)}));
+		} else if hunger_reduction > 0.0 {
+			row_ts.color = v4.{0.5, 0.9, 1.0, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Hunger -%s Kill CD", .{format_float(hunger_reduction, decimals=0)}));
+		} else {
+			row_ts.color = v4.{0.6, 0.6, 0.6, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "No passives active");
+		}
+	}
+	} // end task_list_open
 }
 
 // --- Big Charlie Flesh Mass progress: left side ---
@@ -2133,14 +2164,8 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 	mim := player.entity->get_component(Mimicer_Module);
 	if mim == null return abilityIndex;
 
-	// During Doppelganger Swarm: Kill, Transform, Cycle Clone
-	if mim.swarm_active {
-		draw_ability_button(player, Mimicer_Kill_Ability, abilityIndex);
-		abilityIndex += 1;
-		draw_ability_button(player, Mimicer_Transform_Ability, abilityIndex);
-		abilityIndex += 1;
-		draw_ability_button(player, Mimicer_Cycle_Clone_Ability, abilityIndex);
-		abilityIndex += 1;
+	// During unleash placement: hide all abilities (placement is via screen tap)
+	if mim.unleash_placing {
 		return abilityIndex;
 	}
 
@@ -2172,8 +2197,11 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 		abilityIndex += 1;
 		draw_ability_button(player, Drag_Body_Ability, abilityIndex);
 		abilityIndex += 1;
-		draw_ability_button(player, Mimicer_Prowl_Ability, abilityIndex);
-		abilityIndex += 1;
+		// Random disguise unlocked after Unleash
+		if mim.unleash_used {
+			draw_ability_button(player, Mimicer_Random_Disguise_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
 	}
 	return abilityIndex;
 }
@@ -3926,6 +3954,44 @@ update_minimap_ui :: proc(player: Player) {
 						}
 					} else {
 						UI.quad(pillar_r->fit_aspect(tp_icon->get_aspect()), tp_icon, pillar_col);
+					}
+				}
+
+				// Unleash pillars (bright purple, also teleportable)
+				for ui: 0..mm_map.unleash_pillars.count-1 {
+					up_ent := mm_map.unleash_pillars[ui];
+					if up_ent == null continue;
+					if !#alive(up_ent) continue;
+
+					up_ui := rr_minimap_world_to_ui(map_rect, up_ent.world_position);
+					pillar_size := map_rect->height() * 0.04;
+					if pillar_size < 18.0 { pillar_size = 18.0; }
+					if pillar_size > 52.0 { pillar_size = 52.0; }
+					up_r := Rect{up_ui, up_ui}->grow_unscaled(pillar_size, pillar_size, pillar_size, pillar_size);
+					up_col := v4.{1.0, 0.4, 1.0, 1.0};
+
+					if player.player_state == Player_State.ALIVE {
+						UI.push_id(format_string("mim_utp_%", {ui}));
+						defer UI.pop_id();
+						up_bs: Button_Settings = .{};
+						rr_ui_apply_button_click_sound(ref up_bs);
+						up_interact := UI.button(up_r, up_bs, .{}, "");
+						UI.quad(up_r->fit_aspect(tp_icon->get_aspect()), tp_icon, up_col);
+
+						can_tp := mm_map.teleport_cooldown <= 0.0 && game_state == Game_State.INGAME;
+						if !can_tp {
+							UI.quad(up_r, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.5});
+						}
+
+						if up_interact.clicked && can_tp {
+							pos := up_ent.world_position;
+							player.entity->set_local_position(pos);
+							rr_mimicer_spawn_vfx(pos, "004RAND/Teleport", 1.5);
+							mm_map.teleport_cooldown = MIMICER_TELEPORT_COOLDOWN;
+							player.show_minimap = false;
+						}
+					} else {
+						UI.quad(up_r->fit_aspect(tp_icon->get_aspect()), tp_icon, up_col);
 					}
 				}
 			}
