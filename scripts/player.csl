@@ -1825,7 +1825,13 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	LIST_PAD :: 10.0;
 	DROPDOWN_SLICE_PX :: 16.0;
 
-	row_count := 5;
+	pillar_count := rr_mimicer_get_active_pillar_count(player);
+	tether_on := mm.tether_speed_active;
+	hunger_val := rr_mimicer_get_void_hunger_reduction(player);
+	passive_rows := 0;
+	if tether_on { passive_rows += 1; }
+	if hunger_val > 0.0 { passive_rows += 1; }
+	row_count := 4 + max(passive_rows, 1);
 	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 
 	header_rect := rr_draw_task_list_header(safe, false, player);
@@ -1840,19 +1846,15 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
 
 	base_ts := UI.default_text_settings();
-	base_ts.size = 24;
+	base_ts.size = 20;
 	base_ts.halign = .LEFT;
 	base_ts.valign = .CENTER;
 	base_ts.do_outline = true;
-	base_ts.outline_thickness = 4;
+	base_ts.outline_thickness = 3;
 	base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
-	base_ts.do_autofit = true;
-	base_ts.autofit_min_size = 14;
-	base_ts.autofit_max_size = 24;
 
 	list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 	faces := mm.stolen_faces;
-	pillar_count := rr_mimicer_get_active_pillar_count(player);
 
 	// Row 1: Stolen Faces (SF)
 	{
@@ -1923,24 +1925,34 @@ draw_mimicer_role_hud :: proc(player: Player) {
 		label := used ? "Unleash: USED" : format_string("Unlock Unleash: %/% SF", .{min(faces, MIMICER_UNLEASH_UNLOCK_FACES), MIMICER_UNLEASH_UNLOCK_FACES});
 		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, label);
 	}
-	// Row 5: Passive stats
-	{
+	// Passive rows — only shown when active, otherwise single "No passives" row
+	if passive_rows == 0 {
 		entry_rect := list_content->cut_top(ROW_H);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		entry_content->cut_left(24.0);
 		row_ts := base_ts;
 		row_ts.size = 18;
-		hunger_reduction := rr_mimicer_get_void_hunger_reduction(player);
-		tether_active := mm.tether_speed_active;
-		if tether_active {
+		row_ts.color = v4.{0.4, 0.4, 0.4, 1.0};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "No passives active");
+	} else {
+		if tether_on {
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			entry_content->cut_left(24.0);
+			row_ts := base_ts;
+			row_ts.size = 18;
 			row_ts.color = v4.{0.5, 1.0, 0.8, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Tether +20%% | Hunger -%s Kill CD", .{format_float(hunger_reduction, decimals=0)}));
-		} else if hunger_reduction > 0.0 {
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Void Tether: +20%% speed");
+		}
+		if hunger_val > 0.0 {
+			entry_rect := list_content->cut_top(ROW_H);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			entry_content->cut_left(24.0);
+			row_ts := base_ts;
+			row_ts.size = 18;
 			row_ts.color = v4.{0.5, 0.9, 1.0, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Hunger -%s Kill CD", .{format_float(hunger_reduction, decimals=0)}));
-		} else {
-			row_ts.color = v4.{0.6, 0.6, 0.6, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "No passives active");
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Void Hunger: -%s Kill CD", .{format_float(hunger_val, decimals=0)}));
 		}
 	}
 	} // end task_list_open
