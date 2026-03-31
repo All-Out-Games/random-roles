@@ -82,6 +82,21 @@ MIMICER_INVIS_REASON :: "mimicer_monster_form";
 MIMICER_NAME_INVIS_REASON :: "mimicer_monster_form";
 MIMICER_PROWL_INVIS_REASON :: "mimicer_prowl";
 
+// --- SFX paths ---
+MIM_SFX_TRANSFORM :: "sfx/mim/TransformIntoMim.wav";
+MIM_SFX_TRANSFORM_BACK :: "sfx/mim/TransformBack.wav";
+MIM_SFX_ULTIMATE_TRANSFORM :: "sfx/mim/UltimateTransform.wav";
+MIM_SFX_JUMPSCARE :: "sfx/mim/Jumpscare.wav";
+MIM_SFX_KILL :: "sfx/mim/kill.wav";
+MIM_SFX_ULTIMATE_KILL :: "sfx/mim/UltimateKill.wav";
+MIM_SFX_SPEW :: "sfx/mim/spew.wav";
+MIM_SFX_VOID_LUNGE :: "sfx/mim/voidLunge.wav";
+MIM_SFX_PILLAR_START :: "sfx/mim/pillar_start.wav";
+MIM_SFX_PILLAR_LOOP :: "sfx/mim/pillar_loop.wav";
+MIM_SFX_PILLAR_EXTINGUISH :: "sfx/mim/pillar extinguish.wav";
+MIM_SFX_PILLAR_CONSUME :: "sfx/mim/pillar consume.wav";
+MIM_SFX_DISGUISE :: "sfx/mim/disguise_change.wav";
+
 // =============================================================================
 // Creature Entity Management
 // =============================================================================
@@ -274,6 +289,12 @@ rr_mimicer_setup_creature_actions :: proc(sm: State_Machine, layer: State_Machin
 	corrupt_state := layer->create_state("004RAND/Slash_With_Hand_Dark", false, 1.0);
 	layer->create_global_transition(corrupt_state, false)->create_trigger_condition(corrupt_trigger);
 	layer->create_transition(corrupt_state, idle_state, true);
+
+	// Absorb (consume pillar)
+	absorb_trigger := sm->create_variable("absorb", .TRIGGER);
+	absorb_state := layer->create_state("004RAND/Absorb_Flames", false, 1.0);
+	layer->create_global_transition(absorb_state, false)->create_trigger_condition(absorb_trigger);
+	layer->create_transition(absorb_state, idle_state, true);
 }
 
 rr_mimicer_update_creature_anims :: proc(player: Player, dt: float) {
@@ -334,6 +355,12 @@ rr_mimicer_force_revert :: proc(player: Player) {
 
 	if mm.creature_visible {
 		rr_mimicer_swap_to_player(player);
+	}
+
+	// Remove monster speed bonus if active
+	if mm.monster_speed_active {
+		player.agent.movement_speed = player.agent.movement_speed / MIMICER_MONSTER_SPEED_MULTIPLIER;
+		mm.monster_speed_active = false;
 	}
 
 	// Remove tether speed bonus if active
@@ -398,7 +425,7 @@ rr_mimicer_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_
 		mm.last_kill_was_disguised = true;
 	}
 
-	// Play kill animation
+	// Play kill animation + SFX
 	if mm.is_monster_form && mm.creature_visible {
 		if mm.stolen_faces >= MIMICER_KILL_ESCALATION_FACES {
 			rr_mimicer_creature_trigger(killer, "slash_escalated");
@@ -409,6 +436,17 @@ rr_mimicer_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_
 		}
 	} else {
 		killer->set_trigger("traitor_kill");
+	}
+
+	if Game.is_server() {
+		sfx_desc := SFX.default_sfx_desc();
+		sfx_desc.entity_to_follow = killer.entity.id;
+		sfx_desc.volume = 0.5;
+		if mm.stolen_faces >= MIMICER_KILL_ESCALATION_FACES {
+			rr_play_sfx(MIM_SFX_ULTIMATE_KILL, sfx_desc);
+		} else {
+			rr_play_sfx(MIM_SFX_KILL, sfx_desc);
+		}
 	}
 
 	// Spoof killer identity on corpse when disguised
@@ -653,6 +691,13 @@ rr_mimicer_start_disguise_from_pillar :: proc(player: Player, pillar: Void_Pilla
 	mm.disguise_ends_at = get_time() + MIMICER_DISGUISE_DURATION;
 
 	rr_mimicer_spawn_vfx(player.entity.world_position, "004RAND/Mimic_Poof", 1.0);
+
+	if Game.is_server() {
+		sfx_desc := SFX.default_sfx_desc();
+		sfx_desc.entity_to_follow = player.entity.id;
+		sfx_desc.volume = 0.5;
+		rr_play_sfx(MIM_SFX_DISGUISE, sfx_desc);
+	}
 }
 
 rr_mimicer_end_disguise :: proc(player: Player) {
@@ -721,6 +766,13 @@ rr_mimicer_start_void_lunge :: proc(player: Player, target_pos: v2) {
 		} else {
 			rr_mimicer_creature_trigger(player, "lunge");
 		}
+	}
+
+	if Game.is_server() {
+		sfx_desc := SFX.default_sfx_desc();
+		sfx_desc.entity_to_follow = player.entity.id;
+		sfx_desc.volume = 0.5;
+		rr_play_sfx(MIM_SFX_VOID_LUNGE, sfx_desc);
 	}
 }
 
@@ -822,6 +874,13 @@ rr_mimicer_spew_corruption :: proc(player: Player, target: Player) {
 
 	if mm.is_monster_form && mm.creature_visible {
 		rr_mimicer_creature_trigger(player, "spew");
+	}
+
+	if Game.is_server() {
+		sfx_desc := SFX.default_sfx_desc();
+		sfx_desc.entity_to_follow = player.entity.id;
+		sfx_desc.volume = 0.5;
+		rr_play_sfx(MIM_SFX_SPEW, sfx_desc);
 	}
 
 	// Spawn hallucination mimicer creatures on every other alive player.
@@ -952,6 +1011,13 @@ Void_Pillar :: class : Component {
 	stored_victim_color: Color_Replace_Color;
 	is_smoldered: bool;
 	pillar_spine: Spine_Animator;
+	loop_sfx_id: u64;
+
+	ao_end :: method() {
+		if loop_sfx_id != 0 {
+			SFX.stop(loop_sfx_id);
+		}
+	}
 }
 
 rr_mimicer_create_void_pillar :: proc(player: Player, pos: v2, corpse: Corpse) {
@@ -1013,6 +1079,20 @@ rr_mimicer_create_void_pillar :: proc(player: Player, pos: v2, corpse: Corpse) {
 
 	pillar.is_smoldered = false;
 
+	// Pillar SFX: one-shot start + looping ambient
+	if Game.is_server() {
+		sfx_desc := SFX.default_sfx_desc();
+		sfx_desc.entity_to_follow = pillar_entity.id;
+		sfx_desc.volume = 0.5;
+		rr_play_sfx(MIM_SFX_PILLAR_START, sfx_desc);
+
+		loop_desc := SFX.default_sfx_desc();
+		loop_desc.entity_to_follow = pillar_entity.id;
+		loop_desc.loop = true;
+		loop_desc.volume = 0.2;
+		pillar.loop_sfx_id = rr_play_sfx(MIM_SFX_PILLAR_LOOP, loop_desc);
+	}
+
 	// Add interactables
 	pillar_entity->add_component(Void_Pillar_Mimicer_Interact);
 	pillar_entity->add_component(Void_Pillar_Civilian_Interact);
@@ -1048,6 +1128,19 @@ rr_mimicer_smolder_pillar :: proc(pillar: Void_Pillar) {
 		pillar.pillar_spine.instance->set_animation("012MIM/Dark_Flame_Pillar_End", false, 0);
 		pillar.pillar_spine.instance.color_multiplier = v4.{0.3, 0.3, 0.3, 0.4};
 	}
+
+	if Game.is_server() {
+		sfx_desc := SFX.default_sfx_desc();
+		sfx_desc.entity_to_follow = pillar.entity.id;
+		sfx_desc.volume = 0.5;
+		rr_play_sfx(MIM_SFX_PILLAR_EXTINGUISH, sfx_desc);
+	}
+
+	// Stop loop sound
+	if pillar.loop_sfx_id != 0 {
+		SFX.stop(pillar.loop_sfx_id);
+		pillar.loop_sfx_id = 0;
+	}
 }
 
 rr_mimicer_reignite_pillar :: proc(pillar: Void_Pillar) {
@@ -1057,6 +1150,15 @@ rr_mimicer_reignite_pillar :: proc(pillar: Void_Pillar) {
 	if pillar.pillar_spine != null && pillar.pillar_spine.instance != null {
 		pillar.pillar_spine.instance->set_animation("012MIM/Dark_Flame_Pillar_Start", false, 0);
 		pillar.pillar_spine.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 1.0};
+	}
+
+	// Restart loop sound
+	if Game.is_server() {
+		loop_desc := SFX.default_sfx_desc();
+		loop_desc.entity_to_follow = pillar.entity.id;
+		loop_desc.loop = true;
+		loop_desc.volume = 0.2;
+		pillar.loop_sfx_id = rr_play_sfx(MIM_SFX_PILLAR_LOOP, loop_desc);
 	}
 }
 
@@ -1498,6 +1600,22 @@ rr_mimicer_unleash_place_pillar :: proc(player: Player, pos: v2) {
 	append(ref mm.unleash_pillars, pillar_entity);
 	mm.unleash_pillars_placed += 1;
 
+	// Pillar placement SFX
+	if Game.is_server() {
+		sfx_desc := SFX.default_sfx_desc();
+		sfx_desc.entity_to_follow = pillar_entity.id;
+		sfx_desc.volume = 0.5;
+		rr_play_sfx(MIM_SFX_PILLAR_START, sfx_desc);
+
+		loop_desc := SFX.default_sfx_desc();
+		loop_desc.entity_to_follow = pillar_entity.id;
+		loop_desc.loop = true;
+		loop_desc.volume = 0.2;
+		// Unleash pillars don't have Void_Pillar component, so just fire-and-forget the loop
+		// (they get destroyed on consume which kills the sound)
+		rr_play_sfx(MIM_SFX_PILLAR_LOOP, loop_desc);
+	}
+
 	rr_mimicer_spawn_vfx(pos, "004RAND/Teleport", 1.5);
 
 	// All pillars placed — activate unleash
@@ -1531,6 +1649,18 @@ rr_mimicer_unleash_activate :: proc(player: Player) {
 		rr_mimicer_creature_trigger(player, "scream");
 	}
 
+	// Unleash transform SFX + jumpscare SFX for all other players
+	if Game.is_server() {
+		sfx_desc := SFX.default_sfx_desc();
+		sfx_desc.entity_to_follow = player.entity.id;
+		sfx_desc.volume = 0.5;
+		rr_play_sfx(MIM_SFX_ULTIMATE_TRANSFORM, sfx_desc);
+
+		scare_desc := SFX.default_sfx_desc();
+		scare_desc.volume = 0.5;
+		rr_play_sfx(MIM_SFX_JUMPSCARE, scare_desc);
+	}
+
 	// Jumpscare all non-mimicer players (including dead ones)
 	jumpscare_end := get_time() + MIMICER_JUMPSCARE_DURATION;
 	foreach p: component_iterator(Player) {
@@ -1554,6 +1684,16 @@ rr_mimicer_consume_unleash_pillar :: proc(player: Player, pillar_entity: Entity)
 	mm.teleport_cooldown = 0.0;
 	mm.spew_lock_until = 0.0;
 	player->remove_disable_movement_input_reason(MIMICER_SPEW_LOCK_REASON);
+
+	// Play absorb animation on creature
+	rr_mimicer_creature_trigger(player, "absorb");
+
+	if Game.is_server() {
+		sfx_desc := SFX.default_sfx_desc();
+		sfx_desc.entity_to_follow = pillar_entity.id;
+		sfx_desc.volume = 0.5;
+		rr_play_sfx(MIM_SFX_PILLAR_CONSUME, sfx_desc);
+	}
 
 	// Destroy the pillar
 	pos := pillar_entity.world_position;
@@ -1828,10 +1968,21 @@ Mimicer_Transform_Ability :: class : Ability_Base {
 				// Revert to schleem — transforming back breaks disguise
 				mm.is_monster_form = false;
 				mm.skeleton_swap_at = 0.0;
+				if mm.monster_speed_active {
+					mm.monster_speed_active = false;
+					player.agent.movement_speed = player.agent.movement_speed / MIMICER_MONSTER_SPEED_MULTIPLIER;
+				}
 				rr_mimicer_swap_to_player(player);
 				player->set_trigger("mimicer_revert");
 				player->remove_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
 				player->add_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
+
+				if Game.is_server() {
+					sfx_desc := SFX.default_sfx_desc();
+					sfx_desc.entity_to_follow = player.entity.id;
+					sfx_desc.volume = 0.5;
+					rr_play_sfx(MIM_SFX_TRANSFORM_BACK, sfx_desc);
+				}
 
 				// Breaking disguise on revert to schleem
 				if mm.is_disguised {
@@ -1856,6 +2007,13 @@ Mimicer_Transform_Ability :: class : Ability_Base {
 				player->remove_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
 				player->add_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
 				mm.skeleton_swap_at = get_time() + MIMICER_TRANSFORM_ANIM_SECONDS;
+
+				if Game.is_server() {
+					sfx_desc := SFX.default_sfx_desc();
+					sfx_desc.entity_to_follow = player.entity.id;
+					sfx_desc.volume = 0.5;
+					rr_play_sfx(MIM_SFX_TRANSFORM, sfx_desc);
+				}
 
 				lock := player.entity->get_component(Mimicer_Transform_Lock);
 				if lock == null {
@@ -1888,7 +2046,8 @@ Mimicer_Transform_Lock :: class : Component {
 
 				// Apply monster speed bonus and ultimate form skin
 				mm := p.entity->get_component(Mimicer_Module);
-				if mm != null && mm.is_monster_form && !mm.is_prowling {
+				if mm != null && mm.is_monster_form && !mm.is_prowling && !mm.monster_speed_active {
+					mm.monster_speed_active = true;
 					p.agent.movement_speed = p.agent.movement_speed * MIMICER_MONSTER_SPEED_MULTIPLIER;
 
 					// Preserve ultimate form skin through transforms
