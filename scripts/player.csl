@@ -1205,6 +1205,12 @@ rr_get_stun_remaining :: proc(p: Player) -> float {
 		if r > best { best = r; }
 	}
 
+	ms := p.entity->get_component(Mimicer_Stun);
+	if ms != null && ms.active {
+		r := ms.end_time - now;
+		if r > best { best = r; }
+	}
+
 	// Werewolf infection countdown (time until auto-revert) — only after transform reveals.
 	if p.werewolf_infected && p.werewolf_infection_expires_at > 0.0 && p.werewolf_skin_active {
 		r := p.werewolf_infection_expires_at - now;
@@ -1330,7 +1336,7 @@ draw_player_role_hud :: proc(player: Player) {
 		if hm_contract_target_id != 0 {
 			t := get_player_by_entity_id(hm_contract_target_id);
 			if t != null && t.player_state == Player_State.ALIVE {
-				target_name = t.entity->get_name();
+				target_name = t->get_username();
 			}
 		}
 
@@ -2839,7 +2845,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		name := "Someone";
 		target := get_player_by_entity_id(rr_vote_eject_player_id);
 		if target != null {
-			name = target.entity->get_name();
+			name = target->get_username();
 		}
 		message := format_string("% got voted out", .{name});
 
