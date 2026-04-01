@@ -12,9 +12,9 @@ MIMICER_VFX_RIG :: "anims/roles/Mimicer/vfx/004RAND_Mimicer.spine";
 MIMICER_PILLAR_RIG :: "anims/roles/Mimicer/vfx/012MIM_Dark_Flame_Pillar.spine";
 
 // Kill
-MIMICER_KILL_COOLDOWN :: 25.0;
-MIMICER_KILL_RANGE_SCHLEEM :: 5.0;
-MIMICER_KILL_RANGE_MONSTER :: 6.5;
+MIMICER_KILL_COOLDOWN :: 80.0;
+MIMICER_KILL_RANGE_SCHLEEM :: 6.5;
+MIMICER_KILL_RANGE_MONSTER :: 7.5;
 MIMICER_KILL_ESCALATION_FACES :: 2;
 
 // Transform
@@ -34,7 +34,7 @@ MIMICER_CORRUPT_INTERACT_RADIUS :: 2.5;
 // Void Pillar
 MIMICER_PILLAR_INTERACT_RADIUS :: 2.5;
 MIMICER_PILLAR_SMOLDER_SECONDS :: 3.0;
-MIMICER_PILLAR_REIGNITE_SECONDS :: 3.0;
+
 
 // Disguise
 MIMICER_DISGUISE_DURATION :: 40.0;
@@ -53,7 +53,7 @@ MIMICER_VOID_LUNGE_HIT_RADIUS :: 1.5;
 MIMICER_SPEW_COOLDOWN :: 50.0;
 MIMICER_SPEW_BLIND_SECONDS :: 5.0;
 MIMICER_SPEW_DISTORT_SECONDS :: 40.0;
-MIMICER_SPEW_RANGE :: 2.5;
+MIMICER_SPEW_RANGE :: 6.5;
 MIMICER_SPEW_CAST_LOCK_SECONDS :: 3.0;
 MIMICER_SPEW_BLIND_LOS_INNER :: 0.5;
 MIMICER_SPEW_BLIND_LOS_OUTER :: 0.8;
@@ -496,6 +496,10 @@ rr_mimicer_update :: proc(player: Player, dt: float) {
 	if mm.skeleton_swap_at > 0.0 && now >= mm.skeleton_swap_at {
 		mm.skeleton_swap_at = 0.0;
 		if mm.is_monster_form && !mm.creature_visible {
+			// End disguise now that we're fully transformed
+			if mm.is_disguised {
+				rr_mimicer_end_disguise(player);
+			}
 			rr_mimicer_swap_to_creature(player);
 		}
 	}
@@ -1126,7 +1130,6 @@ rr_mimicer_smolder_pillar :: proc(pillar: Void_Pillar) {
 
 	if pillar.pillar_spine != null && pillar.pillar_spine.instance != null {
 		pillar.pillar_spine.instance->set_animation("012MIM/Dark_Flame_Pillar_End", false, 0);
-		pillar.pillar_spine.instance.color_multiplier = v4.{0.3, 0.3, 0.3, 0.4};
 	}
 
 	if Game.is_server() {
@@ -1141,26 +1144,13 @@ rr_mimicer_smolder_pillar :: proc(pillar: Void_Pillar) {
 		SFX.stop(pillar.loop_sfx_id);
 		pillar.loop_sfx_id = 0;
 	}
-}
 
-rr_mimicer_reignite_pillar :: proc(pillar: Void_Pillar) {
-	if pillar == null return;
-	pillar.is_smoldered = false;
-
-	if pillar.pillar_spine != null && pillar.pillar_spine.instance != null {
-		pillar.pillar_spine.instance->set_animation("012MIM/Dark_Flame_Pillar_Start", false, 0);
-		pillar.pillar_spine.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 1.0};
-	}
-
-	// Restart loop sound
-	if Game.is_server() {
-		loop_desc := SFX.default_sfx_desc();
-		loop_desc.entity_to_follow = pillar.entity.id;
-		loop_desc.loop = true;
-		loop_desc.volume = 0.2;
-		pillar.loop_sfx_id = rr_play_sfx(MIM_SFX_PILLAR_LOOP, loop_desc);
+	// Destroy the pillar after the end animation plays
+	if pillar.entity != null && #alive(pillar.entity) {
+		pillar.entity->queue_for_destruction(1.0);
 	}
 }
+
 
 rr_mimicer_get_active_pillar_count :: proc(player: Player) -> int {
 	mm := player.entity->get_component(Mimicer_Module);
@@ -1281,18 +1271,14 @@ Void_Pillar_Mimicer_Interact :: class : Interactable {
 			return true;
 		}
 
-		if vp.is_smoldered {
-			this->set_text("Reignite");
-			this->set_hold_text("Reigniting...");
-			required_hold_time = MIMICER_PILLAR_REIGNITE_SECONDS;
-		} else {
-			if mm.is_disguised {
-				return false;
-			}
-			this->set_text("Disguise");
-			this->set_hold_text("");
-			required_hold_time = 0.0;
+		if vp.is_smoldered return false;
+
+		if mm.is_disguised {
+			return false;
 		}
+		this->set_text("Disguise");
+		this->set_hold_text("");
+		required_hold_time = 0.0;
 
 		return true;
 	}
@@ -1308,25 +1294,20 @@ Void_Pillar_Mimicer_Interact :: class : Interactable {
 			return;
 		}
 
-		if vp.is_smoldered {
-			rr_mimicer_reignite_pillar(vp);
-			Notifier.notify(player, "Void Pillar reignited!");
-		} else {
-			if mm == null return;
-			if mm.is_disguised return;
+		if mm == null return;
+		if mm.is_disguised return;
 
-			// Revert to schleem for disguise — clean up all monster visuals
-			if mm.is_monster_form {
-				mm.is_monster_form = false;
-				mm.skeleton_swap_at = 0.0;
+		// Revert to schleem for disguise — clean up all monster visuals
+		if mm.is_monster_form {
+			mm.is_monster_form = false;
+			mm.skeleton_swap_at = 0.0;
 
-				rr_mimicer_swap_to_player(player);
-				player->remove_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
-			}
-
-			rr_mimicer_start_disguise_from_pillar(player, vp);
-			Notifier.notify(player, format_string("Disguised as %!", {vp.stored_victim_name}));
+			rr_mimicer_swap_to_player(player);
+			player->remove_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
 		}
+
+		rr_mimicer_start_disguise_from_pillar(player, vp);
+		Notifier.notify(player, format_string("Disguised as %!", {vp.stored_victim_name}));
 	}
 }
 
@@ -1614,6 +1595,12 @@ rr_mimicer_unleash_place_pillar :: proc(player: Player, pos: v2) {
 		// Unleash pillars don't have Void_Pillar component, so just fire-and-forget the loop
 		// (they get destroyed on consume which kills the sound)
 		rr_play_sfx(MIM_SFX_PILLAR_LOOP, loop_desc);
+
+		// Ding to confirm placement
+		ding_desc := SFX.default_sfx_desc();
+		ding_desc.entity_to_follow = player.entity.id;
+		ding_desc.volume = 0.25;
+		rr_play_sfx("sfx/task_success.wav", ding_desc);
 	}
 
 	rr_mimicer_spawn_vfx(pos, "004RAND/Teleport", 1.5);
@@ -1999,9 +1986,7 @@ Mimicer_Transform_Ability :: class : Ability_Base {
 			} else {
 				// Transform to monster (115% speed) — drop any dragged body first
 				rr_drag_body_force_drop_for_player(player);
-				if mm.is_disguised {
-					rr_mimicer_end_disguise(player);
-				}
+				// Disguise is kept during transform animation and removed when skeleton swap completes
 				mm.is_monster_form = true;
 				player->set_trigger("mimicer_transform");
 				player->remove_disable_movement_input_reason(MIMICER_TRANSFORM_LOCK_REASON);
