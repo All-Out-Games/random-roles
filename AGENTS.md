@@ -81,6 +81,17 @@ foreach entity: entity_iterator() {
 }
 ```
 
+#### Iterating Children
+visit :: proc(entity: Entity) {
+    // <do something>
+
+    current := entity.first_child;
+    while current != null {
+        visit(current);
+        current = current.next_sibling;
+    }
+}
+
 ## Components
 
 ### Out-of-the-box components
