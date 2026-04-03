@@ -443,6 +443,12 @@ Player :: class : Player_Base {
 		// Big Charlie trampled status update.
 		rr_bc_update_trampled(this, delta_time);
 
+		// Lily Lovebraids per-frame update (transform, strings, RLGL, tea party, dollhouse).
+		rr_lily_update(this, delta_time);
+
+		// Show RLGL traffic light to affected (strung) players.
+		rr_lily_draw_rlgl_victim_hud(this);
+
 		// Mimicer disguise name (draws target's name above disguised player).
 		rr_mimicer_draw_disguise_name(this);
 
@@ -754,120 +760,7 @@ Player :: class : Player_Base {
 
                     // During gameplay, show abilities based on type and role
                     if player_type == Player_Type.TRAITOR {
-						// Hitman replaces the default kill with Neck Snap.
-						if player_role == Player_Role.HITMAN {
-							draw_ability_button(this, Hitman_Neck_Snap_Ability, abilityIndex);
-							abilityIndex += 1;
-						} else if player_role == Player_Role.WEREWOLF {
-							wm := this.entity->get_component(Werewolf_Module);
-							if wm != null && wm.is_wolf_form {
-								// Wolf form: Devour + Transform (no Drag).
-								draw_ability_button(this, Werewolf_Devour_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, Werewolf_Transform_Ability, abilityIndex);
-								abilityIndex += 1;
-							} else {
-								// Human form: Drag + Transform (no Devour).
-								draw_ability_button(this, Drag_Body_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, Werewolf_Transform_Ability, abilityIndex);
-								abilityIndex += 1;
-							}
-						} else if player_role == Player_Role.GOO_GOO_GAGA {
-							ggm := this.entity->get_component(GGG_Module);
-							if ggm != null && !ggm.nest_placed {
-								// Before nest placed: Place Nest + Kill + Transform
-								draw_ability_button(this, GGG_Place_Nest_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, Kill_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, GGG_Transform_Ability, abilityIndex);
-								abilityIndex += 1;
-							} else if ggm != null && ggm.is_creature_form {
-								// Creature form: Kill + Transform + Crawl + Foil Whip + Swarm
-								draw_ability_button(this, Kill_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, GGG_Transform_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, GGG_Crawl_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, GGG_Foil_Whip_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, GGG_Swarm_Ability, abilityIndex);
-								abilityIndex += 1;
-							} else {
-								// Human form: Kill + Transform + Chocolate Trap + Drag
-								draw_ability_button(this, Kill_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, GGG_Transform_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, GGG_Chocolate_Trap_Ability, abilityIndex);
-								abilityIndex += 1;
-								draw_ability_button(this, Drag_Body_Ability, abilityIndex);
-								abilityIndex += 1;
-							}
-						} else if player_role == Player_Role.MIMICER {
-							abilityIndex = rr_mimicer_draw_abilities(this, abilityIndex);
-						} else if player_role == Player_Role.BIG_CHARLIE {
-							abilityIndex = rr_bc_draw_abilities(this, abilityIndex);
-						} else {
-                        	draw_ability_button(this, Kill_Ability, abilityIndex);
-							abilityIndex += 1;
-						}
-
-						// All traitors (except werewolf and GGG, handled above) can drag bodies.
-						if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA && player_role != Player_Role.MIMICER && player_role != Player_Role.BIG_CHARLIE {
-							draw_ability_button(this, Drag_Body_Ability, abilityIndex);
-							abilityIndex += 1;
-						}
-                        
-                        // Pirate progression: Black Flag default, Shoot at 1 treasure, Keg at 2.
-                        if player_role == Player_Role.PIRATE {
-							draw_ability_button(this, Black_Flag_Ability, abilityIndex);
-							abilityIndex += 1;
-							pm := this.entity->get_component(Pirate_Module);
-							// Only show Shoot once unlocked.
-							if pm != null && pm.treasure >= PIRATE_SHOOT_UNLOCK_TREASURE_COST {
-								draw_ability_button(this, Shoot_Ability, abilityIndex);
-								abilityIndex += 1;
-							}
-							// Only show Powder Keg once unlocked.
-							if pm != null && pm.treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
-								draw_ability_button(this, Powder_Keg_Ability, abilityIndex);
-								abilityIndex += 1;
-							}
-							draw_ability_button(this, Pirate_Treasure_Map_Ability, abilityIndex);
-							abilityIndex += 1;
-                        }
-
-						// Hitman gets Mine + Sniper (only show once unlocked).
-						if player_role == Player_Role.HITMAN {
-							hm := this.entity->get_component(Hitman_Module);
-							if hm != null && hm.kills >= HITMAN_MINE_UNLOCK_KILLS {
-								draw_ability_button(this, Hitman_Mine_Ability, abilityIndex);
-								abilityIndex += 1;
-							}
-							if hm != null && hm.kills >= HITMAN_SNIPER_UNLOCK_KILLS {
-								draw_ability_button(this, Hitman_Sniper_Ability, abilityIndex);
-								abilityIndex += 1;
-							}
-						}
-
-						// Werewolf gets Infect (any form) + Claw (wolf form only), once unlocked.
-						if player_role == Player_Role.WEREWOLF {
-							wm2 := this.entity->get_component(Werewolf_Module);
-							if wm2 != null && wm2.kills >= WEREWOLF_INFECT_UNLOCK_KILLS {
-								draw_ability_button(this, Werewolf_Infecting_Bite_Ability, abilityIndex);
-								abilityIndex += 1;
-							}
-							if wm2 != null && wm2.is_wolf_form && wm2.kills >= WEREWOLF_CLAW_UNLOCK_KILLS {
-								draw_ability_button(this, Werewolf_Claw_Slash_Ability, abilityIndex);
-								abilityIndex += 1;
-							}
-						}
-
-						// Traitor quick-access map (sabotage icon) above abilities.
-						draw_traitor_sabotage_map_button(this);
+						abilityIndex = rr_draw_traitor_abilities(this, abilityIndex);
                     }
                     if player_type == Player_Type.CIVILIAN && player_role == Player_Role.SHERIFF {
                         draw_ability_button(this, Shoot_Ability, abilityIndex);
@@ -1096,6 +989,7 @@ Player :: class : Player_Base {
 		rr_ggg_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_mimicer_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_bc_on_player_killed(killer_player_entity_id, this.entity.id);
+		rr_lily_on_player_death(this.entity.id, killer_player_entity_id);
         log(format_string("Player % killed (killer=%)", .{this.entity.id, killer_player_entity_id}));
 	}
 
@@ -1117,6 +1011,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .GOO_GOO_GAGA:  return "GOO GOO GAGA";
 		case .MIMICER:       return "MIMICER";
 		case .BIG_CHARLIE:   return "BIG CHARLIE";
+		case .LILY_LOVEBRAIDS: return "LILY LOVEBRAIDS";
 	}
 	return "CREW";
 }
@@ -2176,6 +2071,123 @@ rr_werewolf_capture_round_start_look :: proc(player: Player) {
 	player.werewolf_round_start_avatar_color = player.avatar_color;
 }
 
+// Traitor ability drawing (extracted from ao_late_update to reduce register pressure).
+rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
+	abilityIndex := idx;
+	player_role := player.player_role;
+
+	// Hitman replaces the default kill with Neck Snap.
+	if player_role == Player_Role.HITMAN {
+		draw_ability_button(player, Hitman_Neck_Snap_Ability, abilityIndex);
+		abilityIndex += 1;
+	} else if player_role == Player_Role.WEREWOLF {
+		wm := player.entity->get_component(Werewolf_Module);
+		if wm != null && wm.is_wolf_form {
+			draw_ability_button(player, Werewolf_Devour_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, Werewolf_Transform_Ability, abilityIndex);
+			abilityIndex += 1;
+		} else {
+			draw_ability_button(player, Drag_Body_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, Werewolf_Transform_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+	} else if player_role == Player_Role.GOO_GOO_GAGA {
+		ggm := player.entity->get_component(GGG_Module);
+		if ggm != null && !ggm.nest_placed {
+			draw_ability_button(player, GGG_Place_Nest_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, Kill_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, GGG_Transform_Ability, abilityIndex);
+			abilityIndex += 1;
+		} else if ggm != null && ggm.is_creature_form {
+			draw_ability_button(player, Kill_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, GGG_Transform_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, GGG_Crawl_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, GGG_Foil_Whip_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, GGG_Swarm_Ability, abilityIndex);
+			abilityIndex += 1;
+		} else {
+			draw_ability_button(player, Kill_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, GGG_Transform_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, GGG_Chocolate_Trap_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, Drag_Body_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+	} else if player_role == Player_Role.MIMICER {
+		abilityIndex = rr_mimicer_draw_abilities(player, abilityIndex);
+	} else if player_role == Player_Role.BIG_CHARLIE {
+		abilityIndex = rr_bc_draw_abilities(player, abilityIndex);
+	} else if player_role == Player_Role.LILY_LOVEBRAIDS {
+		abilityIndex = rr_lily_draw_abilities(player, abilityIndex);
+	} else {
+		draw_ability_button(player, Kill_Ability, abilityIndex);
+		abilityIndex += 1;
+	}
+
+	// All traitors (except werewolf and GGG, handled above) can drag bodies.
+	if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA && player_role != Player_Role.MIMICER && player_role != Player_Role.BIG_CHARLIE && player_role != Player_Role.LILY_LOVEBRAIDS {
+		draw_ability_button(player, Drag_Body_Ability, abilityIndex);
+		abilityIndex += 1;
+	}
+
+	// Pirate progression: Black Flag default, Shoot at 1 treasure, Keg at 2.
+	if player_role == Player_Role.PIRATE {
+		draw_ability_button(player, Black_Flag_Ability, abilityIndex);
+		abilityIndex += 1;
+		pm := player.entity->get_component(Pirate_Module);
+		if pm != null && pm.treasure >= PIRATE_SHOOT_UNLOCK_TREASURE_COST {
+			draw_ability_button(player, Shoot_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if pm != null && pm.treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
+			draw_ability_button(player, Powder_Keg_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		draw_ability_button(player, Pirate_Treasure_Map_Ability, abilityIndex);
+		abilityIndex += 1;
+	}
+
+	// Hitman gets Mine + Sniper (only show once unlocked).
+	if player_role == Player_Role.HITMAN {
+		hm := player.entity->get_component(Hitman_Module);
+		if hm != null && hm.kills >= HITMAN_MINE_UNLOCK_KILLS {
+			draw_ability_button(player, Hitman_Mine_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if hm != null && hm.kills >= HITMAN_SNIPER_UNLOCK_KILLS {
+			draw_ability_button(player, Hitman_Sniper_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+	}
+
+	// Werewolf gets Infect (any form) + Claw (wolf form only), once unlocked.
+	if player_role == Player_Role.WEREWOLF {
+		wm2 := player.entity->get_component(Werewolf_Module);
+		if wm2 != null && wm2.kills >= WEREWOLF_INFECT_UNLOCK_KILLS {
+			draw_ability_button(player, Werewolf_Infecting_Bite_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if wm2 != null && wm2.is_wolf_form && wm2.kills >= WEREWOLF_CLAW_UNLOCK_KILLS {
+			draw_ability_button(player, Werewolf_Claw_Slash_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+	}
+
+	// Traitor quick-access map (sabotage icon) above abilities.
+	draw_traitor_sabotage_map_button(player);
+	return abilityIndex;
+}
+
 // Mimicer ability button layout (extracted from ao_late_update to reduce register pressure).
 rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 	abilityIndex := idx;
@@ -2780,6 +2792,83 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer->create_transition(bc_cocoon_success_state, idle_state, true);
 	}
 
+	// Lily Lovebraids player-rig state machine states.
+	rr_sm_setup_lily :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		// Transform to Lily (one-shot) -> back to Idle.
+		lily_transform_var := sm->create_variable("lily_transform", State_Machine_Variable.Kind.TRIGGER);
+		lily_transform_state := layer->create_state("004RAND_LILY/Transform_Monster_Start", false, 1.0);
+		layer->create_global_transition(lily_transform_state, false)->create_trigger_condition(lily_transform_var);
+		layer->create_transition(lily_transform_state, idle_state, true);
+
+		// Revert from Lily (one-shot) -> back to Idle.
+		lily_revert_var := sm->create_variable("lily_revert", State_Machine_Variable.Kind.TRIGGER);
+		lily_revert_state := layer->create_state("004RAND_LILY/Transform_Player_End", false, 1.0);
+		layer->create_global_transition(lily_revert_state, false)->create_trigger_condition(lily_revert_var);
+		layer->create_transition(lily_revert_state, idle_state, true);
+
+		// Kill animation
+		lily_kill_var := sm->create_variable("lily_kill", State_Machine_Variable.Kind.TRIGGER);
+		lily_kill_state := layer->create_state("004RAND_LILY/Kill_Lovebraids", false, 1.0);
+		layer->create_global_transition(lily_kill_state, false)->create_trigger_condition(lily_kill_var);
+		layer->create_transition(lily_kill_state, idle_state, true);
+
+		// Rooted (RLGL victim): Start -> Loop, End -> Idle
+		lily_rooted_start_var := sm->create_variable("lily_rooted_start", State_Machine_Variable.Kind.TRIGGER);
+		lily_rooted_start_state := layer->create_state("004RAND_LILY/Rooted_Start", false, 0.5);
+		lily_rooted_loop_state := layer->create_state("004RAND_LILY/Rooted_Loop", true, 0.0);
+		layer->create_global_transition(lily_rooted_start_state, false)->create_trigger_condition(lily_rooted_start_var);
+		layer->create_transition(lily_rooted_start_state, lily_rooted_loop_state, true);
+
+		lily_rooted_end_var := sm->create_variable("lily_rooted_end", State_Machine_Variable.Kind.TRIGGER);
+		lily_rooted_end_state := layer->create_state("004RAND_LILY/Rooted_End", false, 0.5);
+		layer->create_global_transition(lily_rooted_end_state, false)->create_trigger_condition(lily_rooted_end_var);
+		layer->create_transition(lily_rooted_end_state, idle_state, true);
+
+		// Tea Party: Start -> Loop
+		lily_tea_start_var := sm->create_variable("lily_tea_start", State_Machine_Variable.Kind.TRIGGER);
+		lily_tea_start_state := layer->create_state("004RAND_LILY/Tea_Party_Start", false, 0.5);
+		lily_tea_loop_state := layer->create_state("004RAND_LILY/Tea_Party_Loop", true, 0.0);
+		layer->create_global_transition(lily_tea_start_state, false)->create_trigger_condition(lily_tea_start_var);
+		layer->create_transition(lily_tea_start_state, lily_tea_loop_state, true);
+
+		// Tea outcomes (one-shots -> idle)
+		lily_tea_death_var := sm->create_variable("lily_tea_death", State_Machine_Variable.Kind.TRIGGER);
+		lily_tea_death_state := layer->create_state("004RAND_LILY/Forced_Tea_Death", false, 1.0);
+		layer->create_global_transition(lily_tea_death_state, false)->create_trigger_condition(lily_tea_death_var);
+
+		lily_tea_safe_var := sm->create_variable("lily_tea_safe", State_Machine_Variable.Kind.TRIGGER);
+		lily_tea_safe_state := layer->create_state("004RAND_LILY/Forced_Tea_Safe", false, 1.0);
+		layer->create_global_transition(lily_tea_safe_state, false)->create_trigger_condition(lily_tea_safe_var);
+		layer->create_transition(lily_tea_safe_state, idle_state, true);
+
+		// Caffeine (Hyper): Forced_Tea_Hyper -> Hyper_Idle/Run locomotion -> Hyper_End -> Idle
+		lily_tea_hyper_var := sm->create_variable("lily_tea_hyper", State_Machine_Variable.Kind.TRIGGER);
+		lily_tea_hyper_state := layer->create_state("004RAND_LILY/Forced_Tea_Hyper", false, 1.0);
+		layer->create_global_transition(lily_tea_hyper_state, false)->create_trigger_condition(lily_tea_hyper_var);
+
+		lily_hyper_moving_var := sm->create_variable("lily_hyper_moving", State_Machine_Variable.Kind.BOOL);
+		lily_hyper_idle_state := layer->create_state("004RAND_LILY/Hyper_Idle", true, 0.0);
+		lily_hyper_run_state := layer->create_state("004RAND_LILY/Hyper_Run", true, 0.0);
+		layer->create_transition(lily_tea_hyper_state, lily_hyper_idle_state, true);
+
+		hyper_idle_to_run := layer->create_transition(lily_hyper_idle_state, lily_hyper_run_state, false);
+		hyper_idle_to_run->create_bool_condition(lily_hyper_moving_var, true);
+		hyper_run_to_idle := layer->create_transition(lily_hyper_run_state, lily_hyper_idle_state, false);
+		hyper_run_to_idle->create_bool_condition(lily_hyper_moving_var, false);
+
+		lily_hyper_end_var := sm->create_variable("lily_hyper_end", State_Machine_Variable.Kind.TRIGGER);
+		lily_hyper_end_state := layer->create_state("004RAND_LILY/Hyper_End", false, 0.5);
+		layer->create_global_transition(lily_hyper_end_state, false)->create_trigger_condition(lily_hyper_end_var);
+		layer->create_transition(lily_hyper_end_state, idle_state, true);
+
+		// Hair string pull: Start -> Loop
+		lily_pull_start_var := sm->create_variable("lily_pull_start", State_Machine_Variable.Kind.TRIGGER);
+		lily_pull_start_state := layer->create_state("004RAND_LILY/Hair_String_Pull_Start", false, 0.5);
+		lily_pull_loop_state := layer->create_state("004RAND_LILY/Hair_String_Pull_Loop", true, 0.0);
+		layer->create_global_transition(lily_pull_start_state, false)->create_trigger_condition(lily_pull_start_var);
+		layer->create_transition(lily_pull_start_state, lily_pull_loop_state, true);
+	}
+
 	// Adds the animation state machine.
 	ensure_anim_state_machine :: proc(using this: Player) {
 		if sm_inited {
@@ -2815,6 +2904,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		rr_sm_setup_ggg(sm, layer, idle_state);
 		rr_mimicer_setup_player_state_machine(sm, layer, idle_state);
 		rr_sm_setup_big_charlie(sm, layer, idle_state);
+		rr_sm_setup_lily(sm, layer, idle_state);
 		rr_sm_setup_drag_body(sm, layer, idle_state);
 
 		sm_inited = true;
@@ -4278,6 +4368,15 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 		player.intro_role_spine->set_animation("Transform_Monster_End", false, 0);
 		player.intro_is_creature_rig = true;
 		player.intro_second_anim_name = "Pounce";
+		player.intro_second_anim_at = 1.3;
+		return;
+	}
+	if role == Player_Role.LILY_LOVEBRAIDS {
+		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, rr_lily_get_creature_rig_path()));
+		player.intro_role_spine->refresh_skins();
+		player.intro_role_spine->set_animation("transform", false, 0);
+		player.intro_is_creature_rig = true;
+		player.intro_second_anim_name = "action";
 		player.intro_second_anim_at = 1.3;
 		return;
 	}

@@ -1547,7 +1547,7 @@ Resurrect_Ability :: class : Ability_Base {
             if p.player_state != Player_State.ALIVE continue;
             has_spew := p.mimicer_blinded || p.mimicer_distorted_until > 0.0;
             has_trample := p.bc_trampled;
-            if !has_spew && !has_trample continue;
+            if !has_spew && !has_trample && !rr_lily_is_player_strung_by_any(p) continue;
             finder->check(p, p.entity.world_position);
         }
         return finder.closest;
@@ -1584,6 +1584,11 @@ Resurrect_Ability :: class : Ability_Base {
                         rr_bc_heal_trample(spew_victim);
                         instance.player->Notify(format_string("Healed %!", .{spew_victim.entity->get_name()}));
                         spew_victim->Notify("The Doctor healed your injuries!");
+                    }
+                    if rr_lily_is_player_strung_by_any(spew_victim) {
+                        rr_lily_on_doctor_heal(spew_victim);
+                        instance.player->Notify(format_string("Cut strings on %!", .{spew_victim.entity->get_name()}));
+                        spew_victim->Notify("The Doctor freed you from Lily's strings!");
                     }
                     instance.current_cooldown = 1.0;
                 }

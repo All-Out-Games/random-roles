@@ -405,6 +405,7 @@ Player_Role :: enum {
 	GOO_GOO_GAGA;
 	MIMICER;
 	BIG_CHARLIE;
+	LILY_LOVEBRAIDS;
 }
 
 rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
@@ -423,6 +424,7 @@ rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
 		case .GOO_GOO_GAGA:  return Player_Type.TRAITOR;
 		case .MIMICER:       return Player_Type.TRAITOR;
 		case .BIG_CHARLIE:   return Player_Type.TRAITOR;
+		case .LILY_LOVEBRAIDS: return Player_Type.TRAITOR;
 		case .NONE:          return Player_Type.CIVILIAN;
 	}
 	return Player_Type.CIVILIAN;
@@ -444,6 +446,7 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .GOO_GOO_GAGA:  return "goo_goo_gaga";
 		case .MIMICER:       return "mimicer";
 		case .BIG_CHARLIE:   return "big_charlie";
+		case .LILY_LOVEBRAIDS: return "lily_lovebraids";
 		case .NONE:          return "none";
 	}
 	return "none";
@@ -478,6 +481,7 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	if name == "ggg" || name == "goo_goo_gaga" || name == "googoo" return Player_Role.GOO_GOO_GAGA, true;
 	if name == "mimicer" || name == "mim"                        return Player_Role.MIMICER, true;
 	if name == "big_charlie" || name == "bigcharlie" || name == "charlie" return Player_Role.BIG_CHARLIE, true;
+	if name == "lily" || name == "lily_lovebraids" || name == "lovebraids" return Player_Role.LILY_LOVEBRAIDS, true;
 	return Player_Role.NONE, false;
 }
 
@@ -1369,6 +1373,9 @@ on_player_go_dead :: proc(player: Player) {
 	// Reset GGG whip/creature state so a mid-pull whip doesn't persist as a ghost.
 	rr_ggg_force_revert(player);
 
+	// Reset Lily creature state on death.
+	rr_lily_force_revert(player);
+
 	player.player_state = Player_State.DEAD;
 	// Safety: temporary resurrection should always end when dead.
 	player.is_temporarily_resurrected = false;
@@ -1611,6 +1618,7 @@ setup_voting :: proc() {
 		rr_ggg_force_revert(player);
 		rr_ggg_stop_live_drag(player);
 		rr_mimicer_force_revert(player);
+		rr_lily_force_revert(player);
 		rr_werewolf_force_revert_for_meeting(player);
 
 		world_references->teleport_to_voting(player);
@@ -2203,7 +2211,7 @@ start :: proc(player: Player) {
 r :: proc(player: Player, role_name: string) {
 	role, ok := rr_parse_role_name(role_name);
 	if !ok {
-		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, warper, prankster, pyromaniac, pirate, hitman, werewolf, googoo, charlie, none.", player);
+		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, warper, prankster, pyromaniac, pirate, hitman, werewolf, googoo, charlie, lily, none.", player);
 		return;
 	}
 
@@ -3261,6 +3269,9 @@ assign_players_to_types :: proc() {
 	if rr_bigcharlie_role_enabled {
 		append(ref traitor_roles_master, Player_Role.BIG_CHARLIE);
 	}
+	if rr_lily_role_enabled {
+		append(ref traitor_roles_master, Player_Role.LILY_LOVEBRAIDS);
+	}
 
 	civ_players: List(Player);
 	an_players: List(Player);
@@ -3434,62 +3445,13 @@ assign_players_to_types :: proc() {
 		}
 
 		// Mimicer
-		rr_mimicer_destroy_creature_entity(p);
-		rr_mimicer_clear_void_pillars(p);
-		if p.player_role == Player_Role.MIMICER {
-			mm := p.entity->get_component(Mimicer_Module);
-			if mm == null {
-				mm = p.entity->add_component(Mimicer_Module);
-			}
-			mm.kills = 0;
-			mm.stolen_faces = 0;
-			mm.last_kill_was_disguised = false;
-			mm.is_monster_form = false;
-			mm.creature_visible = false;
-			mm.skeleton_swap_at = 0.0;
-			mm.is_prowling = false;
-			mm.prowl_speed_active = false;
-			mm.prowl_near_wall = false;
-			mm.is_disguised = false;
-			mm.disguise_ends_at = 0.0;
-			mm.disguise_target_id = 0;
-			mm.void_lunge_active = false;
-			mm.void_pillars->clear();
-			mm.teleport_cooldown = 0.0;
-			mm.teleport_pillar_index = 0;
-			mm.unleash_used = false;
-			mm.is_ultimate_form = false;
-			mm.unleash_placing = false;
-			mm.unleash_active = false;
-			mm.unleash_pillars_placed = 0;
-			mm.unleash_pillars_consumed = 0;
-			mm.unleash_pillars->clear();
-			p.active_tasks = List(Task_Base).{};
-		}
+		rr_mimicer_round_start(p);
 
 		// Big Charlie
-		rr_bc_cleanup(p);
-		if p.player_role == Player_Role.BIG_CHARLIE {
-			bcm := p.entity->get_component(Big_Charlie_Module);
-			if bcm == null {
-				bcm = p.entity->add_component(Big_Charlie_Module);
-			}
-			bcm.flesh_mass = 0;
-			bcm.is_monster_form = false;
-			bcm.creature_visible = false;
-			bcm.skeleton_swap_at = 0.0;
-			bcm.current_scale = BC_BASE_SCALE;
-			bcm.target_scale = BC_BASE_SCALE;
-			bcm.rampage_active = false;
-			bcm.rampage_ends_at = 0.0;
-			bcm.slough_speed_active = false;
-			bcm.slough_speed_ends_at = 0.0;
-			bcm.camera_active = false;
-			bcm.camera_nugget_index = 0;
-			bcm.nugget_entities->clear();
-			bcm.nest_entities->clear();
-			p.active_tasks = List(Task_Base).{};
-		}
+		rr_bc_round_start(p);
+
+		// Lily Lovebraids
+		rr_lily_round_start(p);
 
 		if p.player_role == Player_Role.PYROMANIAC {
 			// Pyro objectives replace normal tasks.

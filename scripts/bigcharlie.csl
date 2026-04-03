@@ -66,6 +66,31 @@ BC_CAMERA_LOCK_REASON :: "bc_camera_viewing";
 // Creature Entity Management (same pattern as Mimicer/GGG)
 // =============================================================================
 
+// Single entry point for round start — cleanup + init.
+rr_bc_round_start :: proc(p: Player) {
+	rr_bc_cleanup(p);
+	if p.player_role != Player_Role.BIG_CHARLIE return;
+	bcm := p.entity->get_component(Big_Charlie_Module);
+	if bcm == null {
+		bcm = p.entity->add_component(Big_Charlie_Module);
+	}
+	bcm.flesh_mass = 0;
+	bcm.is_monster_form = false;
+	bcm.creature_visible = false;
+	bcm.skeleton_swap_at = 0.0;
+	bcm.current_scale = BC_BASE_SCALE;
+	bcm.target_scale = BC_BASE_SCALE;
+	bcm.rampage_active = false;
+	bcm.rampage_ends_at = 0.0;
+	bcm.slough_speed_active = false;
+	bcm.slough_speed_ends_at = 0.0;
+	bcm.camera_active = false;
+	bcm.camera_nugget_index = 0;
+	bcm.nugget_entities->clear();
+	bcm.nest_entities->clear();
+	p.active_tasks = List(Task_Base).{};
+}
+
 rr_bc_ensure_creature_entity :: proc(player: Player) {
 	bc := player.entity->get_component(Big_Charlie_Module);
 	if bc == null return;

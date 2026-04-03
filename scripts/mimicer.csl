@@ -100,6 +100,41 @@ MIM_SFX_DISGUISE :: "sfx/mim/disguise_change.wav";
 // Creature Entity Management
 // =============================================================================
 
+// Single entry point for round start — cleanup + init.
+rr_mimicer_round_start :: proc(p: Player) {
+	rr_mimicer_destroy_creature_entity(p);
+	rr_mimicer_clear_void_pillars(p);
+	if p.player_role != Player_Role.MIMICER return;
+	mm := p.entity->get_component(Mimicer_Module);
+	if mm == null {
+		mm = p.entity->add_component(Mimicer_Module);
+	}
+	mm.kills = 0;
+	mm.stolen_faces = 0;
+	mm.last_kill_was_disguised = false;
+	mm.is_monster_form = false;
+	mm.creature_visible = false;
+	mm.skeleton_swap_at = 0.0;
+	mm.is_prowling = false;
+	mm.prowl_speed_active = false;
+	mm.prowl_near_wall = false;
+	mm.is_disguised = false;
+	mm.disguise_ends_at = 0.0;
+	mm.disguise_target_id = 0;
+	mm.void_lunge_active = false;
+	mm.void_pillars->clear();
+	mm.teleport_cooldown = 0.0;
+	mm.teleport_pillar_index = 0;
+	mm.unleash_used = false;
+	mm.is_ultimate_form = false;
+	mm.unleash_placing = false;
+	mm.unleash_active = false;
+	mm.unleash_pillars_placed = 0;
+	mm.unleash_pillars_consumed = 0;
+	mm.unleash_pillars->clear();
+	p.active_tasks = List(Task_Base).{};
+}
+
 rr_mimicer_ensure_creature_entity :: proc(player: Player) {
 	mm := player.entity->get_component(Mimicer_Module);
 	if mm == null return;
