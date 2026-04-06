@@ -1534,6 +1534,7 @@ draw_player_role_hud :: proc(player: Player) {
 	draw_ggg_role_hud(player);
 	draw_mimicer_role_hud(player);
 	draw_bc_role_hud(player);
+	draw_lily_role_hud(player);
 }
 
 // --- GGG ability unlock progress: left side ---
@@ -2000,6 +2001,144 @@ draw_bc_role_hud :: proc(player: Player) {
 		} else {
 			row_ts.color = v4.{0.6, 1.0, 0.4, 1.0};
 			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "All ability unlocks online");
+		}
+	}
+	} // end task_list_open
+}
+
+// --- Lily Lovebraids Braid Point progress: left side ---
+draw_lily_role_hud :: proc(player: Player) {
+	if player == null return;
+	if player.player_role != Player_Role.LILY_LOVEBRAIDS return;
+	if !player->is_local_or_server() return;
+	if player.player_type != Player_Type.TRAITOR return;
+
+	lm := player.entity->get_component(Lily_Module);
+	if lm == null return;
+
+	UI.push_layer(1600);
+	defer UI.pop_layer();
+
+	_pushed_scale := rr_push_mobile_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
+	safe := UI.get_safe_screen_rect();
+	PANEL_W :: 300.0;
+	ROW_H :: 32.0;
+	LIST_PAD :: 10.0;
+	DROPDOWN_SLICE_PX :: 16.0;
+
+	row_count := 5;
+	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
+
+	header_rect := rr_draw_task_list_header(safe, false, player);
+
+	if player.task_list_open {
+	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+
+	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
+	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
+	checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
+
+	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
+
+	base_ts := UI.default_text_settings();
+	base_ts.size = 20;
+	base_ts.halign = .LEFT;
+	base_ts.valign = .CENTER;
+	base_ts.do_outline = true;
+	base_ts.outline_thickness = 3;
+	base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
+	base_ts.do_autofit = true;
+	base_ts.autofit_min_size = 14;
+	base_ts.autofit_max_size = 24;
+
+	list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+	braid_points := lm.braid_points;
+
+	// Row 1: Braid Points + active strings
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		row_ts.color = v4.{1.0, 0.6, 0.9, 1.0};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Braid Points: % | Strings: %", .{braid_points, lm.strung_player_ids.count}));
+	}
+	// Row 2: Unlock Red Light
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := braid_points >= LILY_RLGL_UNLOCK_POINTS;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Red Light: %/% BP", .{min(braid_points, LILY_RLGL_UNLOCK_POINTS), LILY_RLGL_UNLOCK_POINTS}));
+	}
+	// Row 3: Unlock Tea Party
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := braid_points >= LILY_TEA_PARTY_UNLOCK_POINTS;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Tea Party: %/% BP", .{min(braid_points, LILY_TEA_PARTY_UNLOCK_POINTS), LILY_TEA_PARTY_UNLOCK_POINTS}));
+	}
+	// Row 4: Unlock Dollhouse
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := braid_points >= LILY_DOLLHOUSE_UNLOCK_POINTS;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Dollhouse: %/% BP", .{min(braid_points, LILY_DOLLHOUSE_UNLOCK_POINTS), LILY_DOLLHOUSE_UNLOCK_POINTS}));
+	}
+	// Row 5: Live status
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		entry_content->cut_left(24.0);
+		row_ts := base_ts;
+		row_ts.size = 18;
+		if lm.dollhouse_active {
+			row_ts.color = v4.{1.0, 0.7, 0.9, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Dollhouse: ACTIVE");
+		} else if lm.tea_party_active {
+			row_ts.color = v4.{1.0, 0.85, 0.55, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Tea Party: ACTIVE");
+		} else if lm.rlgl_active {
+			row_ts.color = lm.rlgl_is_red ? v4.{1.0, 0.35, 0.35, 1.0} : v4.{0.5, 1.0, 0.5, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, lm.rlgl_is_red ? "Red Light: ACTIVE" : "Green Light: ACTIVE");
+		} else if lm.is_lily_form {
+			row_ts.color = v4.{0.95, 0.75, 1.0, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Lily Form");
+		} else {
+			row_ts.color = v4.{0.85, 0.85, 0.85, 1.0};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Schleem Form");
 		}
 	}
 	} // end task_list_open
