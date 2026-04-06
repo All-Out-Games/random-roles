@@ -71,8 +71,12 @@ LILY_RLGL_SPEED_BOOST :: 2.0; // 200% speed boost toward frozen player
 LILY_TEA_PARTY_COOLDOWN :: 60.0;
 LILY_TEA_PARTY_PULL_DURATION :: 6.0;
 LILY_TEA_PARTY_TABLE_RANGE :: 15.0; // Max distance to place table
-LILY_CAFFEINE_SPEED_BOOST :: 3.0;
+LILY_TEA_CUP_SPAWN_SECONDS :: 0.5;
+LILY_TEA_CUP_SPIN_SECONDS :: 2.5;
+LILY_TEA_CUP_SPIN_START_DELAY :: 2.0;
+LILY_CAFFEINE_SPEED_BOOST :: 1.75;
 LILY_CAFFEINE_DURATION :: 10.0;
+LILY_CAFFEINE_DIRECTION_HOLD_SECONDS :: 0.4;
 
 // Dollhouse
 LILY_DOLLHOUSE_COOLDOWN :: 75.0;
@@ -867,7 +871,34 @@ Lily_String_Braid :: class : Component {
 	braid_animator: Spine_Animator;
 	lily_player_entity_id: u64;
 
+	is_visible_to_local_player :: method() -> bool {
+		local_player, ok := Game.get_local_player();
+		if !ok return false;
+		return local_player.player_role == Player_Role.LILY_LOVEBRAIDS;
+	}
+
+	apply_local_visibility :: method() {
+		if braid_animator == null return;
+		if braid_animator.instance == null return;
+
+		if is_visible_to_local_player() {
+			braid_animator.instance.color_multiplier = v4.{1, 1, 1, 1};
+		} else {
+			braid_animator.instance.color_multiplier = v4.{1, 1, 1, 0};
+		}
+	}
+
+	ao_start :: method() {
+		apply_local_visibility();
+	}
+
+	ao_on_state_sync :: method() {
+		apply_local_visibility();
+	}
+
 	ao_update :: method(dt: float) {
+		apply_local_visibility();
+
 		// Flip braid to face toward Lily, compensating for parent's facing scale.
 		lily := get_player_by_entity_id(lily_player_entity_id);
 		if lily == null return;
@@ -1043,6 +1074,24 @@ Lily_RLGL_Root_Timer :: class : Component {
 // Tea Party
 // =============================================================================
 
+Lily_Tea_Cup_Follower :: class : Component {
+	table_entity: Entity;
+	shadow_bone_name: string;
+
+	ao_update :: method(dt: float) {
+		if table_entity == null || !#alive(table_entity) {
+			entity->destroy();
+			return;
+		}
+
+		table_anim := table_entity->get_component(Spine_Animator);
+		if table_anim == null || table_anim.instance == null return;
+
+		shadow_local := table_anim.instance->get_bone_local_position(shadow_bone_name);
+		entity->set_local_position(shadow_local);
+	}
+}
+
 // Spawn tea cup entities at CUP bone positions on the table rig.
 rr_lily_spawn_tea_cups :: proc(player: Player, table_anim: Spine_Animator, count: int) {
 	lm := player.entity->get_component(Lily_Module);
@@ -1053,21 +1102,26 @@ rr_lily_spawn_tea_cups :: proc(player: Player, table_anim: Spine_Animator, count
 	cup_rig := get_asset(Spine_Asset, rr_lily_get_teacup_rig_path());
 	if cup_rig == null return;
 
-	table_world_pos := table_anim.entity.world_position;
 	for i: 0..count-1 {
-		bone_name := format_string("CUP%", {i + 1});
-		cup_local := table_anim.instance->get_bone_local_position(bone_name);
+		shadow_bone_name := format_string("TestShadow%", {i + 1});
+		shadow_local := table_anim.instance->get_bone_local_position(shadow_bone_name);
 
 		cup_entity := Scene.create_entity();
-		cup_entity->set_local_position(table_world_pos + cup_local);
+		cup_entity->set_parent(table_anim.entity, false);
+		cup_entity->set_local_position(shadow_local);
 		cup_entity->set_local_scale(v2.{1, 1});
 
 		cup_anim := cup_entity->add_component(Spine_Animator);
+		cup_anim.depth_offset = -3.0;
 		cup_anim->awaken();
 		if cup_anim.instance != null {
 			cup_anim.instance->set_skeleton(cup_rig);
 			cup_anim.instance->set_animation("Spawn", false, 0);
 		}
+
+		follower := cup_entity->add_component(Lily_Tea_Cup_Follower);
+		follower.table_entity = table_anim.entity;
+		follower.shadow_bone_name = shadow_bone_name;
 
 		lm.tea_cup_entities->append(cup_entity);
 	}
@@ -1080,6 +1134,27 @@ rr_lily_get_seat_position :: proc(lm: Lily_Module, seat_index: int) -> v2 {
 	bone_name := format_string("PLAYER%", {seat_index});
 	bone_local := lm.tea_table_animator.instance->get_bone_local_position(bone_name);
 	return lm.tea_table_animator.entity.world_position + bone_local;
+}
+
+rr_lily_place_strung_players_at_table :: proc(player: Player) {
+	lm := player.entity->get_component(Lily_Module);
+	if lm == null return;
+	if lm.tea_table_animator == null return;
+	if lm.tea_table_animator.instance == null return;
+	if lm.strung_player_ids.count == 0 return;
+
+	seat_count := lm.strung_player_ids.count;
+	if seat_count < 1 seat_count = 1;
+	if seat_count > 8 seat_count = 8;
+
+	for i: 0..seat_count-1 {
+		target := get_player_by_entity_id(lm.strung_player_ids[i]);
+		if target == null continue;
+		if target.player_state != Player_State.ALIVE continue;
+
+		seat_world := rr_lily_get_seat_position(lm, i + 1);
+		target.entity->set_local_position(seat_world);
+	}
 }
 
 rr_lily_start_tea_party :: proc(player: Player, table_pos: v2) {
@@ -1099,19 +1174,17 @@ rr_lily_start_tea_party :: proc(player: Player, table_pos: v2) {
 	table_anim := table_entity->add_component(Spine_Animator);
 	table_anim->awaken();
 	table_rig := get_asset(Spine_Asset, rr_lily_get_table_rig_path());
+	seat_count := lm.strung_player_ids.count;
+	if seat_count < 1 seat_count = 1;
+	if seat_count > 8 seat_count = 8;
 	if table_anim.instance != null && table_rig != null {
 		table_anim.instance->set_skeleton(table_rig);
-		table_anim.instance->set_animation("Spawn", false, 0);
+		table_anim.instance->set_animation(format_string("%_Player/Idle", {seat_count}), true, 0);
 		rr_apply_shadow_mask(table_anim.instance);
 	}
 
 	lm.tea_table_entity = table_entity;
 	lm.tea_table_animator = table_anim;
-
-	// Pick the right N_Player/Idle animation based on strung player count (clamped 1-8)
-	seat_count := lm.strung_player_ids.count;
-	if seat_count < 1 seat_count = 1;
-	if seat_count > 8 seat_count = 8;
 
 	// --- Layer 2: Spawn cups at CUP bone positions ---
 	lm.tea_cup_entities->clear();
@@ -1122,6 +1195,7 @@ rr_lily_start_tea_party :: proc(player: Player, table_pos: v2) {
 	tray_entity->set_parent(table_entity, false);
 	tray_entity->set_local_position(v2.{0, 0});
 	tray_anim := tray_entity->add_component(Spine_Animator);
+	tray_anim.depth_offset = -4.0;
 	tray_anim->awaken();
 	tray_rig := get_asset(Spine_Asset, rr_lily_get_tray_rig_path());
 	if tray_anim.instance != null && tray_rig != null {
@@ -1134,9 +1208,11 @@ rr_lily_start_tea_party :: proc(player: Player, table_pos: v2) {
 	lm.tea_party_seated = true;
 	lm.tea_party_pull_start_time = get_time();
 	lm.tea_party_ends_at = get_time() + LILY_TEA_PARTY_PULL_DURATION + 5.0;
+	lm.tea_party_cups_settled = false;
+	lm.tea_party_cups_spun = false;
 
-	// Teleport strung players to seat positions around the table
-	rr_lily_teleport_strung_to_point(player, nav_point);
+	// Place players using the authored PLAYER1-PLAYER8 seat bones for the current layout.
+	rr_lily_place_strung_players_at_table(player);
 
 	// Freeze strung players at their seats and play tea party animation
 	for i: 0..lm.strung_player_ids.count-1 {
@@ -1144,13 +1220,8 @@ rr_lily_start_tea_party :: proc(player: Player, table_pos: v2) {
 		if target == null continue;
 		if target.player_state != Player_State.ALIVE continue;
 		target->add_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
+		target->set_trigger("lily_pull_start");
 		target->set_trigger("lily_tea_start");
-	}
-
-	// Set table to N_Player/Idle animation
-	if lm.tea_table_animator != null && lm.tea_table_animator.instance != null {
-		anim_name := format_string("%_Player/Idle", {seat_count});
-		lm.tea_table_animator.instance->set_animation(anim_name, true, 0);
 	}
 
 	if Game.is_server() {
@@ -1179,22 +1250,42 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	// Spin cups after a short delay, then drink phase
-	if elapsed >= 2.0 && !lm.tea_party_cups_spun {
-		lm.tea_party_cups_spun = true;
+	// Keep seated players glued to the authored PLAYER bones while the table anim plays.
+	if lm.tea_party_seated {
+		rr_lily_place_strung_players_at_table(player);
+	}
+
+	// Let the individual cup Spawn anim land, then keep the table cups idling until pickup.
+	if elapsed >= LILY_TEA_CUP_SPAWN_SECONDS && !lm.tea_party_cups_settled {
+		lm.tea_party_cups_settled = true;
 		for c: 0..lm.tea_cup_entities.count-1 {
 			cup := lm.tea_cup_entities[c];
 			if cup == null continue;
 			if !#alive(cup) continue;
 			cup_anim := cup->get_component(Spine_Animator);
 			if cup_anim != null && cup_anim.instance != null {
-				cup_anim.instance->set_animation("Spin", false, 0);
+				cup_anim.instance->set_animation("Idle", true, 0);
 			}
 		}
 	}
 
-	// Drink phase after spin
-	if elapsed >= 4.0 {
+	// Spin cups after a short delay, then drink phase
+	if elapsed >= LILY_TEA_CUP_SPIN_START_DELAY && !lm.tea_party_cups_spun {
+		lm.tea_party_cups_spun = true;
+	}
+
+	// Wait until the authored Spin animation finishes before players "pick up" their drinks.
+	if elapsed >= (LILY_TEA_CUP_SPIN_START_DELAY + LILY_TEA_CUP_SPIN_SECONDS) {
+		for c: 0..lm.tea_cup_entities.count-1 {
+			cup := lm.tea_cup_entities[c];
+			if cup == null continue;
+			if !#alive(cup) continue;
+			cup_anim := cup->get_component(Spine_Animator);
+			if cup_anim != null && cup_anim.instance != null {
+				cup_anim.instance->set_animation("Idle_Plate", true, 0);
+			}
+		}
+
 		rr_lily_tea_party_drink_phase(player);
 		return;
 	}
@@ -1271,6 +1362,7 @@ rr_lily_end_tea_party :: proc(player: Player) {
 
 	lm.tea_party_active = false;
 	lm.tea_party_seated = false;
+	lm.tea_party_cups_settled = false;
 	lm.tea_party_cups_spun = false;
 
 	// Cut animation on all braids
@@ -1323,9 +1415,14 @@ Lily_Caffeine_Timer :: class : Component {
 	player_entity_id: u64;
 	speed_multiplier: float;
 	rng: u64;
+	current_dir: v2;
+	next_direction_change_at: float;
 
 	ao_start :: method() {
 		rng = rng_seed_time();
+		angle := rng_range_float(ref rng, 0.0, 6.28);
+		current_dir = v2.{cos(angle), sin(angle)};
+		next_direction_change_at = get_time() + LILY_CAFFEINE_DIRECTION_HOLD_SECONDS;
 	}
 
 	ao_update :: method(dt: float) {
@@ -1337,12 +1434,16 @@ Lily_Caffeine_Timer :: class : Component {
 
 		// Force random movement direction
 		if p.player_state == Player_State.ALIVE {
-			angle := rng_range_float(ref rng, 0.0, 6.28);
-			dir := v2.{cos(angle), sin(angle)};
-			p.agent.velocity = dir * p.agent.movement_speed;
+			if get_time() >= next_direction_change_at {
+				angle := rng_range_float(ref rng, 0.0, 6.28);
+				current_dir = v2.{cos(angle), sin(angle)};
+				next_direction_change_at = get_time() + LILY_CAFFEINE_DIRECTION_HOLD_SECONDS;
+			}
+			p.agent.input_this_frame = current_dir;
+			p->set_facing_right(current_dir.x >= 0.0);
 
 			// Sync hyper locomotion animation
-			moving := length_squared(p.agent.velocity) > 0.01;
+			moving := length_squared(p.agent.input_this_frame) > 0.01;
 			sm := p.animator.instance.state_machine;
 			if sm != null {
 				sm->set_bool("lily_hyper_moving", moving);
@@ -1352,6 +1453,8 @@ Lily_Caffeine_Timer :: class : Component {
 		if get_time() >= ends_at {
 			p->remove_disable_movement_input_reason(LILY_CAFFEINE_REASON);
 			p.agent.movement_speed = p.agent.movement_speed / speed_multiplier;
+			p.agent.input_this_frame = v2.{0, 0};
+			p.agent.velocity = v2.{0, 0};
 			p->set_trigger("lily_hyper_end");
 			entity->destroy();
 		}
@@ -1592,9 +1695,10 @@ rr_lily_update :: proc(player: Player, dt: float) {
 	// Clean up dead strung players
 	i := 0;
 	while i < lm.strung_player_ids.count {
-		target := get_player_by_entity_id(lm.strung_player_ids[i]);
+		target_id := lm.strung_player_ids[i];
+		target := get_player_by_entity_id(target_id);
 		if target == null || target.player_state != Player_State.ALIVE {
-			lm.strung_player_ids->unordered_remove_by_index(i);
+			rr_lily_remove_string(player, target_id);
 		} else {
 			i += 1;
 		}
