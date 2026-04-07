@@ -37,14 +37,13 @@ rr_lily_get_mouth_rig_path :: proc() -> string {
 
 // Kill
 LILY_KILL_COOLDOWN :: 25.0;
-LILY_KILL_RANGE_SCHLEEM :: 10.0;
-LILY_KILL_RANGE_LILY :: 13.0; // Extended melee range in Lily form
+LILY_KILL_RANGE_SCHLEEM :: 15.0;
+LILY_KILL_RANGE_LILY :: 18.0; // Extended melee range in Lily form
 
 // Braid Points (progression)
 LILY_BRAID_POINTS_PER_KILL :: 1;
 LILY_BRAID_POINTS_STRUNG_KILL :: 2;
 LILY_BRAID_POINTS_PRESIDENT_STRUNG :: 3;
-LILY_RLGL_UNLOCK_POINTS :: 1;        // Tree Pull
 LILY_DOLLHOUSE_UNLOCK_POINTS :: 2;   // was 5
 LILY_TEA_PARTY_UNLOCK_POINTS :: 3;   // stays 3
 
@@ -53,8 +52,8 @@ LILY_TRANSFORM_ANIM_SECONDS :: 1.0;
 LILY_LILY_SPEED_MULTIPLIER :: 1.10;
 
 // String
-LILY_STRING_COOLDOWN :: 8.0;
-LILY_STRING_RANGE :: 5.0;
+LILY_STRING_COOLDOWN :: 15.0;
+LILY_STRING_RANGE :: 10.0;
 
 // Hair Tree
 LILY_MAX_HAIR_TREES :: 5;
@@ -62,18 +61,11 @@ LILY_TREE_TELEPORT_COOLDOWN :: 30.0;
 LILY_TREE_DESTROY_HOLD_TIME :: 3.0;
 LILY_TREE_INTERACT_RADIUS :: 2.5;
 
-// Red Light Green Light (manual control)
-LILY_RLGL_COOLDOWN :: 45.0;
-LILY_RLGL_DURATION :: 30.0;
-LILY_RLGL_RADIUS :: 25.0;
-LILY_RLGL_SCATTER_RADIUS :: 2.5;     // random offset when teleporting
-LILY_RLGL_PULL_SPEED :: 1.5;         // speed at which rooted players get pulled to trees
-LILY_RLGL_TOGGLE_COOLDOWN :: 3.0;    // cooldown between red/green toggles
 
 // Tree Absorb
 LILY_ABSORB_HOLD_TIME :: 2.0;
 LILY_ABSORB_BRAID_POINTS :: 2;
-LILY_ABSORB_RANGE :: 3.0;
+LILY_ABSORB_RANGE :: 1.5;
 LILY_DEATHBRAID_ABSORB_THRESHOLD :: 5;
 
 // Pull (base ability — drag strung to tree)
@@ -85,7 +77,7 @@ LILY_PULL_SNAP_SPEED :: 15.0;
 LILY_TEA_PARTY_COOLDOWN :: 60.0;
 LILY_TEA_PARTY_TABLE_RANGE :: 20.0; // Max distance to target victim
 LILY_TEA_CUP_SPAWN_SECONDS :: 0.5;
-LILY_TEA_CUP_SPIN_SECONDS :: 2.5;
+LILY_TEA_CUP_SPIN_SECONDS :: 10;
 LILY_TEA_CUP_SPIN_START_DELAY :: 2.0;
 LILY_TEA_PARTY_CHOICE_TIME :: 5.0; // seconds victim has to pick a cup
 LILY_TEA_PARTY_CAMERA_SIZE :: 4.0; // tight camera zoom during tea party
@@ -105,7 +97,6 @@ LILY_WEB_SENSE_UPDATE_INTERVAL :: 0.5;
 LILY_TRANSFORM_LOCK_REASON :: "lily_transform_lock";
 LILY_INVIS_REASON :: "lily_form";
 LILY_NAME_INVIS_REASON :: "lily_form";
-LILY_RLGL_ROOT_REASON :: "lily_rlgl_root";
 LILY_TEA_PARTY_SIT_REASON :: "lily_tea_party_sit";
 LILY_DOLLHOUSE_PUPPET_REASON :: "lily_dollhouse_puppet";
 LILY_DOLLHOUSE_BODY_REASON :: "lily_dollhouse_body";
@@ -119,8 +110,6 @@ LILY_SFX_TRANSFORM :: "sfx/mim/TransformIntoMim.wav"; // [ART] Replace with Lily
 LILY_SFX_TRANSFORM_BACK :: "sfx/mim/TransformBack.wav"; // [ART] Replace with Lily revert SFX
 LILY_SFX_KILL :: "sfx/traitor_kill_death.wav"; // [ART] Replace with Lily braid kill SFX
 LILY_SFX_STRING :: "sfx/traitor_kill_death.wav"; // [ART] Replace with string attach SFX
-LILY_SFX_RLGL_RED :: "sfx/button_click.wav"; // [ART] Replace with "Red Light!" audio cue
-LILY_SFX_RLGL_GREEN :: "sfx/button_click.wav"; // [ART] Replace with "Green Light!" audio cue
 LILY_SFX_TEA_PARTY :: "sfx/traitor_kill_death.wav"; // [ART] Replace with tea party SFX
 LILY_SFX_DOLLHOUSE :: "sfx/traitor_kill_death.wav"; // [ART] Replace with dollhouse SFX
 
@@ -310,7 +299,6 @@ rr_lily_force_revert :: proc(player: Player) {
 	player->remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
 
 	// End active abilities
-	rr_lily_end_rlgl(player);
 	rr_lily_end_tea_party(player);
 	rr_lily_end_dollhouse(player);
 	rr_lily_end_pull(player);
@@ -338,9 +326,6 @@ rr_lily_round_start :: proc(p: Player) {
 	llm.thread_speed_multiplier = 1.0;
 	llm.hair_tree_entities->clear();
 	llm.tree_teleport_cooldown = 0.0;
-	llm.rlgl_active = false;
-	llm.rlgl_is_red = false;
-	llm.rlgl_rooted_ids->clear();
 	llm.pull_active = false;
 	llm.pull_target_index = 0;
 	llm.pull_progress = 0.0;
@@ -390,6 +375,17 @@ rr_lily_cleanup :: proc(player: Player) {
 
 	// Remove all strings
 	rr_lily_remove_all_strings(player);
+
+	// Force-destroy any remaining braids on all players
+	foreach braid: component_iterator(Lily_String_Braid) {
+		if braid == null continue;
+		if braid.lily_player_entity_id == player.entity.id {
+			braid.entity->destroy();
+		}
+	}
+
+	// End deathbraid if active
+	rr_lily_end_deathbraid(player);
 }
 
 // =============================================================================
@@ -452,7 +448,6 @@ rr_lily_remove_all_strings :: proc(player: Player) {
 	for i: 0..lm.strung_player_ids.count-1 {
 		target := get_player_by_entity_id(lm.strung_player_ids[i]);
 		if target != null {
-			target->remove_freeze_reason(LILY_RLGL_ROOT_REASON);
 			target->remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
 			target->remove_disable_movement_input_reason(LILY_DOLLHOUSE_PUPPET_REASON);
 			target->remove_freeze_reason(LILY_PULL_REASON);
@@ -499,7 +494,6 @@ rr_lily_on_doctor_heal :: proc(healed_player: Player) {
 			rr_lily_remove_string(player, healed_player.entity.id);
 
 			// Also free from tree pull root
-			healed_player->remove_freeze_reason(LILY_RLGL_ROOT_REASON);
 			// Also free from pull drag
 			healed_player->remove_freeze_reason(LILY_PULL_REASON);
 			// Also free from dollhouse puppet
@@ -533,9 +527,6 @@ rr_lily_award_kill_points :: proc(player: Player, victim: Player) {
 	if player->is_local_or_server() {
 		Notifier.notify(player, format_string("+% Braid Points!", {points}));
 
-		if old_points < LILY_RLGL_UNLOCK_POINTS && lm.braid_points >= LILY_RLGL_UNLOCK_POINTS {
-			Notifier.notify(player, "Tree Pull unlocked!");
-		}
 		if old_points < LILY_DOLLHOUSE_UNLOCK_POINTS && lm.braid_points >= LILY_DOLLHOUSE_UNLOCK_POINTS {
 			Notifier.notify(player, "Dollhouse unlocked!");
 		}
@@ -556,25 +547,7 @@ Lily_Hair_Tree :: class : Component {
 	absorb_count: int;
 	is_mature: bool;
 
-	ao_start :: method() {
-		if tree_animator == null return;
-		tree_animator->awaken();
-		if tree_animator.instance == null return;
-
-		sm := State_Machine.create();
-		layer := sm->create_layer("main", 0);
-
-		spawn_state := layer->create_state("Spawn", false, 1.0);
-		idle_state := layer->create_state("Idle", true, 0.0);
-		destroyed_trigger := sm->create_variable("destroyed", .TRIGGER);
-		destroyed_state := layer->create_state("Destroyed", false, 1.0);
-
-		layer->set_initial_state(spawn_state);
-		layer->create_transition(spawn_state, idle_state, true);
-		layer->create_global_transition(destroyed_state, false)->create_trigger_condition(destroyed_trigger);
-
-		tree_animator.instance->set_state_machine(sm, true);
-	}
+	// State machine is set up in rr_lily_place_hair_tree after skeleton is loaded
 
 	// Visual feedback: scale up when mature (after first absorb)
 	grow_mature :: method() {
@@ -641,6 +614,7 @@ Lily_Hair_Tree_Destroy_Interactable :: class : Interactable {
 // Pull interactable — Lily holds to pull a strung player toward the tree.
 Lily_Tree_Pull_Interactable :: class : Interactable {
 	tree_entity: Entity;
+	aoe_entity: Entity;
 
 	ao_start :: method() {
 		this->set_listener(this);
@@ -650,6 +624,39 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 		required_hold_time = LILY_PULL_HOLD_DURATION;
 		prompt_offset = v2.{0, 2.5};
 		priority = 18;
+	}
+
+	spawn_aoe :: method() {
+		if aoe_entity != null return;
+		if tree_entity == null return;
+		aoe_entity = Scene.create_entity();
+		aoe_entity->set_parent(tree_entity, false);
+		aoe_entity->set_local_position(v2.{0, 0});
+		aoe_entity->set_local_scale(v2.{0.6, 0.6});
+		aoe_anim := aoe_entity->add_component(Spine_Animator);
+		aoe_anim.depth_offset = -5.0; // Render above everything
+		aoe_anim->awaken();
+		aoe_rig := get_asset(Spine_Asset, format_string("anims/vfx/BAT003_gravity_field_AOE.spine", {}));
+		if aoe_anim.instance != null && aoe_rig != null {
+			aoe_anim.instance->set_skeleton(aoe_rig);
+			aoe_anim.instance->set_animation("loop", true, 0);
+		}
+	}
+
+	destroy_aoe :: method() {
+		if aoe_entity == null return;
+		if !#alive(aoe_entity) { aoe_entity = null; return; }
+		aoe_anim := aoe_entity->get_component(Spine_Animator);
+		if aoe_anim != null && aoe_anim.instance != null {
+			aoe_anim.instance->set_animation("disappear", false, 0);
+		}
+		delayed := aoe_entity->add_component(Lily_Delayed_Destroy);
+		delayed.destroy_at = get_time() + 1.0;
+		aoe_entity = null;
+	}
+
+	ao_end :: method() {
+		destroy_aoe();
 	}
 
 	// Find the first alive strung player for this Lily
@@ -694,6 +701,9 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 	}
 
 	on_holding :: method(player: Player) {
+		// Show AOE while pulling
+		spawn_aoe();
+
 		// While holding, drag target toward tree
 		target := find_pull_target();
 		if target == null return;
@@ -713,6 +723,7 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 	}
 
 	on_interact :: method(player: Player) {
+		destroy_aoe();
 		// Pull complete — snap target to tree and freeze
 		target := find_pull_target();
 		if target == null return;
@@ -826,9 +837,6 @@ Lily_Tree_Absorb_Interactable :: class : Interactable {
 			if player->is_local_or_server() {
 				Notifier.notify(player, format_string("Absorbed corpse! +% Braid Points", {LILY_ABSORB_BRAID_POINTS}));
 
-				if old_points < LILY_RLGL_UNLOCK_POINTS && lm.braid_points >= LILY_RLGL_UNLOCK_POINTS {
-					Notifier.notify(player, "RLGL unlocked!");
-				}
 				if old_points < LILY_DOLLHOUSE_UNLOCK_POINTS && lm.braid_points >= LILY_DOLLHOUSE_UNLOCK_POINTS {
 					Notifier.notify(player, "Dollhouse unlocked!");
 				}
@@ -857,9 +865,6 @@ Lily_Tree_Absorb_Interactable :: class : Interactable {
 		if player->is_local_or_server() {
 			Notifier.notify(player, format_string("Absorbed %! +% Braid Points", {target->get_username(), LILY_ABSORB_BRAID_POINTS}));
 
-			if old_points < LILY_RLGL_UNLOCK_POINTS && lm.braid_points >= LILY_RLGL_UNLOCK_POINTS {
-				Notifier.notify(player, "Tree Pull unlocked!");
-			}
 			if old_points < LILY_DOLLHOUSE_UNLOCK_POINTS && lm.braid_points >= LILY_DOLLHOUSE_UNLOCK_POINTS {
 				Notifier.notify(player, "Dollhouse unlocked!");
 			}
@@ -907,8 +912,19 @@ rr_lily_place_hair_tree :: proc(player: Player) {
 	tree_rig := get_asset(Spine_Asset, rr_lily_get_tree_rig_path());
 	if tree_anim.instance != null && tree_rig != null {
 		tree_anim.instance->set_skeleton(tree_rig);
-		tree_anim.instance->set_animation("Spawn", false, 0);
 		rr_apply_shadow_mask(tree_anim.instance);
+
+		// Set up state machine: Spawn → Idle, with Destroyed trigger
+		sm := State_Machine.create();
+		layer := sm->create_layer("main", 0);
+		spawn_state := layer->create_state("Spawn", false, 1.0);
+		idle_state := layer->create_state("Idle", true, 0.0);
+		destroyed_trigger := sm->create_variable("destroyed", .TRIGGER);
+		destroyed_state := layer->create_state("Destroyed", false, 1.0);
+		layer->set_initial_state(spawn_state);
+		layer->create_transition(spawn_state, idle_state, true);
+		layer->create_global_transition(destroyed_state, false)->create_trigger_condition(destroyed_trigger);
+		tree_anim.instance->set_state_machine(sm, true);
 	}
 
 	tree_comp := tree_entity->add_component(Lily_Hair_Tree);
@@ -979,223 +995,6 @@ rr_lily_teleport_strung_to_point :: proc(player: Player, center: v2) {
 // Red Light, Green Light
 // =============================================================================
 
-// =============================================================================
-// Red Light Green Light (manual control — Lily toggles red/green)
-// =============================================================================
-
-rr_lily_start_rlgl :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
-	if lm == null return;
-	if lm.strung_player_ids.count == 0 return;
-
-	center := player.entity.world_position;
-	rng: u64 = rng_seed_time();
-
-	// Teleport all strung players to random positions around Lily
-	for i: 0..lm.strung_player_ids.count-1 {
-		target := get_player_by_entity_id(lm.strung_player_ids[i]);
-		if target == null continue;
-		if target.player_state != Player_State.ALIVE continue;
-
-		angle := rng_range_float(ref rng, 0.0, 6.283);
-		radius := rng_range_float(ref rng, 1.0, LILY_RLGL_SCATTER_RADIUS);
-		offset := v2.{cos(angle) * radius, sin(angle) * radius};
-		dest := center + offset;
-
-		nav_point: v2;
-		triangle_hint: s64;
-		try_find_closest_point_on_navmesh(dest, ref nav_point, ref triangle_hint);
-		target.entity->set_local_position(nav_point);
-		target->set_trigger("lily_pull_start");
-	}
-
-	// Also scatter Lily slightly
-	lily_angle := rng_range_float(ref rng, 0.0, 6.283);
-	lily_offset := v2.{cos(lily_angle) * 0.5, sin(lily_angle) * 0.5};
-	lily_dest := center + lily_offset;
-	nav_point: v2;
-	triangle_hint: s64;
-	try_find_closest_point_on_navmesh(lily_dest, ref nav_point, ref triangle_hint);
-	player.entity->set_local_position(nav_point);
-
-	// Revert Lily to Schleem form (disguise among the crowd)
-	if lm.is_lily_form {
-		lm.is_lily_form = false;
-		lm.skeleton_swap_at = 0.0;
-		if lm.lily_speed_active {
-			lm.lily_speed_active = false;
-			player.agent.movement_speed = player.agent.movement_speed / LILY_LILY_SPEED_MULTIPLIER;
-		}
-		rr_lily_swap_to_player(player);
-		player->set_trigger("lily_revert");
-	}
-
-	lm.rlgl_active = true;
-	lm.rlgl_ends_at = get_time() + LILY_RLGL_DURATION;
-	lm.rlgl_is_red = false; // Start with green
-	lm.rlgl_next_toggle_at = get_time() + LILY_RLGL_TOGGLE_COOLDOWN;
-	lm.rlgl_rooted_ids->clear();
-
-	if Game.is_server() {
-		sfx := SFX.default_sfx_desc();
-		sfx->set_position(center);
-		sfx.volume = 0.5;
-		rr_play_sfx(LILY_SFX_RLGL_GREEN, sfx);
-	}
-
-	if player->is_local_or_server() {
-		Notifier.notify(player, "Red Light, Green Light! Toggle red/green manually!");
-	}
-}
-
-// Lily manually toggles red/green
-rr_lily_rlgl_toggle :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
-	if lm == null return;
-	if !lm.rlgl_active return;
-	if get_time() < lm.rlgl_next_toggle_at return;
-
-	lm.rlgl_is_red = !lm.rlgl_is_red;
-	lm.rlgl_next_toggle_at = get_time() + LILY_RLGL_TOGGLE_COOLDOWN;
-
-	if Game.is_server() {
-		sfx := SFX.default_sfx_desc();
-		sfx->set_position(player.entity.world_position);
-		sfx.volume = 0.5;
-		if lm.rlgl_is_red {
-			rr_play_sfx(LILY_SFX_RLGL_RED, sfx);
-		} else {
-			rr_play_sfx(LILY_SFX_RLGL_GREEN, sfx);
-		}
-	}
-}
-
-rr_lily_update_rlgl :: proc(player: Player, dt: float) {
-	lm := player.entity->get_component(Lily_Module);
-	if lm == null return;
-	if !lm.rlgl_active return;
-
-	now := get_time();
-
-	// Time limit
-	if now >= lm.rlgl_ends_at {
-		rr_lily_end_rlgl(player);
-		return;
-	}
-
-	// During red light: check strung players for movement → root them
-	if lm.rlgl_is_red {
-		for i: 0..lm.strung_player_ids.count-1 {
-			target_id := lm.strung_player_ids[i];
-			target := get_player_by_entity_id(target_id);
-			if target == null continue;
-			if target.player_state != Player_State.ALIVE continue;
-
-			// Already rooted?
-			already_rooted := false;
-			for r: 0..lm.rlgl_rooted_ids.count-1 {
-				if lm.rlgl_rooted_ids[r] == target_id {
-					already_rooted = true;
-					break;
-				}
-			}
-			if already_rooted continue;
-
-			// Check if within RLGL radius and moving
-			dist := length(target.entity.world_position - player.entity.world_position);
-			if dist > LILY_RLGL_RADIUS continue;
-
-			if length_squared(target.agent.velocity) > 0.1 {
-				// Caught! Root them and start pulling to tree
-				target->add_freeze_reason(LILY_RLGL_ROOT_REASON);
-				target->set_trigger("lily_pull_start");
-				lm.rlgl_rooted_ids->append(target_id);
-
-				if player->is_local_or_server() {
-					Notifier.notify(player, format_string("% was caught moving!", {target->get_username()}));
-				}
-			}
-		}
-	}
-
-	// Pull rooted players toward nearest tree
-	i := 0;
-	while i < lm.rlgl_rooted_ids.count {
-		target_id := lm.rlgl_rooted_ids[i];
-		target := get_player_by_entity_id(target_id);
-		if target == null || target.player_state != Player_State.ALIVE {
-			lm.rlgl_rooted_ids->unordered_remove_by_index(i);
-			continue;
-		}
-
-		// Find nearest tree
-		nearest_tree := rr_lily_find_nearest_tree_to_pos(player, target.entity.world_position);
-		if nearest_tree != null && #alive(nearest_tree) {
-			tree_pos := nearest_tree.world_position;
-			dir := tree_pos - target.entity.world_position;
-			dist := length(dir);
-
-			if dist > 0.5 {
-				// Drag toward tree
-				move := normalize(dir) * LILY_RLGL_PULL_SPEED * dt;
-				new_pos := target.entity.world_position + move;
-				nav_pt: v2;
-				tri_hint: s64;
-				try_find_closest_point_on_navmesh(new_pos, ref nav_pt, ref tri_hint);
-				target.entity->set_local_position(nav_pt);
-			}
-		}
-		i += 1;
-	}
-}
-
-// Find nearest tree to a world position
-rr_lily_find_nearest_tree_to_pos :: proc(player: Player, pos: v2) -> Entity {
-	lm := player.entity->get_component(Lily_Module);
-	if lm == null return null;
-
-	best_dist := 999999.0;
-	best_tree: Entity = null;
-
-	for i: 0..lm.hair_tree_entities.count-1 {
-		tree := lm.hair_tree_entities[i];
-		if tree == null continue;
-		if !#alive(tree) continue;
-		dist := length(tree.world_position - pos);
-		if dist < best_dist {
-			best_dist = dist;
-			best_tree = tree;
-		}
-	}
-	return best_tree;
-}
-
-rr_lily_end_rlgl :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
-	if lm == null return;
-	if !lm.rlgl_active return;
-
-	lm.rlgl_active = false;
-	lm.rlgl_is_red = false;
-
-	// Unroot all rooted players
-	for i: 0..lm.rlgl_rooted_ids.count-1 {
-		target := get_player_by_entity_id(lm.rlgl_rooted_ids[i]);
-		if target != null {
-			target->remove_freeze_reason(LILY_RLGL_ROOT_REASON);
-			target->set_trigger("lily_pull_end");
-		}
-	}
-	lm.rlgl_rooted_ids->clear();
-
-	// Also unroot any strung players that might have been rooted
-	for i: 0..lm.strung_player_ids.count-1 {
-		target := get_player_by_entity_id(lm.strung_player_ids[i]);
-		if target != null {
-			target->remove_freeze_reason(LILY_RLGL_ROOT_REASON);
-		}
-	}
-}
 
 // =============================================================================
 // Tree Pull Root Timer (auto-expires roots on strung players)
@@ -1627,9 +1426,11 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	// Keep victim at seat
+	// Keep victim locked at seat, facing the table
 	seat_world := rr_lily_get_seat_position(lm, 1);
 	victim.entity->set_local_position(seat_world);
+	table_pos := lm.tea_table_entity.world_position;
+	victim->set_facing_right(table_pos.x > seat_world.x);
 
 	// Camera focus (must set every frame due to server sync)
 	if player->is_local_or_server() {
@@ -2489,6 +2290,14 @@ rr_lily_draw_web_sense :: proc(player: Player) {
 	options.bob_scale = 0.3;
 	options.bob_bias = 1.2;
 
+	// Hide arrows during tea party
+	lm_check := player.entity->get_component(Lily_Module);
+	if lm_check != null && lm_check.tea_party_active return;
+
+	// Purple tint for Lily's web sense arrows
+	UI.push_color_multiplier(v4.{0.7, 0.3, 1.0, 1.0});
+	defer UI.pop_color_multiplier();
+
 	for i: 0..lm.strung_player_ids.count-1 {
 		target := get_player_by_entity_id(lm.strung_player_ids[i]);
 		if target == null continue;
@@ -2686,7 +2495,7 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 				rr_lily_spawn_braid_on_target(p, player.entity.id);
 			}
 
-			// Lerp toward mouth center
+			// Move directly toward mouth center (ignore navmesh/walls)
 			current := p.entity.world_position;
 			new_pos := lerp(current, focus_pos, suck_progress * 0.1);
 			p.entity->set_local_position(new_pos);
@@ -2713,10 +2522,13 @@ rr_lily_end_deathbraid :: proc(player: Player) {
 
 	lm.deathbraid_active = false;
 
-	// Unfreeze all players and restore LOS light
+	// Unfreeze all players, restore camera and LOS light
 	foreach p: component_iterator(Player) {
 		if p == null continue;
 		p->remove_freeze_reason(LILY_DEATHBRAID_REASON);
+		if p->is_local_or_server() {
+			p.camera.follow_player = true;
+		}
 		if p.local_light_entity != null && #alive(p.local_light_entity) {
 			p.local_light_entity->set_parent(p.entity, false);
 			p.local_light_entity->set_local_position(v2.{0, 0});
@@ -2791,7 +2603,6 @@ rr_lily_update :: proc(player: Player, dt: float) {
 	}
 
 	// Update active abilities
-	rr_lily_update_rlgl(player, dt);
 	rr_lily_update_tea_party(player, dt);
 	rr_lily_update_dollhouse(player, dt);
 	rr_lily_update_pull(player, dt);
@@ -2929,7 +2740,7 @@ Lily_Transform_Ability :: class : Ability_Base {
 	NAME :: "Transform";
 
 	on_init :: proc(instance: Lily_Transform_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Lily_Transform_Icon.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/transform_evil.png");
 	}
 
 	can_use :: method() -> bool {
@@ -3163,80 +2974,6 @@ Lily_String_Ability :: class : Ability_Base {
 
 // Pull interactable is added to each tree via Lily_Tree_Pull_Interactable (see Hair Tree section)
 
-// --- Red Light Green Light (manual control) ---
-Lily_RLGL_Ability :: class : Ability_Base {
-	NAME :: "Red Light";
-
-	on_init :: proc(instance: Lily_RLGL_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Lily_Red_Light_Green_Light_Icon.png");
-	}
-
-	can_use :: method() -> bool {
-		if game_state != Game_State.INGAME return false;
-		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
-		if player.player_type != Player_Type.TRAITOR return false;
-		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
-
-		lm := player.entity->get_component(Lily_Module);
-		if lm == null return false;
-		if lm.braid_points < LILY_RLGL_UNLOCK_POINTS return false;
-		// Can activate from Lily form (will auto-revert), or toggle during active
-		if !lm.rlgl_active && !lm.is_lily_form return false;
-		if lm.tea_party_active return false;
-		if lm.dollhouse_active return false;
-		if !lm.rlgl_active && lm.strung_player_ids.count == 0 return false;
-		return true;
-	}
-
-	on_update :: method(params: ref Ability_Update_Params) {
-		lm := player.entity->get_component(Lily_Module);
-		if lm == null return;
-
-		// While RLGL is active, toggle bypasses cooldown (has its own internal cooldown)
-		if lm.rlgl_active {
-			if params.clicked {
-				rr_lily_rlgl_toggle(player);
-			}
-			return;
-		}
-
-		if params.clicked && params.can_use {
-			rr_lily_start_rlgl(player);
-			current_cooldown = LILY_RLGL_COOLDOWN;
-		}
-	}
-
-	on_draw_button :: method(rect: Rect) {
-		lm := player.entity->get_component(Lily_Module);
-		if lm != null && lm.rlgl_active {
-			// Show traffic light indicator on button
-			light_rect := rect->inset(8);
-			base_tex := get_asset(Texture_Asset, "sprites/icons/lily/red_l_green_l/base2.png");
-			if base_tex != null {
-				UI.quad(light_rect, base_tex);
-			}
-			if lm.rlgl_is_red {
-				red_tex := get_asset(Texture_Asset, "sprites/icons/lily/red_l_green_l/red_light.png");
-				if red_tex != null UI.quad(light_rect, red_tex);
-			} else {
-				green_tex := get_asset(Texture_Asset, "sprites/icons/lily/red_l_green_l/green_light.png");
-				if green_tex != null UI.quad(light_rect, green_tex);
-			}
-
-			// Show time remaining
-			remaining := lm.rlgl_ends_at - get_time();
-			if remaining < 0.0 remaining = 0.0;
-			ts := UI.default_text_settings();
-			ts.size = 12;
-			ts.halign = .CENTER;
-			ts.valign = .BOTTOM;
-			ts.color = v4.{1, 1, 1, 0.8};
-			UI.text(rect->inset(2), ts, "%s", {format_float(remaining, decimals=0)});
-		}
-		draw_ability_name_label(rect, Lily_RLGL_Ability.NAME);
-	}
-}
 
 // --- Tea Party (single target) ---
 Lily_Tea_Party_Ability :: class : Ability_Base {
@@ -3258,7 +2995,6 @@ Lily_Tea_Party_Ability :: class : Ability_Base {
 		if !lm.is_lily_form return false;
 		if lm.braid_points < LILY_TEA_PARTY_UNLOCK_POINTS return false;
 		if lm.tea_party_active return false;
-		if lm.rlgl_active return false;
 		if lm.dollhouse_active return false;
 		if lm.strung_player_ids.count == 0 return false;
 		return get_closest_tea_target(this, player) != null;
@@ -3313,7 +3049,6 @@ Lily_Dollhouse_Ability :: class : Ability_Base {
 		if !lm.is_lily_form return false;
 		if lm.braid_points < LILY_DOLLHOUSE_UNLOCK_POINTS return false;
 		if lm.dollhouse_active return false;
-		if lm.rlgl_active return false;
 		if lm.tea_party_active return false;
 		if lm.strung_player_ids.count == 0 return false;
 		return true;
@@ -3429,7 +3164,6 @@ Lily_Deathbraid_Ability :: class : Ability_Base {
 		if lm == null return false;
 		if !lm.is_lily_form return false;
 		if lm.deathbraid_active return false;
-		if lm.rlgl_active return false;
 		if lm.dollhouse_active return false;
 		if lm.tea_party_active return false;
 		return find_ready_tree() != null;
@@ -3477,14 +3211,6 @@ rr_lily_draw_abilities :: proc(player: Player, idx: int) -> int {
 		return abilityIndex;
 	}
 
-	// During RLGL (Lily is in Schleem form): RLGL toggle + Kill
-	if lm.rlgl_active {
-		draw_ability_button(player, Lily_Kill_Ability, abilityIndex);
-		abilityIndex += 1;
-		draw_ability_button(player, Lily_RLGL_Ability, abilityIndex);
-		abilityIndex += 1;
-		return abilityIndex;
-	}
 
 	if lm.is_lily_form {
 		// Lily form: Kill, Transform + unlockable abilities
@@ -3492,10 +3218,6 @@ rr_lily_draw_abilities :: proc(player: Player, idx: int) -> int {
 		abilityIndex += 1;
 		draw_ability_button(player, Lily_Transform_Ability, abilityIndex);
 		abilityIndex += 1;
-		if lm.braid_points >= LILY_RLGL_UNLOCK_POINTS {
-			draw_ability_button(player, Lily_RLGL_Ability, abilityIndex);
-			abilityIndex += 1;
-		}
 		if lm.braid_points >= LILY_DOLLHOUSE_UNLOCK_POINTS {
 			draw_ability_button(player, Lily_Dollhouse_Ability, abilityIndex);
 			abilityIndex += 1;
@@ -3527,53 +3249,6 @@ rr_lily_draw_abilities :: proc(player: Player, idx: int) -> int {
 // Braid Points HUD (local only)
 // =============================================================================
 
-// Draw traffic light indicator (used by both Lily and affected players).
-rr_lily_draw_traffic_light :: proc(screen: Rect, is_red: bool) {
-	// Position below the top progress bar
-	light_rect := screen->top_center_rect()->offset(0.0, -120.0)->grow(30.0, 30.0, 50.0, 30.0);
-
-	// Draw base
-	base_tex := get_asset(Texture_Asset, "sprites/icons/lily/red_l_green_l/base4.png");
-	if base_tex != null {
-		UI.quad(light_rect, base_tex);
-	}
-
-	// Draw active light on top
-	if is_red {
-		red_tex := get_asset(Texture_Asset, "sprites/icons/lily/red_l_green_l/red_light.png");
-		if red_tex != null {
-			UI.quad(light_rect, red_tex);
-		}
-	} else {
-		green_tex := get_asset(Texture_Asset, "sprites/icons/lily/red_l_green_l/green_light.png");
-		if green_tex != null {
-			UI.quad(light_rect, green_tex);
-		}
-	}
-}
-
-// Draw RLGL indicator on strung players who are affected.
-// Called from player ao_late_update for all players (not just Lily).
-rr_lily_draw_rlgl_victim_hud :: proc(player: Player) {
-	if !player->is_local() return;
-	if player.player_type == Player_Type.TRAITOR return;
-
-	// Check if any Lily has RLGL active and this player is strung
-	foreach lily: component_iterator(Player) {
-		if lily == null continue;
-		if lily.player_role != Player_Role.LILY_LOVEBRAIDS continue;
-
-		lm := lily.entity->get_component(Lily_Module);
-		if lm == null continue;
-		if !lm.rlgl_active continue;
-		if !rr_lily_is_player_strung(lily, player.entity.id) continue;
-
-		// This player is strung and RLGL is active — show them the traffic light
-		screen := UI.get_screen_rect();
-		rr_lily_draw_traffic_light(screen, lm.rlgl_is_red);
-		return;
-	}
-}
 
 rr_lily_draw_hud :: proc(player: Player) {
 	if !player->is_local() return;
@@ -3598,25 +3273,6 @@ rr_lily_draw_hud :: proc(player: Player) {
 
 	y_offset := 130.0;
 
-	// RLGL active indicator (traffic light sprite + time remaining)
-	if lm.rlgl_active {
-		rr_lily_draw_traffic_light(screen, lm.rlgl_is_red);
-
-		remaining := lm.rlgl_ends_at - get_time();
-		if remaining < 0.0 remaining = 0.0;
-		timer_rect := screen->top_center_rect()->offset(0.0, -170.0)->grow(15.0, 50.0, 15.0, 50.0);
-		timer_ts := UI.default_text_settings();
-		timer_ts.size = 18;
-		timer_ts.halign = .CENTER;
-		timer_ts.valign = .CENTER;
-		timer_ts.color = v4.{1, 1, 1, 0.9};
-		timer_ts.do_outline = true;
-		timer_ts.outline_thickness = 2;
-		timer_ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(timer_rect, timer_ts, "%s", {format_float(remaining, decimals=0)});
-
-		y_offset += 80.0;
-	}
 
 	// Dollhouse active indicator
 	if lm.dollhouse_active {

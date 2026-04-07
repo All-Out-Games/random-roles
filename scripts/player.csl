@@ -446,8 +446,6 @@ Player :: class : Player_Base {
 		// Lily Lovebraids per-frame update (transform, strings, RLGL, tea party, dollhouse).
 		rr_lily_update(this, delta_time);
 
-		// Show RLGL traffic light to affected (strung) players.
-		rr_lily_draw_rlgl_victim_hud(this);
 
 		// Tea party victim cup choice UI.
 		rr_lily_draw_tea_party_victim_ui(this);
@@ -2069,23 +2067,6 @@ draw_lily_role_hud :: proc(player: Player) {
 		row_ts.color = v4.{1.0, 0.6, 0.9, 1.0};
 		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Braid Points: % | Strings: %", .{braid_points, lm.strung_player_ids.count}));
 	}
-	// Row 2: Unlock RLGL (1 BP)
-	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-		unlocked := braid_points >= LILY_RLGL_UNLOCK_POINTS;
-		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
-		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
-		}
-		row_ts := base_ts;
-		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock RLGL: %/% BP", .{min(braid_points, LILY_RLGL_UNLOCK_POINTS), LILY_RLGL_UNLOCK_POINTS}));
-	}
 	// Row 3: Unlock Dollhouse (2 BP)
 	{
 		entry_rect := list_content->cut_top(ROW_H);
@@ -2162,9 +2143,6 @@ draw_lily_role_hud :: proc(player: Player) {
 		} else if lm.tea_party_active {
 			row_ts.color = v4.{1.0, 0.85, 0.55, 1.0};
 			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Tea Party: ACTIVE");
-		} else if lm.rlgl_active {
-			row_ts.color = lm.rlgl_is_red ? v4.{1.0, 0.35, 0.35, 1.0} : v4.{0.5, 1.0, 0.5, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, lm.rlgl_is_red ? "Red Light: ACTIVE" : "Green Light: ACTIVE");
 		} else if lm.is_lily_form {
 			row_ts.color = v4.{0.95, 0.75, 1.0, 1.0};
 			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Lily Form");
