@@ -2418,16 +2418,30 @@ unlock :: proc(player: Player) {
 		lm := player.entity->get_component(Lily_Module);
 		if lm != null {
 			old_points := lm.braid_points;
-			lm.braid_points = max(lm.braid_points, LILY_DOLLHOUSE_UNLOCK_POINTS);
+			// Unlock all abilities (RLGL=1, Dollhouse=2, Tea Party=3)
+			lm.braid_points = max(lm.braid_points, LILY_TEA_PARTY_UNLOCK_POINTS);
+
+			// Max out absorbs on first tree for Deathbraid testing
+			if lm.hair_tree_entities.count > 0 {
+				tree := lm.hair_tree_entities[0];
+				if tree != null && #alive(tree) {
+					tc := tree->get_component(Lily_Hair_Tree);
+					if tc != null {
+						tc.absorb_count = LILY_DEATHBRAID_ABSORB_THRESHOLD - 1;
+						tc->grow_mature();
+						Notifier.notify(player, "First tree set to 4/5 absorbs — one more for Deathbraid!");
+					}
+				}
+			}
 
 			if old_points < LILY_RLGL_UNLOCK_POINTS && lm.braid_points >= LILY_RLGL_UNLOCK_POINTS {
 				Notifier.notify(player, "Red Light, Green Light unlocked!");
 			}
-			if old_points < LILY_TEA_PARTY_UNLOCK_POINTS && lm.braid_points >= LILY_TEA_PARTY_UNLOCK_POINTS {
-				Notifier.notify(player, "Tea Party unlocked!");
-			}
 			if old_points < LILY_DOLLHOUSE_UNLOCK_POINTS && lm.braid_points >= LILY_DOLLHOUSE_UNLOCK_POINTS {
 				Notifier.notify(player, "Dollhouse unlocked!");
+			}
+			if old_points < LILY_TEA_PARTY_UNLOCK_POINTS && lm.braid_points >= LILY_TEA_PARTY_UNLOCK_POINTS {
+				Notifier.notify(player, "Tea Party unlocked!");
 			}
 		}
 	}

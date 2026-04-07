@@ -449,6 +449,9 @@ Player :: class : Player_Base {
 		// Show RLGL traffic light to affected (strung) players.
 		rr_lily_draw_rlgl_victim_hud(this);
 
+		// Tea party victim cup choice UI.
+		rr_lily_draw_tea_party_victim_ui(this);
+
 		// Mimicer disguise name (draws target's name above disguised player).
 		rr_mimicer_draw_disguise_name(this);
 
@@ -2066,7 +2069,7 @@ draw_lily_role_hud :: proc(player: Player) {
 		row_ts.color = v4.{1.0, 0.6, 0.9, 1.0};
 		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Braid Points: % | Strings: %", .{braid_points, lm.strung_player_ids.count}));
 	}
-	// Row 2: Unlock Red Light
+	// Row 2: Unlock RLGL (1 BP)
 	{
 		entry_rect := list_content->cut_top(ROW_H);
 		list_content->cut_top(2.0);
@@ -2081,26 +2084,9 @@ draw_lily_role_hud :: proc(player: Player) {
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Red Light: %/% BP", .{min(braid_points, LILY_RLGL_UNLOCK_POINTS), LILY_RLGL_UNLOCK_POINTS}));
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock RLGL: %/% BP", .{min(braid_points, LILY_RLGL_UNLOCK_POINTS), LILY_RLGL_UNLOCK_POINTS}));
 	}
-	// Row 3: Unlock Tea Party
-	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-		unlocked := braid_points >= LILY_TEA_PARTY_UNLOCK_POINTS;
-		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
-		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
-		}
-		row_ts := base_ts;
-		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Tea Party: %/% BP", .{min(braid_points, LILY_TEA_PARTY_UNLOCK_POINTS), LILY_TEA_PARTY_UNLOCK_POINTS}));
-	}
-	// Row 4: Unlock Dollhouse
+	// Row 3: Unlock Dollhouse (2 BP)
 	{
 		entry_rect := list_content->cut_top(ROW_H);
 		list_content->cut_top(2.0);
@@ -2117,7 +2103,53 @@ draw_lily_role_hud :: proc(player: Player) {
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
 		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Dollhouse: %/% BP", .{min(braid_points, LILY_DOLLHOUSE_UNLOCK_POINTS), LILY_DOLLHOUSE_UNLOCK_POINTS}));
 	}
-	// Row 5: Live status
+	// Row 4: Unlock Tea Party (3 BP)
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := braid_points >= LILY_TEA_PARTY_UNLOCK_POINTS;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Tea Party: %/% BP", .{min(braid_points, LILY_TEA_PARTY_UNLOCK_POINTS), LILY_TEA_PARTY_UNLOCK_POINTS}));
+	}
+	// Row 5: Deathbraid progress
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+
+		// Find best tree absorb count
+		best_absorbs := 0;
+		for t: 0..lm.hair_tree_entities.count-1 {
+			tree := lm.hair_tree_entities[t];
+			if tree == null continue;
+			if !#alive(tree) continue;
+			tc := tree->get_component(Lily_Hair_Tree);
+			if tc != null && tc.absorb_count > best_absorbs {
+				best_absorbs = tc.absorb_count;
+			}
+		}
+		unlocked := best_absorbs >= LILY_DEATHBRAID_ABSORB_THRESHOLD;
+		if unlocked {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = unlocked ? v4.{1.0, 0.3, 0.3, 1.0} : v4.{0.9, 0.5, 0.5, 1.0};
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Deathbraid: %/% Absorbs", .{min(best_absorbs, LILY_DEATHBRAID_ABSORB_THRESHOLD), LILY_DEATHBRAID_ABSORB_THRESHOLD}));
+	}
+	// Row 6: Live status
 	{
 		entry_rect := list_content->cut_top(ROW_H);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
@@ -3000,11 +3032,17 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer->create_global_transition(lily_hyper_end_state, false)->create_trigger_condition(lily_hyper_end_var);
 		layer->create_transition(lily_hyper_end_state, idle_state, true);
 
-		// Hair string pull: Start -> Loop
+		// Hair string pull: Start -> Loop -> End
 		lily_pull_start_var := sm->create_variable("lily_pull_start", State_Machine_Variable.Kind.TRIGGER);
 		lily_pull_start_state := layer->create_state("004RAND_LILY/Hair_String_Pull_Start", false, 0.5);
+		lily_pull_loop_state := layer->create_state("004RAND_LILY/Hair_String_Pull_Loop", true, 0.0);
 		layer->create_global_transition(lily_pull_start_state, false)->create_trigger_condition(lily_pull_start_var);
-		layer->create_transition(lily_pull_start_state, idle_state, true);
+		layer->create_transition(lily_pull_start_state, lily_pull_loop_state, true);
+
+		lily_pull_end_var := sm->create_variable("lily_pull_end", State_Machine_Variable.Kind.TRIGGER);
+		lily_pull_end_state := layer->create_state("004RAND_LILY/Hair_String_Pull_End", false, 0.5);
+		layer->create_global_transition(lily_pull_end_state, false)->create_trigger_condition(lily_pull_end_var);
+		layer->create_transition(lily_pull_end_state, idle_state, true);
 	}
 
 	// Adds the animation state machine.
