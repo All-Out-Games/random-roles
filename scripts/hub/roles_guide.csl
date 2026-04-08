@@ -1,4 +1,4 @@
-RG_NUM_ROLES :: 14;
+RG_NUM_ROLES :: 15;
 
 Rg_Ability_Entry :: struct {
     icon_path: string;
@@ -22,6 +22,7 @@ rg_get_role_name :: proc(idx: int) -> string {
         case 11: return "HITMAN";
         case 12: return "WEREWOLF";
         case 13: return "GOO GOO GAGA";
+        case 14: return "MIMICER";
     }
     return "UNKNOWN";
 }
@@ -176,6 +177,7 @@ rg_get_role_abilities :: proc(idx: int, results: ref [..]Rg_Ability_Entry) {
 rg_is_role_locked :: proc(player: Player, idx: int) -> bool {
     switch idx {
         case 13: return !Purchasing.owns_product(player, GGG_PRODUCT_ID);
+        case 14: return !Purchasing.owns_product(player, MIMICER_PRODUCT_ID);
     }
     return false;
 }
@@ -535,6 +537,24 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
                 name_ts.outline_color     = v4.{0, 0, 0, 1};
                 name_ts.offset.x          = 2;
                 UI.text(inner, name_ts, rg_get_role_name(i));
+
+                // "NEW" badge for new roles
+                if i == 14 {
+                    NEW_BADGE_H :: 14.0;
+                    NEW_BADGE_W :: 30.0;
+                    badge_rect := result.rect->top_right_rect()->offset(-4, -2)->grow_unscaled(NEW_BADGE_H, NEW_BADGE_W, 0, 0);
+                    UI.quad(badge_rect, core_globals.white_sprite, v4.{0.1, 0.6, 1.0, 0.9});
+
+                    new_badge_ts := UI.default_text_settings();
+                    new_badge_ts.size = 11;
+                    new_badge_ts.halign = .CENTER;
+                    new_badge_ts.valign = .CENTER;
+                    new_badge_ts.color = v4.{1, 1, 1, 1};
+                    new_badge_ts.do_outline = true;
+                    new_badge_ts.outline_thickness = 1;
+                    new_badge_ts.outline_color = v4.{0, 0, 0, 1};
+                    UI.text(badge_rect, new_badge_ts, "NEW");
+                }
             }
 
             if result.clicked {

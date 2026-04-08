@@ -1,4 +1,5 @@
 GGG_PRODUCT_ID :: "69b1aa6e3a1668e54467c5d4";
+MIMICER_PRODUCT_ID :: "69d67dac5a645398b8c19d96";
 
 stamp_product_purchase :: proc(player: Player, product_id: string, reason: string) {
     if Game.is_server() {
@@ -19,6 +20,12 @@ ao_purchase_handler :: proc(player: Player, id: string) -> bool {
         Notifier.notify(player, "Goo Goo Ga Ga unlocked!");
         return true;
     }
+    if id == MIMICER_PRODUCT_ID {
+        stamp_product_purchase(player, MIMICER_PRODUCT_ID, "purchase");
+        player.mimicer_bought = true;
+        Notifier.notify(player, "Mimicer unlocked!");
+        return true;
+    }
     return false;
 }
 
@@ -26,37 +33,101 @@ check_owned_products :: proc(player: Player) {
     if Purchasing.owns_product(player, GGG_PRODUCT_ID) {
         stamp_product_purchase(player, GGG_PRODUCT_ID, "corrective");
     }
+    if Purchasing.owns_product(player, MIMICER_PRODUCT_ID) {
+        stamp_product_purchase(player, MIMICER_PRODUCT_ID, "corrective");
+    }
 }
 
-POUNCE_INTERVAL :: 15.0;
+Pedestal_Role :: enum {
+    GOO_GOO_GAGA;
+    MIMICER;
+}
 
-GGG_Pedestal :: class : Interactable {
+pedestal_get_product_id :: proc(role: Pedestal_Role) -> string {
+    switch role {
+        case .GOO_GOO_GAGA: return GGG_PRODUCT_ID;
+        case .MIMICER:      return MIMICER_PRODUCT_ID;
+    }
+    return "";
+}
+
+pedestal_get_display_name :: proc(role: Pedestal_Role) -> string {
+    switch role {
+        case .GOO_GOO_GAGA: return "Goo Goo Ga Ga";
+        case .MIMICER:      return "Mimicer";
+    }
+    return "";
+}
+
+pedestal_get_idle_anim :: proc(role: Pedestal_Role) -> string {
+    switch role {
+        case .GOO_GOO_GAGA: return "Idle";
+        case .MIMICER:      return "004RAND/Idle";
+    }
+    return "Idle";
+}
+
+pedestal_get_action_anim :: proc(role: Pedestal_Role) -> string {
+    switch role {
+        case .GOO_GOO_GAGA: return "PounceWrap";
+        case .MIMICER:      return "004RAND/Absorb_Flames";
+    }
+    return "Idle";
+}
+
+pedestal_is_bought :: proc(role: Pedestal_Role, player: Player) -> bool {
+    switch role {
+        case .GOO_GOO_GAGA: return player.ggg_bought;
+        case .MIMICER:      return player.mimicer_bought;
+    }
+    return false;
+}
+
+pedestal_is_new :: proc(role: Pedestal_Role) -> bool {
+    switch role {
+        case .MIMICER: return true;
+    }
+    return false;
+}
+
+pedestal_get_price :: proc(role: Pedestal_Role) -> string {
+    switch role {
+        case .GOO_GOO_GAGA: return "199";
+        case .MIMICER:      return "499";
+    }
+    return "";
+}
+
+PEDESTAL_ACTION_INTERVAL :: 15.0;
+
+Role_Pedestal :: class : Interactable {
+    role: Pedestal_Role @ao_serialize;
     spine: Spine_Animator @ao_serialize;
-    pounce_timer: float;
+    action_timer: float;
     state_machine: State_Machine;
 
     ao_start :: method() {
         this->set_listener(this);
-        this->set_text("Buy Goo Goo Ga Ga");
-        pounce_timer = POUNCE_INTERVAL;
+        this->set_text(format_string("Buy %", {pedestal_get_display_name(role)}));
+        action_timer = PEDESTAL_ACTION_INTERVAL;
 
         if spine != null {
             spine->awaken();
 
             state_machine = State_Machine.create();
-            pounce_trigger := state_machine->create_variable("pounce", .TRIGGER);
+            action_trigger := state_machine->create_variable("action", .TRIGGER);
 
             layer := state_machine->create_layer("main", 0);
 
-            idle_state := layer->create_state("Idle", true);
-            pounce_state := layer->create_state("PounceWrap", false);
+            idle_state := layer->create_state(pedestal_get_idle_anim(role), true);
+            action_state := layer->create_state(pedestal_get_action_anim(role), false);
 
             layer->set_initial_state(idle_state);
 
-            to_pounce := layer->create_global_transition(pounce_state, true);
-            to_pounce->create_trigger_condition(pounce_trigger);
+            to_action := layer->create_global_transition(action_state, true);
+            to_action->create_trigger_condition(action_trigger);
 
-            pounce_to_idle := layer->create_transition(pounce_state, idle_state, true);
+            action_to_idle := layer->create_transition(action_state, idle_state, true);
 
             spine.instance->set_state_machine(state_machine, true);
         }
@@ -66,171 +137,105 @@ GGG_Pedestal :: class : Interactable {
         if Game.is_server() return;
 
         pos := entity.world_position;
+        product_id := pedestal_get_product_id(role);
 
         UI.push_world_draw_context();
         defer UI.pop_draw_context();
 
-        // Push z well above everything (lower y = renders on top in world space)
         UI.push_z(pos.y - 10.0);
         defer UI.pop_z();
 
         t := get_real_time();
-
-        // Floating banner at podium height
         bob := sin(t * 2.5) * 0.06;
+
+        // Floating banner
         banner_y := pos.y + 0.1 + bob;
         banner_pos := v2.{pos.x, banner_y};
 
-        // Pulsing color
-        pulse := (sin(t * 3.0) + 1.0) * 0.5;
-        banner_r := lerp(0.6, 0.75, pulse);
-        banner_g := lerp(0.08, 0.2, pulse);
-        banner_b := lerp(0.05, 0.12, pulse);
-
-        // Starburst glow behind the banner
-        starburst_tex := get_asset(Texture_Asset, "$AO/ui/starburst.png");
-        if starburst_tex != null {
-            spin := t * 15.0;
-            starburst_rect := Rect.{banner_pos, banner_pos}->grow(1.1, 1.1, 1.1, 1.1);
-            UI.push_matrix(Matrix4.rotate_about_point(banner_pos, spin));
-            defer UI.pop_matrix();
-            UI.quad(starburst_rect, starburst_tex, v4.{1.0, 0.85, 0.2, 0.25});
-        }
-
-        // Banner background with proper ribbon ends
         banner_tex := get_asset(Texture_Asset, "$AO/ui/kit/Modal Augments/modal_banner_small/modal_banner_red.png");
-        banner_rect := Rect.{banner_pos, banner_pos}->grow(0.85, 1.6, 0.85, 1.6);
-        if banner_tex != null {
-            UI.quad(banner_rect->fit_aspect(banner_tex->get_aspect()), banner_tex, v4.{banner_r, banner_g, banner_b, 1.0});
+
+        if pedestal_is_new(role) {
+            banner_rect := Rect.{banner_pos, banner_pos}->grow(0.3, 1.2, 0.3, 1.2);
+            if banner_tex != null {
+                UI.quad(banner_rect, banner_tex, v4.{0.15, 0.5, 0.8, 1.0});
+            }
+        } else {
+            // Standard pulsing banner
+            pulse := (sin(t * 3.0) + 1.0) * 0.5;
+            banner_r := lerp(0.6, 0.75, pulse);
+            banner_g := lerp(0.08, 0.2, pulse);
+            banner_b := lerp(0.05, 0.12, pulse);
+
+            banner_rect := Rect.{banner_pos, banner_pos}->grow(0.3, 1.2, 0.3, 1.2);
+            if banner_tex != null {
+                UI.quad(banner_rect, banner_tex, v4.{banner_r, banner_g, banner_b, 1.0});
+            }
         }
 
-        // "50% OFF" top line
-        off_rect := Rect.{banner_pos, banner_pos}->grow(0.0, 1.2, 0.0, 1.2)->offset(0, 0.10);
-
-        off_ts := UI.default_text_settings();
-        off_ts.size = 0.32;
-        off_ts.halign = .CENTER;
-        off_ts.valign = .CENTER;
-        off_ts.color = v4.{1.0, 1.0, 0.85, 1.0};
-        off_ts.do_outline = true;
-        off_ts.outline_thickness = 0.025;
-        off_ts.outline_color = v4.{0.3, 0.05, 0.0, 1.0};
-        off_ts.do_drop_shadow = true;
-        off_ts.drop_shadow_offset = v2.{0.012, -0.012};
-        off_ts.drop_shadow_color = v4.{0.0, 0.0, 0.0, 0.6};
-        UI.text(off_rect, off_ts, "50% OFF");
-
-        // Price comparison inside banner, below 50% OFF
+        // Price with sparks icon - bottom line of banner
         sparks_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/sparks/spark_small.png");
-        price_y := banner_pos.y - 0.10;
-        price_center := v2.{banner_pos.x, price_y};
+        price_y := banner_pos.y + 0.05;
+        price_pos := v2.{banner_pos.x, price_y};
+        price_rect := Rect.{price_pos, price_pos}->grow(0.0, 0.5, 0.0, 0.5);
 
-        // Old price "999" (darkened, crossed out) - shifted left
-        old_price_pos := v2.{price_center.x - 0.30, price_y};
-        old_rect := Rect.{old_price_pos, old_price_pos}->grow(0.0, 0.5, 0.0, 0.5);
+        price_ts := UI.default_text_settings();
+        price_ts.size = 0.42;
+        price_ts.halign = .CENTER;
+        price_ts.valign = .CENTER;
+        price_ts.color = v4.{1.0, 1.0, 0.5, 1.0};
+        price_ts.do_outline = true;
+        price_ts.outline_thickness = 0.018;
+        price_ts.outline_color = v4.{0.3, 0.1, 0.0, 1.0};
+        price_ts.do_drop_shadow = true;
+        price_ts.drop_shadow_offset = v2.{0.008, -0.008};
+        price_ts.drop_shadow_color = v4.{0.0, 0.0, 0.0, 0.6};
+        UI.text(price_rect, price_ts, pedestal_get_price(role));
 
-        old_ts := UI.default_text_settings();
-        old_ts.size = 0.15;
-        old_ts.halign = .CENTER;
-        old_ts.valign = .CENTER;
-        old_ts.color = v4.{0.5, 0.35, 0.3, 0.7};
-        old_ts.do_outline = true;
-        old_ts.outline_thickness = 0.01;
-        old_ts.outline_color = v4.{0.15, 0.0, 0.0, 0.5};
-        UI.text(old_rect, old_ts, "999");
-
-        // Sparks icon next to old price (darkened)
         if sparks_tex != null {
-            SPARK_OLD :: 0.07;
-            old_spark_rect := Rect.{old_price_pos, old_price_pos}->offset(0.22, 0)->grow(SPARK_OLD, SPARK_OLD, SPARK_OLD, SPARK_OLD);
-            UI.quad(old_spark_rect->fit_aspect(sparks_tex->get_aspect()), sparks_tex, v4.{0.5, 0.35, 0.3, 0.7});
+            SPARK_HALF :: 0.15;
+            spark_rect := Rect.{price_pos, price_pos}->offset(0.48, 0)->grow(SPARK_HALF, SPARK_HALF, SPARK_HALF, SPARK_HALF);
+            UI.quad(spark_rect->fit_aspect(sparks_tex->get_aspect()), sparks_tex, v4.{1.0, 0.9, 0.3, 1.0});
         }
 
-        // Strikethrough line over old price
-        strike_rect := Rect.{old_price_pos, old_price_pos}->grow(0.01, 0.32, 0.01, 0.32);
-        UI.quad(strike_rect, core_globals.white_sprite, v4.{0.8, 0.2, 0.15, 0.8});
-
-        // New price "499" (bright) - shifted right
-        new_price_pos := v2.{price_center.x + 0.30, price_y};
-        new_rect := Rect.{new_price_pos, new_price_pos}->grow(0.0, 0.5, 0.0, 0.5);
-
-        new_ts := UI.default_text_settings();
-        new_ts.size = 0.20;
-        new_ts.halign = .CENTER;
-        new_ts.valign = .CENTER;
-        new_ts.color = v4.{1.0, 1.0, 0.5, 1.0};
-        new_ts.do_outline = true;
-        new_ts.outline_thickness = 0.018;
-        new_ts.outline_color = v4.{0.3, 0.1, 0.0, 1.0};
-        new_ts.do_drop_shadow = true;
-        new_ts.drop_shadow_offset = v2.{0.008, -0.008};
-        new_ts.drop_shadow_color = v4.{0.0, 0.0, 0.0, 0.6};
-        UI.text(new_rect, new_ts, "499");
-
-        // Sparks icon next to new price (bright)
-        if sparks_tex != null {
-            SPARK_NEW :: 0.09;
-            new_spark_rect := Rect.{new_price_pos, new_price_pos}->offset(0.26, 0)->grow(SPARK_NEW, SPARK_NEW, SPARK_NEW, SPARK_NEW);
-            UI.quad(new_spark_rect->fit_aspect(sparks_tex->get_aspect()), sparks_tex, v4.{1.0, 0.9, 0.3, 1.0});
-        }
-
-        // Small star ribbons overlapping the banner edges
-        ribbon_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/star_ribbons/star_ribbons_large/ribbon_star_yellow.png");
-        if ribbon_tex != null {
-            RIBBON_HALF :: 0.20;
-            left_ribbon := Rect.{banner_pos, banner_pos}->offset(-1.15, 0.03)->grow(RIBBON_HALF, RIBBON_HALF, RIBBON_HALF, RIBBON_HALF);
-            right_ribbon := Rect.{banner_pos, banner_pos}->offset(1.15, 0.03)->grow(RIBBON_HALF, RIBBON_HALF, RIBBON_HALF, RIBBON_HALF);
-            UI.quad(left_ribbon->fit_aspect(ribbon_tex->get_aspect()), ribbon_tex, v4.{1, 1, 1, 0.9});
-            UI.quad(right_ribbon->fit_aspect(ribbon_tex->get_aspect()), ribbon_tex, v4.{1, 1, 1, 0.9});
-        }
-
-        // "BUY NOW!" above GGG if not bought
+        // Floating sprite/text above pedestal if not bought
         local_player, lok := Game.get_local_player();
-        if lok && !local_player.ggg_bought && !Purchasing.owns_product(local_player, GGG_PRODUCT_ID) || (lok && local_player->is_admin()) {
-            buy_head_y := pos.y + 2.4 + bob;
-            buy_head_pos := v2.{pos.x, buy_head_y};
-
-            buy_head_ts := UI.default_text_settings();
-            buy_head_ts.font = get_asset(Font_Asset, "$AO/fonts/Barlow-Black.ttf");
-            buy_head_ts.size = 0.42;
-            buy_head_ts.halign = .CENTER;
-            buy_head_ts.valign = .CENTER;
-            buy_head_ts.color = v4.{1.0, 0.78, 0.0, 1.0};
-            buy_head_ts.spacing_multiplier = 1.15;
-            buy_head_ts.do_outline = true;
-            buy_head_ts.outline_thickness = 6.0;
-            buy_head_ts.outline_color = v4.{0.0, 0.0, 0.0, 1.0};
-            buy_head_ts.do_drop_shadow = true;
-            buy_head_ts.drop_shadow_offset = v2.{0.012, -0.012};
-            buy_head_ts.drop_shadow_color = v4.{0.0, 0.0, 0.0, 0.5};
-
-            buy_head_rect := Rect.{buy_head_pos, buy_head_pos}->grow(0.0, 1.0, 0.0, 1.0);
-            UI.text(buy_head_rect, buy_head_ts, "BUY NOW!");
+        if lok && !pedestal_is_bought(role, local_player) && !Purchasing.owns_product(local_player, product_id) || (lok && local_player->is_admin()) {
+            if role == Pedestal_Role.MIMICER {
+                new_role_tex := get_asset(Texture_Asset, "sprites/NewRole.png");
+                if new_role_tex != null {
+                    nr_y := pos.y + 3.0 + bob;
+                    nr_pos := v2.{pos.x, nr_y};
+                    NR_HALF :: 1.0;
+                    nr_rect := Rect.{nr_pos, nr_pos}->grow(NR_HALF, NR_HALF, NR_HALF, NR_HALF);
+                    UI.quad(nr_rect->fit_aspect(new_role_tex->get_aspect()), new_role_tex);
+                }
+            }
         }
     }
 
     ao_update :: method(dt: float) {
         if spine == null return;
 
-        pounce_timer -= dt;
-        if pounce_timer <= 0.0 {
-            pounce_timer = POUNCE_INTERVAL;
-            state_machine->set_trigger("pounce");
+        action_timer -= dt;
+        if action_timer <= 0.0 {
+            action_timer = PEDESTAL_ACTION_INTERVAL;
+            state_machine->set_trigger("action");
         }
     }
 
     can_use :: method(player: Player) -> bool {
         if player == null return false;
         if player->is_admin() return true;
-        if player.ggg_bought || Purchasing.owns_product(player, GGG_PRODUCT_ID) {
+        product_id := pedestal_get_product_id(role);
+        if pedestal_is_bought(role, player) || Purchasing.owns_product(player, product_id) {
             this->set_text("Bought!");
             return false;
         }
-        this->set_text("Buy Goo Goo Ga Ga");
+        this->set_text(format_string("Buy %", {pedestal_get_display_name(role)}));
         return true;
     }
 
     on_interact :: method(player: Player) {
-        Purchasing.prompt_purchase(player, GGG_PRODUCT_ID);
+        Purchasing.prompt_purchase(player, pedestal_get_product_id(role));
     }
 }

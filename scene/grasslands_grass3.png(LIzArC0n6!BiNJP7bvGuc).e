@@ -5,8 +5,8 @@
   "name": "grasslands_grass3.png",
   "local_enabled": true,
   "local_position": {
-    "X": 2.3618812561035156,
-    "Y": -3.3370885848999023
+    "X": 2.3084995746612549,
+    "Y": -3.4972305297851562
   },
   "local_rotation": 0,
   "local_scale": {
