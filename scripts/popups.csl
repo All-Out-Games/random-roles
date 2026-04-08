@@ -360,7 +360,8 @@ spin_rebuild_enabled_roles :: proc() {
 	spin_enabled_roles->append(Player_Role.WEREWOLF);
 	// GGG: always show in spinner. Non-owners see a lock overlay.
 	spin_enabled_roles->append(Player_Role.GOO_GOO_GAGA);
-	// Mimicer is never shown in the spinner (not player-ownable).
+	// Mimicer: always show in spinner. Non-owners see a lock overlay.
+	spin_enabled_roles->append(Player_Role.MIMICER);
 	// Lily Lovebraids: shown in spinner when enabled.
 	if rr_lily_role_enabled {
 		spin_enabled_roles->append(Player_Role.LILY_LOVEBRAIDS);
@@ -670,17 +671,11 @@ render_spin :: proc(using popup: Role_Spin_Popup, elapsed: float) {
 			}
 		}
 
-		// Lock overlay for roles the local player doesn't have access to
+		// Lock overlay for purchase-gated roles the local player doesn't own
 		is_locked := false;
-		if role == Player_Role.MIMICER && role != target_role {
+		if rp_is_purchase_gated(role) && role != target_role {
 			lock_local_p, lock_local_ok := Game.get_local_player();
-			if !lock_local_ok || lock_local_p == null || !Purchasing.owns_product(lock_local_p, MIMICER_PRODUCT_ID) {
-				is_locked = true;
-			}
-		}
-		if role == Player_Role.GOO_GOO_GAGA && role != target_role {
-			lock_local_p, lock_local_ok := Game.get_local_player();
-			if !lock_local_ok || lock_local_p == null || !Purchasing.owns_product(lock_local_p, GGG_PRODUCT_ID) {
+			if !lock_local_ok || lock_local_p == null || rp_is_role_locked(lock_local_p, role) {
 				is_locked = true;
 			}
 		}

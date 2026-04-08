@@ -36,6 +36,15 @@ Role_Boost_Info :: struct {
     chance:    float;
 }
 
+// Returns true if any connected player owns the given product.
+rp_any_player_owns :: proc(players: ref List(Player), product_id: string) -> bool {
+    for i: 0..players.elements.count - 1 {
+        p := players.elements[i];
+        if p != null && Purchasing.owns_product(p, product_id) return true;
+    }
+    return false;
+}
+
 // Returns true if the role is behind a purchase gate.
 rp_is_purchase_gated :: proc(role: Player_Role) -> bool {
     if role == Player_Role.GOO_GOO_GAGA return true;
@@ -61,7 +70,7 @@ rp_get_boost_chance :: proc(usage_count: int) -> float {
     return 0.0;
 }
 
-// Query a player's active boost (if any).
+// Query a player's active boost (if any). Picks the highest boost when multiple are owned.
 rp_get_player_boost :: proc(player: Player) -> Role_Boost_Info {
     info: Role_Boost_Info;
     if player == null return info;
@@ -70,12 +79,11 @@ rp_get_player_boost :: proc(player: Player) -> Role_Boost_Info {
     if Purchasing.owns_product(player, GGG_PRODUCT_ID) {
         usage := Save.get_int(player, GGG_USAGE_KEY, 0);
         chance := rp_get_boost_chance(usage.(int));
-        if chance > 0.0 {
+        if chance > info.chance {
             info.has_boost = true;
             info.role      = Player_Role.GOO_GOO_GAGA;
             info.role_type = Player_Type.TRAITOR;
             info.chance    = chance;
-            return info;
         }
     }
 
@@ -83,7 +91,7 @@ rp_get_player_boost :: proc(player: Player) -> Role_Boost_Info {
     if Purchasing.owns_product(player, MIMICER_PRODUCT_ID) {
         usage := Save.get_int(player, MIMICER_USAGE_KEY, 0);
         chance := rp_get_boost_chance(usage.(int));
-        if chance > 0.0 {
+        if chance > info.chance {
             info.has_boost = true;
             info.role      = Player_Role.MIMICER;
             info.role_type = Player_Type.TRAITOR;
@@ -153,7 +161,6 @@ rp_assign_player_types :: proc(
         roll := rng_range_float(ref rng, 0.0, 1.0);
         if roll > boost.chance continue;
 
-        // Won — lock this player's type.
         unforced[i].player_type = boost.role_type;
         type_locked[i] = true;
         if boost.role_type == Player_Type.CIVILIAN  { r_civ -= 1; }
@@ -191,6 +198,7 @@ rp_assign_player_types :: proc(
             unforced[i].player_type = Player_Type.CIVILIAN;
         }
     }
+
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -278,11 +286,15 @@ rp_assign_roles_for_type :: proc(
     bag = cleaned_bag;
 
     drawn := draw_roles_from_bag(ref bag, filtered_master, normal_count, allow_duplicates);
-
     // ── Final assignment (ownership-aware) ────────────────────────────
-    // Boost winners already have their role.
+    // Assign boost winners their roles first.
     assigned: [..]bool;
-    for i: 0..count - 1 { assigned->append(boost_won[i]); }
+    for i: 0..count - 1 {
+        if boost_won[i] {
+            type_players.elements[i].player_role = boost_role[i];
+        }
+        assigned->append(boost_won[i]);
+    }
 
     drawn_used: [..]bool;
     for d: 0..drawn.elements.count - 1 { drawn_used->append(false); }
@@ -334,6 +346,7 @@ rp_assign_roles_for_type :: proc(
             draw_idx += 1;
         }
     }
+
 }
 
 // ════════════════════════════════════════════════════════════════════
