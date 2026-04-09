@@ -2029,7 +2029,7 @@ draw_lily_role_hud :: proc(player: Player) {
 	LIST_PAD :: 10.0;
 	DROPDOWN_SLICE_PX :: 16.0;
 
-	row_count := 5;
+	row_count := 7;
 	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
 
 	header_rect := rr_draw_task_list_header(safe, false, player);
@@ -2055,72 +2055,119 @@ draw_lily_role_hud :: proc(player: Player) {
 	base_ts.autofit_max_size = 24;
 
 	list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
-	braid_points := lm.braid_points;
 
-	// Row 1: Braid Points + active strings
+	// Get tree state
+	fulfilled := 0;
+	has_tree := false;
+	tree_comp: Lily_Hair_Tree = null;
+	if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
+		has_tree = true;
+		tree_comp = lm.hair_tree_entity->get_component(Lily_Hair_Tree);
+		if tree_comp != null {
+			fulfilled = tree_comp.fulfilled_count;
+		}
+	}
+
+	// Row 1: Plant Tree status
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		list_content->cut_top(2.0);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		if lm.hair_tree_planted {
+			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		row_ts := base_ts;
+		row_ts.color = lm.hair_tree_planted ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1.0, 0.85, 0.6, 1.0};
+		if lm.hair_tree_planted {
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Braid Tree Planted");
+		} else {
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Plant your Braid Tree!");
+		}
+	}
+	// Row 2: Current tree request
 	{
 		entry_rect := list_content->cut_top(ROW_H);
 		list_content->cut_top(2.0);
 		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
 		entry_content->cut_left(24.0);
 		row_ts := base_ts;
-		row_ts.color = v4.{1.0, 0.6, 0.9, 1.0};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Braid Points: % | Strings: %", .{braid_points, lm.strung_player_ids.count}));
-	}
-	// Row 3: Unlock Dollhouse (2 BP)
-	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-		unlocked := braid_points >= LILY_DOLLHOUSE_UNLOCK_POINTS;
-		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
-		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
-		}
-		row_ts := base_ts;
-		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Dollhouse: %/% BP", .{min(braid_points, LILY_DOLLHOUSE_UNLOCK_POINTS), LILY_DOLLHOUSE_UNLOCK_POINTS}));
-	}
-	// Row 4: Unlock Tea Party (3 BP)
-	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-		unlocked := braid_points >= LILY_TEA_PARTY_UNLOCK_POINTS;
-		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
-		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
-		}
-		row_ts := base_ts;
-		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Tea Party: %/% BP", .{min(braid_points, LILY_TEA_PARTY_UNLOCK_POINTS), LILY_TEA_PARTY_UNLOCK_POINTS}));
-	}
-	// Row 5: Deathbraid progress
-	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-
-		// Find best tree absorb count
-		best_absorbs := 0;
-		for t: 0..lm.hair_tree_entities.count-1 {
-			tree := lm.hair_tree_entities[t];
-			if tree == null continue;
-			if !#alive(tree) continue;
-			tc := tree->get_component(Lily_Hair_Tree);
-			if tc != null && tc.absorb_count > best_absorbs {
-				best_absorbs = tc.absorb_count;
+		if has_tree && tree_comp != null {
+			if fulfilled >= LILY_TREE_TOTAL_REQUESTS {
+				row_ts.color = v4.{1.0, 0.3, 0.3, 1.0};
+				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "All requests fulfilled!");
+			} else {
+				request_name := rr_lily_get_request_name(tree_comp);
+				row_ts.color = v4.{1.0, 0.85, 0.95, 1.0};
+				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Tree wants: %", .{request_name}));
 			}
+		} else {
+			row_ts.color = v4.{0.6, 0.6, 0.6, 0.8};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Plant tree to see requests");
 		}
-		unlocked := best_absorbs >= LILY_DEATHBRAID_ABSORB_THRESHOLD;
+	}
+	// Rows 3-6: Individual request checklist
+	if has_tree && tree_comp != null {
+		for i: 0..LILY_TREE_TOTAL_REQUESTS-1 {
+			UI.push_id("req_%", {i});
+			defer UI.pop_id();
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content->cut_left(24.0);
+			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			is_done := i < fulfilled;
+			is_current := i == fulfilled;
+			if is_done {
+				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			} else {
+				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			}
+			// Get request name for this slot
+			req := tree_comp.request_order[i].(Tree_Request);
+			req_name := "???";
+			switch req {
+				case .DEAD_PLAYER: req_name = "Dead Player";
+				case .EYES: req_name = "Eyes";
+				case .LEGS: req_name = "Legs";
+				case .ALIVE_PLAYER: req_name = "Alive Player";
+			}
+			row_ts := base_ts;
+			if is_done {
+				row_ts.color = v4.{0.5, 0.8, 0.4, 0.8};
+			} else if is_current {
+				row_ts.color = v4.{1.0, 0.9, 0.7, 1.0};
+			} else {
+				row_ts.color = v4.{0.6, 0.6, 0.6, 0.6};
+			}
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("%: %", .{i + 1, req_name}));
+		}
+	} else {
+		// Placeholder rows when no tree
+		for i: 0..LILY_TREE_TOTAL_REQUESTS-1 {
+			UI.push_id("req_%", {i});
+			defer UI.pop_id();
+			entry_rect := list_content->cut_top(ROW_H);
+			list_content->cut_top(2.0);
+			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content->cut_left(24.0);
+			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{0.5, 0.5, 0.5, 0.4});
+			row_ts := base_ts;
+			row_ts.color = v4.{0.5, 0.5, 0.5, 0.4};
+			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("%: ???", .{i + 1}));
+		}
+	}
+	// Row 7: Deathbraid unlock
+	{
+		entry_rect := list_content->cut_top(ROW_H);
+		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content->cut_left(24.0);
+		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		unlocked := fulfilled >= LILY_DEATHBRAID_THRESHOLD;
 		if unlocked {
 			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
@@ -2128,28 +2175,7 @@ draw_lily_role_hud :: proc(player: Player) {
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{1.0, 0.3, 0.3, 1.0} : v4.{0.9, 0.5, 0.5, 1.0};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Deathbraid: %/% Absorbs", .{min(best_absorbs, LILY_DEATHBRAID_ABSORB_THRESHOLD), LILY_DEATHBRAID_ABSORB_THRESHOLD}));
-	}
-	// Row 6: Live status
-	{
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
-		row_ts := base_ts;
-		row_ts.size = 18;
-		if lm.dollhouse_active {
-			row_ts.color = v4.{1.0, 0.7, 0.9, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Dollhouse: ACTIVE");
-		} else if lm.tea_party_active {
-			row_ts.color = v4.{1.0, 0.85, 0.55, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Tea Party: ACTIVE");
-		} else if lm.is_lily_form {
-			row_ts.color = v4.{0.95, 0.75, 1.0, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Lily Form");
-		} else {
-			row_ts.color = v4.{0.85, 0.85, 0.85, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Schleem Form");
-		}
+		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Deathbraid: %/%", .{min(fulfilled, LILY_DEATHBRAID_THRESHOLD), LILY_DEATHBRAID_THRESHOLD}));
 	}
 	} // end task_list_open
 }
