@@ -83,6 +83,9 @@ Player :: class : Player_Base {
 	ghost_speed_override_active: bool;
 	ghost_speed_original_movement_speed: float;
 	
+	// --- Lily (cross-player: any player can have eyes stolen) ---
+	lily_no_eyes: bool;
+
 	// --- Pyromaniac (cross-player: any player can be on fire) ---
 	pyro_on_fire: bool;
 
@@ -446,6 +449,10 @@ Player :: class : Player_Base {
 		// Lily Lovebraids per-frame update (transform, strings, RLGL, tea party, dollhouse).
 		rr_lily_update(this, delta_time);
 
+		// Drive lily no-eyes overlay animation (track 1) on all clients.
+		if this.animator != null && this.animator.instance != null && this.animator.instance.state_machine != null {
+			this.animator.instance.state_machine->set_bool("lily_no_eyes", this.lily_no_eyes);
+		}
 
 		// Tea party victim cup choice UI.
 		rr_lily_draw_tea_party_victim_ui(this);
@@ -3047,6 +3054,18 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		lily_pull_end_state := layer->create_state("004RAND_LILY/Hair_String_Pull_End", false, 0.5);
 		layer->create_global_transition(lily_pull_end_state, false)->create_trigger_condition(lily_pull_end_var);
 		layer->create_transition(lily_pull_end_state, idle_state, true);
+
+		// No-eyes overlay (track 1) — separate layer so main animations play underneath.
+		eyes_layer := sm->create_layer("lily_no_eyes", 1);
+		no_eyes_off_state := eyes_layer->create_state("__clear", true, 0.0);
+		no_eyes_on_state := eyes_layer->create_state("004RAND_LILY/No_Eyes_AL", true, 0.0);
+		eyes_layer->set_initial_state(no_eyes_off_state);
+
+		lily_no_eyes_var := sm->create_variable("lily_no_eyes", State_Machine_Variable.Kind.BOOL);
+		off_to_on := eyes_layer->create_transition(no_eyes_off_state, no_eyes_on_state, false);
+		off_to_on->create_bool_condition(lily_no_eyes_var, true);
+		on_to_off := eyes_layer->create_transition(no_eyes_on_state, no_eyes_off_state, false);
+		on_to_off->create_bool_condition(lily_no_eyes_var, false);
 	}
 
 	// Adds the animation state machine.
