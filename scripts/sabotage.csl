@@ -77,7 +77,7 @@ rr_should_draw_power_outage_overlay :: proc(player: Player) -> bool {
 	if player == null return false;
 	if game_state != Game_State.INGAME return false;
 	if player.player_state != Player_State.ALIVE return false;
-	if !player->is_local() return false;
+	if !player.is_local() return false;
 	if !rr_power_outage_active return false;
 	if !rr_power_outage_affects_player(player) return false;
 	return true;
@@ -99,7 +99,7 @@ rr_draw_power_outage_overlay_if_needed :: proc(player: Player) {
 	ts.do_outline = true;
 	ts.outline_thickness = 3;
 	ts.outline_color = v4.{0, 0, 0, 1};
-	UI.text(screen->top_center_rect()->offset(0, -150), ts, "POWER OUTAGE");
+	UI.text(screen.top_center_rect().offset(0, -150), ts, "POWER OUTAGE");
 }
 
 rr_should_draw_comms_deaf_icon :: proc(player: Player, comms_down: bool) -> bool {
@@ -114,7 +114,7 @@ rr_should_draw_comms_deaf_icon :: proc(player: Player, comms_down: bool) -> bool
 // This is drawn only on the local client.
 rr_draw_comms_deaf_icons_if_needed :: proc(local_player: Player, comms_down: bool) {
 	if local_player == null return;
-	if !local_player->is_local() return;
+	if !local_player.is_local() return;
 	if !comms_down return;
 	if game_state != Game_State.INGAME return;
 
@@ -132,7 +132,7 @@ rr_draw_comms_deaf_icons_if_needed :: proc(local_player: Player, comms_down: boo
 	check_los := false;
 	max_los_dist := 0.0;
 	if rr_power_outage_active && rr_power_outage_affects_player(local_player) {
-		radii := local_player->get_local_light_radii();
+		radii := local_player.get_local_light_radii();
 		max_los_dist = radii.y/2;
 		check_los = true;
 	}
@@ -154,8 +154,8 @@ rr_draw_comms_deaf_icons_if_needed :: proc(local_player: Player, comms_down: boo
 		screen_pos.x += x_offset;
 		screen_pos.y += y_offset;
 
-		r := Rect{screen_pos, screen_pos}->grow_unscaled(icon_size * 0.5, icon_size * 0.5, icon_size * 0.5, icon_size * 0.5);
-		r = r->fit_aspect(icon->get_aspect(), .KEEP_HEIGHT);
+		r := Rect{screen_pos, screen_pos}.grow_unscaled(icon_size * 0.5, icon_size * 0.5, icon_size * 0.5, icon_size * 0.5);
+		r = r.fit_aspect(icon.get_aspect(), .KEEP_HEIGHT);
 		UI.quad(r, icon, v4.{1, 1, 1, 0.95});
 	}
 }
@@ -203,12 +203,12 @@ rr_draw_sabotage_button :: proc(
 	}
 
 	if icon != null {
-		icon_rect := btn->inset(max(2.0, btn->height() * 0.06));
-		UI.quad(icon_rect->fit_aspect(icon->get_aspect()), icon, col);
+		icon_rect := btn.inset(max(2.0, btn.height() * 0.06));
+		UI.quad(icon_rect.fit_aspect(icon.get_aspect()), icon, col);
 	} else {
 		// Fallback to text label if icon missing.
 		ts := UI.default_text_settings();
-		ts.size = btn->height() * 0.22;
+		ts.size = btn.height() * 0.22;
 		ts.color = v4.{1, 1, 1, col.w};
 		ts.halign = .CENTER;
 		ts.valign = .CENTER;
@@ -258,22 +258,22 @@ rr_draw_sabotages_next_to_minimap :: proc(
 	defer rr_pop_mobile_ui_scale(_pushed_scale);
 
 	// Button size based on minimap height.
-	size := map_rect->height() * 0.12;
+	size := map_rect.height() * 0.12;
 	if size < 86.0 { size = 86.0; }
 	if size > 150.0 { size = 150.0; }
 
 	pad := size * 0.22;
 	gap := size * 0.06;
 	x := map_rect.max.x + gap + size * 0.5;
-	y_top := map_rect.max.y - (map_rect->height() * 0.5) + size;
+	y_top := map_rect.max.y - (map_rect.height() * 0.5) + size;
 
 	// Two stacked buttons.
 	btn1_center := v2.{x, y_top};
 	btn2_center := v2.{x, y_top - (size + pad)};
 	btn3_center := v2.{x, y_top - (size + pad) * 2.0};
-	btn1 := Rect{btn1_center, btn1_center}->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
-	btn2 := Rect{btn2_center, btn2_center}->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
-	btn3 := Rect{btn3_center, btn3_center}->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
+	btn1 := Rect{btn1_center, btn1_center}.grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
+	btn2 := Rect{btn2_center, btn2_center}.grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
+	btn3 := Rect{btn3_center, btn3_center}.grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
 
 	// Proper icon buttons from sprites/icons (icon is the button).
 	power_icon := get_asset(Texture_Asset, "sprites/icons/power_outage.png");
@@ -303,15 +303,15 @@ rr_draw_sabotages_next_to_minimap :: proc(
 	label_ts.outline_thickness = 3;
 	label_ts.outline_color = v4.{0, 0, 0, 1};
 
-	label_center := btn1->bottom_center_rect()->offset(0.0, -label_pad);
-	label_rect := label_center->grow(label_h * 0.5, label_w * 0.5, label_h * 0.5, label_w * 0.5);
+	label_center := btn1.bottom_center_rect().offset(0.0, -label_pad);
+	label_rect := label_center.grow(label_h * 0.5, label_w * 0.5, label_h * 0.5, label_w * 0.5);
 	UI.text(label_rect, label_ts, "Light Sabotage");
 
-	label_center = btn2->bottom_center_rect()->offset(0.0, -label_pad);
-	label_rect = label_center->grow(label_h * 0.5, label_w * 0.5, label_h * 0.5, label_w * 0.5);
+	label_center = btn2.bottom_center_rect().offset(0.0, -label_pad);
+	label_rect = label_center.grow(label_h * 0.5, label_w * 0.5, label_h * 0.5, label_w * 0.5);
 	UI.text(label_rect, label_ts, "Comms Sabotage");
 
-	label_center = btn3->bottom_center_rect()->offset(0.0, -label_pad);
-	label_rect = label_center->grow(label_h * 0.5, label_w * 0.5, label_h * 0.5, label_w * 0.5);
+	label_center = btn3.bottom_center_rect().offset(0.0, -label_pad);
+	label_rect = label_center.grow(label_h * 0.5, label_w * 0.5, label_h * 0.5, label_w * 0.5);
 	UI.text(label_rect, label_ts, "Lock Doors");
 }

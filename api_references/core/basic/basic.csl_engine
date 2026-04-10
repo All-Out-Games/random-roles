@@ -45,9 +45,12 @@ memcpy :: proc(dst: *u8, src: *u8, count: int) #foreign "csl_memcpy";
 
 
 
-sin   :: proc(v: float) -> float #foreign;
-cos   :: proc(v: float) -> float #foreign;
-atan2 :: proc(x: float, y: float) -> float #foreign;
+sin   :: proc(v: float) -> float #intrinsic "sin_f32";
+sin   :: proc(v: f64) -> f64 #intrinsic "sin_f64";
+cos   :: proc(v: float) -> float #intrinsic "cos_f32";
+cos   :: proc(v: f64) -> f64 #intrinsic "cos_f64";
+atan2 :: proc(y: float, x: float) -> float #intrinsic "atan2_f32";
+atan2 :: proc(y: f64, x: f64) -> f64 #intrinsic "atan2_f64";
 
 to_degrees :: proc(radians: float) -> float {
     return radians * 180.0 / PI;
@@ -69,11 +72,19 @@ Matrix4 :: struct {
     multiply :: proc(a: Matrix4, b: Matrix4) -> Matrix4 #foreign "matrix4_multiply_matrix4";
 
     rotate_about_point :: proc(point: v2, degrees: float) -> Matrix4 {
-        return Matrix4.translate(point)->multiply(Matrix4.rotate(degrees, {0, 0, 1})->multiply(Matrix4.translate(-point)));
+        return Matrix4.translate(point).multiply(Matrix4.rotate(degrees, {0, 0, 1}).multiply(Matrix4.translate(-point)));
     }
 }
 
 
+
+Time :: struct {
+    nanoseconds_since_epoch :: proc() -> u64 #foreign "time_nanoseconds_since_epoch";
+}
+
+
+
+hash_murmur32 :: proc(data: *u8, count: s64, seed: u64 = 0) -> u64 #foreign "csl_hash_bytes";
 
 new_string  :: proc(count: int)  -> string #foreign;
 copy_string :: proc(str: string) -> string #foreign;
@@ -115,7 +126,7 @@ rng_disk :: proc(rng: ref u64, inner_radius: float, outer_radius: float) -> v2 {
 
 append :: proc(list: ref [..]$T, element: T) {
     if list.count >= list.capacity {
-        list->reserve(max(next_power_of_two(list.count+1), 8));
+        list.reserve(max(next_power_of_two(list.count+1), 8));
     }
     i := list.count;
     #unsafe list.count += 1;
@@ -201,10 +212,11 @@ ordered_remove_by_index :: proc(using this: ref [..]$T, index: int) {
 }
 
 
-// todo(josh): @Speed: all of these should be intrinsics
 
-pow :: proc(b: float, e: float) -> float #foreign;
-sqrt :: proc(x: float) -> float #foreign;
+pow :: proc(b: float, e: float) -> float #intrinsic "pow_f32";
+pow :: proc(b: f64, e: f64) -> f64 #intrinsic "pow_f64";
+sqrt :: proc(x: float) -> float #intrinsic "sqrt_f32";
+sqrt :: proc(x: f64) -> f64 #intrinsic "sqrt_f64";
 next_power_of_two :: proc(n: s64) -> s64 {
     if n <= 0 {
         return 0;
@@ -220,13 +232,6 @@ next_power_of_two :: proc(n: s64) -> s64 {
     return n;
 }
 
-min :: proc(a: $T, b: T) -> T {
-    if a < b {
-        return a;
-    }
-    return b;
-}
-
 sign :: proc(v: $T) -> T {
     if v < 0 {
         return -1;
@@ -234,44 +239,17 @@ sign :: proc(v: $T) -> T {
     return 1;
 }
 
-max :: proc(a: $T, b: T) -> T {
-    if a > b {
-        return a;
-    }
-    return b;
-}
+length :: proc(v: v2) -> float #intrinsic "length_v2";
+length :: proc(v: v3) -> float #intrinsic "length_v3";
+length :: proc(v: v4) -> float #intrinsic "length_v4";
 
-length :: proc(v: v2) -> float {
-    return sqrt(v.x*v.x + v.y*v.y);
-}
+length_squared :: proc(v: v2) -> float #intrinsic "length_squared_v2";
+length_squared :: proc(v: v3) -> float #intrinsic "length_squared_v3";
+length_squared :: proc(v: v4) -> float #intrinsic "length_squared_v4";
 
-length_squared :: proc(v: v2) -> float {
-    return v.x*v.x + v.y*v.y;
-}
-
-length :: proc(v: v3) -> float {
-    return sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
-}
-
-length_squared :: proc(v: v3) -> float {
-    return v.x*v.x + v.y*v.y + v.z*v.z;
-}
-
-length :: proc(v: v4) -> float {
-    return sqrt(v.x*v.x + v.y*v.y + v.z*v.z + v.w*v.w);
-}
-
-length_squared :: proc(v: v4) -> float {
-    return v.x*v.x + v.y*v.y + v.z*v.z + v.w*v.w;
-}
-
-normalize :: proc(v: $T) -> T {
-    l := length(v);
-    if l == 0 {
-        return {};
-    }
-    return v / l;
-}
+normalize :: proc(v: v2) -> v2 #intrinsic "normalize_v2";
+normalize :: proc(v: v3) -> v3 #intrinsic "normalize_v3";
+normalize :: proc(v: v4) -> v4 #intrinsic "normalize_v4";
 
 in_range :: proc(v: $T, distance: float) -> bool {
     return length_squared(v) <= (distance*distance);

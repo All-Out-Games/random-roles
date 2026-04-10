@@ -198,7 +198,7 @@ Player :: class : Player_Base {
 		// While on fire, you can only move.
 		if pyro_on_fire return false;
 		// Trapped or being dragged by GGG — no abilities.
-		root := entity->get_component(GGG_Trap_Root_Effect);
+		root := entity.get_component(GGG_Trap_Root_Effect);
 		if root != null && root.active return false;
 		return true;
 	}
@@ -235,7 +235,7 @@ Player :: class : Player_Base {
 
         has_task_in_progress := false;
         if should_check_tasks {
-			has_task_in_progress = this->has_task_in_progress();
+			has_task_in_progress = this.has_task_in_progress();
         }
 
         should_be_frozen := should_freeze_for_popup || has_task_in_progress;
@@ -245,16 +245,16 @@ Player :: class : Player_Base {
         }
 
         if should_be_frozen {
-            this->add_disable_movement_input_reason("frozen");
+            this.add_disable_movement_input_reason("frozen");
         } else {
-            this->remove_disable_movement_input_reason("frozen");
+            this.remove_disable_movement_input_reason("frozen");
         }
 
         is_frozen = should_be_frozen;
     }
 
     Notify :: proc(using this: Player, message: string) {
-        if this->is_local_or_server() {
+        if this.is_local_or_server() {
             Notifier.notify(message);
         }
     }
@@ -265,10 +265,10 @@ Player :: class : Player_Base {
 		rr_restart_ambience();
         append(ref players, this);
 
-		this->ensure_anim_state_machine();
+		this.ensure_anim_state_machine();
 
 		// Voice chat: ensure late-joiners get the correct routing immediately.
-		this->apply_voice_chat_masks_for_current_state();
+		this.apply_voice_chat_masks_for_current_state();
 
 		// If a new player joins while in solo test mode (mid-round), end the stale
 		// round and return to lobby so everyone starts fresh.
@@ -287,7 +287,7 @@ Player :: class : Player_Base {
             on_player_go_dead(this);
         } else if game_state == Game_State.VOTING {
             on_player_go_dead(this);
-            world_references->teleport_to_voting(this);
+            world_references.teleport_to_voting(this);
         } else {
 			// Any other state (ANIM_INTRO, ANIM_BODY_FOUND, ANIM_MEETING_CALLED,
 			// ANIM_VOTE_EJECT, ANIM_JESTER_WIN, ANIM_PYRO_WIN):
@@ -299,9 +299,9 @@ Player :: class : Player_Base {
 	apply_voice_chat_masks_for_current_state :: proc(using this: Player) {
 		// In-match: alive speaks to alive; ghosts/spectators speak to dead (but listen to all)
 		if this.player_state == Player_State.ALIVE {
-			this->apply_voice_chat_masks_alive();
+			this.apply_voice_chat_masks_alive();
 		} else {
-			this->apply_voice_chat_masks_ghost_or_passive();
+			this.apply_voice_chat_masks_ghost_or_passive();
 		}
 	}
 
@@ -339,7 +339,7 @@ Player :: class : Player_Base {
 
 		// Clear any voted_for references pointing to the disconnecting player
 		// to prevent stale component access in vote reveal UI.
-		foreach p: component_iterator(Player) {
+		for p: component_iterator(Player) {
 			if p.voted_for == this {
 				p.voted_for = null;
 			}
@@ -347,9 +347,9 @@ Player :: class : Player_Base {
 
         unordered_remove_by_value(ref players, this);
 
-		if this->is_local() {
+		if this.is_local() {
 			if local_light_entity != null && #alive(local_light_entity) {
-				local_light_entity->destroy();
+				local_light_entity.destroy();
 			}
 			local_light_entity = null;
 			local_light = null;
@@ -358,13 +358,13 @@ Player :: class : Player_Base {
     }
 
     ao_update :: proc(using this: Player, delta_time: float) {
-        if this->is_local_or_server() {
-            this->update_freeze_reasons();
+        if this.is_local_or_server() {
+            this.update_freeze_reasons();
 			// Cosmetic-only: name coloring is per-viewer. Do this only on the local client.
-			if this->is_local() {
-            	this->setup_player_colors();
-				this->update_chat_mode();
-				this->update_local_vision_light();
+			if this.is_local() {
+            	this.setup_player_colors();
+				this.update_chat_mode();
+				this.update_local_vision_light();
 			}
 			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
 			rr_draw_power_outage_overlay_if_needed(this);
@@ -380,7 +380,7 @@ Player :: class : Player_Base {
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			draw_player_role_hud(this);
 			// Draw resurrection timer above any temporarily resurrected players' heads.
-			if this->is_local() {
+			if this.is_local() {
 				rr_draw_temp_resurrect_timers();
 				// Draw fiery-room exposure countdown above the local player's head.
 				rr_pyro_draw_room_exposure_timer(this);
@@ -390,30 +390,30 @@ Player :: class : Player_Base {
 				fake_nameplate_draw_all(this);
 			}
 			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
-				this->draw_letterbox_bars();
+				this.draw_letterbox_bars();
 			}
 			if game_state == Game_State.ANIM_VOTE_EJECT {
-				this->draw_vote_eject_cinematic_ui();
+				this.draw_vote_eject_cinematic_ui();
 			}
             if game_state == Game_State.ANIM_ROLE_SPIN {
-                role_spin_popup->set_local_player(this);
-                role_spin_popup->update(delta_time);
+                role_spin_popup.set_local_player(this);
+                role_spin_popup.update(delta_time);
             }
             if game_state == Game_State.ANIM_INTRO {
                 rr_intro_ensure_role_spine(this);
                 if intro_role_spine_ready {
-                    intro_role_spine->update(delta_time);
+                    intro_role_spine.update(delta_time);
                     // Trigger second animation for transforming roles
                     if intro_second_anim_at > 0.0 && !intro_second_anim_started {
                         elapsed := get_time() - intro_popup.show_start_time;
                         if elapsed >= intro_second_anim_at {
-                            intro_role_spine->set_animation(intro_second_anim_name, false, 0);
+                            intro_role_spine.set_animation(intro_second_anim_name, false, 0);
                             intro_second_anim_started = true;
                         }
                     }
                 }
-                intro_popup->set_local_player(this);
-                intro_popup->update(delta_time);
+                intro_popup.set_local_player(this);
+                intro_popup.update(delta_time);
             }
         }
         update_tasks(this);
@@ -451,7 +451,7 @@ Player :: class : Player_Base {
 
 		// Drive lily no-eyes overlay animation (track 1) on all clients.
 		if this.animator != null && this.animator.instance != null && this.animator.instance.state_machine != null {
-			this.animator.instance.state_machine->set_bool("lily_no_eyes", this.lily_no_eyes);
+			this.animator.instance.state_machine.set_bool("lily_no_eyes", this.lily_no_eyes);
 		}
 
 		// Tea party victim cup choice UI.
@@ -468,10 +468,10 @@ Player :: class : Player_Base {
 		if this.player_role == Player_Role.MIMICER {
 			mim_sm := this.animator.instance.state_machine;
 			if mim_sm != null {
-				mim_mod := this.entity->get_component(Mimicer_Module);
+				mim_mod := this.entity.get_component(Mimicer_Module);
 				if mim_mod != null && mim_mod.is_prowling {
 					prowl_moving := length_squared(this.agent.velocity) > 0.01;
-					mim_sm->set_bool("mimicer_prowl_moving", prowl_moving);
+					mim_sm.set_bool("mimicer_prowl_moving", prowl_moving);
 				}
 			}
 		}
@@ -482,7 +482,7 @@ Player :: class : Player_Base {
 		// GGG whip caught animation (runs on all clients).
 		if this.whip_caught && !this.whip_caught_anim_applied {
 			this.whip_caught_anim_applied = true;
-			this->set_trigger("ggg_whip_caught");
+			this.set_trigger("ggg_whip_caught");
 		} else if !this.whip_caught && this.whip_caught_anim_applied {
 			this.whip_caught_anim_applied = false;
 		}
@@ -508,9 +508,9 @@ Player :: class : Player_Base {
 	is_in_pirate_fog :: proc(using this: Player) -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player_state != Player_State.ALIVE return false;
-		if !this->is_local() return false;
+		if !this.is_local() return false;
 
-		foreach fog: component_iterator(Black_Flag) {
+		for fog: component_iterator(Black_Flag) {
 			if fog == null continue;
 			if !#alive(fog.entity) continue;
 			distance := length(this.entity.world_position - fog.entity.world_position);
@@ -539,7 +539,7 @@ Player :: class : Player_Base {
 		}
 
 		// GGG trap blind: super tiny LOS
-		root := this.entity->get_component(GGG_Trap_Root_Effect);
+		root := this.entity.get_component(GGG_Trap_Root_Effect);
 		if root != null && root.active && root.is_blinded {
 			return v2.{GGG_TRAP_BLIND_LOS_INNER, GGG_TRAP_BLIND_LOS_OUTER};
 		}
@@ -552,7 +552,7 @@ Player :: class : Player_Base {
 		radii := v2.{PLAYER_LIGHT_BASE_INNER_RADIUS, PLAYER_LIGHT_BASE_OUTER_RADIUS};
 
 		// GGG foil whip targeting: expand LOS so GGG can see further
-		ggg_mod := this.entity->get_component(GGG_Module);
+		ggg_mod := this.entity.get_component(GGG_Module);
 		if ggg_mod != null && ggg_mod.foil_whip_targeting {
 			radii.x = max(radii.x, GGG_FOIL_WHIP_LOS_INNER);
 			radii.y = max(radii.y, GGG_FOIL_WHIP_LOS_OUTER);
@@ -569,7 +569,7 @@ Player :: class : Player_Base {
 					radii.y *= PLAYER_LIGHT_POWER_OUTAGE_MULTIPLIER;
 				}
 			}
-			if this->is_in_pirate_fog() {
+			if this.is_in_pirate_fog() {
 				radii.x *= PLAYER_LIGHT_PIRATE_FOG_MULTIPLIER;
 				radii.y *= PLAYER_LIGHT_PIRATE_FOG_MULTIPLIER;
 			}
@@ -588,43 +588,43 @@ Player :: class : Player_Base {
 		if local_light_entity != null && #alive(local_light_entity) return;
 
 		local_light_entity = Scene.create_entity();
-		local_light_entity->set_parent(this.entity, false);
-		local_light_entity->set_local_enabled(true);
-		local_light_entity->set_local_position(v2.{0.0, 0.0});
-		local_light_entity->set_local_rotation(0.0);
-		local_light_entity->set_local_scale(v2.{1.0, 1.0});
+		local_light_entity.set_parent(this.entity, false);
+		local_light_entity.set_local_enabled(true);
+		local_light_entity.set_local_position(v2.{0.0, 0.0});
+		local_light_entity.set_local_rotation(0.0);
+		local_light_entity.set_local_scale(v2.{1.0, 1.0});
 
-		local_light = local_light_entity->add_component(Light);
+		local_light = local_light_entity.add_component(Light);
 		local_light.color = PLAYER_LIGHT_COLOR;
 		local_light.intensity = PLAYER_LIGHT_INTENSITY;
 		local_light.radii = v2.{PLAYER_LIGHT_BASE_INNER_RADIUS, PLAYER_LIGHT_BASE_OUTER_RADIUS};
 
-		local_light_caster = local_light_entity->add_component(LOS_Caster);
+		local_light_caster = local_light_entity.add_component(LOS_Caster);
 		local_light_caster.radii = local_light.radii;
 	}
 
 	update_local_vision_light :: proc(using this: Player) {
-		if !this->is_local_or_server() return;
+		if !this.is_local_or_server() return;
 		if !#alive(this.entity) return;
 
-		this->ensure_local_vision_light();
+		this.ensure_local_vision_light();
 
 		if local_light == null && local_light_entity != null {
-			local_light = local_light_entity->get_component(Light);
+			local_light = local_light_entity.get_component(Light);
 		}
 		if local_light_caster == null && local_light_entity != null {
-			local_light_caster = local_light_entity->get_component(LOS_Caster);
+			local_light_caster = local_light_entity.get_component(LOS_Caster);
 		}
 		if local_light == null || local_light_caster == null return;
 
-		radii := this->get_local_light_radii();
-		bc := this.entity->get_component(Big_Charlie_Module);
+		radii := this.get_local_light_radii();
+		bc := this.entity.get_component(Big_Charlie_Module);
 		if bc != null && bc.camera_active {
 			// Blow out the light range so the nugget camera view is never in shadow.
 			radii.x = 999.0;
 			radii.y = 999.0;
 		}
-		local_light_entity->set_local_position(v2.{0.0, 0.0});
+		local_light_entity.set_local_position(v2.{0.0, 0.0});
 
 		local_light.radii = radii;
 		local_light_caster.radii = radii;
@@ -639,7 +639,7 @@ Player :: class : Player_Base {
 	}
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
-        if this->is_local_or_server() {
+        if this.is_local_or_server() {
 			rr_bc_draw_camera_ui(this, delta_time);
 
 			// Ghost QoL: zoom the local dead player's camera out a bit so they can
@@ -648,7 +648,7 @@ Player :: class : Player_Base {
 			// Important:
 			// - Only the local player has a camera.
 			// - Avoid fighting win cinematics (handled by the early return below).
-			if this->is_local() {
+			if this.is_local() {
 				// Save the engine-default camera size once so we can restore it each round.
 				if !camera_default_size_saved {
 					camera_default_size = this.camera.size;
@@ -694,7 +694,7 @@ Player :: class : Player_Base {
 				// Mimicer unleash: enforce camera zoom during placement,
 				// restore to default when placement ends (overrides server sync).
 				if this.player_role == Player_Role.MIMICER {
-					mim_cam := this.entity->get_component(Mimicer_Module);
+					mim_cam := this.entity.get_component(Mimicer_Module);
 					if mim_cam != null {
 						if mim_cam.unleash_placing {
 							this.camera.follow_player = false;
@@ -725,7 +725,7 @@ Player :: class : Player_Base {
 			// During vote ejection, lock camera to the ejected player and zoom in.
 			if game_state == Game_State.ANIM_VOTE_EJECT {
 				elapsed := get_time() - rr_vote_eject_start_time;
-				if elapsed >= RR_VOTE_EJECT_TEXT_SECONDS && this->is_local() {
+				if elapsed >= RR_VOTE_EJECT_TEXT_SECONDS && this.is_local() {
 					if !vote_eject_camera_override_active {
 						vote_eject_camera_original_size = this.camera.size;
 						this.camera.follow_player = false;
@@ -745,7 +745,7 @@ Player :: class : Player_Base {
 			if game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
 				// Turn off camera follow and set position ONCE to reduce per-frame camera work.
 				if !jester_win_camera_override_active {
-					if this->try_begin_jester_win_camera_override() {
+					if this.try_begin_jester_win_camera_override() {
 						jester_win_camera_override_active = true;
 					}
 				}
@@ -800,7 +800,7 @@ Player :: class : Player_Base {
 						draw_ability_button(this, Fake_Meeting_Ability, abilityIndex);
 						abilityIndex += 1;
 						// Only show Jester Win once unlocked.
-						prk := this.entity->get_component(Prankster_Module);
+						prk := this.entity.get_component(Prankster_Module);
 						if prk != null && prk.jester_unlocked_time > 0.0 {
 							draw_ability_button(this, Jester_Win_Ability, abilityIndex);
 							abilityIndex += 1;
@@ -812,7 +812,7 @@ Player :: class : Player_Base {
 						draw_ability_button(this, Pyromaniac_Light_Corpse_Ability, abilityIndex);
 						abilityIndex += 1;
 						// Only show World Fire once unlocked.
-						pyro := this.entity->get_component(Pyro_Module);
+						pyro := this.entity.get_component(Pyro_Module);
 						if pyro != null && pyro.world_fire_unlocked_time > 0.0 {
 							draw_ability_button(this, Pyromaniac_World_Fire_Ability, abilityIndex);
 							abilityIndex += 1;
@@ -835,10 +835,10 @@ Player :: class : Player_Base {
 
 						t := get_time();
 						screen := UI.get_safe_screen_rect();
-						area_rect := screen->bottom_center_rect()->offset(0, 230);
+						area_rect := screen.bottom_center_rect().offset(0, 230);
 
 						// --- Elapsed timer (top) ---
-						timer_rect := area_rect->grow(20, 240, 0, 240)->offset(0, 40);
+						timer_rect := area_rect.grow(20, 240, 0, 240).offset(0, 40);
 						timer_ts := UI.default_text_settings();
 						timer_ts.size = 30;
 						timer_ts.color = .{0.55, 0.55, 0.65, 1};
@@ -856,7 +856,7 @@ Player :: class : Player_Base {
 						title_b := sin(t * 1.8 + 4.189) * 0.3 + 0.7;
 						bob_y := sin(t * 2.0) * 4.0;
 
-						title_rect := area_rect->grow(30, 240, 0, 240)->offset(0, -15.0 + bob_y);
+						title_rect := area_rect.grow(30, 240, 0, 240).offset(0, -15.0 + bob_y);
 						title_ts := UI.default_text_settings();
 						title_ts.size = 48;
 						title_ts.color = .{title_r, title_g, title_b, 1};
@@ -879,7 +879,7 @@ Player :: class : Player_Base {
 						// --- Player count (bottom): X / MAX ---
 						player_count := players.elements.count;
 						pulse := sin(t * 3.0) * 0.15 + 0.85;
-						count_rect := area_rect->grow(25, 240, 0, 240)->offset(0, -75);
+						count_rect := area_rect.grow(25, 240, 0, 240).offset(0, -75);
 						count_ts := UI.default_text_settings();
 						count_ts.size = 44;
 						count_ts.color = .{pulse, pulse * 0.85, 0.25, 1};
@@ -895,7 +895,7 @@ Player :: class : Player_Base {
 						// Only show this after players have waited in lobby for 30s.
 						if elapsed >= 15.0 {
 							button_pulse := sin(t * 3.2) * 0.07 + 0.93;
-							return_btn_rect := area_rect->grow(26, 160, 12, 160)->offset(0, -148);
+							return_btn_rect := area_rect.grow(26, 160, 12, 160).offset(0, -148);
 							return_bs := UI.default_button_settings();
 							return_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_5.png");
 							return_bs.press_scaling = 0.96;
@@ -935,7 +935,7 @@ Player :: class : Player_Base {
 		//
 		// IMPORTANT: run this only on the local client (see ao_update).
 		local_is_impostor := this.player_type == Player_Type.TRAITOR;
-		foreach p: component_iterator(Player) {
+		for p: component_iterator(Player) {
 			p.do_name_color_override = true;
 			if local_is_impostor && p.player_type == Player_Type.TRAITOR {
 				p.name_color_override = .{1, 0, 0, 1};
@@ -947,21 +947,21 @@ Player :: class : Player_Base {
 
     clear_player_colors :: proc(using this: Player) {
 		// Reset to default (used when leaving gameplay contexts).
-		foreach p: component_iterator(Player) {
+		for p: component_iterator(Player) {
 			p.do_name_color_override = false;
 		}
     }
 
     kill :: proc(using this: Player) {
-		this->kill_with_killer(0);
+		this.kill_with_killer(0);
     }
 
 	kill_with_killer :: proc(using this: Player, killer_player_entity_id: u64) {
-		this->kill_with_killer_and_corpse(killer_player_entity_id, true);
+		this.kill_with_killer_and_corpse(killer_player_entity_id, true);
     }
 
 	kill_with_killer_no_corpse :: proc(using this: Player, killer_player_entity_id: u64) {
-		this->kill_with_killer_and_corpse(killer_player_entity_id, false);
+		this.kill_with_killer_and_corpse(killer_player_entity_id, false);
 	}
 
 	kill_with_killer_and_corpse :: proc(using this: Player, killer_player_entity_id: u64, spawn_corpse: bool) {
@@ -990,7 +990,7 @@ Player :: class : Player_Base {
 		rr_register_player_death(this.entity.id);
         on_player_go_dead(this);
 		if spawn_corpse {
-        	world_references->spawn_corpse(this, killer_player_entity_id);
+        	world_references.spawn_corpse(this, killer_player_entity_id);
 		}
 		rr_hitman_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_werewolf_on_player_killed(killer_player_entity_id, this.entity.id);
@@ -1033,7 +1033,7 @@ rr_draw_temp_resurrect_timers :: proc() {
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
 
-	foreach p: component_iterator(Player) {
+	for p: component_iterator(Player) {
 		if p == null continue;
 		if !#alive(p.entity) continue;
 		if !p.is_temporarily_resurrected continue;
@@ -1050,7 +1050,7 @@ rr_draw_temp_resurrect_timers :: proc() {
 		UI.push_z(text_pos.y);
 		defer UI.pop_z();
 
-		text_rect := Rect{text_pos, text_pos}->grow(0.15, 1.5, 0.15, 1.5);
+		text_rect := Rect{text_pos, text_pos}.grow(0.15, 1.5, 0.15, 1.5);
 
 		ts := UI.default_text_settings();
 		ts.size = 0.30;
@@ -1078,37 +1078,37 @@ rr_get_stun_remaining :: proc(p: Player) -> float {
 	now := get_time();
 	best := 0.0;
 
-	ws := p.entity->get_component(Werewolf_Infection_Stun);
+	ws := p.entity.get_component(Werewolf_Infection_Stun);
 	if ws != null && ws.active {
 		r := ws.end_time - now;
 		if r > best { best = r; }
 	}
 
-	hm := p.entity->get_component(Hitman_Mine_Stun);
+	hm := p.entity.get_component(Hitman_Mine_Stun);
 	if hm != null && hm.active {
 		r := hm.stun_end_time - now;
 		if r > best { best = r; }
 	}
 
-	pe := p.entity->get_component(Pranked_Effect);
+	pe := p.entity.get_component(Pranked_Effect);
 	if pe != null && pe.phase == 1 {
 		r := pe.stun_end_time - now;
 		if r > best { best = r; }
 	}
 
-	sa := p.entity->get_component(Stunned_By_Autograph_Effect);
+	sa := p.entity.get_component(Stunned_By_Autograph_Effect);
 	if sa != null && sa.active {
 		r := sa.stun_end_time - now;
 		if r > best { best = r; }
 	}
 
-	gr := p.entity->get_component(GGG_Trap_Root_Effect);
+	gr := p.entity.get_component(GGG_Trap_Root_Effect);
 	if gr != null && gr.active {
 		r := gr.root_end_time - now;
 		if r > best { best = r; }
 	}
 
-	ms := p.entity->get_component(Mimicer_Stun);
+	ms := p.entity.get_component(Mimicer_Stun);
 	if ms != null && ms.active {
 		r := ms.end_time - now;
 		if r > best { best = r; }
@@ -1131,7 +1131,7 @@ rr_draw_stun_timers :: proc() {
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
 
-	foreach p: component_iterator(Player) {
+	for p: component_iterator(Player) {
 		if p == null continue;
 		if !#alive(p.entity) continue;
 		if p.player_state != Player_State.ALIVE continue;
@@ -1154,7 +1154,7 @@ rr_draw_stun_timers :: proc() {
 		label_pos := pos + v2.{0.0, 1.8};
 
 		// Background pill.
-		bg_rect := Rect{label_pos, label_pos}->grow(0.18, 0.45, 0.18, 0.45);
+		bg_rect := Rect{label_pos, label_pos}.grow(0.18, 0.45, 0.18, 0.45);
 		UI.quad(bg_rect, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.55});
 
 		// Color: lerp from white to red as time decreases (treat 5s as "full").
@@ -1170,7 +1170,7 @@ rr_draw_stun_timers :: proc() {
 		ts.outline_thickness = 0.05;
 		ts.outline_color = v4.{0.0, 0.0, 0.0, 1.0};
 
-		text_rect := Rect{label_pos, label_pos}->grow(0.16, 0.43, 0.16, 0.43);
+		text_rect := Rect{label_pos, label_pos}.grow(0.16, 0.43, 0.16, 0.43);
 		UI.text(text_rect, ts, format_string("%s", .{secs_i}));
 	}
 }
@@ -1198,7 +1198,7 @@ draw_player_role_hud :: proc(player: Player) {
 	// Role icon is now drawn inside the task list header (rr_draw_task_list_header).
 
 	// Hitman contract HUD.
-	if player.player_role == Player_Role.HITMAN && player->is_local_or_server() {
+	if player.player_role == Player_Role.HITMAN && player.is_local_or_server() {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
@@ -1219,7 +1219,7 @@ draw_player_role_hud :: proc(player: Player) {
 		header_rect := rr_draw_task_list_header(safe, false, player);
 
 		if player.task_list_open {
-		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+		list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 
 		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
@@ -1227,7 +1227,7 @@ draw_player_role_hud :: proc(player: Player) {
 
 		rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
 
-		hm := player.entity->get_component(Hitman_Module);
+		hm := player.entity.get_component(Hitman_Module);
 		hm_kills : int = 0;
 		hm_contract_target_id : u64 = 0;
 		if hm != null {
@@ -1239,7 +1239,7 @@ draw_player_role_hud :: proc(player: Player) {
 		if hm_contract_target_id != 0 {
 			t := get_player_by_entity_id(hm_contract_target_id);
 			if t != null && t.player_state == Player_State.ALIVE {
-				target_name = t->get_username();
+				target_name = t.get_username();
 			}
 		}
 
@@ -1254,68 +1254,68 @@ draw_player_role_hud :: proc(player: Player) {
 		base_ts.autofit_min_size = 14;
 		base_ts.autofit_max_size = 24;
 
-		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+		list_content := list_rect.inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			entry_content->cut_left(24.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			entry_content.cut_left(24.0);
 			row_ts := base_ts;
 			row_ts.color = v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Target: %", .{target_name}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Target: %", .{target_name}));
 		}
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			entry_content->cut_left(24.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			entry_content.cut_left(24.0);
 			row_ts := base_ts;
 			row_ts.color = v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{hm_kills}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{hm_kills}));
 		}
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			checkbox_slot := entry_content->cut_left(24.0);
-			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content.cut_left(24.0);
+			checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 			mine_unlocked := hm_kills >= HITMAN_MINE_UNLOCK_KILLS;
 			if mine_unlocked {
-				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
-				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 			}
 			row_ts := base_ts;
 			row_ts.color = mine_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Mine: %/%", .{min(hm_kills, HITMAN_MINE_UNLOCK_KILLS), HITMAN_MINE_UNLOCK_KILLS}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Mine: %/%", .{min(hm_kills, HITMAN_MINE_UNLOCK_KILLS), HITMAN_MINE_UNLOCK_KILLS}));
 		}
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			checkbox_slot := entry_content->cut_left(24.0);
-			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content.cut_left(24.0);
+			checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 			sniper_unlocked := hm_kills >= HITMAN_SNIPER_UNLOCK_KILLS;
 			if sniper_unlocked {
-				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
-				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 			}
 			row_ts := base_ts;
 			row_ts.color = sniper_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Sniper: %/%", .{min(hm_kills, HITMAN_SNIPER_UNLOCK_KILLS), HITMAN_SNIPER_UNLOCK_KILLS}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Sniper: %/%", .{min(hm_kills, HITMAN_SNIPER_UNLOCK_KILLS), HITMAN_SNIPER_UNLOCK_KILLS}));
 		}
 		} // end task_list_open
 	}
 
 	// Coroner vial count: right side around mid-screen (local-only).
-	if player.player_role == Player_Role.CORONER && player->is_local() {
+	if player.player_role == Player_Role.CORONER && player.is_local() {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
 		vial := get_asset(Texture_Asset, "sprites/icons/coroner/dna_vial.png");
-		anchor := screen->right_center_rect()->offset(-70.0, 0.0);
-		icon_rect := anchor->grow(60.0); // big icon
-		UI.quad(icon_rect->fit_aspect(vial->get_aspect()), vial, v4.{1, 1, 1, 1});
+		anchor := screen.right_center_rect().offset(-70.0, 0.0);
+		icon_rect := anchor.grow(60.0); // big icon
+		UI.quad(icon_rect.fit_aspect(vial.get_aspect()), vial, v4.{1, 1, 1, 1});
 
 		// Count overlaid on the vial
 		count_ts := UI.default_text_settings();
@@ -1326,14 +1326,14 @@ draw_player_role_hud :: proc(player: Player) {
 		count_ts.do_outline = true;
 		count_ts.outline_thickness = 3;
 		count_ts.outline_color = v4.{0, 0, 0, 1};
-		cm := player.entity->get_component(Coroner_Module);
+		cm := player.entity.get_component(Coroner_Module);
 		vial_count := 0;
 		if cm != null { vial_count = cm.dna_vials.count; }
 		UI.text(icon_rect, count_ts, format_string("%", .{vial_count}));
 	}
 
 	// Pirate unlock progress.
-	if player.player_role == Player_Role.PIRATE && player->is_local_or_server() {
+	if player.player_role == Player_Role.PIRATE && player.is_local_or_server() {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
@@ -1355,7 +1355,7 @@ draw_player_role_hud :: proc(player: Player) {
 		header_rect := rr_draw_task_list_header(safe, false, player);
 
 		if player.task_list_open {
-		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+		list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 
 		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
@@ -1374,62 +1374,62 @@ draw_player_role_hud :: proc(player: Player) {
 		base_ts.autofit_min_size = 14;
 		base_ts.autofit_max_size = 24;
 
-		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
-		pm := player.entity->get_component(Pirate_Module);
+		list_content := list_rect.inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+		pm := player.entity.get_component(Pirate_Module);
 		pirate_treasure := pm != null ? pm.treasure : 0;
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			entry_content->cut_left(24.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			entry_content.cut_left(24.0);
 			row_ts := base_ts;
 			row_ts.color = v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Treasure: %", .{pirate_treasure}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Treasure: %", .{pirate_treasure}));
 		}
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			checkbox_slot := entry_content->cut_left(24.0);
-			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content.cut_left(24.0);
+			checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 			shoot_unlocked := pirate_treasure >= PIRATE_SHOOT_UNLOCK_TREASURE_COST;
 			if shoot_unlocked {
-				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
-				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 			}
 			row_ts := base_ts;
 			row_ts.color = shoot_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
 			if shoot_unlocked {
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Unlock Shoot: UNLOCKED");
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Unlock Shoot: UNLOCKED");
 			} else {
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Shoot: %/%", .{min(pirate_treasure, PIRATE_SHOOT_UNLOCK_TREASURE_COST), PIRATE_SHOOT_UNLOCK_TREASURE_COST}));
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Unlock Shoot: %/%", .{min(pirate_treasure, PIRATE_SHOOT_UNLOCK_TREASURE_COST), PIRATE_SHOOT_UNLOCK_TREASURE_COST}));
 			}
 		}
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			checkbox_slot := entry_content->cut_left(24.0);
-			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content.cut_left(24.0);
+			checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 			powder_keg_unlocked := pirate_treasure >= PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST;
 			if powder_keg_unlocked {
-				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
-				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 			}
 			row_ts := base_ts;
 			row_ts.color = powder_keg_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
 			if powder_keg_unlocked {
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Unlock Powder Keg: UNLOCKED");
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Unlock Powder Keg: UNLOCKED");
 			} else {
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Powder Keg: %/%", .{min(pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST), PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Unlock Powder Keg: %/%", .{min(pirate_treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST), PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
 			}
 		}
 		} // end task_list_open
 	}
 
 	// Werewolf ability unlock progress: left side.
-	if player.player_role == Player_Role.WEREWOLF && player->is_local_or_server() {
+	if player.player_role == Player_Role.WEREWOLF && player.is_local_or_server() {
 		UI.push_layer(1600);
 		defer UI.pop_layer();
 
@@ -1450,7 +1450,7 @@ draw_player_role_hud :: proc(player: Player) {
 		header_rect := rr_draw_task_list_header(safe, false, player);
 
 		if player.task_list_open {
-		list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+		list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 
 		list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 		checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
@@ -1469,8 +1469,8 @@ draw_player_role_hud :: proc(player: Player) {
 		base_ts.autofit_min_size = 14;
 		base_ts.autofit_max_size = 24;
 
-		list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
-		wm := player.entity->get_component(Werewolf_Module);
+		list_content := list_rect.inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+		wm := player.entity.get_component(Werewolf_Module);
 		wm_kills := 0;
 		wm_is_wolf := false;
 		wm_transform_ends := 0.0;
@@ -1480,61 +1480,61 @@ draw_player_role_hud :: proc(player: Player) {
 			wm_transform_ends = wm.transform_ends_at;
 		}
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			entry_content->cut_left(24.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			entry_content.cut_left(24.0);
 			row_ts := base_ts;
 			if wm_is_wolf {
 				remaining := wm_transform_ends - get_time();
 				if remaining < 0.0 { remaining = 0.0; }
 				remaining_s := (remaining + 0.999).(int);
 				row_ts.color = v4.{1.0, 0.25, 0.25, 1.0};
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("WOLF: %s", .{remaining_s}));
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("WOLF: %s", .{remaining_s}));
 			} else {
 				row_ts.color = v4.{0.9, 0.9, 0.9, 1.0};
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Schleem");
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Schleem");
 			}
 		}
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			entry_content->cut_left(24.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			entry_content.cut_left(24.0);
 			row_ts := base_ts;
 			row_ts.color = v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{wm_kills}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Kills: %", .{wm_kills}));
 		}
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			checkbox_slot := entry_content->cut_left(24.0);
-			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content.cut_left(24.0);
+			checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 			infect_unlocked := wm_kills >= WEREWOLF_INFECT_UNLOCK_KILLS;
 			if infect_unlocked {
-				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
-				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 			}
 			row_ts := base_ts;
 			row_ts.color = infect_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Infect: %/%", .{min(wm_kills, WEREWOLF_INFECT_UNLOCK_KILLS), WEREWOLF_INFECT_UNLOCK_KILLS}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Infect: %/%", .{min(wm_kills, WEREWOLF_INFECT_UNLOCK_KILLS), WEREWOLF_INFECT_UNLOCK_KILLS}));
 		}
 		{
-			entry_rect := list_content->cut_top(ROW_H);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			checkbox_slot := entry_content->cut_left(24.0);
-			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content.cut_left(24.0);
+			checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 			claw_unlocked := wm_kills >= WEREWOLF_CLAW_UNLOCK_KILLS;
 			if claw_unlocked {
-				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
-				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 			}
 			row_ts := base_ts;
 			row_ts.color = claw_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Claw: %/%", .{min(wm_kills, WEREWOLF_CLAW_UNLOCK_KILLS), WEREWOLF_CLAW_UNLOCK_KILLS}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Claw: %/%", .{min(wm_kills, WEREWOLF_CLAW_UNLOCK_KILLS), WEREWOLF_CLAW_UNLOCK_KILLS}));
 		}
 		} // end task_list_open
 	}
@@ -1549,7 +1549,7 @@ draw_player_role_hud :: proc(player: Player) {
 draw_ggg_role_hud :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.GOO_GOO_GAGA return;
-	if !player->is_local_or_server() return;
+	if !player.is_local_or_server() return;
 
 	UI.push_layer(1600);
 	defer UI.pop_layer();
@@ -1570,7 +1570,7 @@ draw_ggg_role_hud :: proc(player: Player) {
 	header_rect := rr_draw_task_list_header(safe, false, player);
 
 	if player.task_list_open {
-	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+	list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 
 	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
@@ -1589,91 +1589,91 @@ draw_ggg_role_hud :: proc(player: Player) {
 	base_ts.autofit_min_size = 14;
 	base_ts.autofit_max_size = 24;
 
-	list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
-	gm := player.entity->get_component(GGG_Module);
+	list_content := list_rect.inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+	gm := player.entity.get_component(GGG_Module);
 	ggg_pts := 0;
 	if gm != null {
 		ggg_pts = gm.nest_points;
 	}
 	// Row 1: Nest Points (NP)
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
 		row_ts := base_ts;
 		row_ts.color = v4.{1.0, 0.85, 0.0, 1.0};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Nest Points (NP): %", .{ggg_pts}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Nest Points (NP): %", .{ggg_pts}));
 	}
 	// Row: Nest burned lockout timer
 	if gm != null && rr_ggg_is_nest_burn_locked(gm) {
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
 		row_ts := base_ts;
 		row_ts.color = v4.{1.0, 0.3, 0.3, 1.0};
 		remaining := (gm.nest_burned_at + GGG_NEST_REBUILD_DELAY) - get_time();
 		if remaining < 0.0 { remaining = 0.0; }
 		remaining_s := (remaining + 0.999).(int);
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("NEST BURNED — rebuild in %s", .{remaining_s}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("NEST BURNED — rebuild in %s", .{remaining_s}));
 	}
 	// Row 2: Unlock Crawl (1 NP)
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		crawl_unlocked := ggg_pts >= GGG_CRAWL_UNLOCK_NEST_POINTS;
 		if crawl_unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = crawl_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Crawl: %/% NP", .{min(ggg_pts, GGG_CRAWL_UNLOCK_NEST_POINTS), GGG_CRAWL_UNLOCK_NEST_POINTS}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Unlock Crawl: %/% NP", .{min(ggg_pts, GGG_CRAWL_UNLOCK_NEST_POINTS), GGG_CRAWL_UNLOCK_NEST_POINTS}));
 	}
 	// Row 3: Unlock Whip (3 NP)
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		whip_unlocked := ggg_pts >= GGG_FOIL_WHIP_UNLOCK_NEST_POINTS;
 		if whip_unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = whip_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Whip: %/% NP", .{min(ggg_pts, GGG_FOIL_WHIP_UNLOCK_NEST_POINTS), GGG_FOIL_WHIP_UNLOCK_NEST_POINTS}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Unlock Whip: %/% NP", .{min(ggg_pts, GGG_FOIL_WHIP_UNLOCK_NEST_POINTS), GGG_FOIL_WHIP_UNLOCK_NEST_POINTS}));
 	}
 	// Row 4: Unlock Swarm (5 NP)
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		swarm_unlocked := ggg_pts >= GGG_SWARM_UNLOCK_NEST_POINTS;
 		if swarm_unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = swarm_unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Swarm: %/% NP", .{min(ggg_pts, GGG_SWARM_UNLOCK_NEST_POINTS), GGG_SWARM_UNLOCK_NEST_POINTS}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Unlock Swarm: %/% NP", .{min(ggg_pts, GGG_SWARM_UNLOCK_NEST_POINTS), GGG_SWARM_UNLOCK_NEST_POINTS}));
 	}
 	// Row 5: Consume bonuses
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
 		row_ts := base_ts;
 		row_ts.size = 18;
 		bonuses := "";
@@ -1689,7 +1689,7 @@ draw_ggg_role_hud :: proc(player: Player) {
 		}
 		if bonuses.count > 0 {
 			row_ts.color = v4.{0.5, 0.9, 1.0, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, bonuses);
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, bonuses);
 		}
 	}
 	} // end task_list_open
@@ -1701,23 +1701,23 @@ rr_draw_mim_jumpscare :: proc(player: Player, dt: float) {
 
 	if player.mim_jumpscare_spine == null {
 		player.mim_jumpscare_spine = Spine_Instance.create();
-		player.mim_jumpscare_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Mimicer/vfx/012MIM_mimicerjumpscare.spine"));
-		player.mim_jumpscare_spine->set_animation("mimicer_jumpscare2", false, 0, 0.75);
+		player.mim_jumpscare_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Mimicer/vfx/012MIM_mimicerjumpscare.spine"));
+		player.mim_jumpscare_spine.set_animation("mimicer_jumpscare2", false, 0, 0.75);
 	}
 
-	player.mim_jumpscare_spine->update(dt);
+	player.mim_jumpscare_spine.update(dt);
 
 	UI.push_layer(POPUP_UI_LAYER + 100);
 	defer UI.pop_layer();
 	screen := UI.get_screen_rect();
-	UI.spine(screen->center(), player.mim_jumpscare_spine, .{150, 150}, 0.0);
+	UI.spine(screen.center(), player.mim_jumpscare_spine, .{150, 150}, 0.0);
 }
 
 // --- Mimicer Stolen Faces progress: left side ---
 draw_mimicer_role_hud :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.MIMICER return;
-	if !player->is_local_or_server() return;
+	if !player.is_local_or_server() return;
 	if player.player_type != Player_Type.TRAITOR return;
 
 	UI.push_layer(1600);
@@ -1726,7 +1726,7 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	_pushed_scale := rr_push_mobile_ui_scale(player);
 	defer rr_pop_mobile_ui_scale(_pushed_scale);
 
-	mm := player.entity->get_component(Mimicer_Module);
+	mm := player.entity.get_component(Mimicer_Module);
 	if mm == null return;
 
 	safe := UI.get_safe_screen_rect();
@@ -1747,7 +1747,7 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	header_rect := rr_draw_task_list_header(safe, false, player);
 
 	if player.task_list_open {
-	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+	list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 
 	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
@@ -1763,68 +1763,68 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	base_ts.outline_thickness = 3;
 	base_ts.outline_color = v4.{0.15, 0.15, 0.215, 1};
 
-	list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+	list_content := list_rect.inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 	faces := mm.stolen_faces;
 
 	// Row 1: Stolen Faces (SF)
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
 		row_ts := base_ts;
 		row_ts.color = v4.{1.0, 0.85, 0.0, 1.0};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Stolen Faces (SF): %", .{faces}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Stolen Faces (SF): %", .{faces}));
 	}
 	// Row 2: Unlock Void Lunge
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		unlocked := faces >= MIMICER_VOID_LUNGE_UNLOCK_FACES;
 		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Void Lunge: %/% SF", .{min(faces, MIMICER_VOID_LUNGE_UNLOCK_FACES), MIMICER_VOID_LUNGE_UNLOCK_FACES}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Unlock Void Lunge: %/% SF", .{min(faces, MIMICER_VOID_LUNGE_UNLOCK_FACES), MIMICER_VOID_LUNGE_UNLOCK_FACES}));
 	}
 	// Row 3: Unlock Spew Corruption
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		unlocked := faces >= MIMICER_SPEW_UNLOCK_FACES;
 		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Unlock Spew: %/% SF", .{min(faces, MIMICER_SPEW_UNLOCK_FACES), MIMICER_SPEW_UNLOCK_FACES}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Unlock Spew: %/% SF", .{min(faces, MIMICER_SPEW_UNLOCK_FACES), MIMICER_SPEW_UNLOCK_FACES}));
 	}
 	// Row 4: Unlock Unleash
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		used := mm.unleash_used;
 		unlocked := faces >= MIMICER_UNLEASH_UNLOCK_FACES;
 		if used {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{0.5, 0.5, 0.5, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{0.5, 0.5, 0.5, 1});
 		} else if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		if used {
@@ -1833,36 +1833,36 @@ draw_mimicer_role_hud :: proc(player: Player) {
 			row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
 		}
 		label := used ? "Unleash: USED" : format_string("Unlock Unleash: %/% SF", .{min(faces, MIMICER_UNLEASH_UNLOCK_FACES), MIMICER_UNLEASH_UNLOCK_FACES});
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, label);
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, label);
 	}
 	// Passive rows — only shown when active, otherwise single "No passives" row
 	if passive_rows == 0 {
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
 		row_ts := base_ts;
 		row_ts.size = 18;
 		row_ts.color = v4.{0.4, 0.4, 0.4, 1.0};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "No passives active");
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "No passives active");
 	} else {
 		if tether_on {
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			entry_content->cut_left(24.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			entry_content.cut_left(24.0);
 			row_ts := base_ts;
 			row_ts.size = 18;
 			row_ts.color = v4.{0.5, 1.0, 0.8, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Void Tether: +20%% speed");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Void Tether: +20%% speed");
 		}
 		if hunger_val > 0.0 {
-			entry_rect := list_content->cut_top(ROW_H);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			entry_content->cut_left(24.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			entry_content.cut_left(24.0);
 			row_ts := base_ts;
 			row_ts.size = 18;
 			row_ts.color = v4.{0.5, 0.9, 1.0, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Void Hunger: -%s Kill CD", .{format_float(hunger_val, decimals=0)}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Void Hunger: -%s Kill CD", .{format_float(hunger_val, decimals=0)}));
 		}
 	}
 	} // end task_list_open
@@ -1872,10 +1872,10 @@ draw_mimicer_role_hud :: proc(player: Player) {
 draw_bc_role_hud :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.BIG_CHARLIE return;
-	if !player->is_local_or_server() return;
+	if !player.is_local_or_server() return;
 	if player.player_type != Player_Type.TRAITOR return;
 
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 
 	safe := UI.get_safe_screen_rect();
@@ -1890,7 +1890,7 @@ draw_bc_role_hud :: proc(player: Player) {
 	header_rect := rr_draw_task_list_header(safe, false, player);
 
 	if player.task_list_open {
-	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+	list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 
 	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
@@ -1906,109 +1906,109 @@ draw_bc_role_hud :: proc(player: Player) {
 	base_ts.outline_thickness = 3;
 	base_ts.outline_color = v4.{0, 0, 0, 1};
 
-	list_content := list_rect->inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
+	list_content := list_rect.inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
 	mass := bc.flesh_mass;
 
 	// Row 1: Form status
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
 		row_ts := base_ts;
 		if bc.rampage_active {
 			row_ts.color = v4.{1.0, 0.1, 0.1, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "RAMPAGE");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "RAMPAGE");
 		} else if bc.is_monster_form {
 			row_ts.color = v4.{1.0, 0.4, 0.3, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "BIG CHARLIE");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "BIG CHARLIE");
 		} else {
 			row_ts.color = v4.{0.9, 0.9, 0.9, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Schleem");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Schleem");
 		}
 	}
 	// Row 2: Flesh Mass + Nuggets
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
 		row_ts := base_ts;
 		row_ts.color = v4.{1.0, 0.6, 0.7, 1.0};
 		rr_bc_cleanup_dead_nuggets(bc);
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Flesh Mass: % | Nuggets: %/%", .{mass, bc.nugget_entities.count, BC_MAX_NUGGETS}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Flesh Mass: % | Nuggets: %/%", .{mass, bc.nugget_entities.count, BC_MAX_NUGGETS}));
 	}
 	// Row 3: Unlock Slough (1 Flesh Mass)
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		unlocked := mass >= 1;
 		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Slough: %/1", .{min(mass, 1)}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Slough: %/1", .{min(mass, 1)}));
 	}
 	// Row 4: Unlock Marrow (2 Flesh Mass)
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		unlocked := mass >= 2;
 		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Marrow: %/2", .{min(mass, 2)}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Marrow: %/2", .{min(mass, 2)}));
 	}
 	// Row 5: Unlock Stampede (3 Flesh Mass)
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		unlocked := mass >= 3;
 		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Stampede: %/3", .{min(mass, 3)}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Stampede: %/3", .{min(mass, 3)}));
 	}
 	// Row 6: Live status callout
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
 		row_ts := base_ts;
 		row_ts.size = 18;
 		rr_bc_cleanup_dead_nests(bc);
 		nest_count := bc.nest_entities.count;
 		if bc.camera_active {
 			row_ts.color = v4.{1.0, 0.85, 0.45, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Scouting: ACTIVE - You are vulnerable");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Scouting: ACTIVE - You are vulnerable");
 		} else if bc.rampage_active {
 			row_ts.color = v4.{1.0, 0.25, 0.25, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Rampage: ACTIVE");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Rampage: ACTIVE");
 		} else if nest_count > 0 {
 			row_ts.color = v4.{0.5, 0.9, 1.0, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Active Nests: %", .{nest_count}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Active Nests: %", .{nest_count}));
 		} else if mass < 3 {
 			next_goal := mass + 1;
 			row_ts.color = v4.{0.9, 0.9, 0.9, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Next unlock at Flesh Mass %", .{next_goal}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Next unlock at Flesh Mass %", .{next_goal}));
 		} else {
 			row_ts.color = v4.{0.6, 1.0, 0.4, 1.0};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "All ability unlocks online");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "All ability unlocks online");
 		}
 	}
 	} // end task_list_open
@@ -2018,10 +2018,10 @@ draw_bc_role_hud :: proc(player: Player) {
 draw_lily_role_hud :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.LILY_LOVEBRAIDS return;
-	if !player->is_local_or_server() return;
+	if !player.is_local_or_server() return;
 	if player.player_type != Player_Type.TRAITOR return;
 
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	UI.push_layer(1600);
@@ -2042,7 +2042,7 @@ draw_lily_role_hud :: proc(player: Player) {
 	header_rect := rr_draw_task_list_header(safe, false, player);
 
 	if player.task_list_open {
-	list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+	list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 
 	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
 	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
@@ -2061,7 +2061,7 @@ draw_lily_role_hud :: proc(player: Player) {
 	base_ts.autofit_min_size = 14;
 	base_ts.autofit_max_size = 24;
 
-	list_content := list_rect->inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
+	list_content := list_rect.inset(LIST_PAD, 10.0, LIST_PAD, 10.0);
 
 	// Get tree state
 	fulfilled := 0;
@@ -2069,7 +2069,7 @@ draw_lily_role_hud :: proc(player: Player) {
 	tree_comp: Lily_Hair_Tree = null;
 	if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
 		has_tree = true;
-		tree_comp = lm.hair_tree_entity->get_component(Lily_Hair_Tree);
+		tree_comp = lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 		if tree_comp != null {
 			fulfilled = tree_comp.fulfilled_count;
 		}
@@ -2077,43 +2077,43 @@ draw_lily_role_hud :: proc(player: Player) {
 
 	// Row 1: Plant Tree status
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		if lm.hair_tree_planted {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = lm.hair_tree_planted ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1.0, 0.85, 0.6, 1.0};
 		if lm.hair_tree_planted {
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Braid Tree Planted");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Braid Tree Planted");
 		} else {
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Plant your Braid Tree!");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Plant your Braid Tree!");
 		}
 	}
 	// Row 2: Current tree request
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		list_content->cut_top(2.0);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		entry_content->cut_left(24.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		list_content.cut_top(2.0);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
 		row_ts := base_ts;
 		if has_tree && tree_comp != null {
 			if fulfilled >= LILY_TREE_TOTAL_REQUESTS {
 				row_ts.color = v4.{1.0, 0.3, 0.3, 1.0};
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "All requests fulfilled!");
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "All requests fulfilled!");
 			} else {
 				request_name := rr_lily_get_request_name(tree_comp);
 				row_ts.color = v4.{1.0, 0.85, 0.95, 1.0};
-				UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Tree wants: %", .{request_name}));
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Tree wants: %", .{request_name}));
 			}
 		} else {
 			row_ts.color = v4.{0.6, 0.6, 0.6, 0.8};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, "Plant tree to see requests");
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Plant tree to see requests");
 		}
 	}
 	// Rows 3-6: Individual request checklist
@@ -2121,17 +2121,17 @@ draw_lily_role_hud :: proc(player: Player) {
 		for i: 0..LILY_TREE_TOTAL_REQUESTS-1 {
 			UI.push_id("req_%", {i});
 			defer UI.pop_id();
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			checkbox_slot := entry_content->cut_left(24.0);
-			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content.cut_left(24.0);
+			checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 			is_done := i < fulfilled;
 			is_current := i == fulfilled;
 			if is_done {
-				UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 			} else {
-				UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 			}
 			// Get request name for this slot
 			req := tree_comp.request_order[i].(Tree_Request);
@@ -2150,39 +2150,39 @@ draw_lily_role_hud :: proc(player: Player) {
 			} else {
 				row_ts.color = v4.{0.6, 0.6, 0.6, 0.6};
 			}
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("%: %", .{i + 1, req_name}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("%: %", .{i + 1, req_name}));
 		}
 	} else {
 		// Placeholder rows when no tree
 		for i: 0..LILY_TREE_TOTAL_REQUESTS-1 {
 			UI.push_id("req_%", {i});
 			defer UI.pop_id();
-			entry_rect := list_content->cut_top(ROW_H);
-			list_content->cut_top(2.0);
-			entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-			checkbox_slot := entry_content->cut_left(24.0);
-			checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{0.5, 0.5, 0.5, 0.4});
+			entry_rect := list_content.cut_top(ROW_H);
+			list_content.cut_top(2.0);
+			entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+			checkbox_slot := entry_content.cut_left(24.0);
+			checkbox_rect := checkbox_slot.center_rect().grow(9.0);
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{0.5, 0.5, 0.5, 0.4});
 			row_ts := base_ts;
 			row_ts.color = v4.{0.5, 0.5, 0.5, 0.4};
-			UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("%: ???", .{i + 1}));
+			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("%: ???", .{i + 1}));
 		}
 	}
 	// Row 7: Deathbraid unlock
 	{
-		entry_rect := list_content->cut_top(ROW_H);
-		entry_content := entry_rect->inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content->cut_left(24.0);
-		checkbox_rect := checkbox_slot->center_rect()->grow(9.0);
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
 		unlocked := fulfilled >= LILY_DEATHBRAID_THRESHOLD;
 		if unlocked {
-			UI.quad(checkbox_rect->fit_aspect(checkbox_filled->get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
 		} else {
-			UI.quad(checkbox_rect->fit_aspect(checkbox->get_aspect()), checkbox, v4.{1, 1, 1, 1});
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
 		}
 		row_ts := base_ts;
 		row_ts.color = unlocked ? v4.{1.0, 0.3, 0.3, 1.0} : v4.{0.9, 0.5, 0.5, 1.0};
-		UI.text(entry_content->inset(0, 4, 0, 4), row_ts, format_string("Deathbraid: %/%", .{min(fulfilled, LILY_DEATHBRAID_THRESHOLD), LILY_DEATHBRAID_THRESHOLD}));
+		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Deathbraid: %/%", .{min(fulfilled, LILY_DEATHBRAID_THRESHOLD), LILY_DEATHBRAID_THRESHOLD}));
 	}
 	} // end task_list_open
 }
@@ -2206,8 +2206,8 @@ rr_player_set_skin_enabled :: proc(player: Player, skin: string, enabled: bool) 
 	if skin.count <= 0 return;
 
 	// Rebuild skin list without clobbering the rest of the cosmetics.
-	skins := player.animator.instance->get_skins();
-	player.animator.instance->disable_all_skins();
+	skins := player.animator.instance.get_skins();
+	player.animator.instance.disable_all_skins();
 
 	found := false;
 	for i: 0..skins.count-1 {
@@ -2217,13 +2217,13 @@ rr_player_set_skin_enabled :: proc(player: Player, skin: string, enabled: bool) 
 			// Skip here; we'll add it back once if enabled.
 			continue;
 		}
-		player.animator.instance->enable_skin(s);
+		player.animator.instance.enable_skin(s);
 	}
 	if enabled {
-		player.animator.instance->enable_skin(skin);
+		player.animator.instance.enable_skin(skin);
 	}
 	// If skin wasn't previously present and enabled=false, nothing to do beyond rebuild.
-	player.animator.instance->refresh_skins();
+	player.animator.instance.refresh_skins();
 }
 
 rr_player_has_skin :: proc(player: Player, skin: string) -> bool {
@@ -2231,7 +2231,7 @@ rr_player_has_skin :: proc(player: Player, skin: string) -> bool {
 	if player.animator == null return false;
 	if player.animator.instance == null return false;
 	if skin.count <= 0 return false;
-	skins := player.animator.instance->get_skins();
+	skins := player.animator.instance.get_skins();
 	for i: 0..skins.count-1 {
 		if skins[i] == skin return true;
 	}
@@ -2243,11 +2243,11 @@ rr_werewolf_capture_round_start_look :: proc(player: Player) {
 	if player.animator == null return;
 	if player.animator.instance == null return;
 
-	player.werewolf_round_start_cosmetic_skins->clear();
-	skins := player.animator.instance->get_skins();
+	player.werewolf_round_start_cosmetic_skins.clear();
+	skins := player.animator.instance.get_skins();
 	for i: 0..skins.count-1 {
 		if skins[i] != WEREWOLF_SKIN_NAME {
-			player.werewolf_round_start_cosmetic_skins->append(skins[i]);
+			player.werewolf_round_start_cosmetic_skins.append(skins[i]);
 		}
 	}
 	player.werewolf_round_start_avatar_color = player.avatar_color;
@@ -2263,7 +2263,7 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 		draw_ability_button(player, Hitman_Neck_Snap_Ability, abilityIndex);
 		abilityIndex += 1;
 	} else if player_role == Player_Role.WEREWOLF {
-		wm := player.entity->get_component(Werewolf_Module);
+		wm := player.entity.get_component(Werewolf_Module);
 		if wm != null && wm.is_wolf_form {
 			draw_ability_button(player, Werewolf_Devour_Ability, abilityIndex);
 			abilityIndex += 1;
@@ -2276,7 +2276,7 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 			abilityIndex += 1;
 		}
 	} else if player_role == Player_Role.GOO_GOO_GAGA {
-		ggm := player.entity->get_component(GGG_Module);
+		ggm := player.entity.get_component(GGG_Module);
 		if ggm != null && !ggm.nest_placed {
 			draw_ability_button(player, GGG_Place_Nest_Ability, abilityIndex);
 			abilityIndex += 1;
@@ -2326,7 +2326,7 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 	if player_role == Player_Role.PIRATE {
 		draw_ability_button(player, Black_Flag_Ability, abilityIndex);
 		abilityIndex += 1;
-		pm := player.entity->get_component(Pirate_Module);
+		pm := player.entity.get_component(Pirate_Module);
 		if pm != null && pm.treasure >= PIRATE_SHOOT_UNLOCK_TREASURE_COST {
 			draw_ability_button(player, Shoot_Ability, abilityIndex);
 			abilityIndex += 1;
@@ -2341,7 +2341,7 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 
 	// Hitman gets Mine + Sniper (only show once unlocked).
 	if player_role == Player_Role.HITMAN {
-		hm := player.entity->get_component(Hitman_Module);
+		hm := player.entity.get_component(Hitman_Module);
 		if hm != null && hm.kills >= HITMAN_MINE_UNLOCK_KILLS {
 			draw_ability_button(player, Hitman_Mine_Ability, abilityIndex);
 			abilityIndex += 1;
@@ -2354,7 +2354,7 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 
 	// Werewolf gets Infect (any form) + Claw (wolf form only), once unlocked.
 	if player_role == Player_Role.WEREWOLF {
-		wm2 := player.entity->get_component(Werewolf_Module);
+		wm2 := player.entity.get_component(Werewolf_Module);
 		if wm2 != null && wm2.kills >= WEREWOLF_INFECT_UNLOCK_KILLS {
 			draw_ability_button(player, Werewolf_Infecting_Bite_Ability, abilityIndex);
 			abilityIndex += 1;
@@ -2373,7 +2373,7 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 // Mimicer ability button layout (extracted from ao_late_update to reduce register pressure).
 rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 	abilityIndex := idx;
-	mim := player.entity->get_component(Mimicer_Module);
+	mim := player.entity.get_component(Mimicer_Module);
 	if mim == null return abilityIndex;
 
 	// During unleash placement: hide all abilities (placement is via screen tap)
@@ -2429,11 +2429,11 @@ rr_werewolf_enable_wolf_look :: proc(player: Player) {
 	if player.werewolf_skin_active return;
 
 	// Save current skins so we can restore later.
-	player.werewolf_saved_cosmetic_skins->clear();
-	skins := player.animator.instance->get_skins();
+	player.werewolf_saved_cosmetic_skins.clear();
+	skins := player.animator.instance.get_skins();
 	for i: 0..skins.count-1 {
 		if skins[i] != WEREWOLF_SKIN_NAME {
-			player.werewolf_saved_cosmetic_skins->append(skins[i]);
+			player.werewolf_saved_cosmetic_skins.append(skins[i]);
 		}
 	}
 	player.werewolf_saved_avatar_color = player.avatar_color;
@@ -2441,25 +2441,25 @@ rr_werewolf_enable_wolf_look :: proc(player: Player) {
 	// Extra safety: refresh our long-lived fallback baseline whenever we enter
 	// werewolf look from a valid non-werewolf snapshot.
 	if player.werewolf_saved_cosmetic_skins.count > 0 {
-		player.werewolf_round_start_cosmetic_skins->clear();
+		player.werewolf_round_start_cosmetic_skins.clear();
 		for i: 0..player.werewolf_saved_cosmetic_skins.count-1 {
-			player.werewolf_round_start_cosmetic_skins->append(player.werewolf_saved_cosmetic_skins[i]);
+			player.werewolf_round_start_cosmetic_skins.append(player.werewolf_saved_cosmetic_skins[i]);
 		}
 		player.werewolf_round_start_avatar_color = player.werewolf_saved_avatar_color;
 	}
 
 	// Strip all skins and enable only the werewolf skin.
-	player.animator.instance->disable_all_skins();
-	player.animator.instance->enable_skin(WEREWOLF_SKIN_NAME);
-	player.animator.instance->refresh_skins();
+	player.animator.instance.disable_all_skins();
+	player.animator.instance.enable_skin(WEREWOLF_SKIN_NAME);
+	player.animator.instance.refresh_skins();
 
 	// Force dark color (server-only so it replicates to all clients).
 	if Game.is_server() {
-		player.animator.instance->set_color_replace_color(Color_Replace_Color.BLACK);
+		player.animator.instance.set_color_replace_color(Color_Replace_Color.BLACK);
 	}
 
 	// Hide the player's name tag while in wolf form.
-	player->add_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
+	player.add_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
 
 	player.werewolf_skin_active = true;
 }
@@ -2477,17 +2477,17 @@ rr_werewolf_disable_wolf_look :: proc(player: Player) {
 	// Safety: if the per-transform snapshot is unexpectedly empty, fall back to the
 	// round-start baseline captured at game start.
 	if player.werewolf_saved_cosmetic_skins.count > 0 {
-		player.animator.instance->disable_all_skins();
+		player.animator.instance.disable_all_skins();
 		for i: 0..player.werewolf_saved_cosmetic_skins.count-1 {
-			player.animator.instance->enable_skin(player.werewolf_saved_cosmetic_skins[i]);
+			player.animator.instance.enable_skin(player.werewolf_saved_cosmetic_skins[i]);
 		}
-		player.animator.instance->refresh_skins();
+		player.animator.instance.refresh_skins();
 	} else if player.werewolf_round_start_cosmetic_skins.count > 0 {
-		player.animator.instance->disable_all_skins();
+		player.animator.instance.disable_all_skins();
 		for i: 0..player.werewolf_round_start_cosmetic_skins.count-1 {
-			player.animator.instance->enable_skin(player.werewolf_round_start_cosmetic_skins[i]);
+			player.animator.instance.enable_skin(player.werewolf_round_start_cosmetic_skins[i]);
 		}
-		player.animator.instance->refresh_skins();
+		player.animator.instance.refresh_skins();
 	} else {
 		log_warning("rr_werewolf_disable_wolf_look: missing both saved and round-start cosmetic snapshots for player %.", {player.entity.id});
 	}
@@ -2498,14 +2498,14 @@ rr_werewolf_disable_wolf_look :: proc(player: Player) {
 		if player.werewolf_saved_cosmetic_skins.count <= 0 {
 			restore_color = player.werewolf_round_start_avatar_color;
 		}
-		player.animator.instance->set_color_replace_color(restore_color);
+		player.animator.instance.set_color_replace_color(restore_color);
 	}
 
 	// Restore name tag visibility.
-	player->remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
+	player.remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
 
 	player.werewolf_skin_active = false;
-	player.werewolf_saved_cosmetic_skins->clear();
+	player.werewolf_saved_cosmetic_skins.clear();
 }
 
 rr_werewolf_should_look_werewolf :: proc(player: Player) -> bool {
@@ -2523,7 +2523,7 @@ rr_werewolf_should_look_werewolf :: proc(player: Player) -> bool {
 	if player.werewolf_infected return true;
 	// Werewolf player looks werewolf only during wolf form.
 	if player.player_role == Player_Role.WEREWOLF && player.player_type == Player_Type.TRAITOR {
-		wm := player.entity->get_component(Werewolf_Module);
+		wm := player.entity.get_component(Werewolf_Module);
 		if wm != null return wm.is_wolf_form;
 	}
 	return false;
@@ -2540,18 +2540,18 @@ rr_werewolf_update_skins :: proc(player: Player) {
 	// This is the moment the infection "reveals" — everything before this is invisible.
 	if player.werewolf_infected_transform_trigger_at > 0.0 && now >= player.werewolf_infected_transform_trigger_at {
 		player.werewolf_infected_transform_trigger_at = 0.0;
-		player->set_trigger("werewolf_infected_transform");
+		player.set_trigger("werewolf_infected_transform");
 
 		// Server-authoritative: apply all the reveal effects now (notification, task swap, stun).
 		if Game.is_server() {
-			player->Notify("You were bitten! Pass it on to return to normal.");
+			player.Notify("You were bitten! Pass it on to return to normal.");
 			rr_werewolf_apply_infected_task_override(player);
 
-			stun := player.entity->get_component(Werewolf_Infection_Stun);
+			stun := player.entity.get_component(Werewolf_Infection_Stun);
 			if stun == null {
-				stun = player.entity->add_component(Werewolf_Infection_Stun);
+				stun = player.entity.add_component(Werewolf_Infection_Stun);
 			}
-			stun->arm(WEREWOLF_INFECTION_STUN_SECONDS);
+			stun.arm(WEREWOLF_INFECTION_STUN_SECONDS);
 		}
 	}
 
@@ -2564,7 +2564,7 @@ rr_werewolf_update_skins :: proc(player: Player) {
 			rr_werewolf_disable_wolf_look(player);
 		}
 		// Always clear name invisibility even if skin wasn't active (safety for lobby/reset).
-		player->remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
+		player.remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
 		return;
 	}
 
@@ -2607,7 +2607,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	wm := player.entity->get_component(Werewolf_Module);
+	wm := player.entity.get_component(Werewolf_Module);
 	if wm == null return;
 
 	prev_is_wolf := wm.is_wolf_form;
@@ -2615,7 +2615,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 	// Dead werewolves revert.
 	if player.player_state != Player_State.ALIVE {
 		if prev_is_wolf {
-			player->set_trigger("RESET");
+			player.set_trigger("RESET");
 		}
 		wm.is_wolf_form = false;
 		wm.transform_ends_at = 0.0;
@@ -2634,7 +2634,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 	if wm.is_wolf_form && wm.transform_ends_at > 0.0 && now >= wm.transform_ends_at {
 		wm.is_wolf_form = false;
 		wm.transform_ends_at = 0.0;
-		player->set_trigger("RESET");
+		player.set_trigger("RESET");
 		player.werewolf_skin_enable_at = 0.0;
 		player.werewolf_skin_disable_at = now;
 	}
@@ -2651,20 +2651,20 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 }
 
     revive :: method() {
-        this->set_trigger("RESET");
+        this.set_trigger("RESET");
     }
 
 	// Immediately restores werewolf visuals + clears all skin/transform state.
 	// Safe to call even if the player is not in wolf form (no-ops if skin not active).
 	reset_werewolf_visuals :: method() {
 		rr_werewolf_disable_wolf_look(this);
-		this->remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
+		this.remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
 		this.werewolf_infected = false;
 		this.werewolf_infected_from_id = 0;
 		this.werewolf_skin_enable_at = 0.0;
 		this.werewolf_skin_disable_at = 0.0;
 		this.werewolf_infected_transform_trigger_at = 0.0;
-		wm := this.entity->get_component(Werewolf_Module);
+		wm := this.entity.get_component(Werewolf_Module);
 		if wm != null {
 			wm.is_wolf_form = false;
 			wm.transform_ends_at = 0.0;
@@ -2681,391 +2681,391 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 
     set_trigger :: method(trigger: string) {
         if this.animator.instance != null {
-            this.animator.instance.state_machine->set_trigger(trigger);
+            this.animator.instance.state_machine.set_trigger(trigger);
         }
     }
 
 	// --- State machine setup helpers (split per role to avoid VM register exhaustion) ---
 	rr_sm_setup_common :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		// prank_slip (trigger var -> one-shot anim state -> back to Idle)
-		prank_slip_var := sm->create_variable("prank_slip", State_Machine_Variable.Kind.TRIGGER);
-		prank_slip_state := layer->create_state("004RAND_trickster/Slip_On_Banana", false, 2.0);
-		layer->create_global_transition(prank_slip_state, false)->create_trigger_condition(prank_slip_var);
-		layer->create_transition(prank_slip_state, idle_state, true);
+		prank_slip_var := sm.create_variable("prank_slip", State_Machine_Variable.Kind.TRIGGER);
+		prank_slip_state := layer.create_state("004RAND_trickster/Slip_On_Banana", false, 2.0);
+		layer.create_global_transition(prank_slip_state, false).create_trigger_condition(prank_slip_var);
+		layer.create_transition(prank_slip_state, idle_state, true);
 
 		// jester_win (trigger var -> end-game anim state -> back to Idle)
-		jester_win_var := sm->create_variable("jester_win", State_Machine_Variable.Kind.TRIGGER);
-		jester_win_state := layer->create_state("004RAND_trickster/Trickster_End_Game", false, 5.0);
-		layer->create_global_transition(jester_win_state, false)->create_trigger_condition(jester_win_var);
-		layer->create_transition(jester_win_state, idle_state, true);
+		jester_win_var := sm.create_variable("jester_win", State_Machine_Variable.Kind.TRIGGER);
+		jester_win_state := layer.create_state("004RAND_trickster/Trickster_End_Game", false, 5.0);
+		layer.create_global_transition(jester_win_state, false).create_trigger_condition(jester_win_var);
+		layer.create_transition(jester_win_state, idle_state, true);
 
 		// vote_eject (trigger var -> one-shot anim state -> back to Idle)
-		vote_eject_var := sm->create_variable("death_vote2", State_Machine_Variable.Kind.TRIGGER);
-		vote_eject_state := layer->create_state("004RAND/death_vote2", false, RR_VOTE_EJECT_ANIM_SECONDS);
-		layer->create_global_transition(vote_eject_state, false)->create_trigger_condition(vote_eject_var);
-		layer->create_transition(vote_eject_state, idle_state, true);
+		vote_eject_var := sm.create_variable("death_vote2", State_Machine_Variable.Kind.TRIGGER);
+		vote_eject_state := layer.create_state("004RAND/death_vote2", false, RR_VOTE_EJECT_ANIM_SECONDS);
+		layer.create_global_transition(vote_eject_state, false).create_trigger_condition(vote_eject_var);
+		layer.create_transition(vote_eject_state, idle_state, true);
 
 		// Base traitor kill (default melee)
-		traitor_kill_var := sm->create_variable("traitor_kill", State_Machine_Variable.Kind.TRIGGER);
-		traitor_kill_state := layer->create_state("Attack_Melee_1", false, 1.0);
-		layer->create_global_transition(traitor_kill_state, false)->create_trigger_condition(traitor_kill_var);
-		layer->create_transition(traitor_kill_state, idle_state, true);
+		traitor_kill_var := sm.create_variable("traitor_kill", State_Machine_Variable.Kind.TRIGGER);
+		traitor_kill_state := layer.create_state("Attack_Melee_1", false, 1.0);
+		layer.create_global_transition(traitor_kill_state, false).create_trigger_condition(traitor_kill_var);
+		layer.create_transition(traitor_kill_state, idle_state, true);
 	}
 
 	rr_sm_setup_movie_star :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		// write_place_autograph (trigger var -> one-shot anim state -> back to Idle)
-		write_autograph_var := sm->create_variable("write_place_autograph", State_Machine_Variable.Kind.TRIGGER);
-		write_autograph_state := layer->create_state("004RAND_movie_star/Write_Place_Autograph", false, 2.1);
-		layer->create_global_transition(write_autograph_state, false)->create_trigger_condition(write_autograph_var);
-		layer->create_transition(write_autograph_state, idle_state, true);
+		write_autograph_var := sm.create_variable("write_place_autograph", State_Machine_Variable.Kind.TRIGGER);
+		write_autograph_state := layer.create_state("004RAND_movie_star/Write_Place_Autograph", false, 2.1);
+		layer.create_global_transition(write_autograph_state, false).create_trigger_condition(write_autograph_var);
+		layer.create_transition(write_autograph_state, idle_state, true);
 
 		// stunned_by_autograph_loop (trigger var -> looping anim state -> back to Idle)
-		stunned_autograph_var := sm->create_variable("stunned_by_autograph_loop", State_Machine_Variable.Kind.TRIGGER);
-		stunned_autograph_state := layer->create_state("004RAND_movie_star/stunned_by_autograph_loop", true, 15.0);
-		layer->create_global_transition(stunned_autograph_state, false)->create_trigger_condition(stunned_autograph_var);
+		stunned_autograph_var := sm.create_variable("stunned_by_autograph_loop", State_Machine_Variable.Kind.TRIGGER);
+		stunned_autograph_state := layer.create_state("004RAND_movie_star/stunned_by_autograph_loop", true, 15.0);
+		layer.create_global_transition(stunned_autograph_state, false).create_trigger_condition(stunned_autograph_var);
 		// This is a loop; exit via RESET (or another explicit transition), not state completion.
 	}
 
 	rr_sm_setup_hitman :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		// Neck snap (killer animation)
-		hitman_kill_snap_neck_var := sm->create_variable("hitman_kill_snap_neck", State_Machine_Variable.Kind.TRIGGER);
-		hitman_kill_snap_neck_state := layer->create_state("004RAND_hitman/Kill_Snap_Neck", false, 1.1);
-		layer->create_global_transition(hitman_kill_snap_neck_state, false)->create_trigger_condition(hitman_kill_snap_neck_var);
-		layer->create_transition(hitman_kill_snap_neck_state, idle_state, true);
+		hitman_kill_snap_neck_var := sm.create_variable("hitman_kill_snap_neck", State_Machine_Variable.Kind.TRIGGER);
+		hitman_kill_snap_neck_state := layer.create_state("004RAND_hitman/Kill_Snap_Neck", false, 1.1);
+		layer.create_global_transition(hitman_kill_snap_neck_state, false).create_trigger_condition(hitman_kill_snap_neck_var);
+		layer.create_transition(hitman_kill_snap_neck_state, idle_state, true);
 
 		// Sniper (killer animation)
-		hitman_shoot_sniper_var := sm->create_variable("hitman_shoot_sniper", State_Machine_Variable.Kind.TRIGGER);
-		hitman_shoot_sniper_state := layer->create_state("004RAND_hitman/Shoot_Sniper", false, 0.9);
-		layer->create_global_transition(hitman_shoot_sniper_state, false)->create_trigger_condition(hitman_shoot_sniper_var);
-		layer->create_transition(hitman_shoot_sniper_state, idle_state, true);
+		hitman_shoot_sniper_var := sm.create_variable("hitman_shoot_sniper", State_Machine_Variable.Kind.TRIGGER);
+		hitman_shoot_sniper_state := layer.create_state("004RAND_hitman/Shoot_Sniper", false, 0.9);
+		layer.create_global_transition(hitman_shoot_sniper_state, false).create_trigger_condition(hitman_shoot_sniper_var);
+		layer.create_transition(hitman_shoot_sniper_state, idle_state, true);
 
 		// Mine victim (fly -> collide -> broken leg idle while stunned)
-		hitman_fly_forward_var := sm->create_variable("hitman_fly_forward", State_Machine_Variable.Kind.TRIGGER);
-		hitman_fly_forward_state := layer->create_state("004RAND_hitman/Fly_Forward_Loop", true, 0.0);
-		layer->create_global_transition(hitman_fly_forward_state, false)->create_trigger_condition(hitman_fly_forward_var);
+		hitman_fly_forward_var := sm.create_variable("hitman_fly_forward", State_Machine_Variable.Kind.TRIGGER);
+		hitman_fly_forward_state := layer.create_state("004RAND_hitman/Fly_Forward_Loop", true, 0.0);
+		layer.create_global_transition(hitman_fly_forward_state, false).create_trigger_condition(hitman_fly_forward_var);
 
-		hitman_collide_midair_land_var := sm->create_variable("hitman_collide_midair_land", State_Machine_Variable.Kind.TRIGGER);
-		hitman_collide_midair_land_state := layer->create_state("004RAND_hitman/Collide_Midair_Land", false, 0.8);
-		layer->create_global_transition(hitman_collide_midair_land_state, false)->create_trigger_condition(hitman_collide_midair_land_var);
-		layer->create_transition(hitman_collide_midair_land_state, idle_state, true);
+		hitman_collide_midair_land_var := sm.create_variable("hitman_collide_midair_land", State_Machine_Variable.Kind.TRIGGER);
+		hitman_collide_midair_land_state := layer.create_state("004RAND_hitman/Collide_Midair_Land", false, 0.8);
+		layer.create_global_transition(hitman_collide_midair_land_state, false).create_trigger_condition(hitman_collide_midair_land_var);
+		layer.create_transition(hitman_collide_midair_land_state, idle_state, true);
 
-		hitman_broken_leg_idle_var := sm->create_variable("hitman_broken_leg_idle", State_Machine_Variable.Kind.TRIGGER);
-		hitman_broken_leg_idle_state := layer->create_state("004RAND_hitman/Broken_Leg_Idle", true, 10.0);
-		layer->create_global_transition(hitman_broken_leg_idle_state, false)->create_trigger_condition(hitman_broken_leg_idle_var);
+		hitman_broken_leg_idle_var := sm.create_variable("hitman_broken_leg_idle", State_Machine_Variable.Kind.TRIGGER);
+		hitman_broken_leg_idle_state := layer.create_state("004RAND_hitman/Broken_Leg_Idle", true, 10.0);
+		layer.create_global_transition(hitman_broken_leg_idle_state, false).create_trigger_condition(hitman_broken_leg_idle_var);
 	}
 
 	rr_sm_setup_werewolf :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
-		werewolf_howl_var := sm->create_variable("werewolf_howl", State_Machine_Variable.Kind.TRIGGER);
-		werewolf_howl_state := layer->create_state("004RAND_werewolf/howl", false, 2.0);
-		layer->create_global_transition(werewolf_howl_state, false)->create_trigger_condition(werewolf_howl_var);
-		layer->create_transition(werewolf_howl_state, idle_state, true);
+		werewolf_howl_var := sm.create_variable("werewolf_howl", State_Machine_Variable.Kind.TRIGGER);
+		werewolf_howl_state := layer.create_state("004RAND_werewolf/howl", false, 2.0);
+		layer.create_global_transition(werewolf_howl_state, false).create_trigger_condition(werewolf_howl_var);
+		layer.create_transition(werewolf_howl_state, idle_state, true);
 
-		werewolf_infection_bite_var := sm->create_variable("werewolf_infection_bite", State_Machine_Variable.Kind.TRIGGER);
-		werewolf_infection_bite_state := layer->create_state("004RAND_werewolf/Infection_Bite", false, 1.2);
-		layer->create_global_transition(werewolf_infection_bite_state, false)->create_trigger_condition(werewolf_infection_bite_var);
-		layer->create_transition(werewolf_infection_bite_state, idle_state, true);
+		werewolf_infection_bite_var := sm.create_variable("werewolf_infection_bite", State_Machine_Variable.Kind.TRIGGER);
+		werewolf_infection_bite_state := layer.create_state("004RAND_werewolf/Infection_Bite", false, 1.2);
+		layer.create_global_transition(werewolf_infection_bite_state, false).create_trigger_condition(werewolf_infection_bite_var);
+		layer.create_transition(werewolf_infection_bite_state, idle_state, true);
 
-		werewolf_infected_transform_var := sm->create_variable("werewolf_infected_transform", State_Machine_Variable.Kind.TRIGGER);
-		werewolf_infected_transform_state := layer->create_state("004RAND_werewolf/Infected_Bitten_Transform", false, 2.0);
-		layer->create_global_transition(werewolf_infected_transform_state, false)->create_trigger_condition(werewolf_infected_transform_var);
-		layer->create_transition(werewolf_infected_transform_state, idle_state, true);
+		werewolf_infected_transform_var := sm.create_variable("werewolf_infected_transform", State_Machine_Variable.Kind.TRIGGER);
+		werewolf_infected_transform_state := layer.create_state("004RAND_werewolf/Infected_Bitten_Transform", false, 2.0);
+		layer.create_global_transition(werewolf_infected_transform_state, false).create_trigger_condition(werewolf_infected_transform_var);
+		layer.create_transition(werewolf_infected_transform_state, idle_state, true);
 	}
 
 	rr_sm_setup_pyromaniac :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
-		pyro_snap_fingers_var := sm->create_variable("pyro_snap_fingers", State_Machine_Variable.Kind.TRIGGER);
-		pyro_snap_fingers_state := layer->create_state("004RAND_pyromaniac/Snap_Fingers", false, 1.0);
-		layer->create_global_transition(pyro_snap_fingers_state, false)->create_trigger_condition(pyro_snap_fingers_var);
-		layer->create_transition(pyro_snap_fingers_state, idle_state, true);
+		pyro_snap_fingers_var := sm.create_variable("pyro_snap_fingers", State_Machine_Variable.Kind.TRIGGER);
+		pyro_snap_fingers_state := layer.create_state("004RAND_pyromaniac/Snap_Fingers", false, 1.0);
+		layer.create_global_transition(pyro_snap_fingers_state, false).create_trigger_condition(pyro_snap_fingers_var);
+		layer.create_transition(pyro_snap_fingers_state, idle_state, true);
 
-		pyro_on_fire_idle_var := sm->create_variable("pyro_on_fire_idle", State_Machine_Variable.Kind.TRIGGER);
-		pyro_on_fire_idle_state := layer->create_state("004RAND_pyromaniac/Idle_On_Fire", true, 0.0);
-		layer->create_global_transition(pyro_on_fire_idle_state, false)->create_trigger_condition(pyro_on_fire_idle_var);
+		pyro_on_fire_idle_var := sm.create_variable("pyro_on_fire_idle", State_Machine_Variable.Kind.TRIGGER);
+		pyro_on_fire_idle_state := layer.create_state("004RAND_pyromaniac/Idle_On_Fire", true, 0.0);
+		layer.create_global_transition(pyro_on_fire_idle_state, false).create_trigger_condition(pyro_on_fire_idle_var);
 
-		pyro_blow_out_fire_var := sm->create_variable("pyro_blow_out_fire", State_Machine_Variable.Kind.TRIGGER);
-		pyro_blow_out_fire_state := layer->create_state("004RAND_pyromaniac/Blow_Out_Fire", false, 1.0);
-		layer->create_global_transition(pyro_blow_out_fire_state, false)->create_trigger_condition(pyro_blow_out_fire_var);
-		layer->create_transition(pyro_blow_out_fire_state, idle_state, true);
+		pyro_blow_out_fire_var := sm.create_variable("pyro_blow_out_fire", State_Machine_Variable.Kind.TRIGGER);
+		pyro_blow_out_fire_state := layer.create_state("004RAND_pyromaniac/Blow_Out_Fire", false, 1.0);
+		layer.create_global_transition(pyro_blow_out_fire_state, false).create_trigger_condition(pyro_blow_out_fire_var);
+		layer.create_transition(pyro_blow_out_fire_state, idle_state, true);
 
-		pyro_end_game_var := sm->create_variable("pyro_end_game", State_Machine_Variable.Kind.TRIGGER);
-		pyro_end_game_state := layer->create_state("004RAND_pyromaniac/End_Game", false, 5.0);
-		layer->create_global_transition(pyro_end_game_state, false)->create_trigger_condition(pyro_end_game_var);
-		layer->create_transition(pyro_end_game_state, idle_state, true);
+		pyro_end_game_var := sm.create_variable("pyro_end_game", State_Machine_Variable.Kind.TRIGGER);
+		pyro_end_game_state := layer.create_state("004RAND_pyromaniac/End_Game", false, 5.0);
+		layer.create_global_transition(pyro_end_game_state, false).create_trigger_condition(pyro_end_game_var);
+		layer.create_transition(pyro_end_game_state, idle_state, true);
 	}
 
 	rr_sm_setup_pirate :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
-		pirate_dig_for_treasure_var := sm->create_variable("pirate_dig_for_treasure", State_Machine_Variable.Kind.TRIGGER);
-		pirate_dig_for_treasure_state := layer->create_state("004RAND_pirate/dig_for_treasure", false, 2.0);
-		layer->create_global_transition(pirate_dig_for_treasure_state, false)->create_trigger_condition(pirate_dig_for_treasure_var);
-		layer->create_transition(pirate_dig_for_treasure_state, idle_state, true);
+		pirate_dig_for_treasure_var := sm.create_variable("pirate_dig_for_treasure", State_Machine_Variable.Kind.TRIGGER);
+		pirate_dig_for_treasure_state := layer.create_state("004RAND_pirate/dig_for_treasure", false, 2.0);
+		layer.create_global_transition(pirate_dig_for_treasure_state, false).create_trigger_condition(pirate_dig_for_treasure_var);
+		layer.create_transition(pirate_dig_for_treasure_state, idle_state, true);
 	}
 
 	rr_sm_setup_ggg :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
-		ggg_transform_var := sm->create_variable("ggg_transform", State_Machine_Variable.Kind.TRIGGER);
-		ggg_transform_state := layer->create_state("004RAND_GOOGOOGAGA/Transform_Monster_Start", false, 2.0);
-		layer->create_global_transition(ggg_transform_state, false)->create_trigger_condition(ggg_transform_var);
-		layer->create_transition(ggg_transform_state, idle_state, true);
+		ggg_transform_var := sm.create_variable("ggg_transform", State_Machine_Variable.Kind.TRIGGER);
+		ggg_transform_state := layer.create_state("004RAND_GOOGOOGAGA/Transform_Monster_Start", false, 2.0);
+		layer.create_global_transition(ggg_transform_state, false).create_trigger_condition(ggg_transform_var);
+		layer.create_transition(ggg_transform_state, idle_state, true);
 
-		ggg_revert_var := sm->create_variable("ggg_revert", State_Machine_Variable.Kind.TRIGGER);
-		ggg_revert_state := layer->create_state("004RAND_GOOGOOGAGA/Transform_Player_End", false, 1.0);
-		layer->create_global_transition(ggg_revert_state, false)->create_trigger_condition(ggg_revert_var);
-		layer->create_transition(ggg_revert_state, idle_state, true);
+		ggg_revert_var := sm.create_variable("ggg_revert", State_Machine_Variable.Kind.TRIGGER);
+		ggg_revert_state := layer.create_state("004RAND_GOOGOOGAGA/Transform_Player_End", false, 1.0);
+		layer.create_global_transition(ggg_revert_state, false).create_trigger_condition(ggg_revert_var);
+		layer.create_transition(ggg_revert_state, idle_state, true);
 
-		ggg_trapped_start_var := sm->create_variable("ggg_trapped_start", State_Machine_Variable.Kind.TRIGGER);
-		ggg_trapped_start_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Start", false, 0.5);
-		layer->create_global_transition(ggg_trapped_start_state, false)->create_trigger_condition(ggg_trapped_start_var);
+		ggg_trapped_start_var := sm.create_variable("ggg_trapped_start", State_Machine_Variable.Kind.TRIGGER);
+		ggg_trapped_start_state := layer.create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Start", false, 0.5);
+		layer.create_global_transition(ggg_trapped_start_state, false).create_trigger_condition(ggg_trapped_start_var);
 
-		ggg_trapped_loop_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Loop", true, 0.0);
-		layer->create_transition(ggg_trapped_start_state, ggg_trapped_loop_state, true);
+		ggg_trapped_loop_state := layer.create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_Loop", true, 0.0);
+		layer.create_transition(ggg_trapped_start_state, ggg_trapped_loop_state, true);
 
-		ggg_trapped_end_var := sm->create_variable("ggg_trapped_end", State_Machine_Variable.Kind.TRIGGER);
-		ggg_trapped_end_state := layer->create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_End", false, 0.5);
-		layer->create_global_transition(ggg_trapped_end_state, false)->create_trigger_condition(ggg_trapped_end_var);
-		layer->create_transition(ggg_trapped_end_state, idle_state, true);
+		ggg_trapped_end_var := sm.create_variable("ggg_trapped_end", State_Machine_Variable.Kind.TRIGGER);
+		ggg_trapped_end_state := layer.create_state("004RAND_GOOGOOGAGA/Tinfoil_Trapped_End", false, 0.5);
+		layer.create_global_transition(ggg_trapped_end_state, false).create_trigger_condition(ggg_trapped_end_var);
+		layer.create_transition(ggg_trapped_end_state, idle_state, true);
 
-		ggg_whip_caught_var := sm->create_variable("ggg_whip_caught", State_Machine_Variable.Kind.TRIGGER);
-		ggg_whip_caught_state := layer->create_state("004RAND_GOOGOOGAGA/Caught_By_Whip_Loop", true, 0.0);
-		layer->create_global_transition(ggg_whip_caught_state, false)->create_trigger_condition(ggg_whip_caught_var);
+		ggg_whip_caught_var := sm.create_variable("ggg_whip_caught", State_Machine_Variable.Kind.TRIGGER);
+		ggg_whip_caught_state := layer.create_state("004RAND_GOOGOOGAGA/Caught_By_Whip_Loop", true, 0.0);
+		layer.create_global_transition(ggg_whip_caught_state, false).create_trigger_condition(ggg_whip_caught_var);
 	}
 
 	rr_sm_setup_drag_body :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
-		drag_enabled_var := sm->create_variable("drag_body_enabled", State_Machine_Variable.Kind.BOOL);
-		drag_moving_var := sm->create_variable("drag_body_moving", State_Machine_Variable.Kind.BOOL);
-		drag_right_var := sm->create_variable("drag_body_right", State_Machine_Variable.Kind.BOOL);
+		drag_enabled_var := sm.create_variable("drag_body_enabled", State_Machine_Variable.Kind.BOOL);
+		drag_moving_var := sm.create_variable("drag_body_moving", State_Machine_Variable.Kind.BOOL);
+		drag_right_var := sm.create_variable("drag_body_right", State_Machine_Variable.Kind.BOOL);
 
-		drag_idle_left := layer->create_state("004RAND/drag_body_idle", true, 0.0);
-		drag_idle_right := layer->create_state("004RAND/drag_body_idle_right", true, 0.0);
-		drag_walk_left := layer->create_state("004RAND/drag_body_walk", true, 0.0);
-		drag_walk_right := layer->create_state("004RAND/drag_body_walk_right", true, 0.0);
+		drag_idle_left := layer.create_state("004RAND/drag_body_idle", true, 0.0);
+		drag_idle_right := layer.create_state("004RAND/drag_body_idle_right", true, 0.0);
+		drag_walk_left := layer.create_state("004RAND/drag_body_walk", true, 0.0);
+		drag_walk_right := layer.create_state("004RAND/drag_body_walk_right", true, 0.0);
 
-		to_drag_idle_left := layer->create_global_transition(drag_idle_left, false);
-		to_drag_idle_left->create_bool_condition(drag_enabled_var, true);
-		to_drag_idle_left->create_bool_condition(drag_moving_var, false);
-		to_drag_idle_left->create_bool_condition(drag_right_var, false);
+		to_drag_idle_left := layer.create_global_transition(drag_idle_left, false);
+		to_drag_idle_left.create_bool_condition(drag_enabled_var, true);
+		to_drag_idle_left.create_bool_condition(drag_moving_var, false);
+		to_drag_idle_left.create_bool_condition(drag_right_var, false);
 
-		to_drag_idle_right := layer->create_global_transition(drag_idle_right, false);
-		to_drag_idle_right->create_bool_condition(drag_enabled_var, true);
-		to_drag_idle_right->create_bool_condition(drag_moving_var, false);
-		to_drag_idle_right->create_bool_condition(drag_right_var, true);
+		to_drag_idle_right := layer.create_global_transition(drag_idle_right, false);
+		to_drag_idle_right.create_bool_condition(drag_enabled_var, true);
+		to_drag_idle_right.create_bool_condition(drag_moving_var, false);
+		to_drag_idle_right.create_bool_condition(drag_right_var, true);
 
-		to_drag_walk_left := layer->create_global_transition(drag_walk_left, false);
-		to_drag_walk_left->create_bool_condition(drag_enabled_var, true);
-		to_drag_walk_left->create_bool_condition(drag_moving_var, true);
-		to_drag_walk_left->create_bool_condition(drag_right_var, false);
+		to_drag_walk_left := layer.create_global_transition(drag_walk_left, false);
+		to_drag_walk_left.create_bool_condition(drag_enabled_var, true);
+		to_drag_walk_left.create_bool_condition(drag_moving_var, true);
+		to_drag_walk_left.create_bool_condition(drag_right_var, false);
 
-		to_drag_walk_right := layer->create_global_transition(drag_walk_right, false);
-		to_drag_walk_right->create_bool_condition(drag_enabled_var, true);
-		to_drag_walk_right->create_bool_condition(drag_moving_var, true);
-		to_drag_walk_right->create_bool_condition(drag_right_var, true);
+		to_drag_walk_right := layer.create_global_transition(drag_walk_right, false);
+		to_drag_walk_right.create_bool_condition(drag_enabled_var, true);
+		to_drag_walk_right.create_bool_condition(drag_moving_var, true);
+		to_drag_walk_right.create_bool_condition(drag_right_var, true);
 
-		exit_drag_idle_left := layer->create_transition(drag_idle_left, idle_state, false);
-		exit_drag_idle_left->create_bool_condition(drag_enabled_var, false);
+		exit_drag_idle_left := layer.create_transition(drag_idle_left, idle_state, false);
+		exit_drag_idle_left.create_bool_condition(drag_enabled_var, false);
 
-		exit_drag_idle_right := layer->create_transition(drag_idle_right, idle_state, false);
-		exit_drag_idle_right->create_bool_condition(drag_enabled_var, false);
+		exit_drag_idle_right := layer.create_transition(drag_idle_right, idle_state, false);
+		exit_drag_idle_right.create_bool_condition(drag_enabled_var, false);
 
-		exit_drag_walk_left := layer->create_transition(drag_walk_left, idle_state, false);
-		exit_drag_walk_left->create_bool_condition(drag_enabled_var, false);
+		exit_drag_walk_left := layer.create_transition(drag_walk_left, idle_state, false);
+		exit_drag_walk_left.create_bool_condition(drag_enabled_var, false);
 
-		exit_drag_walk_right := layer->create_transition(drag_walk_right, idle_state, false);
-		exit_drag_walk_right->create_bool_condition(drag_enabled_var, false);
+		exit_drag_walk_right := layer.create_transition(drag_walk_right, idle_state, false);
+		exit_drag_walk_right.create_bool_condition(drag_enabled_var, false);
 	}
 
 	// Mimicer player-rig state machine states.
 	rr_mimicer_setup_player_state_machine :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		// Transform to monster (one-shot, 1s) -> back to Idle.
-		mimicer_transform_var := sm->create_variable("mimicer_transform", State_Machine_Variable.Kind.TRIGGER);
-		mimicer_transform_state := layer->create_state("004RAND/Transform_Monster_Start", false, 1.0);
-		layer->create_global_transition(mimicer_transform_state, false)->create_trigger_condition(mimicer_transform_var);
-		layer->create_transition(mimicer_transform_state, idle_state, true);
+		mimicer_transform_var := sm.create_variable("mimicer_transform", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_transform_state := layer.create_state("004RAND/Transform_Monster_Start", false, 1.0);
+		layer.create_global_transition(mimicer_transform_state, false).create_trigger_condition(mimicer_transform_var);
+		layer.create_transition(mimicer_transform_state, idle_state, true);
 
 		// Revert from monster (one-shot, 1s) -> back to Idle.
-		mimicer_revert_var := sm->create_variable("mimicer_revert", State_Machine_Variable.Kind.TRIGGER);
-		mimicer_revert_state := layer->create_state("004RAND/Transform_Player_End", false, 1.0);
-		layer->create_global_transition(mimicer_revert_state, false)->create_trigger_condition(mimicer_revert_var);
-		layer->create_transition(mimicer_revert_state, idle_state, true);
+		mimicer_revert_var := sm.create_variable("mimicer_revert", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_revert_state := layer.create_state("004RAND/Transform_Player_End", false, 1.0);
+		layer.create_global_transition(mimicer_revert_state, false).create_trigger_condition(mimicer_revert_var);
+		layer.create_transition(mimicer_revert_state, idle_state, true);
 
 		// Prowl start -> prowl idle/run locomotion
-		mimicer_prowl_start_var := sm->create_variable("mimicer_prowl_start", State_Machine_Variable.Kind.TRIGGER);
-		mimicer_prowl_moving_var := sm->create_variable("mimicer_prowl_moving", State_Machine_Variable.Kind.BOOL);
+		mimicer_prowl_start_var := sm.create_variable("mimicer_prowl_start", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_prowl_moving_var := sm.create_variable("mimicer_prowl_moving", State_Machine_Variable.Kind.BOOL);
 
-		mimicer_prowl_start_state := layer->create_state("004RAND/Prowl_Start", false, 0.5);
-		layer->create_global_transition(mimicer_prowl_start_state, false)->create_trigger_condition(mimicer_prowl_start_var);
+		mimicer_prowl_start_state := layer.create_state("004RAND/Prowl_Start", false, 0.5);
+		layer.create_global_transition(mimicer_prowl_start_state, false).create_trigger_condition(mimicer_prowl_start_var);
 
-		mimicer_prowl_idle_state := layer->create_state("004RAND/Prowl_Idle", true, 0.0);
-		layer->create_transition(mimicer_prowl_start_state, mimicer_prowl_idle_state, true);
+		mimicer_prowl_idle_state := layer.create_state("004RAND/Prowl_Idle", true, 0.0);
+		layer.create_transition(mimicer_prowl_start_state, mimicer_prowl_idle_state, true);
 
-		mimicer_prowl_run_state := layer->create_state("004RAND/Prowl_Run", true, 0.0);
-		prowl_idle_to_run := layer->create_transition(mimicer_prowl_idle_state, mimicer_prowl_run_state, false);
-		prowl_idle_to_run->create_bool_condition(mimicer_prowl_moving_var, true);
-		prowl_run_to_idle := layer->create_transition(mimicer_prowl_run_state, mimicer_prowl_idle_state, false);
-		prowl_run_to_idle->create_bool_condition(mimicer_prowl_moving_var, false);
+		mimicer_prowl_run_state := layer.create_state("004RAND/Prowl_Run", true, 0.0);
+		prowl_idle_to_run := layer.create_transition(mimicer_prowl_idle_state, mimicer_prowl_run_state, false);
+		prowl_idle_to_run.create_bool_condition(mimicer_prowl_moving_var, true);
+		prowl_run_to_idle := layer.create_transition(mimicer_prowl_run_state, mimicer_prowl_idle_state, false);
+		prowl_run_to_idle.create_bool_condition(mimicer_prowl_moving_var, false);
 
 		// Prowl end -> back to Idle
-		mimicer_prowl_end_var := sm->create_variable("mimicer_prowl_end", State_Machine_Variable.Kind.TRIGGER);
-		mimicer_prowl_end_state := layer->create_state("004RAND/Prowl_End", false, 0.5);
-		layer->create_global_transition(mimicer_prowl_end_state, false)->create_trigger_condition(mimicer_prowl_end_var);
-		layer->create_transition(mimicer_prowl_end_state, idle_state, true);
+		mimicer_prowl_end_var := sm.create_variable("mimicer_prowl_end", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_prowl_end_state := layer.create_state("004RAND/Prowl_End", false, 0.5);
+		layer.create_global_transition(mimicer_prowl_end_state, false).create_trigger_condition(mimicer_prowl_end_var);
+		layer.create_transition(mimicer_prowl_end_state, idle_state, true);
 
 		// Blinded start -> blinded idle loop (exits via mimicer_blinded_end)
-		mimicer_blinded_start_var := sm->create_variable("mimicer_blinded_start", State_Machine_Variable.Kind.TRIGGER);
-		mimicer_blinded_start_state := layer->create_state("004RAND/Blinded_Start", false, 0.5);
-		layer->create_global_transition(mimicer_blinded_start_state, false)->create_trigger_condition(mimicer_blinded_start_var);
+		mimicer_blinded_start_var := sm.create_variable("mimicer_blinded_start", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_blinded_start_state := layer.create_state("004RAND/Blinded_Start", false, 0.5);
+		layer.create_global_transition(mimicer_blinded_start_state, false).create_trigger_condition(mimicer_blinded_start_var);
 
-		mimicer_blinded_idle_state := layer->create_state("004RAND/Blinded_Idle", true, 0.0);
-		layer->create_transition(mimicer_blinded_start_state, mimicer_blinded_idle_state, true);
+		mimicer_blinded_idle_state := layer.create_state("004RAND/Blinded_Idle", true, 0.0);
+		layer.create_transition(mimicer_blinded_start_state, mimicer_blinded_idle_state, true);
 
 		// Blinded end -> back to Idle
-		mimicer_blinded_end_var := sm->create_variable("mimicer_blinded_end", State_Machine_Variable.Kind.TRIGGER);
-		mimicer_blinded_end_state := layer->create_state("004RAND/Blinded_End", false, 0.5);
-		layer->create_global_transition(mimicer_blinded_end_state, false)->create_trigger_condition(mimicer_blinded_end_var);
-		layer->create_transition(mimicer_blinded_end_state, idle_state, true);
+		mimicer_blinded_end_var := sm.create_variable("mimicer_blinded_end", State_Machine_Variable.Kind.TRIGGER);
+		mimicer_blinded_end_state := layer.create_state("004RAND/Blinded_End", false, 0.5);
+		layer.create_global_transition(mimicer_blinded_end_state, false).create_trigger_condition(mimicer_blinded_end_var);
+		layer.create_transition(mimicer_blinded_end_state, idle_state, true);
 
 	}
 
 	// Big Charlie player-rig state machine states.
 	rr_sm_setup_big_charlie :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		// Transform to monster (one-shot, 1s) -> back to Idle.
-		bc_transform_var := sm->create_variable("bc_transform", State_Machine_Variable.Kind.TRIGGER);
-		bc_transform_state := layer->create_state("004RAND_BIGCHARLIE/Transform_Monster_Start", false, 1.0);
-		layer->create_global_transition(bc_transform_state, false)->create_trigger_condition(bc_transform_var);
-		layer->create_transition(bc_transform_state, idle_state, true);
+		bc_transform_var := sm.create_variable("bc_transform", State_Machine_Variable.Kind.TRIGGER);
+		bc_transform_state := layer.create_state("004RAND_BIGCHARLIE/Transform_Monster_Start", false, 1.0);
+		layer.create_global_transition(bc_transform_state, false).create_trigger_condition(bc_transform_var);
+		layer.create_transition(bc_transform_state, idle_state, true);
 
 		// Revert from monster (one-shot, 1s) -> back to Idle.
-		bc_revert_var := sm->create_variable("bc_revert", State_Machine_Variable.Kind.TRIGGER);
-		bc_revert_state := layer->create_state("004RAND_BIGCHARLIE/Transform_Player_End", false, 1.0);
-		layer->create_global_transition(bc_revert_state, false)->create_trigger_condition(bc_revert_var);
-		layer->create_transition(bc_revert_state, idle_state, true);
+		bc_revert_var := sm.create_variable("bc_revert", State_Machine_Variable.Kind.TRIGGER);
+		bc_revert_state := layer.create_state("004RAND_BIGCHARLIE/Transform_Player_End", false, 1.0);
+		layer.create_global_transition(bc_revert_state, false).create_trigger_condition(bc_revert_var);
+		layer.create_transition(bc_revert_state, idle_state, true);
 
 		// Trampled: Start -> Loop (stays until healed or expired)
-		bc_trampled_start_var := sm->create_variable("bc_trampled_start", State_Machine_Variable.Kind.TRIGGER);
-		bc_trampled_start_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Start", false, 0.5);
-		layer->create_global_transition(bc_trampled_start_state, false)->create_trigger_condition(bc_trampled_start_var);
+		bc_trampled_start_var := sm.create_variable("bc_trampled_start", State_Machine_Variable.Kind.TRIGGER);
+		bc_trampled_start_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Start", false, 0.5);
+		layer.create_global_transition(bc_trampled_start_state, false).create_trigger_condition(bc_trampled_start_var);
 
-		bc_trampled_idle_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Idle", true, 0.0);
-		layer->create_transition(bc_trampled_start_state, bc_trampled_idle_state, true);
+		bc_trampled_idle_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Idle", true, 0.0);
+		layer.create_transition(bc_trampled_start_state, bc_trampled_idle_state, true);
 
-		bc_trampled_run_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Run", true, 0.0);
-		bc_trampled_moving_var := sm->create_variable("bc_trampled_moving", State_Machine_Variable.Kind.BOOL);
-		trampled_idle_to_run := layer->create_transition(bc_trampled_idle_state, bc_trampled_run_state, false);
-		trampled_idle_to_run->create_bool_condition(bc_trampled_moving_var, true);
-		trampled_run_to_idle := layer->create_transition(bc_trampled_run_state, bc_trampled_idle_state, false);
-		trampled_run_to_idle->create_bool_condition(bc_trampled_moving_var, false);
+		bc_trampled_run_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Run", true, 0.0);
+		bc_trampled_moving_var := sm.create_variable("bc_trampled_moving", State_Machine_Variable.Kind.BOOL);
+		trampled_idle_to_run := layer.create_transition(bc_trampled_idle_state, bc_trampled_run_state, false);
+		trampled_idle_to_run.create_bool_condition(bc_trampled_moving_var, true);
+		trampled_run_to_idle := layer.create_transition(bc_trampled_run_state, bc_trampled_idle_state, false);
+		trampled_run_to_idle.create_bool_condition(bc_trampled_moving_var, false);
 
 		// Healed naturally -> back to Idle.
-		bc_trampled_heal_natural_var := sm->create_variable("bc_trampled_heal_natural", State_Machine_Variable.Kind.TRIGGER);
-		bc_trampled_heal_natural_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Heal_Natural", false, 0.5);
-		layer->create_global_transition(bc_trampled_heal_natural_state, false)->create_trigger_condition(bc_trampled_heal_natural_var);
-		layer->create_transition(bc_trampled_heal_natural_state, idle_state, true);
+		bc_trampled_heal_natural_var := sm.create_variable("bc_trampled_heal_natural", State_Machine_Variable.Kind.TRIGGER);
+		bc_trampled_heal_natural_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Heal_Natural", false, 0.5);
+		layer.create_global_transition(bc_trampled_heal_natural_state, false).create_trigger_condition(bc_trampled_heal_natural_var);
+		layer.create_transition(bc_trampled_heal_natural_state, idle_state, true);
 
 		// Healed by Doctor -> back to Idle.
-		bc_trampled_heal_player_var := sm->create_variable("bc_trampled_heal_player", State_Machine_Variable.Kind.TRIGGER);
-		bc_trampled_heal_player_state := layer->create_state("004RAND_BIGCHARLIE/Trampled_Heal_Player", false, 0.5);
-		layer->create_global_transition(bc_trampled_heal_player_state, false)->create_trigger_condition(bc_trampled_heal_player_var);
-		layer->create_transition(bc_trampled_heal_player_state, idle_state, true);
+		bc_trampled_heal_player_var := sm.create_variable("bc_trampled_heal_player", State_Machine_Variable.Kind.TRIGGER);
+		bc_trampled_heal_player_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Heal_Player", false, 0.5);
+		layer.create_global_transition(bc_trampled_heal_player_state, false).create_trigger_condition(bc_trampled_heal_player_var);
+		layer.create_transition(bc_trampled_heal_player_state, idle_state, true);
 
 		// Open Cocoon (breaking a nest)
-		bc_cocoon_loop_var := sm->create_variable("bc_cocoon_loop", State_Machine_Variable.Kind.TRIGGER);
-		bc_cocoon_loop_state := layer->create_state("004RAND_BIGCHARLIE/Open_Cocoon_Loop", true, 0.0);
-		layer->create_global_transition(bc_cocoon_loop_state, false)->create_trigger_condition(bc_cocoon_loop_var);
+		bc_cocoon_loop_var := sm.create_variable("bc_cocoon_loop", State_Machine_Variable.Kind.TRIGGER);
+		bc_cocoon_loop_state := layer.create_state("004RAND_BIGCHARLIE/Open_Cocoon_Loop", true, 0.0);
+		layer.create_global_transition(bc_cocoon_loop_state, false).create_trigger_condition(bc_cocoon_loop_var);
 
-		bc_cocoon_success_var := sm->create_variable("bc_cocoon_success", State_Machine_Variable.Kind.TRIGGER);
-		bc_cocoon_success_state := layer->create_state("004RAND_BIGCHARLIE/Open_Cocoon_Success", false, 0.5);
-		layer->create_global_transition(bc_cocoon_success_state, false)->create_trigger_condition(bc_cocoon_success_var);
-		layer->create_transition(bc_cocoon_success_state, idle_state, true);
+		bc_cocoon_success_var := sm.create_variable("bc_cocoon_success", State_Machine_Variable.Kind.TRIGGER);
+		bc_cocoon_success_state := layer.create_state("004RAND_BIGCHARLIE/Open_Cocoon_Success", false, 0.5);
+		layer.create_global_transition(bc_cocoon_success_state, false).create_trigger_condition(bc_cocoon_success_var);
+		layer.create_transition(bc_cocoon_success_state, idle_state, true);
 	}
 
 	// Lily Lovebraids player-rig state machine states.
 	rr_sm_setup_lily :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		// Transform to Lily (one-shot) -> back to Idle.
-		lily_transform_var := sm->create_variable("lily_transform", State_Machine_Variable.Kind.TRIGGER);
-		lily_transform_state := layer->create_state("004RAND_LILY/Transform_Monster_Start", false, 1.0);
-		layer->create_global_transition(lily_transform_state, false)->create_trigger_condition(lily_transform_var);
-		layer->create_transition(lily_transform_state, idle_state, true);
+		lily_transform_var := sm.create_variable("lily_transform", State_Machine_Variable.Kind.TRIGGER);
+		lily_transform_state := layer.create_state("004RAND_LILY/Transform_Monster_Start", false, 1.0);
+		layer.create_global_transition(lily_transform_state, false).create_trigger_condition(lily_transform_var);
+		layer.create_transition(lily_transform_state, idle_state, true);
 
 		// Revert from Lily (one-shot) -> back to Idle.
-		lily_revert_var := sm->create_variable("lily_revert", State_Machine_Variable.Kind.TRIGGER);
-		lily_revert_state := layer->create_state("004RAND_LILY/Transform_Player_End", false, 1.0);
-		layer->create_global_transition(lily_revert_state, false)->create_trigger_condition(lily_revert_var);
-		layer->create_transition(lily_revert_state, idle_state, true);
+		lily_revert_var := sm.create_variable("lily_revert", State_Machine_Variable.Kind.TRIGGER);
+		lily_revert_state := layer.create_state("004RAND_LILY/Transform_Player_End", false, 1.0);
+		layer.create_global_transition(lily_revert_state, false).create_trigger_condition(lily_revert_var);
+		layer.create_transition(lily_revert_state, idle_state, true);
 
 		// Kill animation
-		lily_kill_var := sm->create_variable("lily_kill", State_Machine_Variable.Kind.TRIGGER);
-		lily_kill_state := layer->create_state("004RAND_LILY/Kill_Lovebraids", false, 1.0);
-		layer->create_global_transition(lily_kill_state, false)->create_trigger_condition(lily_kill_var);
-		layer->create_transition(lily_kill_state, idle_state, true);
+		lily_kill_var := sm.create_variable("lily_kill", State_Machine_Variable.Kind.TRIGGER);
+		lily_kill_state := layer.create_state("004RAND_LILY/Kill_Lovebraids", false, 1.0);
+		layer.create_global_transition(lily_kill_state, false).create_trigger_condition(lily_kill_var);
+		layer.create_transition(lily_kill_state, idle_state, true);
 
 		// Rooted (RLGL victim): Start -> Loop, End -> Idle
-		lily_rooted_start_var := sm->create_variable("lily_rooted_start", State_Machine_Variable.Kind.TRIGGER);
-		lily_rooted_start_state := layer->create_state("004RAND_LILY/Rooted_Start", false, 0.5);
-		lily_rooted_loop_state := layer->create_state("004RAND_LILY/Rooted_Loop", true, 0.0);
-		layer->create_global_transition(lily_rooted_start_state, false)->create_trigger_condition(lily_rooted_start_var);
-		layer->create_transition(lily_rooted_start_state, lily_rooted_loop_state, true);
+		lily_rooted_start_var := sm.create_variable("lily_rooted_start", State_Machine_Variable.Kind.TRIGGER);
+		lily_rooted_start_state := layer.create_state("004RAND_LILY/Rooted_Start", false, 0.5);
+		lily_rooted_loop_state := layer.create_state("004RAND_LILY/Rooted_Loop", true, 0.0);
+		layer.create_global_transition(lily_rooted_start_state, false).create_trigger_condition(lily_rooted_start_var);
+		layer.create_transition(lily_rooted_start_state, lily_rooted_loop_state, true);
 
-		lily_rooted_end_var := sm->create_variable("lily_rooted_end", State_Machine_Variable.Kind.TRIGGER);
-		lily_rooted_end_state := layer->create_state("004RAND_LILY/Rooted_End", false, 0.5);
-		layer->create_global_transition(lily_rooted_end_state, false)->create_trigger_condition(lily_rooted_end_var);
-		layer->create_transition(lily_rooted_end_state, idle_state, true);
+		lily_rooted_end_var := sm.create_variable("lily_rooted_end", State_Machine_Variable.Kind.TRIGGER);
+		lily_rooted_end_state := layer.create_state("004RAND_LILY/Rooted_End", false, 0.5);
+		layer.create_global_transition(lily_rooted_end_state, false).create_trigger_condition(lily_rooted_end_var);
+		layer.create_transition(lily_rooted_end_state, idle_state, true);
 
 		// Tea Party: Start -> Loop
-		lily_tea_start_var := sm->create_variable("lily_tea_start", State_Machine_Variable.Kind.TRIGGER);
-		lily_tea_start_state := layer->create_state("004RAND_LILY/Tea_Party_Start", false, 0.5);
-		lily_tea_loop_state := layer->create_state("004RAND_LILY/Tea_Party_Loop", true, 0.0);
-		layer->create_global_transition(lily_tea_start_state, false)->create_trigger_condition(lily_tea_start_var);
-		layer->create_transition(lily_tea_start_state, lily_tea_loop_state, true);
+		lily_tea_start_var := sm.create_variable("lily_tea_start", State_Machine_Variable.Kind.TRIGGER);
+		lily_tea_start_state := layer.create_state("004RAND_LILY/Tea_Party_Start", false, 0.5);
+		lily_tea_loop_state := layer.create_state("004RAND_LILY/Tea_Party_Loop", true, 0.0);
+		layer.create_global_transition(lily_tea_start_state, false).create_trigger_condition(lily_tea_start_var);
+		layer.create_transition(lily_tea_start_state, lily_tea_loop_state, true);
 
 		// Tea outcomes (one-shots -> idle)
-		lily_tea_death_var := sm->create_variable("lily_tea_death", State_Machine_Variable.Kind.TRIGGER);
-		lily_tea_death_state := layer->create_state("004RAND_LILY/Forced_Tea_Death", false, 1.0);
-		layer->create_global_transition(lily_tea_death_state, false)->create_trigger_condition(lily_tea_death_var);
+		lily_tea_death_var := sm.create_variable("lily_tea_death", State_Machine_Variable.Kind.TRIGGER);
+		lily_tea_death_state := layer.create_state("004RAND_LILY/Forced_Tea_Death", false, 1.0);
+		layer.create_global_transition(lily_tea_death_state, false).create_trigger_condition(lily_tea_death_var);
 
-		lily_tea_safe_var := sm->create_variable("lily_tea_safe", State_Machine_Variable.Kind.TRIGGER);
-		lily_tea_safe_state := layer->create_state("004RAND_LILY/Forced_Tea_Safe", false, 1.0);
-		layer->create_global_transition(lily_tea_safe_state, false)->create_trigger_condition(lily_tea_safe_var);
-		layer->create_transition(lily_tea_safe_state, idle_state, true);
+		lily_tea_safe_var := sm.create_variable("lily_tea_safe", State_Machine_Variable.Kind.TRIGGER);
+		lily_tea_safe_state := layer.create_state("004RAND_LILY/Forced_Tea_Safe", false, 1.0);
+		layer.create_global_transition(lily_tea_safe_state, false).create_trigger_condition(lily_tea_safe_var);
+		layer.create_transition(lily_tea_safe_state, idle_state, true);
 
 		// Caffeine (Hyper): Forced_Tea_Hyper -> Hyper_Idle/Run locomotion -> Hyper_End -> Idle
-		lily_tea_hyper_var := sm->create_variable("lily_tea_hyper", State_Machine_Variable.Kind.TRIGGER);
-		lily_tea_hyper_state := layer->create_state("004RAND_LILY/Forced_Tea_Hyper", false, 1.0);
-		layer->create_global_transition(lily_tea_hyper_state, false)->create_trigger_condition(lily_tea_hyper_var);
+		lily_tea_hyper_var := sm.create_variable("lily_tea_hyper", State_Machine_Variable.Kind.TRIGGER);
+		lily_tea_hyper_state := layer.create_state("004RAND_LILY/Forced_Tea_Hyper", false, 1.0);
+		layer.create_global_transition(lily_tea_hyper_state, false).create_trigger_condition(lily_tea_hyper_var);
 
-		lily_hyper_moving_var := sm->create_variable("lily_hyper_moving", State_Machine_Variable.Kind.BOOL);
-		lily_hyper_idle_state := layer->create_state("004RAND_LILY/Hyper_Idle", true, 0.0);
-		lily_hyper_run_state := layer->create_state("004RAND_LILY/Hyper_Run", true, 0.0);
-		layer->create_transition(lily_tea_hyper_state, lily_hyper_idle_state, true);
+		lily_hyper_moving_var := sm.create_variable("lily_hyper_moving", State_Machine_Variable.Kind.BOOL);
+		lily_hyper_idle_state := layer.create_state("004RAND_LILY/Hyper_Idle", true, 0.0);
+		lily_hyper_run_state := layer.create_state("004RAND_LILY/Hyper_Run", true, 0.0);
+		layer.create_transition(lily_tea_hyper_state, lily_hyper_idle_state, true);
 
-		hyper_idle_to_run := layer->create_transition(lily_hyper_idle_state, lily_hyper_run_state, false);
-		hyper_idle_to_run->create_bool_condition(lily_hyper_moving_var, true);
-		hyper_run_to_idle := layer->create_transition(lily_hyper_run_state, lily_hyper_idle_state, false);
-		hyper_run_to_idle->create_bool_condition(lily_hyper_moving_var, false);
+		hyper_idle_to_run := layer.create_transition(lily_hyper_idle_state, lily_hyper_run_state, false);
+		hyper_idle_to_run.create_bool_condition(lily_hyper_moving_var, true);
+		hyper_run_to_idle := layer.create_transition(lily_hyper_run_state, lily_hyper_idle_state, false);
+		hyper_run_to_idle.create_bool_condition(lily_hyper_moving_var, false);
 
-		lily_hyper_end_var := sm->create_variable("lily_hyper_end", State_Machine_Variable.Kind.TRIGGER);
-		lily_hyper_end_state := layer->create_state("004RAND_LILY/Hyper_End", false, 0.5);
-		layer->create_global_transition(lily_hyper_end_state, false)->create_trigger_condition(lily_hyper_end_var);
-		layer->create_transition(lily_hyper_end_state, idle_state, true);
+		lily_hyper_end_var := sm.create_variable("lily_hyper_end", State_Machine_Variable.Kind.TRIGGER);
+		lily_hyper_end_state := layer.create_state("004RAND_LILY/Hyper_End", false, 0.5);
+		layer.create_global_transition(lily_hyper_end_state, false).create_trigger_condition(lily_hyper_end_var);
+		layer.create_transition(lily_hyper_end_state, idle_state, true);
 
 		// Hair string pull: Start -> Loop -> End
-		lily_pull_start_var := sm->create_variable("lily_pull_start", State_Machine_Variable.Kind.TRIGGER);
-		lily_pull_start_state := layer->create_state("004RAND_LILY/Hair_String_Pull_Start", false, 0.5);
-		lily_pull_loop_state := layer->create_state("004RAND_LILY/Hair_String_Pull_Loop", true, 0.0);
-		layer->create_global_transition(lily_pull_start_state, false)->create_trigger_condition(lily_pull_start_var);
-		layer->create_transition(lily_pull_start_state, lily_pull_loop_state, true);
+		lily_pull_start_var := sm.create_variable("lily_pull_start", State_Machine_Variable.Kind.TRIGGER);
+		lily_pull_start_state := layer.create_state("004RAND_LILY/Hair_String_Pull_Start", false, 0.5);
+		lily_pull_loop_state := layer.create_state("004RAND_LILY/Hair_String_Pull_Loop", true, 0.0);
+		layer.create_global_transition(lily_pull_start_state, false).create_trigger_condition(lily_pull_start_var);
+		layer.create_transition(lily_pull_start_state, lily_pull_loop_state, true);
 
-		lily_pull_end_var := sm->create_variable("lily_pull_end", State_Machine_Variable.Kind.TRIGGER);
-		lily_pull_end_state := layer->create_state("004RAND_LILY/Hair_String_Pull_End", false, 0.5);
-		layer->create_global_transition(lily_pull_end_state, false)->create_trigger_condition(lily_pull_end_var);
-		layer->create_transition(lily_pull_end_state, idle_state, true);
+		lily_pull_end_var := sm.create_variable("lily_pull_end", State_Machine_Variable.Kind.TRIGGER);
+		lily_pull_end_state := layer.create_state("004RAND_LILY/Hair_String_Pull_End", false, 0.5);
+		layer.create_global_transition(lily_pull_end_state, false).create_trigger_condition(lily_pull_end_var);
+		layer.create_transition(lily_pull_end_state, idle_state, true);
 
 		// No-eyes overlay (track 1) — separate layer so main animations play underneath.
-		eyes_layer := sm->create_layer("lily_no_eyes", 1);
-		no_eyes_off_state := eyes_layer->create_state("__clear", true, 0.0);
-		no_eyes_on_state := eyes_layer->create_state("004RAND_LILY/No_Eyes_AL", true, 0.0);
-		eyes_layer->set_initial_state(no_eyes_off_state);
+		eyes_layer := sm.create_layer("lily_no_eyes", 1);
+		no_eyes_off_state := eyes_layer.create_state("__CLEAR_TRACK__", true, 0.0);
+		no_eyes_on_state := eyes_layer.create_state("004RAND_LILY/No_Eyes_AL", true, 0.0);
+		eyes_layer.set_initial_state(no_eyes_off_state);
 
-		lily_no_eyes_var := sm->create_variable("lily_no_eyes", State_Machine_Variable.Kind.BOOL);
-		off_to_on := eyes_layer->create_transition(no_eyes_off_state, no_eyes_on_state, false);
-		off_to_on->create_bool_condition(lily_no_eyes_var, true);
-		on_to_off := eyes_layer->create_transition(no_eyes_on_state, no_eyes_off_state, false);
-		on_to_off->create_bool_condition(lily_no_eyes_var, false);
+		lily_no_eyes_var := sm.create_variable("lily_no_eyes", State_Machine_Variable.Kind.BOOL);
+		off_to_on := eyes_layer.create_transition(no_eyes_off_state, no_eyes_on_state, false);
+		off_to_on.create_bool_condition(lily_no_eyes_var, true);
+		on_to_off := eyes_layer.create_transition(no_eyes_on_state, no_eyes_off_state, false);
+		on_to_off.create_bool_condition(lily_no_eyes_var, false);
 	}
 
 	// Adds the animation state machine.
@@ -3083,12 +3083,12 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 			return;
 		}
 
-		layer := sm->try_get_layer("main");
+		layer := sm.try_get_layer("main");
 		if layer == null {
 			log_error("No 'main' state machine layer found");
 			return;
 		}
-        idle_state := layer->try_get_state("Idle");
+        idle_state := layer.try_get_state("Idle");
 		if idle_state == null {
 			log_error("No 'Idle' state found on 'main' layer");
 			return;
@@ -3115,8 +3115,8 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		bg := get_asset(Texture_Asset, "$AO/white.png");
 		UI.push_layer(2000);
 		defer UI.pop_layer();
-		UI.quad(screen->subrect(0.0, 0.85, 1.0, 1.0), bg, .{0, 0, 0, 1});
-		UI.quad(screen->subrect(0.0, 0.0, 1.0, 0.15), bg, .{0, 0, 0, 1});
+		UI.quad(screen.subrect(0.0, 0.85, 1.0, 1.0), bg, .{0, 0, 0, 1});
+		UI.quad(screen.subrect(0.0, 0.0, 1.0, 0.15), bg, .{0, 0, 0, 1});
 	}
 
 	draw_vote_eject_cinematic_ui :: proc(using this: Player) {
@@ -3128,13 +3128,13 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		UI.push_layer(20010);
 		defer UI.pop_layer();
 
-		panel_rect := screen->center_rect()->grow(90, 320, 90, 320);
+		panel_rect := screen.center_rect().grow(90, 320, 90, 320);
 		rr_ui_draw_modal_panel(panel_rect);
 
 		name := "Someone";
 		target := get_player_by_entity_id(rr_vote_eject_player_id);
 		if target != null {
-			name = target->get_username();
+			name = target.get_username();
 		}
 		message := format_string("% got voted out", .{name});
 
@@ -3146,7 +3146,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		ts.do_outline = true;
 		ts.outline_thickness = 3;
 		ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(panel_rect->inset(18), ts, message);
+		UI.text(panel_rect.inset(18), ts, message);
 	}
 
 	try_focus_camera_on_jester :: proc(using this: Player) {
@@ -3169,7 +3169,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 			p := players.elements[i];
 			if p != null && #alive(p.entity) && p.entity.id == target_id {
 				// Force the cinematic actor to face right and lock the camera once.
-				p->set_facing_right(true);
+				p.set_facing_right(true);
 				this.camera.follow_player = false;
 				this.camera.position = p.entity.world_position;
 				return true;
@@ -3184,7 +3184,7 @@ rr_drag_body_force_drop_for_player :: proc(player: Player) {
 	if player.dragging_corpse_entity_id == 0 return;
 
 	// Clear corpse ownership if it still exists.
-	foreach corpse: component_iterator(Corpse) {
+	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
 		if corpse.entity.id != player.dragging_corpse_entity_id continue;
@@ -3201,7 +3201,7 @@ rr_drag_body_force_drop_for_player :: proc(player: Player) {
 		player.drag_body_sfx_id = 0;
 	}
 	// Ensure we snap back to base locomotion immediately.
-	player->set_trigger("RESET");
+	player.set_trigger("RESET");
 }
 
 rr_drag_body_update_anim_state :: proc(player: Player, dt: float) {
@@ -3214,7 +3214,7 @@ rr_drag_body_update_anim_state :: proc(player: Player, dt: float) {
 	dragging := player.dragging_corpse_entity_id != 0;
 	// Also trigger drag anim when live-dragging a trapped player (GGG)
 	if !dragging {
-		gm := player.entity->get_component(GGG_Module);
+		gm := player.entity.get_component(GGG_Module);
 		if gm != null && gm.dragging_live_player_id != 0 {
 			dragging = true;
 		}
@@ -3258,13 +3258,13 @@ rr_drag_body_update_anim_state :: proc(player: Player, dt: float) {
 
 	// Update state machine bools BEFORE firing RESET so the exit transitions
 	// (drag_body_enabled == false) are already active when the state machine evaluates.
-	player.animator.instance.state_machine->set_bool("drag_body_enabled", dragging);
-	player.animator.instance.state_machine->set_bool("drag_body_moving", moving);
-	player.animator.instance.state_machine->set_bool("drag_body_right", true);
+	player.animator.instance.state_machine.set_bool("drag_body_enabled", dragging);
+	player.animator.instance.state_machine.set_bool("drag_body_moving", moving);
+	player.animator.instance.state_machine.set_bool("drag_body_right", true);
 
 	// If drag just ended, reset to base locomotion state.
 	if player.drag_body_was_dragging && !dragging {
-		player->set_trigger("RESET");
+		player.set_trigger("RESET");
 	}
 	player.drag_body_was_dragging = dragging;
 }
@@ -3279,32 +3279,32 @@ Task_Interactable :: class : Component {
 		if task_id_override.count > 0 {
 			return task_id_override;
 		}
-		return this.entity->get_name();
+		return this.entity.get_name();
 	}
 
     ao_start :: proc(using this: Task_Interactable) {
 		if interactable == null {
 			return;
 		}
-        interactable->set_listener(this);
+        interactable.set_listener(this);
 
 		// Register this interactable's world position as a destination for its task id.
-		rr_register_task_destination(this->get_task_id(), this.entity.world_position);
+		rr_register_task_destination(this.get_task_id(), this.entity.world_position);
     }
 
     on_interact :: proc(using this: Task_Interactable, player: Player) {
-		task_id := this->get_task_id();
+		task_id := this.get_task_id();
         for i: 0..player.active_tasks.elements.count-1 {
             task := player.active_tasks.elements[i];
             if task.id == task_id && !task.started && !task.completed {
-                task->start_attempt(player);
+                task.start_attempt(player);
                 break;
             }
         }
     }
 
     can_use :: proc(using this: Task_Interactable, player: Player) -> bool {
-		task_id := this->get_task_id();
+		task_id := this.get_task_id();
 
 		// Mini-werewolf infection blocks normal task completion until cured.
 		if player != null && player.werewolf_infected {
@@ -3374,16 +3374,16 @@ Call_Meeting_Interactable :: class : Component {
     interactable: Interactable @ao_serialize;
     
     ao_start :: proc(using this: Call_Meeting_Interactable) {
-        interactable->set_listener(this);
+        interactable.set_listener(this);
     }
 
     ao_update :: proc(using this: Call_Meeting_Interactable, dt: float) {
         now := get_time();
         if now < meeting_cooldown_ends_at {
             remaining := (meeting_cooldown_ends_at - now).(int) + 1;
-            interactable->set_text(format_string("Call Meeting (%s)", {remaining}));
+            interactable.set_text(format_string("Call Meeting (%s)", {remaining}));
         } else {
-            interactable->set_text("Call Meeting");
+            interactable.set_text("Call Meeting");
         }
     }
 
@@ -3392,7 +3392,7 @@ Call_Meeting_Interactable :: class : Component {
         if get_time() < meeting_cooldown_ends_at return;
 		// Block meetings while any sabotage is active.
 		if rr_power_outage_active || rr_comms_outage_active || rr_lockdown_active {
-			player->Notify("Can't call a meeting during a sabotage!");
+			player.Notify("Can't call a meeting during a sabotage!");
 			return;
 		}
         start_meeting(false, player);
@@ -3417,9 +3417,9 @@ Report_Corpse_Interactable :: class : Interactable {
 	cooldown_ends_at: float;
 
 	ao_start :: method() {
-		this->set_listener(this);
-		this->set_text("Report");
-		this->set_hold_text("Reporting...");
+		this.set_listener(this);
+		this.set_text("Report");
+		this.set_hold_text("Reporting...");
 		// Match the old report ability's feel (range ~5m, but prompt shouldn't be huge).
 		radius = 3.0;
 		prompt_offset = v2.{0, 1.0};
@@ -3439,7 +3439,7 @@ Report_Corpse_Interactable :: class : Interactable {
 		// Brief lockout after an unwrap so report doesn't fire in the same gesture.
 		if get_time() < cooldown_ends_at return false;
 
-		corpse := entity->get_component(Corpse);
+		corpse := entity.get_component(Corpse);
 		if corpse == null return false;
 
 		// Wrapped corpses must be unwrapped before they can be reported.
@@ -3465,14 +3465,14 @@ Report_Corpse_Interactable :: class : Interactable {
 
 	on_interact :: method(player: Player) {
 		// If already reported, just notify the player and don't start a meeting.
-		corpse := entity->get_component(Corpse);
+		corpse := entity.get_component(Corpse);
 		if corpse != null && corpse.has_been_reported {
-			player->Notify("This body has already been reported.");
+			player.Notify("This body has already been reported.");
 			return;
 		}
 
 		// Mark ALL existing corpses as reported so they can't trigger another meeting.
-		foreach c: component_iterator(Corpse) {
+		for c: component_iterator(Corpse) {
 			if c == null continue;
 			if !#alive(c.entity) continue;
 			c.has_been_reported = true;
@@ -3490,9 +3490,9 @@ Unwrap_Corpse_Interactable :: class : Interactable {
 	cooldown_ends_at: float;
 
 	ao_start :: method() {
-		this->set_listener(this);
-		this->set_text("Unwrap");
-		this->set_hold_text("Unwrapping...");
+		this.set_listener(this);
+		this.set_text("Unwrap");
+		this.set_hold_text("Unwrapping...");
 		radius = 3.0;
 		required_hold_time = GGG_UNWRAP_HOLD_TIME;
 		prompt_offset = v2.{0, 1.0};
@@ -3505,7 +3505,7 @@ Unwrap_Corpse_Interactable :: class : Interactable {
 		if player.player_state != Player_State.ALIVE return false;
 		if player.player_type == Player_Type.TRAITOR return false;
 		if get_time() < cooldown_ends_at return false;
-		corpse := entity->get_component(Corpse);
+		corpse := entity.get_component(Corpse);
 		if corpse == null return false;
 		if !corpse.ggg_is_wrapped return false;
 		if corpse.has_been_reported return false;
@@ -3513,19 +3513,19 @@ Unwrap_Corpse_Interactable :: class : Interactable {
 	}
 
 	on_interact :: method(player: Player) {
-		corpse := entity->get_component(Corpse);
+		corpse := entity.get_component(Corpse);
 		if corpse == null return;
 		corpse.ggg_is_wrapped = false;
 		// Restore the pre-wrap death animation visually.
-		spine := entity->get_component(Spine_Animator);
+		spine := entity.get_component(Spine_Animator);
 		if spine != null && spine.instance != null {
 			restore := corpse.ggg_pre_wrap_death_anim.count > 0 ? corpse.ggg_pre_wrap_death_anim : (corpse.death_anim.count > 0 ? corpse.death_anim : "Death_No_HP");
-			spine.instance->set_animation(restore, false, 0, 1000.0);
+			spine.instance.set_animation(restore, false, 0, 1000.0);
 			corpse.death_anim = restore;
 		}
 		cooldown_ends_at = get_time() + GGG_UNWRAP_COOLDOWN;
 		// Lock out reporting briefly so it doesn't fire in the same interaction gesture.
-		report := entity->get_component(Report_Corpse_Interactable);
+		report := entity.get_component(Report_Corpse_Interactable);
 		if report != null {
 			report.cooldown_ends_at = get_time() + 1.0;
 		}
@@ -3534,7 +3534,7 @@ Unwrap_Corpse_Interactable :: class : Interactable {
 
 destroy_corpses_for_player :: proc(player_entity_id: u64) {
     corpses_to_destroy: List(Entity);
-    foreach corpse: component_iterator(Corpse) {
+    for corpse: component_iterator(Corpse) {
         if corpse.owner_player_entity_id == player_entity_id {
             append(ref corpses_to_destroy, corpse.entity);
         }
@@ -3543,7 +3543,7 @@ destroy_corpses_for_player :: proc(player_entity_id: u64) {
     for i: 0..corpses_to_destroy.elements.count-1 {
         e := corpses_to_destroy.elements[i];
         if #alive(e) {
-            e->destroy();
+            e.destroy();
         }
     }
 }
@@ -3582,10 +3582,10 @@ Corpse :: class : Component {
 
 		// Show "Already reported" world-space text when the local player is nearby.
 		if has_been_reported {
-			foreach p: component_iterator(Player) {
+			for p: component_iterator(Player) {
 				if p == null continue;
 				if !#alive(p.entity) continue;
-				if !p->is_local() continue;
+				if !p.is_local() continue;
 				if p.player_state != Player_State.ALIVE continue;
 
 				dist := length(p.entity.world_position - entity.world_position);
@@ -3597,7 +3597,7 @@ Corpse :: class : Component {
 					UI.push_z(text_pos.y);
 					defer UI.pop_z();
 
-					text_rect := Rect{text_pos, text_pos}->grow(0.15, 1.5, 0.15, 1.5);
+					text_rect := Rect{text_pos, text_pos}.grow(0.15, 1.5, 0.15, 1.5);
 					ts := UI.default_text_settings();
 					ts.size = 0.30;
 					ts.color = v4.{1.0, 0.85, 0.25, 1.0};
@@ -3612,9 +3612,9 @@ Corpse :: class : Component {
 			}
 		}
 
-		spine := entity->get_component(Spine_Animator);
+		spine := entity.get_component(Spine_Animator);
 		if spine == null return;
-		spine->awaken();
+		spine.awaken();
 		if spine.instance == null return;
 
 		// Detect drag state changes to avoid restarting the drag animation every frame.
@@ -3622,12 +3622,12 @@ Corpse :: class : Component {
 			if dragged_by_player_entity_id != 0 {
 				// Wrapped corpses keep their tinfoil pose while dragged.
 				if !ggg_is_wrapped {
-					spine.instance->set_animation("004RAND/dead_body_drag", true, 0);
+					spine.instance.set_animation("004RAND/dead_body_drag", true, 0);
 				}
 			} else {
 				// Dropped: restore the original corpse pose by fast-forwarding the death anim.
 				restore := death_anim.count > 0 ? death_anim : "Death_No_HP";
-				spine.instance->set_animation(restore, false, 0, 1000.0);
+				spine.instance.set_animation(restore, false, 0, 1000.0);
 			}
 			last_dragged_by_player_entity_id = dragged_by_player_entity_id;
 		}
@@ -3649,25 +3649,25 @@ Corpse :: class : Component {
 			alpha := clamp(dt * 6.0, 0.0, 1.0); // smoother follow (less jitter)
 			new_pos := v2.{lerp(cur.x, target.x, alpha), lerp(cur.y, target.y, alpha)};
 
-			entity->set_local_position(new_pos);
-			entity->set_local_rotation(dragger.entity.world_rotation);
+			entity.set_local_position(new_pos);
+			entity.set_local_rotation(dragger.entity.world_rotation);
 			// Flip corpse via scale instead of rotation.
 			corpse_scale := dragger.entity.world_scale;
 			corpse_scale.x = -corpse_scale.x;
-			entity->set_local_scale(corpse_scale);
+			entity.set_local_scale(corpse_scale);
 		}
 	}
 }
 
 draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
 	// Size scales with the window so it stays readable across resolutions.
-	size := window_rect->height() * 0.065;
+	size := window_rect.height() * 0.065;
 	if size < 34.0 { size = 34.0; }
 	if size > 78.0 { size = 78.0; }
 	pad := size * 0.45;
 
-	anchor := window_rect->top_right_rect()->offset_unscaled(-pad, -pad);
-	btn := anchor->grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
+	anchor := window_rect.top_right_rect().offset_unscaled(-pad, -pad);
+	btn := anchor.grow_unscaled(size * 0.5, size * 0.5, size * 0.5, size * 0.5);
 
 	UI.push_id("minimap_close");
 	defer UI.pop_id();
@@ -3679,8 +3679,8 @@ draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
 	close_icon := get_asset(Texture_Asset, "sprites/icons/close_icon.png");
 	if close_icon != null {
 		// Icon is the button (no background). Draw it big.
-		icon_rect := btn->inset(max(2.0, size * 0.06));
-		UI.quad(icon_rect->fit_aspect(close_icon->get_aspect()), close_icon, v4.{1, 1, 1, 1});
+		icon_rect := btn.inset(max(2.0, size * 0.06));
+		UI.quad(icon_rect.fit_aspect(close_icon.get_aspect()), close_icon, v4.{1, 1, 1, 1});
 	} else {
 		ts := UI.default_text_settings();
 		ts.size = size * 0.8;
@@ -3707,14 +3707,14 @@ rr_rects_overlap :: proc(a: Rect, b: Rect) -> bool {
 
 rr_draw_task_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, color: v4) {
 	p_ui := rr_minimap_world_to_ui(map_rect, world_pos);
-	size := map_rect->height() * 0.022;
+	size := map_rect.height() * 0.022;
 	if size < 10.0 { size = 10.0; }
 	if size > 26.0 { size = 26.0; }
 
 	icon := get_asset(Texture_Asset, "sprites/task_icon.png");
-	r := Rect{p_ui, p_ui}->grow_unscaled(size, size, size, size);
+	r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
 	if icon != null {
-		UI.quad(r->fit_aspect(icon->get_aspect()), icon, color);
+		UI.quad(r.fit_aspect(icon.get_aspect()), icon, color);
 	} else {
 		UI.quad(r, core_globals.white_sprite, color);
 	}
@@ -3738,7 +3738,7 @@ rr_pyro_room_color :: proc(idx: int) -> v4 {
 		case 8:  return v4.{0.5,  0.3,  1.0,  1.0}; // lavender        (~270°)
 		case 9:  return v4.{0.85, 0.0,  1.0,  1.0}; // purple          (~290°)
 		case 10: return v4.{1.0,  0.1,  0.65, 1.0}; // magenta         (~320°)
-		case:    return v4.{1.0,  0.05, 0.45, 1.0}; // hot pink/rose   (~340°)
+		default:    return v4.{1.0,  0.05, 0.45, 1.0}; // hot pink/rose   (~340°)
 	}
 }
 
@@ -3758,23 +3758,23 @@ rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 	// entity_iterator() is stable for scene entities, so this is consistent every frame.
 	room_idx := 0;
 
-	foreach e: entity_iterator() {
+	for e: entity_iterator() {
 		if e == null continue;
 		if !#alive(e) continue;
-		if e->get_name() != "Props" continue;
+		if e.get_name() != "Props" continue;
 
 		// Only show rooms that have Min/Max bounds markers (eligible for fire).
 		has_bounds := false;
-		bounds_check := e.first_child;
+		bounds_check := e.get_first_child();
 		while bounds_check != null {
 			if #alive(bounds_check) {
-				bc_name := bounds_check->get_name();
+				bc_name := bounds_check.get_name();
 				if bc_name == "MIN" || bc_name == "MAX" {
 					has_bounds = true;
 					break;
 				}
 			}
-			bounds_check = bounds_check.next_sibling;
+			bounds_check = bounds_check.get_next_sibling();
 		}
 		if !has_bounds continue;
 
@@ -3792,7 +3792,7 @@ rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 		}
 		if !is_objective_room continue;
 
-		room_state   := e->get_component(RR_Pyro_Room_Fire_State);
+		room_state   := e.get_component(RR_Pyro_Room_Fire_State);
 		fiery_locked := room_state != null && room_state.fiery_locked;
 
 		room_col: v4;
@@ -3804,19 +3804,19 @@ rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 		room_idx += 1;
 
 		// Walk direct children; only actual props carry a Sprite_Renderer here.
-		child := e.first_child;
+		child := e.get_first_child();
 		while child != null {
-			next := child.next_sibling;
+			next := child.get_next_sibling();
 
 			if #alive(child) {
-				sprite := child->get_component(Sprite_Renderer);
+				sprite := child.get_component(Sprite_Renderer);
 				if sprite != null {
 					col: v4;
 
 					if fiery_locked {
 						col = burned_col;
 					} else {
-						fire := child->get_component(RR_Prop_Fire_Target);
+						fire := child.get_component(RR_Prop_Fire_Target);
 						if fire != null && fire.active {
 							// Prop is actively burning: flash red.
 							col = burning_col;
@@ -3827,19 +3827,19 @@ rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 					}
 
 					p_ui := rr_minimap_world_to_ui(map_rect, child.world_position);
-					size := map_rect->height() * 0.022;
+					size := map_rect.height() * 0.022;
 					if size < 10.0 { size = 10.0; }
 					if size > 26.0 { size = 26.0; }
 
-					r := Rect{p_ui, p_ui}->grow_unscaled(size, size, size, size);
+					r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
 					if icon != null {
-						UI.quad(r->fit_aspect(icon->get_aspect()), icon, col);
+						UI.quad(r.fit_aspect(icon.get_aspect()), icon, col);
 					} else {
 						UI.quad(r, core_globals.white_sprite, col);
 					}
 					// Fire overlay on top, uncolored.
 					if icon_fire != null {
-						UI.quad(r->fit_aspect(icon_fire->get_aspect()), icon_fire, v4.{1.0, 1.0, 1.0, 1.0});
+						UI.quad(r.fit_aspect(icon_fire.get_aspect()), icon_fire, v4.{1.0, 1.0, 1.0, 1.0});
 					}
 				}
 			}
@@ -3851,7 +3851,7 @@ rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 
 rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 	if player == null return;
-	if !player->is_local() return;
+	if !player.is_local() return;
 
 	// Pyromaniac: show all igniteable prop locations with the pyro icon.
 	if player.player_role == Player_Role.PYROMANIAC {
@@ -3915,7 +3915,7 @@ update_minimap_ui :: proc(player: Player) {
 
 	// Don't show the minimap while a living player is in a task attempt.
 	// (Ghosts can always use the map; voting can always use the map.)
-	if game_state == Game_State.INGAME && is_alive && player->has_task_in_progress() {
+	if game_state == Game_State.INGAME && is_alive && player.has_task_in_progress() {
 		player.show_minimap = false;
 		return;
 	}
@@ -3931,10 +3931,10 @@ update_minimap_ui :: proc(player: Player) {
 	MAP_HALF_SIZE :: 55.0; // role icon uses 50.0
 	MAP_PAD_X :: 20;
 	MAP_PAD_Y :: 250;
-	btn_center := safe->top_right_rect()->offset(-MAP_HALF_SIZE - MAP_PAD_X, -MAP_HALF_SIZE - MAP_PAD_Y);
-	btn_rect := btn_center->grow(MAP_HALF_SIZE);
+	btn_center := safe.top_right_rect().offset(-MAP_HALF_SIZE - MAP_PAD_X, -MAP_HALF_SIZE - MAP_PAD_Y);
+	btn_rect := btn_center.grow(MAP_HALF_SIZE);
 
-	if game_state == Game_State.INGAME && player->is_chat_open() {
+	if game_state == Game_State.INGAME && player.is_chat_open() {
 		// Mirror `update_tasks_ui` panel layout (see `scripts/tasks.csl`).
 		should_show_task_panel := false;
 		if rr_power_outage_active || rr_comms_outage_active {
@@ -3965,19 +3965,19 @@ update_minimap_ui :: proc(player: Player) {
 			PROGRESS_EXTRA_W :: 120.0;
 			PANEL_Y_OFFSET :: -20.0;
 
-			panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
-			header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
-			progress_rect := header_rect->top_left_rect()->offset(0.0, 48.0)->grow(0.0, PANEL_W + PROGRESS_EXTRA_W, PROGRESS_H, 0.0);
+			panel_anchor := layout_safe.cut_left(PANEL_W).inset(350, 0, 300, 20).top_left_rect().offset(0.0, PANEL_Y_OFFSET);
+			header_rect := panel_anchor.grow(0.0, PANEL_W, HEADER_H, 0.0);
+			progress_rect := header_rect.top_left_rect().offset(0.0, 48.0).grow(0.0, PANEL_W + PROGRESS_EXTRA_W, PROGRESS_H, 0.0);
 
 			if rr_rects_overlap(btn_rect, progress_rect) {
-				btn_rect = btn_rect->offset(295.0, -54.0);
+				btn_rect = btn_rect.offset(295.0, -54.0);
 			}
 		}
 
 		if should_show_task_panel {
 			task_panel_rect: Rect;
 			if rr_power_outage_active || rr_comms_outage_active {
-				task_panel_rect = layout_safe->cut_left(320)->inset(250, 0, 250, 10);
+				task_panel_rect = layout_safe.cut_left(320).inset(250, 0, 250, 10);
 			} else {
 				// Mirror `update_tasks_ui` layout for overlap checks.
 				PANEL_W :: 300.0;
@@ -3988,10 +3988,10 @@ update_minimap_ui :: proc(player: Player) {
 				PANEL_Y_OFFSET :: -20.0;
 
 				list_h := (player.active_tasks.elements.count.(float)) * ROW_H + (LIST_PAD * 2.0);
-				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
+				panel_anchor := layout_safe.cut_left(PANEL_W).inset(350, 0, 300, 20).top_left_rect().offset(0.0, PANEL_Y_OFFSET);
 
-				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
-				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				header_rect := panel_anchor.grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 
 				// Bounding box for overlap.
 				task_panel_rect = Rect{
@@ -4001,7 +4001,7 @@ update_minimap_ui :: proc(player: Player) {
 			}
 
 			if rr_rects_overlap(btn_rect, task_panel_rect) {
-				btn_rect = btn_rect->offset(295.0, -54.0);
+				btn_rect = btn_rect.offset(295.0, -54.0);
 			}
 		}
 
@@ -4019,39 +4019,39 @@ update_minimap_ui :: proc(player: Player) {
 			if player.player_role == Player_Role.HITMAN {
 				row_count := 4;
 				list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
-				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
-				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
-				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				panel_anchor := layout_safe.cut_left(PANEL_W).inset(350, 0, 300, 20).top_left_rect().offset(0.0, PANEL_Y_OFFSET);
+				header_rect := panel_anchor.grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 				role_panel_rect = Rect{v2.{panel_anchor.min.x, list_rect.min.y}, v2.{panel_anchor.min.x + PANEL_W, header_rect.max.y}};
 				has_role_panel = true;
 			} else if player.player_role == Player_Role.PIRATE {
 				row_count := 3;
 				list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
-				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
-				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
-				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				panel_anchor := layout_safe.cut_left(PANEL_W).inset(350, 0, 300, 20).top_left_rect().offset(0.0, PANEL_Y_OFFSET);
+				header_rect := panel_anchor.grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 				role_panel_rect = Rect{v2.{panel_anchor.min.x, list_rect.min.y}, v2.{panel_anchor.min.x + PANEL_W, header_rect.max.y}};
 				has_role_panel = true;
 			} else if player.player_role == Player_Role.WEREWOLF {
 				row_count := 4;
 				list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
-				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
-				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
-				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				panel_anchor := layout_safe.cut_left(PANEL_W).inset(350, 0, 300, 20).top_left_rect().offset(0.0, PANEL_Y_OFFSET);
+				header_rect := panel_anchor.grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 				role_panel_rect = Rect{v2.{panel_anchor.min.x, list_rect.min.y}, v2.{panel_anchor.min.x + PANEL_W, header_rect.max.y}};
 				has_role_panel = true;
 			} else if player.player_role == Player_Role.GOO_GOO_GAGA {
 				row_count := 4;
 				list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
-				panel_anchor := layout_safe->cut_left(PANEL_W)->inset(350, 0, 300, 20)->top_left_rect()->offset(0.0, PANEL_Y_OFFSET);
-				header_rect := panel_anchor->grow(0.0, PANEL_W, HEADER_H, 0.0);
-				list_rect := header_rect->bottom_left_rect()->grow(0.0, PANEL_W, list_h, 0.0);
+				panel_anchor := layout_safe.cut_left(PANEL_W).inset(350, 0, 300, 20).top_left_rect().offset(0.0, PANEL_Y_OFFSET);
+				header_rect := panel_anchor.grow(0.0, PANEL_W, HEADER_H, 0.0);
+				list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
 				role_panel_rect = Rect{v2.{panel_anchor.min.x, list_rect.min.y}, v2.{panel_anchor.min.x + PANEL_W, header_rect.max.y}};
 				has_role_panel = true;
 			}
 
 			if has_role_panel && rr_rects_overlap(btn_rect, role_panel_rect) {
-				btn_rect = btn_rect->offset(295.0, -54.0);
+				btn_rect = btn_rect.offset(295.0, -54.0);
 			}
 		}
 	}
@@ -4069,8 +4069,8 @@ update_minimap_ui :: proc(player: Player) {
 	rr_ui_apply_button_click_sound(ref btn_bs);
 	interact := UI.button(btn_rect, btn_bs, .{}, ""); // no background; icon is the button
 	if map_icon != null {
-		icon_rect := btn_rect->inset(4);
-		UI.quad(icon_rect->fit_aspect(map_icon->get_aspect()), map_icon, v4.{1, 1, 1, 1});
+		icon_rect := btn_rect.inset(4);
+		UI.quad(icon_rect.fit_aspect(map_icon.get_aspect()), map_icon, v4.{1, 1, 1, 1});
 	} else {
 		// Fallback
 		ts := UI.default_text_settings();
@@ -4113,20 +4113,20 @@ update_minimap_ui :: proc(player: Player) {
 	}
 
 	map_tex := get_asset(Texture_Asset, "sprites/map.png");
-	content := screen->inset(40.0, 80.0, 120.0, 80.0);
-	map_rect := content->fit_aspect(map_tex->get_aspect());
+	content := screen.inset(40.0, 80.0, 120.0, 80.0);
+	map_rect := content.fit_aspect(map_tex.get_aspect());
 	UI.quad(map_rect, map_tex, v4.{1, 1, 1, 1});
 
 	// Local player marker
 	{
 		p_ui := rr_minimap_world_to_ui(map_rect, player.entity.world_position);
-		dot_size := map_rect->height() * 0.018;
+		dot_size := map_rect.height() * 0.018;
 		if dot_size < 10.0 { dot_size = 10.0; }
 		if dot_size > 22.0 { dot_size = 22.0; }
-		dot := Rect{p_ui, p_ui}->grow_unscaled(dot_size, dot_size, dot_size, dot_size);
+		dot := Rect{p_ui, p_ui}.grow_unscaled(dot_size, dot_size, dot_size, dot_size);
 		player_icon := get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_schleem.png");
 		if player_icon != null {
-			UI.quad(dot->fit_aspect(player_icon->get_aspect()), player_icon, v4.{1, 1, 1, 0.95});
+			UI.quad(dot.fit_aspect(player_icon.get_aspect()), player_icon, v4.{1, 1, 1, 0.95});
 		} else {
 			// Fallback if the asset is missing.
 			UI.quad(dot, core_globals.white_sprite, v4.{0.2, 0.9, 0.3, 0.95});
@@ -4137,53 +4137,53 @@ update_minimap_ui :: proc(player: Player) {
 	rr_draw_task_markers_on_minimap(player, map_rect);
 
 	// Pirate treasure dig spots (local-only).
-	if player->is_local() && player.player_role == Player_Role.PIRATE {
+	if player.is_local() && player.player_role == Player_Role.PIRATE {
 		icon := get_asset(Texture_Asset, "sprites/icons/pirate/dig_for_treasure.png");
 		if icon != null {
-			size := map_rect->height() * 0.030;
+			size := map_rect.height() * 0.030;
 			if size < 14.0 { size = 14.0; }
 			if size > 42.0 { size = 42.0; }
 
-			foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+			for spot: component_iterator(Pirate_Treasure_Dig_Spot) {
 				if spot == null continue;
 				if spot.owner_player_entity_id != player.entity.id continue;
 				if spot.is_dug continue;
 
 				p_ui := rr_minimap_world_to_ui(map_rect, spot.entity.world_position);
-				r := Rect{p_ui, p_ui}->grow_unscaled(size, size, size, size);
-				UI.quad(r->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
+				r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
+				UI.quad(r.fit_aspect(icon.get_aspect()), icon, v4.{1, 1, 1, 1});
 			}
 		}
 	}
 
 	// --- GGG Nest: placement mode (runs on local+server so both sides see the click) ---
-	if player->is_local_or_server() && player.player_role == Player_Role.GOO_GOO_GAGA {
-		gm_map := player.entity->get_component(GGG_Module);
+	if player.is_local_or_server() && player.player_role == Player_Role.GOO_GOO_GAGA {
+		gm_map := player.entity.get_component(GGG_Module);
 		if gm_map != null {
 			// Draw nest marker on minimap (if placed)
 			if gm_map.nest_placed {
 				nest_icon := get_asset(Texture_Asset, "sprites/icons/ggg/Nest_icon.png");
 				if nest_icon != null {
-					nest_size := map_rect->height() * 0.035;
+					nest_size := map_rect.height() * 0.035;
 					if nest_size < 16.0 { nest_size = 16.0; }
 					if nest_size > 48.0 { nest_size = 48.0; }
 					nest_ui := rr_minimap_world_to_ui(map_rect, gm_map.nest_world_pos);
-					nest_r := Rect{nest_ui, nest_ui}->grow_unscaled(nest_size, nest_size, nest_size, nest_size);
+					nest_r := Rect{nest_ui, nest_ui}.grow_unscaled(nest_size, nest_size, nest_size, nest_size);
 					nest_color := v4.{1.0, 0.85, 0.0, 1.0};
 					if gm_map.nest_destroyed {
 						nest_color = v4.{0.4, 0.4, 0.4, 0.6};
 					}
-					UI.quad(nest_r->fit_aspect(nest_icon->get_aspect()), nest_icon, nest_color);
+					UI.quad(nest_r.fit_aspect(nest_icon.get_aspect()), nest_icon, nest_color);
 				}
 
 				// Teleport button (if consumed portal maker)
 				if gm_map.consumed_portal_maker && !gm_map.nest_destroyed {
 					UI.push_id("ggg_nest_tp");
 					defer UI.pop_id();
-					tp_size := map_rect->height() * 0.06;
+					tp_size := map_rect.height() * 0.06;
 					if tp_size < 30.0 { tp_size = 30.0; }
 					nest_ui2 := rr_minimap_world_to_ui(map_rect, gm_map.nest_world_pos);
-					tp_rect := Rect{nest_ui2, nest_ui2}->grow_unscaled(tp_size, tp_size, tp_size, tp_size)->offset_unscaled(0.0, tp_size * 2.0);
+					tp_rect := Rect{nest_ui2, nest_ui2}.grow_unscaled(tp_size, tp_size, tp_size, tp_size).offset_unscaled(0.0, tp_size * 2.0);
 					tp_bs: Button_Settings = .{};
 					rr_ui_apply_button_click_sound(ref tp_bs);
 					tp_interact := UI.button(tp_rect, tp_bs, .{}, "TP");
@@ -4197,23 +4197,23 @@ update_minimap_ui :: proc(player: Player) {
 	}
 
 	// Draw nest marker for ALL players if sheriff revealed it
-	foreach nest_comp: component_iterator(GGG_Nest) {
+	for nest_comp: component_iterator(GGG_Nest) {
 		if nest_comp == null continue;
 		if !nest_comp.sheriff_revealed continue;
 		if !#alive(nest_comp.entity) continue;
 		nest_icon2 := get_asset(Texture_Asset, "sprites/icons/ggg/swarm.png");
 		if nest_icon2 != null {
-			n_size := map_rect->height() * 0.035;
+			n_size := map_rect.height() * 0.035;
 			if n_size < 16.0 { n_size = 16.0; }
 			n_ui := rr_minimap_world_to_ui(map_rect, nest_comp.entity.world_position);
-			n_r := Rect{n_ui, n_ui}->grow_unscaled(n_size, n_size, n_size, n_size);
-			UI.quad(n_r->fit_aspect(nest_icon2->get_aspect()), nest_icon2, v4.{1.0, 0.3, 0.3, 1.0});
+			n_r := Rect{n_ui, n_ui}.grow_unscaled(n_size, n_size, n_size, n_size);
+			UI.quad(n_r.fit_aspect(nest_icon2.get_aspect()), nest_icon2, v4.{1.0, 0.3, 0.3, 1.0});
 		}
 	}
 
 	// --- Mimicer: Void Pillar icons + click-to-teleport ---
-	if player->is_local_or_server() && player.player_role == Player_Role.MIMICER {
-		mm_map := player.entity->get_component(Mimicer_Module);
+	if player.is_local_or_server() && player.player_role == Player_Role.MIMICER {
+		mm_map := player.entity.get_component(Mimicer_Module);
 		if mm_map != null {
 			tp_icon := get_asset(Texture_Asset, "sprites/icons/mimicer/teleport.png");
 			if tp_icon != null {
@@ -4221,16 +4221,16 @@ update_minimap_ui :: proc(player: Player) {
 					pillar_ent := mm_map.void_pillars[pi];
 					if pillar_ent == null continue;
 					if !#alive(pillar_ent) continue;
-					vp_comp := pillar_ent->get_component(Void_Pillar);
+					vp_comp := pillar_ent.get_component(Void_Pillar);
 					if vp_comp == null continue;
 
 					is_active := !vp_comp.is_smoldered;
 
 					pillar_ui := rr_minimap_world_to_ui(map_rect, pillar_ent.world_position);
-					pillar_size := map_rect->height() * 0.035;
+					pillar_size := map_rect.height() * 0.035;
 					if pillar_size < 16.0 { pillar_size = 16.0; }
 					if pillar_size > 48.0 { pillar_size = 48.0; }
-					pillar_r := Rect{pillar_ui, pillar_ui}->grow_unscaled(pillar_size, pillar_size, pillar_size, pillar_size);
+					pillar_r := Rect{pillar_ui, pillar_ui}.grow_unscaled(pillar_size, pillar_size, pillar_size, pillar_size);
 
 					// Smoldered pillars are dim/grey, active are purple
 					pillar_col: v4;
@@ -4247,7 +4247,7 @@ update_minimap_ui :: proc(player: Player) {
 						tp_bs: Button_Settings = .{};
 						rr_ui_apply_button_click_sound(ref tp_bs);
 						tp_interact := UI.button(pillar_r, tp_bs, .{}, "");
-						UI.quad(pillar_r->fit_aspect(tp_icon->get_aspect()), tp_icon, pillar_col);
+						UI.quad(pillar_r.fit_aspect(tp_icon.get_aspect()), tp_icon, pillar_col);
 
 						can_tp := mm_map.teleport_cooldown <= 0.0 && game_state == Game_State.INGAME;
 						if !can_tp {
@@ -4260,7 +4260,7 @@ update_minimap_ui :: proc(player: Player) {
 							player.show_minimap = false;
 						}
 					} else {
-						UI.quad(pillar_r->fit_aspect(tp_icon->get_aspect()), tp_icon, pillar_col);
+						UI.quad(pillar_r.fit_aspect(tp_icon.get_aspect()), tp_icon, pillar_col);
 					}
 				}
 
@@ -4271,10 +4271,10 @@ update_minimap_ui :: proc(player: Player) {
 					if !#alive(up_ent) continue;
 
 					up_ui := rr_minimap_world_to_ui(map_rect, up_ent.world_position);
-					pillar_size := map_rect->height() * 0.04;
+					pillar_size := map_rect.height() * 0.04;
 					if pillar_size < 18.0 { pillar_size = 18.0; }
 					if pillar_size > 52.0 { pillar_size = 52.0; }
-					up_r := Rect{up_ui, up_ui}->grow_unscaled(pillar_size, pillar_size, pillar_size, pillar_size);
+					up_r := Rect{up_ui, up_ui}.grow_unscaled(pillar_size, pillar_size, pillar_size, pillar_size);
 					up_col := v4.{1.0, 0.4, 1.0, 1.0};
 
 					if player.player_state == Player_State.ALIVE {
@@ -4283,7 +4283,7 @@ update_minimap_ui :: proc(player: Player) {
 						up_bs: Button_Settings = .{};
 						rr_ui_apply_button_click_sound(ref up_bs);
 						up_interact := UI.button(up_r, up_bs, .{}, "");
-						UI.quad(up_r->fit_aspect(tp_icon->get_aspect()), tp_icon, up_col);
+						UI.quad(up_r.fit_aspect(tp_icon.get_aspect()), tp_icon, up_col);
 
 						can_tp := mm_map.teleport_cooldown <= 0.0 && game_state == Game_State.INGAME;
 						if !can_tp {
@@ -4292,13 +4292,13 @@ update_minimap_ui :: proc(player: Player) {
 
 						if up_interact.clicked && can_tp {
 							pos := up_ent.world_position;
-							player.entity->set_local_position(pos);
+							player.entity.set_local_position(pos);
 							rr_mimicer_spawn_vfx(pos, "004RAND/Teleport", 1.5);
 							mm_map.teleport_cooldown = MIMICER_TELEPORT_COOLDOWN;
 							player.show_minimap = false;
 						}
 					} else {
-						UI.quad(up_r->fit_aspect(tp_icon->get_aspect()), tp_icon, up_col);
+						UI.quad(up_r.fit_aspect(tp_icon.get_aspect()), tp_icon, up_col);
 					}
 				}
 			}
@@ -4335,7 +4335,7 @@ update_minimap_ui :: proc(player: Player) {
 
 draw_traitor_sabotage_map_button :: proc(player: Player) {
 	if player == null return;
-	if !player->is_local_or_server() return;
+	if !player.is_local_or_server() return;
 	if game_state != Game_State.INGAME return;
 	if player.player_state != Player_State.ALIVE return;
 	if player.player_type != Player_Type.TRAITOR return;
@@ -4346,8 +4346,8 @@ draw_traitor_sabotage_map_button :: proc(player: Player) {
 	SABOTAGE_PAD :: 18.0;
 	ABILITY_STACK_Y_OFFSET :: 420.0;
 
-	center := safe->bottom_right_rect()->offset(-SABOTAGE_HALF_SIZE - SABOTAGE_PAD, SABOTAGE_HALF_SIZE + SABOTAGE_PAD + ABILITY_STACK_Y_OFFSET);
-	btn_rect := center->grow(SABOTAGE_HALF_SIZE);
+	center := safe.bottom_right_rect().offset(-SABOTAGE_HALF_SIZE - SABOTAGE_PAD, SABOTAGE_HALF_SIZE + SABOTAGE_PAD + ABILITY_STACK_Y_OFFSET);
+	btn_rect := center.grow(SABOTAGE_HALF_SIZE);
 
 	UI.push_id("sabotage_map");
 	defer UI.pop_id();
@@ -4361,11 +4361,11 @@ draw_traitor_sabotage_map_button :: proc(player: Player) {
 		icon = get_asset(Texture_Asset, "sprites/icons/doors_lock.png");
 	}
 	if icon != null {
-		icon_rect := btn_rect->inset(6);
-		UI.quad(icon_rect->fit_aspect(icon->get_aspect()), icon, v4.{1, 1, 1, 1});
+		icon_rect := btn_rect.inset(6);
+		UI.quad(icon_rect.fit_aspect(icon.get_aspect()), icon, v4.{1, 1, 1, 1});
 	}
 
-	label_rect := btn_rect->bottom_center_rect()->offset(0.0, -10.0)->grow(12.0, 80.0, 12.0, 80.0);
+	label_rect := btn_rect.bottom_center_rect().offset(0.0, -10.0).grow(12.0, 80.0, 12.0, 80.0);
 	label_ts := UI.default_text_settings();
 	label_ts.size = 22;
 	label_ts.color = v4.{1, 1, 1, 1};
@@ -4390,7 +4390,7 @@ rr_find_nearest_pirate_dig_spot_pos :: proc(player: Player) -> v2, bool {
 	best_pos: v2;
 	found := false;
 
-	foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+	for spot: component_iterator(Pirate_Treasure_Dig_Spot) {
 		if spot == null continue;
 		if spot.owner_player_entity_id != player.entity.id continue;
 		if spot.is_dug continue;
@@ -4409,7 +4409,7 @@ rr_find_nearest_pirate_dig_spot_pos :: proc(player: Player) -> v2, bool {
 
 rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 	if player == null return;
-	if !player->is_local() return;
+	if !player.is_local() return;
 	if game_state != Game_State.INGAME return;
 	if player.player_state != Player_State.ALIVE return;
 	if player.player_role != Player_Role.PIRATE return;
@@ -4429,9 +4429,9 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 
 		// Local-only marker at the active dig spot so pirates can quickly identify it.
 		dirt_pos := target_pos + v2.{0.0, -0.08};
-		dirt_rect := Rect{dirt_pos, dirt_pos}->grow(0.58, 0.38, 0.58, 0.38);
+		dirt_rect := Rect{dirt_pos, dirt_pos}.grow(0.58, 0.38, 0.58, 0.38);
 		pulse := 0.9 + 0.1 * sin(get_time() * 4.0);
-		UI.quad(dirt_rect->fit_aspect(dirt_texture->get_aspect()), dirt_texture, v4.{1, 1, 1, pulse});
+		UI.quad(dirt_rect.fit_aspect(dirt_texture.get_aspect()), dirt_texture, v4.{1, 1, 1, pulse});
 	}
 
 	tutorial_arrow_options := Tutorial_Arrow.default_options();
@@ -4447,7 +4447,7 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 
 destroy_pirate_dig_spots_for_player :: proc(player_entity_id: u64) {
 	to_destroy: List(Entity);
-	foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+	for spot: component_iterator(Pirate_Treasure_Dig_Spot) {
 		if spot == null continue;
 		if spot.owner_player_entity_id != player_entity_id continue;
 		append(ref to_destroy, spot.entity);
@@ -4456,7 +4456,7 @@ destroy_pirate_dig_spots_for_player :: proc(player_entity_id: u64) {
 	for i: 0..to_destroy.elements.count-1 {
 		e := to_destroy.elements[i];
 		if #alive(e) {
-			e->destroy();
+			e.destroy();
 		}
 	}
 }
@@ -4472,8 +4472,8 @@ rr_update_door_unlock_interactable :: proc(player: Player) {
 	// Lazy-create the entity + component once.
 	if player.door_unlock_entity == null || !#alive(player.door_unlock_entity) {
 		player.door_unlock_entity = Scene.create_entity();
-		player.door_unlock_entity->set_local_position(v2.{-9999, -9999});
-		player.door_unlock_interactable = player.door_unlock_entity->add_component(Door_Unlock_Interactable);
+		player.door_unlock_entity.set_local_position(v2.{-9999, -9999});
+		player.door_unlock_interactable = player.door_unlock_entity.add_component(Door_Unlock_Interactable);
 		player.door_unlock_interactable.owner_player = player;
 	}
 
@@ -4483,7 +4483,7 @@ rr_update_door_unlock_interactable :: proc(player: Player) {
 	// Only snap to doors during active gameplay.
 	if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
 		interactable.target_door = null;
-		player.door_unlock_entity->set_local_position(v2.{-9999, -9999});
+		player.door_unlock_entity.set_local_position(v2.{-9999, -9999});
 		return;
 	}
 
@@ -4492,7 +4492,7 @@ rr_update_door_unlock_interactable :: proc(player: Player) {
 	best_door: Door = null;
 	best_dist_sq := DOOR_UNLOCK_SEARCH_RADIUS * DOOR_UNLOCK_SEARCH_RADIUS;
 
-	foreach door: component_iterator(Door) {
+	for door: component_iterator(Door) {
 		if door == null continue;
 		if !#alive(door.entity) continue;
 		if door.is_open continue;
@@ -4506,17 +4506,17 @@ rr_update_door_unlock_interactable :: proc(player: Player) {
 
 	if best_door != null {
 		interactable.target_door = best_door;
-		player.door_unlock_entity->set_local_position(best_door.entity.world_position);
+		player.door_unlock_entity.set_local_position(best_door.entity.world_position);
 	} else {
 		interactable.target_door = null;
-		player.door_unlock_entity->set_local_position(v2.{-9999, -9999});
+		player.door_unlock_entity.set_local_position(v2.{-9999, -9999});
 	}
 }
 
 rr_cleanup_door_unlock_interactable :: proc(player: Player) {
 	if player == null return;
 	if player.door_unlock_entity != null && #alive(player.door_unlock_entity) {
-		player.door_unlock_entity->destroy();
+		player.door_unlock_entity.destroy();
 	}
 	player.door_unlock_entity = null;
 	player.door_unlock_interactable = null;
@@ -4542,48 +4542,48 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 
 	// --- Transforming roles (creature rig: transform-in then attack) ---
 	if role == Player_Role.MIMICER {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Mimicer/004RAND_Mimicer.spine"));
-		player.intro_role_spine->enable_skin("normal");
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND/Transform_Monster_End", false, 0);
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Mimicer/004RAND_Mimicer.spine"));
+		player.intro_role_spine.enable_skin("normal");
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND/Transform_Monster_End", false, 0);
 		player.intro_is_creature_rig = true;
 		player.intro_second_anim_name = "004RAND/Slash_With_Hand";
 		player.intro_second_anim_at = 1.3;
 		return;
 	}
 	if role == Player_Role.WEREWOLF {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Werewolf/RAND004_werewolf.spine"));
-		player.intro_role_spine->enable_skin("004RAND/werewolf");
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Werewolf/RAND004_werewolf.spine"));
+		player.intro_role_spine.enable_skin("004RAND/werewolf");
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND_werewolf/Infected_Bitten_Transform", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_werewolf/Infected_Bitten_Transform", false, 0);
 		player.intro_second_anim_name = "004RAND_werewolf/howl";
 		player.intro_second_anim_at = 1.3;
 		return;
 	}
 	if role == Player_Role.GOO_GOO_GAGA {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Ggg/004RAND_GooGooGaGa.spine"));
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("Transform_Monster_End", false, 0);
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Ggg/004RAND_GooGooGaGa.spine"));
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("Transform_Monster_End", false, 0);
 		player.intro_is_creature_rig = true;
 		player.intro_second_anim_name = "Pounce";
 		player.intro_second_anim_at = 1.3;
 		return;
 	}
 	if role == Player_Role.LILY_LOVEBRAIDS {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, rr_lily_get_creature_rig_path()));
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("transform", false, 0);
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, rr_lily_get_creature_rig_path()));
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("transform", false, 0);
 		player.intro_is_creature_rig = true;
 		player.intro_second_anim_name = "action";
 		player.intro_second_anim_at = 1.3;
 		return;
 	}
 	if role == Player_Role.BIG_CHARLIE {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, BC_CREATURE_RIG));
-		player.intro_role_spine->set_skin("BigCharlie_Base");
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("Spawn_Nugget", false, 0);
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, BC_CREATURE_RIG));
+		player.intro_role_spine.set_skin("BigCharlie_Base");
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("Spawn_Nugget", false, 0);
 		player.intro_is_creature_rig = true;
 		player.intro_second_anim_name = "Bone_Snap_Kill";
 		player.intro_second_anim_at = 1.3;
@@ -4592,70 +4592,70 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 
 	// --- Non-transforming roles (role rig with intro/skill anim) ---
 	if role == Player_Role.SHERIFF {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Sheriff/RAND004_sheriff.spine"));
-		player.intro_role_spine->enable_skin("004RAND/sheriff");
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Sheriff/RAND004_sheriff.spine"));
+		player.intro_role_spine.enable_skin("004RAND/sheriff");
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND_sheriff/Sheriff_Intro", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_sheriff/Sheriff_Intro", false, 0);
 	} else if role == Player_Role.DOCTOR {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Doctor/RAND004_doctor.spine"));
-		player.intro_role_spine->enable_skin("004RAND/doctor");
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Doctor/RAND004_doctor.spine"));
+		player.intro_role_spine.enable_skin("004RAND/doctor");
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND_doctor/Intro_Anim", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_doctor/Intro_Anim", false, 0);
 	} else if role == Player_Role.HITMAN {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Hitman/RAND004_hitman.spine"));
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Hitman/RAND004_hitman.spine"));
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND_hitman/Intro_Hitman", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_hitman/Intro_Hitman", false, 0);
 	} else if role == Player_Role.PIRATE {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Pirate/RAND004_pirate.spine"));
-		player.intro_role_spine->enable_skin("004RAND/pirate");
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Pirate/RAND004_pirate.spine"));
+		player.intro_role_spine.enable_skin("004RAND/pirate");
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND_pirate/intro_anim", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_pirate/intro_anim", false, 0);
 	} else if role == Player_Role.CORONER {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Coroner/RAND004_coroner.spine"));
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Coroner/RAND004_coroner.spine"));
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND_Coroner/Intro_Anim", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_Coroner/Intro_Anim", false, 0);
 	} else if role == Player_Role.PRANKSTER {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Trickster/004RAND_Trickster.spine"));
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Trickster/004RAND_Trickster.spine"));
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND_trickster/Trickster_Intro_Anim", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_trickster/Trickster_Intro_Anim", false, 0);
 	} else if role == Player_Role.PYROMANIAC {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Pyro/playercharacter.spine"));
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Pyro/playercharacter.spine"));
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND_pyromaniac/Pyromaniac_Intro", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_pyromaniac/Pyromaniac_Intro", false, 0);
 	} else if role == Player_Role.MOVIE_STAR {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Movie Star/playercharacter.spine"));
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Movie Star/playercharacter.spine"));
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("004RAND_movie_star/Intro_Movie_Star_start", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_movie_star/Intro_Movie_Star_start", false, 0);
 	} else if role == Player_Role.PORTAL_MAKER {
-		player.intro_role_spine->set_skeleton(get_asset(Spine_Asset, "anims/roles/Portal Maker/RAND004_portal_maker.spine"));
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Portal Maker/RAND004_portal_maker.spine"));
 		rr_intro_copy_player_skins(player);
-		player.intro_role_spine->refresh_skins();
-		player.intro_role_spine->set_animation("Portal_Maker/portal_falling_start", false, 0);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("Portal_Maker/portal_falling_start", false, 0);
 	} else {
-		player.intro_role_spine->destroy();
+		player.intro_role_spine.destroy();
 		player.intro_role_spine_ready = false;
 	}
 }
 
 rr_intro_copy_player_skins :: proc(player: Player) {
-	skins := player.animator.instance->get_skins();
+	skins := player.animator.instance.get_skins();
 	for i: 0..skins.count-1 {
-		player.intro_role_spine->enable_skin(skins[i]);
+		player.intro_role_spine.enable_skin(skins[i]);
 	}
-	player.intro_role_spine->set_color_replace_color(player.avatar_color);
+	player.intro_role_spine.set_color_replace_color(player.avatar_color);
 }
 
 rr_intro_cleanup_role_spine :: proc(player: Player) {
 	if player.intro_role_spine_ready {
-		player.intro_role_spine->destroy();
+		player.intro_role_spine.destroy();
 		player.intro_role_spine_ready = false;
 	}
 }

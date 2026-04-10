@@ -143,39 +143,39 @@ LILY_SFX_DOLLHOUSE :: "sfx/traitor_kill_death.wav"; // [ART] Replace with dollho
 // =============================================================================
 
 rr_lily_ensure_creature_entity :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.creature_entity != null && #alive(lm.creature_entity) return;
 
 	ce := Scene.create_entity();
-	ce->set_parent(player.entity, false);
-	ce->set_local_position(v2.{0, 0});
-	ce->set_local_scale(v2.{1, 1});
-	ce->set_local_rotation(0.0);
+	ce.set_parent(player.entity, false);
+	ce.set_local_position(v2.{0, 0});
+	ce.set_local_scale(v2.{1, 1});
+	ce.set_local_rotation(0.0);
 
-	ca := ce->add_component(Spine_Animator);
-	ca->awaken();
+	ca := ce.add_component(Spine_Animator);
+	ca.awaken();
 	lily_rig := get_asset(Spine_Asset, rr_lily_get_creature_rig_path());
 	if ca.instance != null && lily_rig != null {
-		ca.instance->set_skeleton(lily_rig);
-		ca.instance->set_animation("idle", true, 0);
+		ca.instance.set_skeleton(lily_rig);
+		ca.instance.set_animation("idle", true, 0);
 		rr_lily_setup_creature_state_machine(ca);
 		rr_apply_shadow_mask(ca.instance);
 	}
 
-	ce->set_local_enabled(false);
+	ce.set_local_enabled(false);
 	lm.creature_entity = ce;
 	lm.creature_animator = ca;
 }
 
 rr_lily_destroy_creature_entity :: proc(player: Player) {
-	player->remove_invisibility_reason(LILY_INVIS_REASON);
-	player->remove_name_invisibility_reason(LILY_NAME_INVIS_REASON);
+	player.remove_invisibility_reason(LILY_INVIS_REASON);
+	player.remove_name_invisibility_reason(LILY_NAME_INVIS_REASON);
 
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm != null {
 		if lm.creature_entity != null && #alive(lm.creature_entity) {
-			lm.creature_entity->destroy();
+			lm.creature_entity.destroy();
 		}
 		lm.creature_entity = null;
 		lm.creature_animator = null;
@@ -184,42 +184,42 @@ rr_lily_destroy_creature_entity :: proc(player: Player) {
 }
 
 rr_lily_swap_to_creature :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	rr_lily_ensure_creature_entity(player);
 	if lm.creature_entity == null return;
 
-	player->add_invisibility_reason(LILY_INVIS_REASON);
-	player->add_name_invisibility_reason(LILY_NAME_INVIS_REASON);
-	lm.creature_entity->set_local_enabled(true);
+	player.add_invisibility_reason(LILY_INVIS_REASON);
+	player.add_name_invisibility_reason(LILY_NAME_INVIS_REASON);
+	lm.creature_entity.set_local_enabled(true);
 	lm.creature_visible = true;
 
 	if lm.creature_animator != null && lm.creature_animator.instance != null {
 		if lm.creature_animator.instance.state_machine != null {
-			lm.creature_animator.instance.state_machine->set_trigger("spawn_in");
+			lm.creature_animator.instance.state_machine.set_trigger("spawn_in");
 		}
 	}
 }
 
 rr_lily_swap_to_player :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.creature_visible return;
 	if lm.creature_entity != null && #alive(lm.creature_entity) {
-		lm.creature_entity->set_local_enabled(false);
+		lm.creature_entity.set_local_enabled(false);
 	}
 	lm.creature_visible = false;
-	player->remove_invisibility_reason(LILY_INVIS_REASON);
-	player->remove_name_invisibility_reason(LILY_NAME_INVIS_REASON);
+	player.remove_invisibility_reason(LILY_INVIS_REASON);
+	player.remove_name_invisibility_reason(LILY_NAME_INVIS_REASON);
 }
 
 rr_lily_creature_trigger :: proc(player: Player, trigger_name: string) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.creature_animator == null return;
 	if lm.creature_animator.instance == null return;
 	if lm.creature_animator.instance.state_machine != null {
-		lm.creature_animator.instance.state_machine->set_trigger(trigger_name);
+		lm.creature_animator.instance.state_machine.set_trigger(trigger_name);
 	}
 }
 
@@ -229,57 +229,57 @@ rr_lily_creature_trigger :: proc(player: Player, trigger_name: string) {
 
 rr_lily_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 	sm := State_Machine.create();
-	layer := sm->create_layer("main", 0);
+	layer := sm.create_layer("main", 0);
 
-	is_moving := sm->create_variable("is_moving", .BOOL);
-	spawn_in_trigger := sm->create_variable("spawn_in", .TRIGGER);
+	is_moving := sm.create_variable("is_moving", .BOOL);
+	spawn_in_trigger := sm.create_variable("spawn_in", .TRIGGER);
 
 	// Normal locomotion
-	idle_state := layer->create_state("idle", true, 0.0);
-	move_state := layer->create_state("run", true, 0.0);
-	layer->set_initial_state(idle_state);
+	idle_state := layer.create_state("idle", true, 0.0);
+	move_state := layer.create_state("run", true, 0.0);
+	layer.set_initial_state(idle_state);
 
-	idle_to_move := layer->create_transition(idle_state, move_state, false);
-	idle_to_move->create_bool_condition(is_moving, true);
-	move_to_idle := layer->create_transition(move_state, idle_state, false);
-	move_to_idle->create_bool_condition(is_moving, false);
+	idle_to_move := layer.create_transition(idle_state, move_state, false);
+	idle_to_move.create_bool_condition(is_moving, true);
+	move_to_idle := layer.create_transition(move_state, idle_state, false);
+	move_to_idle.create_bool_condition(is_moving, false);
 
 	// Spawn in (from transform)
-	spawn_in_state := layer->create_state("transform", false, 1.0);
-	layer->create_global_transition(spawn_in_state, false)->create_trigger_condition(spawn_in_trigger);
-	layer->create_transition(spawn_in_state, idle_state, true);
+	spawn_in_state := layer.create_state("transform", false, 1.0);
+	layer.create_global_transition(spawn_in_state, false).create_trigger_condition(spawn_in_trigger);
+	layer.create_transition(spawn_in_state, idle_state, true);
 
 	// Action trigger
-	action_trigger := sm->create_variable("action", .TRIGGER);
-	action_state := layer->create_state("action", false, 1.0);
-	layer->create_global_transition(action_state, false)->create_trigger_condition(action_trigger);
-	layer->create_transition(action_state, idle_state, true);
+	action_trigger := sm.create_variable("action", .TRIGGER);
+	action_state := layer.create_state("action", false, 1.0);
+	layer.create_global_transition(action_state, false).create_trigger_condition(action_trigger);
+	layer.create_transition(action_state, idle_state, true);
 
 	// Leap (for tea party / dollhouse activation) — [ART] leap_start/leap_end animations
-	leap_start_trigger := sm->create_variable("leap_start", .TRIGGER);
-	leap_start_state := layer->create_state("leap_start", false, 0.5);
-	layer->create_global_transition(leap_start_state, false)->create_trigger_condition(leap_start_trigger);
-	layer->create_transition(leap_start_state, idle_state, true);
+	leap_start_trigger := sm.create_variable("leap_start", .TRIGGER);
+	leap_start_state := layer.create_state("leap_start", false, 0.5);
+	layer.create_global_transition(leap_start_state, false).create_trigger_condition(leap_start_trigger);
+	layer.create_transition(leap_start_state, idle_state, true);
 
 	// Control (dollhouse puppet control loop)
-	control_start_trigger := sm->create_variable("control_start", .TRIGGER);
-	control_end_trigger := sm->create_variable("control_end", .TRIGGER);
-	control_start_state := layer->create_state("control_start", false, 0.5);
-	control_loop_state := layer->create_state("control_loop", true, 0.0);
-	control_end_state := layer->create_state("control_end", false, 0.5);
+	control_start_trigger := sm.create_variable("control_start", .TRIGGER);
+	control_end_trigger := sm.create_variable("control_end", .TRIGGER);
+	control_start_state := layer.create_state("control_start", false, 0.5);
+	control_loop_state := layer.create_state("control_loop", true, 0.0);
+	control_end_state := layer.create_state("control_end", false, 0.5);
 
-	layer->create_global_transition(control_start_state, false)->create_trigger_condition(control_start_trigger);
-	layer->create_transition(control_start_state, control_loop_state, true);
-	layer->create_global_transition(control_end_state, false)->create_trigger_condition(control_end_trigger);
-	layer->create_transition(control_end_state, idle_state, true);
+	layer.create_global_transition(control_start_state, false).create_trigger_condition(control_start_trigger);
+	layer.create_transition(control_start_state, control_loop_state, true);
+	layer.create_global_transition(control_end_state, false).create_trigger_condition(control_end_trigger);
+	layer.create_transition(control_end_state, idle_state, true);
 
 	// Detransform
-	detransform_trigger := sm->create_variable("detransform", .TRIGGER);
-	detransform_state := layer->create_state("detransform", false, 1.0);
-	layer->create_global_transition(detransform_state, false)->create_trigger_condition(detransform_trigger);
-	layer->create_transition(detransform_state, idle_state, true);
+	detransform_trigger := sm.create_variable("detransform", .TRIGGER);
+	detransform_state := layer.create_state("detransform", false, 1.0);
+	layer.create_global_transition(detransform_state, false).create_trigger_condition(detransform_trigger);
+	layer.create_transition(detransform_state, idle_state, true);
 
-	ca.instance->set_state_machine(sm, true);
+	ca.instance.set_state_machine(sm, true);
 }
 
 // =============================================================================
@@ -287,7 +287,7 @@ rr_lily_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 // =============================================================================
 
 rr_lily_update_creature_anims :: proc(player: Player, dt: float) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.creature_visible return;
 	if lm.creature_animator == null return;
@@ -295,7 +295,7 @@ rr_lily_update_creature_anims :: proc(player: Player, dt: float) {
 	if lm.creature_animator.instance.state_machine == null return;
 
 	moving := length_squared(player.agent.velocity) > 0.01;
-	lm.creature_animator.instance.state_machine->set_bool("is_moving", moving);
+	lm.creature_animator.instance.state_machine.set_bool("is_moving", moving);
 }
 
 // =============================================================================
@@ -303,7 +303,7 @@ rr_lily_update_creature_anims :: proc(player: Player, dt: float) {
 // =============================================================================
 
 rr_lily_force_revert :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	if lm.lily_speed_active {
@@ -321,7 +321,7 @@ rr_lily_force_revert :: proc(player: Player) {
 	lm.is_lily_form = false;
 	lm.skeleton_swap_at = 0.0;
 	rr_lily_swap_to_player(player);
-	player->remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
+	player.remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
 
 	// End active abilities
 	rr_lily_end_tea_party(player);
@@ -336,9 +336,9 @@ rr_lily_force_revert :: proc(player: Player) {
 rr_lily_round_start :: proc(p: Player) {
 	rr_lily_cleanup(p);
 	if p.player_role != Player_Role.LILY_LOVEBRAIDS return;
-	llm := p.entity->get_component(Lily_Module);
+	llm := p.entity.get_component(Lily_Module);
 	if llm == null {
-		llm = p.entity->add_component(Lily_Module);
+		llm = p.entity.add_component(Lily_Module);
 	}
 	llm.braid_points = 0;
 	llm.kills = 0;
@@ -346,7 +346,7 @@ rr_lily_round_start :: proc(p: Player) {
 	llm.creature_visible = false;
 	llm.skeleton_swap_at = 0.0;
 	llm.lily_speed_active = false;
-	llm.strung_player_ids->clear();
+	llm.strung_player_ids.clear();
 	llm.thread_speed_active = false;
 	llm.thread_speed_multiplier = 1.0;
 	llm.hair_tree_entity = null;
@@ -376,14 +376,14 @@ rr_lily_round_start :: proc(p: Player) {
 	llm.tea_table_entity = null;
 	llm.tea_table_animator = null;
 	llm.tea_tray_entity = null;
-	llm.tea_cup_entities->clear();
+	llm.tea_cup_entities.clear();
 	llm.mind_control_active = false;
 	llm.mind_control_target_id = 0;
 	llm.deathbraid_active = false;
 	llm.deathbraid_tree_entity = null;
 	llm.deathbraid_mouth_entity = null;
 	llm.deathbraid_ground_entity = null;
-	llm.web_sense_arrow_targets->clear();
+	llm.web_sense_arrow_targets.clear();
 	p.active_tasks = List(Task_Base).{};
 }
 
@@ -391,14 +391,14 @@ rr_lily_round_start :: proc(p: Player) {
 rr_lily_cleanup :: proc(player: Player) {
 	rr_lily_force_revert(player);
 
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	rr_lily_destroy_creature_entity(player);
 
 	// Destroy hair tree
 	if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
-		lm.hair_tree_entity->destroy();
+		lm.hair_tree_entity.destroy();
 	}
 	lm.hair_tree_entity = null;
 	lm.hair_tree_planted = false;
@@ -407,10 +407,10 @@ rr_lily_cleanup :: proc(player: Player) {
 	rr_lily_remove_all_strings(player);
 
 	// Force-destroy any remaining braids on all players
-	foreach braid: component_iterator(Lily_String_Braid) {
+	for braid: component_iterator(Lily_String_Braid) {
 		if braid == null continue;
 		if braid.lily_player_entity_id == player.entity.id {
-			braid.entity->destroy();
+			braid.entity.destroy();
 		}
 	}
 
@@ -425,7 +425,7 @@ rr_lily_cleanup :: proc(player: Player) {
 // Check if a target player is strung by ANY Lily (used by doctor/UI).
 rr_lily_is_player_strung_by_any :: proc(target: Player) -> bool {
 	if target == null return false;
-	foreach lily: component_iterator(Player) {
+	for lily: component_iterator(Player) {
 		if lily == null continue;
 		if lily.player_role != Player_Role.LILY_LOVEBRAIDS continue;
 		if rr_lily_is_player_strung(lily, target.entity.id) return true;
@@ -434,7 +434,7 @@ rr_lily_is_player_strung_by_any :: proc(target: Player) -> bool {
 }
 
 rr_lily_is_player_strung :: proc(player: Player, target_id: u64) -> bool {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return false;
 	for i: 0..lm.strung_player_ids.count-1 {
 		if lm.strung_player_ids[i] == target_id return true;
@@ -443,17 +443,17 @@ rr_lily_is_player_strung :: proc(player: Player, target_id: u64) -> bool {
 }
 
 rr_lily_add_string :: proc(player: Player, target_id: u64) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	// Don't double-string
 	if rr_lily_is_player_strung(player, target_id) return;
-	lm.strung_player_ids->append(target_id);
+	lm.strung_player_ids.append(target_id);
 }
 
 rr_lily_remove_string :: proc(player: Player, target_id: u64) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
-	lm.strung_player_ids->unordered_remove_by_value(target_id);
+	lm.strung_player_ids.unordered_remove_by_value(target_id);
 
 	// Remove braid VFX from target
 	target := get_player_by_entity_id(target_id);
@@ -461,40 +461,40 @@ rr_lily_remove_string :: proc(player: Player, target_id: u64) {
 		rr_lily_remove_braid_from_target(target);
 	} else {
 		// Player entity gone — find and destroy braid by iterating
-		foreach braid: component_iterator(Lily_String_Braid) {
+		for braid: component_iterator(Lily_String_Braid) {
 			if braid == null continue;
 			if braid.lily_player_entity_id == player.entity.id {
-				braid.entity->destroy();
+				braid.entity.destroy();
 			}
 		}
 	}
 }
 
 rr_lily_remove_all_strings :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	// Clean up root effects on strung players
 	for i: 0..lm.strung_player_ids.count-1 {
 		target := get_player_by_entity_id(lm.strung_player_ids[i]);
 		if target != null {
-			target->remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
-			target->remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
-			target->remove_freeze_reason(LILY_PULL_REASON);
-			target->remove_disable_movement_input_reason(LILY_CAFFEINE_REASON);
+			target.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
+			target.remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
+			target.remove_freeze_reason(LILY_PULL_REASON);
+			target.remove_disable_movement_input_reason(LILY_CAFFEINE_REASON);
 		}
 	}
-	lm.strung_player_ids->clear();
+	lm.strung_player_ids.clear();
 }
 
 // Remove string when target dies.
 rr_lily_on_player_death :: proc(dead_player_entity_id: u64, killer_entity_id: u64) {
 	// Check all players for Lily — a dead player's string dissolves
-	foreach player: component_iterator(Player) {
+	for player: component_iterator(Player) {
 		if player == null continue;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS continue;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null continue;
 
 		was_strung := rr_lily_is_player_strung(player, dead_player_entity_id);
@@ -503,7 +503,7 @@ rr_lily_on_player_death :: proc(dead_player_entity_id: u64, killer_entity_id: u6
 
 			// String Snap passive: gain 1 braid point when a strung player dies (any source)
 			lm.braid_points += 1;
-			if player->is_local_or_server() {
+			if player.is_local_or_server() {
 				Notifier.notify(player, "String Snap! +1 Braid Point");
 			}
 		}
@@ -513,17 +513,17 @@ rr_lily_on_player_death :: proc(dead_player_entity_id: u64, killer_entity_id: u6
 // Called when doctor heals a player — cuts string if strung.
 rr_lily_on_doctor_heal :: proc(healed_player: Player) {
 	if healed_player == null return;
-	foreach player: component_iterator(Player) {
+	for player: component_iterator(Player) {
 		if player == null continue;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS continue;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null continue;
 
 		// Break mind control if the healed player is being controlled
 		if lm.mind_control_active && lm.mind_control_target_id == healed_player.entity.id {
 			rr_lily_end_mind_control(player);
-			if player->is_local_or_server() {
+			if player.is_local_or_server() {
 				Notifier.notify(player, "Mind Control broken — target was healed!");
 			}
 		}
@@ -532,7 +532,7 @@ rr_lily_on_doctor_heal :: proc(healed_player: Player) {
 			rr_lily_remove_string(player, healed_player.entity.id);
 
 			// Also free from tree pull root
-			healed_player->remove_freeze_reason(LILY_PULL_REASON);
+			healed_player.remove_freeze_reason(LILY_PULL_REASON);
 		}
 	}
 }
@@ -542,7 +542,7 @@ rr_lily_on_doctor_heal :: proc(healed_player: Player) {
 // =============================================================================
 
 rr_lily_award_kill_points :: proc(player: Player, victim: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	points := LILY_BRAID_POINTS_PER_KILL;
@@ -558,7 +558,7 @@ rr_lily_award_kill_points :: proc(player: Player, victim: Player) {
 	lm.braid_points += points;
 	lm.kills += 1;
 
-	if player->is_local_or_server() {
+	if player.is_local_or_server() {
 		Notifier.notify(player, format_string("+% Braid Points!", {points}));
 	}
 }
@@ -602,7 +602,7 @@ Lily_Hair_Tree :: class : Component {
 		} else if fulfilled_count == 1 {
 			new_scale = LILY_TREE_SCALE_STAGE_1;
 		}
-		entity->set_local_scale(v2.{new_scale, new_scale});
+		entity.set_local_scale(v2.{new_scale, new_scale});
 	}
 }
 
@@ -614,9 +614,9 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 	aoe_entity: Entity;
 
 	ao_start :: method() {
-		this->set_listener(this);
-		this->set_text("Pull");
-		this->set_hold_text("Pulling...");
+		this.set_listener(this);
+		this.set_text("Pull");
+		this.set_hold_text("Pulling...");
 		radius = LILY_TREE_INTERACT_RADIUS;
 		required_hold_time = LILY_PULL_HOLD_DURATION;
 		prompt_offset = v2.{0, 2.5};
@@ -627,27 +627,27 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 		if aoe_entity != null return;
 		if tree_entity == null return;
 		aoe_entity = Scene.create_entity();
-		aoe_entity->set_parent(tree_entity, false);
-		aoe_entity->set_local_position(v2.{0, 0});
-		aoe_entity->set_local_scale(v2.{0.6, 0.6});
-		aoe_anim := aoe_entity->add_component(Spine_Animator);
+		aoe_entity.set_parent(tree_entity, false);
+		aoe_entity.set_local_position(v2.{0, 0});
+		aoe_entity.set_local_scale(v2.{0.6, 0.6});
+		aoe_anim := aoe_entity.add_component(Spine_Animator);
 		aoe_anim.depth_offset = -5.0; // Render above everything
-		aoe_anim->awaken();
+		aoe_anim.awaken();
 		aoe_rig := get_asset(Spine_Asset, format_string("anims/vfx/BAT003_gravity_field_AOE.spine", {}));
 		if aoe_anim.instance != null && aoe_rig != null {
-			aoe_anim.instance->set_skeleton(aoe_rig);
-			aoe_anim.instance->set_animation("loop", true, 0);
+			aoe_anim.instance.set_skeleton(aoe_rig);
+			aoe_anim.instance.set_animation("loop", true, 0);
 		}
 	}
 
 	destroy_aoe :: method() {
 		if aoe_entity == null return;
 		if !#alive(aoe_entity) { aoe_entity = null; return; }
-		aoe_anim := aoe_entity->get_component(Spine_Animator);
+		aoe_anim := aoe_entity.get_component(Spine_Animator);
 		if aoe_anim != null && aoe_anim.instance != null {
-			aoe_anim.instance->set_animation("disappear", false, 0);
+			aoe_anim.instance.set_animation("disappear", false, 0);
 		}
-		delayed := aoe_entity->add_component(Lily_Delayed_Destroy);
+		delayed := aoe_entity.add_component(Lily_Delayed_Destroy);
 		delayed.destroy_at = get_time() + 1.0;
 		aoe_entity = null;
 	}
@@ -661,11 +661,11 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 		if tree_entity == null return null;
 		if !#alive(tree_entity) return null;
 
-		tree_comp := tree_entity->get_component(Lily_Hair_Tree);
+		tree_comp := tree_entity.get_component(Lily_Hair_Tree);
 		if tree_comp == null return null;
 		lily := get_player_by_entity_id(tree_comp.owner_player_entity_id);
 		if lily == null return null;
-		lm := lily.entity->get_component(Lily_Module);
+		lm := lily.entity.get_component(Lily_Module);
 		if lm == null return null;
 
 		if lm.pull_target_index >= lm.strung_player_ids.count {
@@ -715,7 +715,7 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 			nav_pt: v2;
 			tri_hint: s64;
 			try_find_closest_point_on_navmesh(new_pos, ref nav_pt, ref tri_hint);
-			target.entity->set_local_position(nav_pt);
+			target.entity.set_local_position(nav_pt);
 		}
 	}
 
@@ -730,15 +730,15 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 		nav_pt: v2;
 		tri_hint: s64;
 		try_find_closest_point_on_navmesh(tree_pos, ref nav_pt, ref tri_hint);
-		target.entity->set_local_position(nav_pt);
-		target->add_freeze_reason(LILY_PULL_REASON);
+		target.entity.set_local_position(nav_pt);
+		target.add_freeze_reason(LILY_PULL_REASON);
 
-		if player->is_local_or_server() {
-			Notifier.notify(player, format_string("% dragged to tree!", {target->get_username()}));
+		if player.is_local_or_server() {
+			Notifier.notify(player, format_string("% dragged to tree!", {target.get_username()}));
 		}
 
 		// Cycle to next target for subsequent pulls
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm != null {
 			lm.pull_target_index = (lm.pull_target_index + 1) % max(lm.strung_player_ids.count, 1);
 		}
@@ -750,9 +750,9 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 	tree_entity: Entity;
 
 	ao_start :: method() {
-		this->set_listener(this);
-		this->set_text("Deliver");
-		this->set_hold_text("Delivering...");
+		this.set_listener(this);
+		this.set_text("Deliver");
+		this.set_hold_text("Delivering...");
 		radius = LILY_TREE_DELIVER_RANGE;
 		required_hold_time = LILY_DELIVER_HOLD_TIME;
 		prompt_offset = v2.{0, 2.0};
@@ -763,13 +763,13 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 	can_fulfill :: method(player: Player) -> bool {
 		if tree_entity == null return false;
 		if !#alive(tree_entity) return false;
-		tree_comp := tree_entity->get_component(Lily_Hair_Tree);
+		tree_comp := tree_entity.get_component(Lily_Hair_Tree);
 		if tree_comp == null return false;
 
-		request, has_request := tree_comp->get_current_request();
+		request, has_request := tree_comp.get_current_request();
 		if !has_request return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 
 		switch request {
@@ -815,13 +815,13 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 		if tree_entity == null return;
 		if !#alive(tree_entity) return;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return;
 
-		tree_comp := tree_entity->get_component(Lily_Hair_Tree);
+		tree_comp := tree_entity.get_component(Lily_Hair_Tree);
 		if tree_comp == null return;
 
-		request, has_request := tree_comp->get_current_request();
+		request, has_request := tree_comp.get_current_request();
 		if !has_request return;
 
 		switch request {
@@ -829,29 +829,29 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 				// Consume the dragged corpse
 				corpse_id := player.dragging_corpse_entity_id;
 				rr_drag_body_force_drop_for_player(player);
-				foreach corpse: component_iterator(Corpse) {
+				for corpse: component_iterator(Corpse) {
 					if corpse == null continue;
 					if !#alive(corpse.entity) continue;
 					if corpse.entity.id == corpse_id {
-						corpse.entity->destroy();
+						corpse.entity.destroy();
 						break;
 					}
 				}
-				if player->is_local_or_server() {
+				if player.is_local_or_server() {
 					Notifier.notify(player, "Corpse delivered to the tree!");
 				}
 			}
 			case .EYES: {
 				lm.carrying_eyes = false;
 				lm.stolen_eyes_from_id = 0;
-				if player->is_local_or_server() {
+				if player.is_local_or_server() {
 					Notifier.notify(player, "Eyes delivered to the tree!");
 				}
 			}
 			case .LEGS: {
 				lm.carrying_legs = false;
 				lm.stolen_legs_from_id = 0;
-				if player->is_local_or_server() {
+				if player.is_local_or_server() {
 					Notifier.notify(player, "Legs delivered to the tree!");
 				}
 			}
@@ -859,20 +859,20 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 				target := find_alive_strung_near_tree(lm);
 				if target == null return;
 				// Absorb the living player into the tree
-				target->kill_with_killer_no_corpse(player.entity.id);
+				target.kill_with_killer_no_corpse(player.entity.id);
 				rr_lily_remove_string(player, target.entity.id);
 				lm.kills += 1;
-				if player->is_local_or_server() {
-					Notifier.notify(player, format_string("% delivered to the tree!", {target->get_username()}));
+				if player.is_local_or_server() {
+					Notifier.notify(player, format_string("% delivered to the tree!", {target.get_username()}));
 				}
 			}
 		}
 
 		// Fulfill the request — grow tree, advance to next
-		tree_comp->fulfill_request();
+		tree_comp.fulfill_request();
 		rr_lily_apply_tree_buffs(player);
 
-		if player->is_local_or_server() {
+		if player.is_local_or_server() {
 			if tree_comp.fulfilled_count >= LILY_DEATHBRAID_THRESHOLD {
 				Notifier.notify(player, "All requests fulfilled — Deathbraid is ready!");
 			} else {
@@ -885,7 +885,7 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 
 // Get a human-readable name for the tree's current request
 rr_lily_get_request_name :: proc(tree_comp: Lily_Hair_Tree) -> string {
-	request, has_request := tree_comp->get_current_request();
+	request, has_request := tree_comp.get_current_request();
 	if !has_request return "None";
 	switch request {
 		case .DEAD_PLAYER: return "Dead Player";
@@ -898,11 +898,11 @@ rr_lily_get_request_name :: proc(tree_comp: Lily_Hair_Tree) -> string {
 
 // Apply tree growth buffs to Lily (speed + cooldown reduction)
 rr_lily_apply_tree_buffs :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.hair_tree_entity == null return;
 
-	tree_comp := lm.hair_tree_entity->get_component(Lily_Hair_Tree);
+	tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 	if tree_comp == null return;
 
 	stage := tree_comp.fulfilled_count.(float);
@@ -927,7 +927,7 @@ rr_lily_apply_tree_buffs :: proc(player: Player) {
 
 // Remove tree buffs (called on cleanup/revert)
 rr_lily_remove_tree_buffs :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	if lm.tree_speed_buff_active {
@@ -939,7 +939,7 @@ rr_lily_remove_tree_buffs :: proc(player: Player) {
 }
 
 rr_lily_place_hair_tree :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	// One-time use — cannot plant again once placed
@@ -952,43 +952,43 @@ rr_lily_place_hair_tree :: proc(player: Player) {
 	try_find_closest_point_on_navmesh(pos, ref nav_point, ref triangle_hint);
 
 	tree_entity := Scene.create_entity();
-	tree_entity->set_local_position(nav_point);
+	tree_entity.set_local_position(nav_point);
 	// [ART] Starts as a small hair sapling — swap tree asset later
-	tree_entity->set_local_scale(v2.{LILY_TREE_SCALE_STAGE_0, LILY_TREE_SCALE_STAGE_0});
+	tree_entity.set_local_scale(v2.{LILY_TREE_SCALE_STAGE_0, LILY_TREE_SCALE_STAGE_0});
 
-	tree_anim := tree_entity->add_component(Spine_Animator);
-	tree_anim->awaken();
+	tree_anim := tree_entity.add_component(Spine_Animator);
+	tree_anim.awaken();
 	// [ART] Using current tree rig — will be swapped for a proper sapling/growth asset
 	tree_rig := get_asset(Spine_Asset, rr_lily_get_tree_rig_path());
 	if tree_anim.instance != null && tree_rig != null {
-		tree_anim.instance->set_skeleton(tree_rig);
+		tree_anim.instance.set_skeleton(tree_rig);
 		rr_apply_shadow_mask(tree_anim.instance);
 
 		// Set up state machine: Spawn → Idle, with Destroyed trigger
 		sm := State_Machine.create();
-		layer := sm->create_layer("main", 0);
-		spawn_state := layer->create_state("Spawn", false, 1.0);
-		idle_state := layer->create_state("Idle", true, 0.0);
-		destroyed_trigger := sm->create_variable("destroyed", .TRIGGER);
-		destroyed_state := layer->create_state("Destroyed", false, 1.0);
-		layer->set_initial_state(spawn_state);
-		layer->create_transition(spawn_state, idle_state, true);
-		layer->create_global_transition(destroyed_state, false)->create_trigger_condition(destroyed_trigger);
-		tree_anim.instance->set_state_machine(sm, true);
+		layer := sm.create_layer("main", 0);
+		spawn_state := layer.create_state("Spawn", false, 1.0);
+		idle_state := layer.create_state("Idle", true, 0.0);
+		destroyed_trigger := sm.create_variable("destroyed", .TRIGGER);
+		destroyed_state := layer.create_state("Destroyed", false, 1.0);
+		layer.set_initial_state(spawn_state);
+		layer.create_transition(spawn_state, idle_state, true);
+		layer.create_global_transition(destroyed_state, false).create_trigger_condition(destroyed_trigger);
+		tree_anim.instance.set_state_machine(sm, true);
 	}
 
-	tree_comp := tree_entity->add_component(Lily_Hair_Tree);
+	tree_comp := tree_entity.add_component(Lily_Hair_Tree);
 	tree_comp.owner_player_entity_id = player.entity.id;
 	tree_comp.placement_time = get_time();
 	tree_comp.tree_animator = tree_anim;
 	tree_comp.fulfilled_count = 0;
 
 	// Randomize request order (Fisher-Yates shuffle)
-	tree_comp.request_order->clear();
-	tree_comp.request_order->append(0); // DEAD_PLAYER
-	tree_comp.request_order->append(1); // EYES
-	tree_comp.request_order->append(2); // LEGS
-	tree_comp.request_order->append(3); // ALIVE_PLAYER
+	tree_comp.request_order.clear();
+	tree_comp.request_order.append(0); // DEAD_PLAYER
+	tree_comp.request_order.append(1); // EYES
+	tree_comp.request_order.append(2); // LEGS
+	tree_comp.request_order.append(3); // ALIVE_PLAYER
 	rng: u64 = rng_seed(player.entity.id);
 	for i: 3..1 {
 		j := rng_range_int(ref rng, 0, i);
@@ -997,22 +997,22 @@ rr_lily_place_hair_tree :: proc(player: Player) {
 		tree_comp.request_order[j] = tmp;
 	}
 
-	deliver_interactable := tree_entity->add_component(Lily_Tree_Deliver_Interactable);
+	deliver_interactable := tree_entity.add_component(Lily_Tree_Deliver_Interactable);
 	deliver_interactable.tree_entity = tree_entity;
 
-	pull_interactable := tree_entity->add_component(Lily_Tree_Pull_Interactable);
+	pull_interactable := tree_entity.add_component(Lily_Tree_Pull_Interactable);
 	pull_interactable.tree_entity = tree_entity;
 
 	lm.hair_tree_entity = tree_entity;
 	lm.hair_tree_planted = true;
 
-	if player->is_local_or_server() {
+	if player.is_local_or_server() {
 		Notifier.notify(player, "Braid Tree planted! This is your permanent base.");
 	}
 }
 
 rr_lily_teleport_to_tree :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.tree_teleport_cooldown > 0.0 return;
 	if lm.hair_tree_entity == null return;
@@ -1021,7 +1021,7 @@ rr_lily_teleport_to_tree :: proc(player: Player) {
 	nav_point: v2;
 	triangle_hint: s64;
 	try_find_closest_point_on_navmesh(lm.hair_tree_entity.world_position, ref nav_point, ref triangle_hint);
-	player.entity->set_local_position(nav_point);
+	player.entity.set_local_position(nav_point);
 	lm.tree_teleport_cooldown = LILY_TREE_TELEPORT_COOLDOWN;
 }
 
@@ -1032,7 +1032,7 @@ rr_lily_teleport_to_tree :: proc(player: Player) {
 LILY_TELEPORT_CIRCLE_RADIUS :: 3.0;
 
 rr_lily_teleport_strung_to_point :: proc(player: Player, center: v2) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.strung_player_ids.count == 0 return;
 
@@ -1051,8 +1051,8 @@ rr_lily_teleport_strung_to_point :: proc(player: Player, center: v2) {
 		nav_point: v2;
 		triangle_hint: s64;
 		try_find_closest_point_on_navmesh(dest, ref nav_point, ref triangle_hint);
-		target.entity->set_local_position(nav_point);
-		target->set_trigger("lily_pull_start");
+		target.entity.set_local_position(nav_point);
+		target.set_trigger("lily_pull_start");
 	}
 }
 
@@ -1102,11 +1102,11 @@ Lily_String_Braid :: class : Component {
 
 	ao_update :: method(dt: float) {
 		// Self-destroy if parent player is dead
-		parent_entity := entity.parent;
+		parent_entity := entity.get_parent();
 		if parent_entity != null && #alive(parent_entity) {
-			parent_player := parent_entity->get_component(Player);
+			parent_player := parent_entity.get_component(Player);
 			if parent_player != null && parent_player.player_state != Player_State.ALIVE {
-				entity->destroy();
+				entity.destroy();
 				return;
 			}
 		}
@@ -1117,7 +1117,7 @@ Lily_String_Braid :: class : Component {
 		lily := get_player_by_entity_id(lily_player_entity_id);
 		if lily == null return;
 
-		parent_player := entity.parent;
+		parent_player := entity.get_parent();
 		if parent_player == null return;
 		if !#alive(parent_player) return;
 
@@ -1126,9 +1126,9 @@ Lily_String_Braid :: class : Component {
 
 		// XOR: if parent is flipped, invert our local scale to get the desired world facing
 		if (dir_x > 0.0) != parent_flipped {
-			entity->set_local_scale(v2.{-1, 1});
+			entity.set_local_scale(v2.{-1, 1});
 		} else {
-			entity->set_local_scale(v2.{1, 1});
+			entity.set_local_scale(v2.{1, 1});
 		}
 	}
 
@@ -1136,57 +1136,57 @@ Lily_String_Braid :: class : Component {
 		if braid_animator == null return;
 		if braid_animator.instance == null return;
 		if braid_animator.instance.state_machine == null return;
-		braid_animator.instance.state_machine->set_trigger(trigger_name);
+		braid_animator.instance.state_machine.set_trigger(trigger_name);
 	}
 
 	update_locomotion :: method(is_moving: bool) {
 		if braid_animator == null return;
 		if braid_animator.instance == null return;
 		if braid_animator.instance.state_machine == null return;
-		braid_animator.instance.state_machine->set_bool("is_moving", is_moving);
+		braid_animator.instance.state_machine.set_bool("is_moving", is_moving);
 	}
 }
 
 rr_lily_setup_braid_state_machine :: proc(sa: Spine_Animator) {
 	sm := State_Machine.create();
-	layer := sm->create_layer("main", 0);
+	layer := sm.create_layer("main", 0);
 
-	idle_state := layer->create_state("Idle", true, 0.0);
-	is_moving := sm->create_variable("is_moving", .BOOL);
-	run_state := layer->create_state("Run", true, 0.0);
-	layer->set_initial_state(idle_state);
+	idle_state := layer.create_state("Idle", true, 0.0);
+	is_moving := sm.create_variable("is_moving", .BOOL);
+	run_state := layer.create_state("Run", true, 0.0);
+	layer.set_initial_state(idle_state);
 
-	idle_to_run := layer->create_transition(idle_state, run_state, false);
-	idle_to_run->create_bool_condition(is_moving, true);
-	run_to_idle := layer->create_transition(run_state, idle_state, false);
-	run_to_idle->create_bool_condition(is_moving, false);
+	idle_to_run := layer.create_transition(idle_state, run_state, false);
+	idle_to_run.create_bool_condition(is_moving, true);
+	run_to_idle := layer.create_transition(run_state, idle_state, false);
+	run_to_idle.create_bool_condition(is_moving, false);
 
-	attach_trigger := sm->create_variable("attach", .TRIGGER);
-	attach_state := layer->create_state("Attach", false, 1.0);
-	layer->create_global_transition(attach_state, false)->create_trigger_condition(attach_trigger);
-	layer->create_transition(attach_state, idle_state, true);
+	attach_trigger := sm.create_variable("attach", .TRIGGER);
+	attach_state := layer.create_state("Attach", false, 1.0);
+	layer.create_global_transition(attach_state, false).create_trigger_condition(attach_trigger);
+	layer.create_transition(attach_state, idle_state, true);
 
-	cut_trigger := sm->create_variable("cut", .TRIGGER);
-	cut_state := layer->create_state("Cut", false, 1.0);
-	layer->create_global_transition(cut_state, false)->create_trigger_condition(cut_trigger);
+	cut_trigger := sm.create_variable("cut", .TRIGGER);
+	cut_state := layer.create_state("Cut", false, 1.0);
+	layer.create_global_transition(cut_state, false).create_trigger_condition(cut_trigger);
 
-	pull_start_trigger := sm->create_variable("pull_start", .TRIGGER);
-	pull_start_state := layer->create_state("Pulling_Start", false, 0.5);
-	pull_loop_state := layer->create_state("Pulling_Loop", true, 0.0);
-	layer->create_global_transition(pull_start_state, false)->create_trigger_condition(pull_start_trigger);
-	layer->create_transition(pull_start_state, pull_loop_state, true);
+	pull_start_trigger := sm.create_variable("pull_start", .TRIGGER);
+	pull_start_state := layer.create_state("Pulling_Start", false, 0.5);
+	pull_loop_state := layer.create_state("Pulling_Loop", true, 0.0);
+	layer.create_global_transition(pull_start_state, false).create_trigger_condition(pull_start_trigger);
+	layer.create_transition(pull_start_state, pull_loop_state, true);
 
-	control_start_trigger := sm->create_variable("control_start", .TRIGGER);
-	control_start_state := layer->create_state("Control_Start", false, 0.5);
-	control_loop_state := layer->create_state("Control_Loop", true, 0.0);
-	control_end_trigger := sm->create_variable("control_end", .TRIGGER);
-	control_end_state := layer->create_state("Control_End", false, 0.5);
-	layer->create_global_transition(control_start_state, false)->create_trigger_condition(control_start_trigger);
-	layer->create_transition(control_start_state, control_loop_state, true);
-	layer->create_global_transition(control_end_state, false)->create_trigger_condition(control_end_trigger);
-	layer->create_transition(control_end_state, idle_state, true);
+	control_start_trigger := sm.create_variable("control_start", .TRIGGER);
+	control_start_state := layer.create_state("Control_Start", false, 0.5);
+	control_loop_state := layer.create_state("Control_Loop", true, 0.0);
+	control_end_trigger := sm.create_variable("control_end", .TRIGGER);
+	control_end_state := layer.create_state("Control_End", false, 0.5);
+	layer.create_global_transition(control_start_state, false).create_trigger_condition(control_start_trigger);
+	layer.create_transition(control_start_state, control_loop_state, true);
+	layer.create_global_transition(control_end_state, false).create_trigger_condition(control_end_trigger);
+	layer.create_transition(control_end_state, idle_state, true);
 
-	sa.instance->set_state_machine(sm, true);
+	sa.instance.set_state_machine(sm, true);
 }
 
 // Spawn a braid on a strung player's head. Plays Attach animation.
@@ -1194,25 +1194,25 @@ rr_lily_spawn_braid_on_target :: proc(target: Player, lily_entity_id: u64) {
 	if target == null return;
 
 	// Don't double-spawn
-	existing := target.entity->get_component(Lily_String_Braid);
+	existing := target.entity.get_component(Lily_String_Braid);
 	if existing != null return;
 
 	se := Scene.create_entity();
-	se->set_parent(target.entity, false);
-	se->set_local_position(v2.{0, LILY_BRAID_HEAD_OFFSET});
-	se->set_local_scale(v2.{1, 1});
+	se.set_parent(target.entity, false);
+	se.set_local_position(v2.{0, LILY_BRAID_HEAD_OFFSET});
+	se.set_local_scale(v2.{1, 1});
 
-	sa := se->add_component(Spine_Animator);
+	sa := se.add_component(Spine_Animator);
 	sa.depth_offset = -2.0; // Render above players
-	sa->awaken();
+	sa.awaken();
 	rig := get_asset(Spine_Asset, rr_lily_get_string_rig_path());
 	if sa.instance != null && rig != null {
-		sa.instance->set_skeleton(rig);
+		sa.instance.set_skeleton(rig);
 		rr_lily_setup_braid_state_machine(sa);
-		sa.instance->set_animation("Attach", false, 0);
+		sa.instance.set_animation("Attach", false, 0);
 	}
 
-	braid := se->add_component(Lily_String_Braid);
+	braid := se.add_component(Lily_String_Braid);
 	braid.braid_animator = sa;
 	braid.lily_player_entity_id = lily_entity_id;
 }
@@ -1221,39 +1221,39 @@ rr_lily_spawn_braid_on_target :: proc(target: Player, lily_entity_id: u64) {
 rr_lily_remove_braid_from_target :: proc(target: Player) {
 	if target == null return;
 
-	braid := target.entity->get_component(Lily_String_Braid);
+	braid := target.entity.get_component(Lily_String_Braid);
 	if braid == null return;
 
 	// Play cut animation then destroy
-	braid->trigger("cut");
-	delayed := braid.entity->add_component(Lily_Delayed_Destroy);
+	braid.trigger("cut");
+	delayed := braid.entity.add_component(Lily_Delayed_Destroy);
 	delayed.destroy_at = get_time() + 1.0;
 }
 
 // Trigger an animation on ALL strung players' braids.
 rr_lily_trigger_all_braids :: proc(player: Player, trigger_name: string) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	for i: 0..lm.strung_player_ids.count-1 {
 		target := get_player_by_entity_id(lm.strung_player_ids[i]);
 		if target == null continue;
-		braid := target.entity->get_component(Lily_String_Braid);
+		braid := target.entity.get_component(Lily_String_Braid);
 		if braid == null continue;
-		braid->trigger(trigger_name);
+		braid.trigger(trigger_name);
 	}
 }
 
 // Update locomotion on all strung players' braids.
 rr_lily_update_all_braids :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	for i: 0..lm.strung_player_ids.count-1 {
 		target := get_player_by_entity_id(lm.strung_player_ids[i]);
 		if target == null continue;
-		braid := target.entity->get_component(Lily_String_Braid);
+		braid := target.entity.get_component(Lily_String_Braid);
 		if braid == null continue;
 		moving := length_squared(target.agent.velocity) > 0.01;
-		braid->update_locomotion(moving);
+		braid.update_locomotion(moving);
 	}
 }
 
@@ -1263,7 +1263,7 @@ Lily_Delayed_Destroy :: class : Component {
 
 	ao_update :: method(dt: float) {
 		if get_time() >= destroy_at {
-			entity->destroy();
+			entity.destroy();
 		}
 	}
 }
@@ -1282,7 +1282,7 @@ Lily_Tea_Cup_Follower :: class : Component {
 
 	ao_update :: method(dt: float) {
 		if table_entity == null || !#alive(table_entity) {
-			entity->destroy();
+			entity.destroy();
 			return;
 		}
 
@@ -1294,25 +1294,25 @@ Lily_Tea_Cup_Follower :: class : Component {
 			if dist > 0.01 {
 				move := normalize(dir) * settle_speed * dt;
 				if length(move) > dist {
-					entity->set_local_position(settle_target);
+					entity.set_local_position(settle_target);
 				} else {
-					entity->set_local_position(current + move);
+					entity.set_local_position(current + move);
 				}
 			}
 			return;
 		}
 
-		table_anim := table_entity->get_component(Spine_Animator);
+		table_anim := table_entity.get_component(Spine_Animator);
 		if table_anim == null || table_anim.instance == null return;
 
-		shadow_local := table_anim.instance->get_bone_local_position(shadow_bone_name);
-		entity->set_local_position(shadow_local);
+		shadow_local := table_anim.instance.get_bone_local_position(shadow_bone_name);
+		entity.set_local_position(shadow_local);
 	}
 }
 
 // Spawn tea cup entities at CUP bone positions on the table rig.
 rr_lily_spawn_tea_cups :: proc(player: Player, table_anim: Spine_Animator, count: int) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if table_anim == null return;
 	if table_anim.instance == null return;
@@ -1322,26 +1322,26 @@ rr_lily_spawn_tea_cups :: proc(player: Player, table_anim: Spine_Animator, count
 
 	for i: 0..count-1 {
 		shadow_bone_name := format_string("TestShadow%", {i + 1});
-		shadow_local := table_anim.instance->get_bone_local_position(shadow_bone_name);
+		shadow_local := table_anim.instance.get_bone_local_position(shadow_bone_name);
 
 		cup_entity := Scene.create_entity();
-		cup_entity->set_parent(table_anim.entity, false);
-		cup_entity->set_local_position(shadow_local);
-		cup_entity->set_local_scale(v2.{1, 1});
+		cup_entity.set_parent(table_anim.entity, false);
+		cup_entity.set_local_position(shadow_local);
+		cup_entity.set_local_scale(v2.{1, 1});
 
-		cup_anim := cup_entity->add_component(Spine_Animator);
+		cup_anim := cup_entity.add_component(Spine_Animator);
 		cup_anim.depth_offset = -3.0;
-		cup_anim->awaken();
+		cup_anim.awaken();
 		if cup_anim.instance != null {
-			cup_anim.instance->set_skeleton(cup_rig);
-			cup_anim.instance->set_animation("Spawn", false, 0);
+			cup_anim.instance.set_skeleton(cup_rig);
+			cup_anim.instance.set_animation("Spawn", false, 0);
 		}
 
-		follower := cup_entity->add_component(Lily_Tea_Cup_Follower);
+		follower := cup_entity.add_component(Lily_Tea_Cup_Follower);
 		follower.table_entity = table_anim.entity;
 		follower.shadow_bone_name = shadow_bone_name;
 
-		lm.tea_cup_entities->append(cup_entity);
+		lm.tea_cup_entities.append(cup_entity);
 	}
 }
 
@@ -1350,12 +1350,12 @@ rr_lily_get_seat_position :: proc(lm: Lily_Module, seat_index: int) -> v2 {
 	if lm.tea_table_animator == null return v2.{0, 0};
 	if lm.tea_table_animator.instance == null return v2.{0, 0};
 	bone_name := format_string("PLAYER%", {seat_index});
-	bone_local := lm.tea_table_animator.instance->get_bone_local_position(bone_name);
+	bone_local := lm.tea_table_animator.instance.get_bone_local_position(bone_name);
 	return lm.tea_table_animator.entity.world_position + bone_local;
 }
 
 rr_lily_place_strung_players_at_table :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.tea_table_animator == null return;
 	if lm.tea_table_animator.instance == null return;
@@ -1371,12 +1371,12 @@ rr_lily_place_strung_players_at_table :: proc(player: Player) {
 		if target.player_state != Player_State.ALIVE continue;
 
 		seat_world := rr_lily_get_seat_position(lm, i + 1);
-		target.entity->set_local_position(seat_world);
+		target.entity.set_local_position(seat_world);
 	}
 }
 
 rr_lily_start_tea_party :: proc(player: Player, target: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if target == null return;
 
@@ -1388,16 +1388,16 @@ rr_lily_start_tea_party :: proc(player: Player, target: Player) {
 
 	// --- Layer 1: Table (1 player layout) ---
 	table_entity := Scene.create_entity();
-	table_entity->set_local_position(nav_point);
-	table_entity->set_local_scale(v2.{1, 1});
+	table_entity.set_local_position(nav_point);
+	table_entity.set_local_scale(v2.{1, 1});
 
-	table_anim := table_entity->add_component(Spine_Animator);
+	table_anim := table_entity.add_component(Spine_Animator);
 	table_anim.depth_offset = 2.0; // render below players
-	table_anim->awaken();
+	table_anim.awaken();
 	table_rig := get_asset(Spine_Asset, rr_lily_get_table_rig_path());
 	if table_anim.instance != null && table_rig != null {
-		table_anim.instance->set_skeleton(table_rig);
-		table_anim.instance->set_animation("2_Player/Idle", true, 0);
+		table_anim.instance.set_skeleton(table_rig);
+		table_anim.instance.set_animation("2_Player/Idle", true, 0);
 		rr_apply_shadow_mask(table_anim.instance);
 	}
 
@@ -1405,20 +1405,20 @@ rr_lily_start_tea_party :: proc(player: Player, target: Player) {
 	lm.tea_table_animator = table_anim;
 
 	// --- Layer 2: Spawn 2 cups ---
-	lm.tea_cup_entities->clear();
+	lm.tea_cup_entities.clear();
 	rr_lily_spawn_tea_cups(player, table_anim, 2);
 
 	// --- Layer 3: Tray overlay ---
 	tray_entity := Scene.create_entity();
-	tray_entity->set_parent(table_entity, false);
-	tray_entity->set_local_position(v2.{0, 0});
-	tray_anim := tray_entity->add_component(Spine_Animator);
+	tray_entity.set_parent(table_entity, false);
+	tray_entity.set_local_position(v2.{0, 0});
+	tray_anim := tray_entity.add_component(Spine_Animator);
 	tray_anim.depth_offset = -4.0;
-	tray_anim->awaken();
+	tray_anim.awaken();
 	tray_rig := get_asset(Spine_Asset, rr_lily_get_tray_rig_path());
 	if tray_anim.instance != null && tray_rig != null {
-		tray_anim.instance->set_skeleton(tray_rig);
-		tray_anim.instance->set_animation("Idle", true, 0);
+		tray_anim.instance.set_skeleton(tray_rig);
+		tray_anim.instance.set_animation("Idle", true, 0);
 	}
 	lm.tea_tray_entity = tray_entity;
 
@@ -1437,18 +1437,18 @@ rr_lily_start_tea_party :: proc(player: Player, target: Player) {
 
 	// Place victim at table seat
 	seat_world := rr_lily_get_seat_position(lm, 1);
-	target.entity->set_local_position(seat_world);
-	target->add_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
-	target->set_trigger("lily_tea_start");
+	target.entity.set_local_position(seat_world);
+	target.add_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
+	target.set_trigger("lily_tea_start");
 
 	// Camera focus for both players
 	lm.tea_party_camera_saved_size = player.camera.size;
 	lm.tea_party_camera_saved_follow = player.camera.follow_player;
 
 	// Add victim choice component
-	existing_choice := target.entity->get_component(Lily_Tea_Party_Victim_Choice);
+	existing_choice := target.entity.get_component(Lily_Tea_Party_Victim_Choice);
 	if existing_choice == null {
-		existing_choice = target.entity->add_component(Lily_Tea_Party_Victim_Choice);
+		existing_choice = target.entity.add_component(Lily_Tea_Party_Victim_Choice);
 	}
 	existing_choice.choice = 0;
 	existing_choice.lily_entity_id = player.entity.id;
@@ -1457,7 +1457,7 @@ rr_lily_start_tea_party :: proc(player: Player, target: Player) {
 
 	if Game.is_server() {
 		sfx := SFX.default_sfx_desc();
-		sfx->set_position(nav_point);
+		sfx.set_position(nav_point);
 		sfx.volume = 0.4;
 		rr_play_sfx(LILY_SFX_TEA_PARTY, sfx);
 	}
@@ -1466,7 +1466,7 @@ rr_lily_start_tea_party :: proc(player: Player, target: Player) {
 }
 
 rr_lily_update_tea_party :: proc(player: Player, dt: float) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.tea_party_active return;
 
@@ -1487,19 +1487,19 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 
 	// Keep victim locked at seat, facing the table
 	seat_world := rr_lily_get_seat_position(lm, 1);
-	victim.entity->set_local_position(seat_world);
+	victim.entity.set_local_position(seat_world);
 	table_pos := lm.tea_table_entity.world_position;
-	victim->set_facing_right(table_pos.x > seat_world.x);
+	victim.set_facing_right(table_pos.x > seat_world.x);
 
 	// Camera focus (must set every frame due to server sync)
-	if player->is_local_or_server() {
+	if player.is_local_or_server() {
 		table_pos := lm.tea_table_entity.world_position;
 		player.camera.follow_player = false;
 		player.camera.position = table_pos;
 		player.camera.size = LILY_TEA_PARTY_CAMERA_SIZE;
 	}
 	// Focus victim's camera too
-	if victim->is_local_or_server() {
+	if victim.is_local_or_server() {
 		table_pos := lm.tea_table_entity.world_position;
 		victim.camera.follow_player = false;
 		victim.camera.position = table_pos;
@@ -1526,9 +1526,9 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 			if chosen_idx >= 0 && chosen_idx < lm.tea_cup_entities.count {
 				cup := lm.tea_cup_entities[chosen_idx];
 				if cup != null && #alive(cup) {
-					cup_anim := cup->get_component(Spine_Animator);
+					cup_anim := cup.get_component(Spine_Animator);
 					if cup_anim != null && cup_anim.instance != null {
-						cup_anim.instance->set_animation("Idle_Plate", true, 0);
+						cup_anim.instance.set_animation("Idle_Plate", true, 0);
 					}
 				}
 			}
@@ -1536,9 +1536,9 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 			// Play the correct drink animation based on outcome
 			is_poison := lm.tea_party_chosen_cup == lm.tea_party_poison_cup;
 			if is_poison {
-				victim->set_trigger("lily_tea_death");
+				victim.set_trigger("lily_tea_death");
 			} else {
-				victim->set_trigger("lily_tea_hyper");
+				victim.set_trigger("lily_tea_hyper");
 			}
 			lm.tea_party_drinking = true;
 			lm.tea_party_drink_done_at = now + 2.0; // drink anim duration
@@ -1558,14 +1558,14 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 		lm.tea_party_choice_deadline = now + LILY_TEA_PARTY_CHOICE_TIME;
 
 		// Activate victim choice UI
-		victim_choice := victim.entity->get_component(Lily_Tea_Party_Victim_Choice);
+		victim_choice := victim.entity.get_component(Lily_Tea_Party_Victim_Choice);
 		if victim_choice != null {
 			victim_choice.deadline = lm.tea_party_choice_deadline;
 		}
 	}
 
 	// Check if victim chose or deadline expired
-	victim_choice := victim.entity->get_component(Lily_Tea_Party_Victim_Choice);
+	victim_choice := victim.entity.get_component(Lily_Tea_Party_Victim_Choice);
 	victim_picked := 0;
 	if victim_choice != null && victim_choice.choice != 0 {
 		victim_picked = victim_choice.choice;
@@ -1610,18 +1610,18 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 				settle_local := settle_dir * cup_radius;
 
 				// Tell follower to lerp to settle position (stays on Idle until arrived)
-				follower := cup->get_component(Lily_Tea_Cup_Follower);
+				follower := cup.get_component(Lily_Tea_Cup_Follower);
 				if follower != null {
 					follower.settled = true;
 					follower.settle_target = settle_local;
 					follower.settle_speed = 3.0;
 				}
 			} else {
-				cup_anim := cup->get_component(Spine_Animator);
+				cup_anim := cup.get_component(Spine_Animator);
 				if cup_anim != null && cup_anim.instance != null {
-					cup_anim.instance->set_animation("Despawn", false, 0);
+					cup_anim.instance.set_animation("Despawn", false, 0);
 				}
-				delayed := cup->add_component(Lily_Delayed_Destroy);
+				delayed := cup.add_component(Lily_Delayed_Destroy);
 				delayed.destroy_at = now + 1.0;
 			}
 		}
@@ -1629,7 +1629,7 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 	}
 
 	// Draw red glow on poison cup for Lily (local only)
-	if player->is_local() {
+	if player.is_local() {
 		rr_lily_draw_poison_cup_glow(player);
 	}
 
@@ -1641,7 +1641,7 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 
 // Resolve the cup choice — poison or caffeine
 rr_lily_tea_party_resolve :: proc(player: Player, victim: Player, chosen_cup: int) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if victim == null return;
 
@@ -1649,32 +1649,32 @@ rr_lily_tea_party_resolve :: proc(player: Player, victim: Player, chosen_cup: in
 
 	if is_poison {
 		// Poison — victim dies
-		victim->remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
-		victim->kill_with_killer(player.entity.id);
+		victim.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
+		victim.kill_with_killer(player.entity.id);
 		// Reset anim state to idle so ghost doesn't show death pose
 		if victim.animator != null && victim.animator.instance != null {
-			victim.animator.instance->set_animation("idle", true, 0);
+			victim.animator.instance.set_animation("idle", true, 0);
 		}
-		if player->is_local_or_server() {
-			Notifier.notify(player, format_string("% drank poison!", {victim->get_username()}));
+		if player.is_local_or_server() {
+			Notifier.notify(player, format_string("% drank poison!", {victim.get_username()}));
 		}
 	} else {
 		// Caffeine — uncontrollable movement (anim already playing)
-		victim->remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
-		victim->add_disable_movement_input_reason(LILY_CAFFEINE_REASON);
+		victim.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
+		victim.add_disable_movement_input_reason(LILY_CAFFEINE_REASON);
 
 		caffeine_entity := Scene.create_entity();
-		caffeine_timer := caffeine_entity->add_component(Lily_Caffeine_Timer);
+		caffeine_timer := caffeine_entity.add_component(Lily_Caffeine_Timer);
 		caffeine_timer.ends_at = get_time() + LILY_CAFFEINE_DURATION;
 		caffeine_timer.player_entity_id = victim.entity.id;
 		caffeine_timer.speed_multiplier = LILY_CAFFEINE_SPEED_BOOST;
 		victim.agent.movement_speed = victim.agent.movement_speed * LILY_CAFFEINE_SPEED_BOOST;
 
-		if victim->is_local_or_server() {
+		if victim.is_local_or_server() {
 			Notifier.notify(victim, "Caffeine rush! You can't stop running!");
 		}
-		if player->is_local_or_server() {
-			Notifier.notify(player, format_string("% got caffeine!", {victim->get_username()}));
+		if player.is_local_or_server() {
+			Notifier.notify(player, format_string("% got caffeine!", {victim.get_username()}));
 		}
 	}
 
@@ -1684,7 +1684,7 @@ rr_lily_tea_party_resolve :: proc(player: Player, victim: Player, chosen_cup: in
 
 // Draw red glow on poison cup (Lily's screen only)
 rr_lily_draw_poison_cup_glow :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.tea_party_poison_cup < 1 return;
 	if lm.tea_party_poison_cup > lm.tea_cup_entities.count return;
@@ -1701,12 +1701,12 @@ rr_lily_draw_poison_cup_glow :: proc(player: Player) {
 	defer UI.pop_z();
 
 	pulse := sin(get_time() * 4.0) * 0.15 + 0.85;
-	glow_rect := Rect{cup_pos, cup_pos}->grow(0.4);
+	glow_rect := Rect{cup_pos, cup_pos}.grow(0.4);
 	UI.quad(glow_rect, core_globals.white_sprite, v4.{1.0, 0.0, 0.0, 0.3 * pulse});
 }
 
 rr_lily_end_tea_party :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.tea_party_active return;
 
@@ -1716,7 +1716,7 @@ rr_lily_end_tea_party :: proc(player: Player) {
 	lm.tea_party_choice_deadline = 0.0;
 
 	// Restore camera
-	if player->is_local_or_server() {
+	if player.is_local_or_server() {
 		player.camera.follow_player = lm.tea_party_camera_saved_follow;
 		player.camera.size = lm.tea_party_camera_saved_size;
 	}
@@ -1724,13 +1724,13 @@ rr_lily_end_tea_party :: proc(player: Player) {
 	// Restore victim camera and free them
 	victim := get_player_by_entity_id(lm.tea_party_target_id);
 	if victim != null {
-		victim->remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
+		victim.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
 		// Restore victim camera
-		if victim->is_local_or_server() {
+		if victim.is_local_or_server() {
 			victim.camera.follow_player = true;
 		}
 		// Remove choice component
-		victim_choice := victim.entity->get_component(Lily_Tea_Party_Victim_Choice);
+		victim_choice := victim.entity.get_component(Lily_Tea_Party_Victim_Choice);
 		if victim_choice != null {
 			victim_choice.active = false;
 		}
@@ -1741,22 +1741,22 @@ rr_lily_end_tea_party :: proc(player: Player) {
 	for i: 0..lm.tea_cup_entities.count-1 {
 		cup := lm.tea_cup_entities[i];
 		if cup != null && #alive(cup) {
-			cup_anim := cup->get_component(Spine_Animator);
+			cup_anim := cup.get_component(Spine_Animator);
 			if cup_anim != null && cup_anim.instance != null {
-				cup_anim.instance->set_animation("Despawn", false, 0);
+				cup_anim.instance.set_animation("Despawn", false, 0);
 			}
-			delayed := cup->add_component(Lily_Delayed_Destroy);
+			delayed := cup.add_component(Lily_Delayed_Destroy);
 			delayed.destroy_at = get_time() + 1.0;
 		}
 	}
-	lm.tea_cup_entities->clear();
+	lm.tea_cup_entities.clear();
 
 	// Despawn table
 	if lm.tea_table_entity != null && #alive(lm.tea_table_entity) {
 		if lm.tea_table_animator != null && lm.tea_table_animator.instance != null {
-			lm.tea_table_animator.instance->set_animation("Despawn", false, 0);
+			lm.tea_table_animator.instance.set_animation("Despawn", false, 0);
 		}
-		delayed := lm.tea_table_entity->add_component(Lily_Delayed_Destroy);
+		delayed := lm.tea_table_entity.add_component(Lily_Delayed_Destroy);
 		delayed.destroy_at = get_time() + 1.0;
 	}
 	lm.tea_table_entity = null;
@@ -1764,7 +1764,7 @@ rr_lily_end_tea_party :: proc(player: Player) {
 
 	// Destroy tray
 	if lm.tea_tray_entity != null && #alive(lm.tea_tray_entity) {
-		lm.tea_tray_entity->destroy();
+		lm.tea_tray_entity.destroy();
 	}
 	lm.tea_tray_entity = null;
 }
@@ -1779,13 +1779,13 @@ Lily_Tea_Party_Victim_Choice :: class : Component {
 
 // Draw tea party victim cup choice UI — called from player ao_late_update for ALL players.
 rr_lily_draw_tea_party_victim_ui :: proc(player: Player) {
-	vc := player.entity->get_component(Lily_Tea_Party_Victim_Choice);
+	vc := player.entity.get_component(Lily_Tea_Party_Victim_Choice);
 	if vc == null return;
 	if !vc.active return;
 	if vc.choice != 0 return;
 	if vc.deadline <= 0.0 return;
 
-	if !player->is_local_or_server() return;
+	if !player.is_local_or_server() return;
 
 	screen := UI.get_safe_screen_rect();
 	UI.push_layer(200);
@@ -1796,9 +1796,9 @@ rr_lily_draw_tea_party_victim_ui :: proc(player: Player) {
 	if remaining < 0.0 remaining = 0.0;
 	timer_pct := remaining / LILY_TEA_PARTY_CHOICE_TIME;
 
-	timer_rect := screen->top_center_rect()->offset(0.0, -160.0)->grow(10.0, 150.0, 10.0, 150.0);
+	timer_rect := screen.top_center_rect().offset(0.0, -160.0).grow(10.0, 150.0, 10.0, 150.0);
 	UI.quad(timer_rect, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.6});
-	fill := timer_rect->subrect(0.0, 0.0, timer_pct, 1.0);
+	fill := timer_rect.subrect(0.0, 0.0, timer_pct, 1.0);
 	UI.quad(fill, core_globals.white_sprite, v4.{1.0, 0.8, 0.2, 0.9});
 
 	ts := UI.default_text_settings();
@@ -1810,7 +1810,7 @@ rr_lily_draw_tea_party_victim_ui :: proc(player: Player) {
 	ts.outline_thickness = 2;
 	ts.outline_color = v4.{0, 0, 0, 1};
 
-	prompt_rect := screen->center_rect()->offset(0.0, 80.0)->grow(20.0, 200.0, 20.0, 200.0);
+	prompt_rect := screen.center_rect().offset(0.0, 80.0).grow(20.0, 200.0, 20.0, 200.0);
 	UI.text(prompt_rect, ts, "Choose a cup!");
 
 	bs := UI.default_button_settings();
@@ -1822,8 +1822,8 @@ rr_lily_draw_tea_party_victim_ui :: proc(player: Player) {
 	btn_ts.valign = .CENTER;
 	btn_ts.color = v4.{1, 1, 1, 1};
 
-	left_rect := screen->center_rect()->offset(-120.0, 0.0)->grow(35.0, 100.0, 35.0, 100.0);
-	right_rect := screen->center_rect()->offset(120.0, 0.0)->grow(35.0, 100.0, 35.0, 100.0);
+	left_rect := screen.center_rect().offset(-120.0, 0.0).grow(35.0, 100.0, 35.0, 100.0);
+	right_rect := screen.center_rect().offset(120.0, 0.0).grow(35.0, 100.0, 35.0, 100.0);
 
 	if UI.button(left_rect, bs, btn_ts, "Left Cup").clicked {
 		vc.choice = 1;
@@ -1856,7 +1856,7 @@ Lily_Caffeine_Timer :: class : Component {
 	ao_update :: method(dt: float) {
 		p := get_player_by_entity_id(player_entity_id);
 		if p == null {
-			entity->destroy();
+			entity.destroy();
 			return;
 		}
 
@@ -1868,23 +1868,23 @@ Lily_Caffeine_Timer :: class : Component {
 				next_direction_change_at = get_time() + LILY_CAFFEINE_DIRECTION_HOLD_SECONDS;
 			}
 			p.agent.input_this_frame = current_dir;
-			p->set_facing_right(current_dir.x >= 0.0);
+			p.set_facing_right(current_dir.x >= 0.0);
 
 			// Sync hyper locomotion animation
 			moving := length_squared(p.agent.input_this_frame) > 0.01;
 			sm := p.animator.instance.state_machine;
 			if sm != null {
-				sm->set_bool("lily_hyper_moving", moving);
+				sm.set_bool("lily_hyper_moving", moving);
 			}
 		}
 
 		if get_time() >= ends_at {
-			p->remove_disable_movement_input_reason(LILY_CAFFEINE_REASON);
+			p.remove_disable_movement_input_reason(LILY_CAFFEINE_REASON);
 			p.agent.movement_speed = p.agent.movement_speed / speed_multiplier;
 			p.agent.input_this_frame = v2.{0, 0};
 			p.agent.velocity = v2.{0, 0};
-			p->set_trigger("lily_hyper_end");
-			entity->destroy();
+			p.set_trigger("lily_hyper_end");
+			entity.destroy();
 		}
 	}
 }
@@ -1895,7 +1895,7 @@ Lily_Caffeine_Timer :: class : Component {
 
 // Get Lily's planted tree (single tree now)
 rr_lily_get_nearest_tree :: proc(player: Player) -> Entity {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return null;
 	if lm.hair_tree_entity == null return null;
 	if !#alive(lm.hair_tree_entity) return null;
@@ -1903,7 +1903,7 @@ rr_lily_get_nearest_tree :: proc(player: Player) -> Entity {
 }
 
 rr_lily_start_pull :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	tree := rr_lily_get_nearest_tree(player);
@@ -1924,14 +1924,14 @@ rr_lily_start_pull :: proc(player: Player) {
 	if lm.strung_player_ids.count > 0 {
 		target := get_player_by_entity_id(lm.strung_player_ids[lm.pull_target_index]);
 		if target != null {
-			braid := target.entity->get_component(Lily_String_Braid);
-			if braid != null braid->trigger("pull_start");
+			braid := target.entity.get_component(Lily_String_Braid);
+			if braid != null braid.trigger("pull_start");
 		}
 	}
 }
 
 rr_lily_update_pull :: proc(player: Player, dt: float) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.pull_active return;
 
@@ -1967,12 +1967,12 @@ rr_lily_update_pull :: proc(player: Player, dt: float) {
 			nav_point: v2;
 			triangle_hint: s64;
 			try_find_closest_point_on_navmesh(tree_pos, ref nav_point, ref triangle_hint);
-			target.entity->set_local_position(nav_point);
-			target->add_freeze_reason(LILY_PULL_REASON);
+			target.entity.set_local_position(nav_point);
+			target.add_freeze_reason(LILY_PULL_REASON);
 			rr_lily_end_pull(player);
 
-			if player->is_local_or_server() {
-				Notifier.notify(player, format_string("% dragged to tree!", {target->get_username()}));
+			if player.is_local_or_server() {
+				Notifier.notify(player, format_string("% dragged to tree!", {target.get_username()}));
 			}
 			return;
 		}
@@ -1981,7 +1981,7 @@ rr_lily_update_pull :: proc(player: Player, dt: float) {
 		nav_point: v2;
 		triangle_hint: s64;
 		try_find_closest_point_on_navmesh(new_pos, ref nav_point, ref triangle_hint);
-		target.entity->set_local_position(nav_point);
+		target.entity.set_local_position(nav_point);
 		return;
 	}
 
@@ -1994,12 +1994,12 @@ rr_lily_update_pull :: proc(player: Player, dt: float) {
 		nav_point: v2;
 		triangle_hint: s64;
 		try_find_closest_point_on_navmesh(new_pos, ref nav_point, ref triangle_hint);
-		target.entity->set_local_position(nav_point);
+		target.entity.set_local_position(nav_point);
 	}
 }
 
 rr_lily_pull_complete :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.pull_active return;
 
@@ -2008,7 +2008,7 @@ rr_lily_pull_complete :: proc(player: Player) {
 }
 
 rr_lily_end_pull :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.pull_active return;
 
@@ -2019,7 +2019,7 @@ rr_lily_end_pull :: proc(player: Player) {
 }
 
 rr_lily_pull_cycle_target :: proc(player: Player, direction: int) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.strung_player_ids.count == 0 return;
 
@@ -2029,8 +2029,8 @@ rr_lily_pull_cycle_target :: proc(player: Player, direction: int) {
 	}
 
 	target := get_player_by_entity_id(lm.strung_player_ids[lm.pull_target_index]);
-	if target != null && player->is_local_or_server() {
-		Notifier.notify(player, format_string("Target: %", {target->get_username()}));
+	if target != null && player.is_local_or_server() {
+		Notifier.notify(player, format_string("Target: %", {target.get_username()}));
 	}
 }
 
@@ -2045,10 +2045,10 @@ Lily_Mind_Control_Puppet :: class : Component {
 	ao_update :: method(dt: float) {
 		lily := get_player_by_entity_id(lily_entity_id);
 		if lily == null return;
-		lm := lily.entity->get_component(Lily_Module);
+		lm := lily.entity.get_component(Lily_Module);
 		if lm == null || !lm.mind_control_active return;
 
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null return;
 		if p.player_state != Player_State.ALIVE return;
 		if lm.mind_control_target_id != p.entity.id return;
@@ -2057,7 +2057,7 @@ Lily_Mind_Control_Puppet :: class : Component {
 		input := lily.agent.input_this_frame;
 		p.agent.input_this_frame = input;
 		if length_squared(input) > 0.01 {
-			p->set_facing_right(input.x >= 0.0);
+			p.set_facing_right(input.x >= 0.0);
 		}
 
 		// Override Lily's input so she follows behind instead of moving with her own input
@@ -2070,22 +2070,22 @@ Lily_Mind_Control_Puppet :: class : Component {
 			overshoot := dist - LILY_MIND_CONTROL_FOLLOW_DIST;
 			strength := clamp(overshoot / LILY_MIND_CONTROL_FOLLOW_DIST, 0.0, 1.0);
 			lily.agent.input_this_frame = move_dir * strength;
-			lily->set_facing_right(dir.x >= 0.0);
+			lily.set_facing_right(dir.x >= 0.0);
 		} else {
 			lily.agent.input_this_frame = v2.{0, 0};
 		}
 	}
 
 	ao_end :: method() {
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
-			p->remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
+			p.remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
 		}
 	}
 }
 
 rr_lily_start_mind_control :: proc(player: Player, target: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if target == null return;
 
@@ -2094,21 +2094,21 @@ rr_lily_start_mind_control :: proc(player: Player, target: Player) {
 	lm.mind_control_target_id = target.entity.id;
 
 	// Block target's own input — Lily's input is forwarded via the Puppet component
-	target->add_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
+	target.add_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
 
 	// Lily's own input is overridden each frame in the update to follow behind the puppet
 
 	// Add input forwarding component
-	existing := target.entity->get_component(Lily_Mind_Control_Puppet);
+	existing := target.entity.get_component(Lily_Mind_Control_Puppet);
 	if existing == null {
-		mc := target.entity->add_component(Lily_Mind_Control_Puppet);
+		mc := target.entity.add_component(Lily_Mind_Control_Puppet);
 		mc.lily_entity_id = player.entity.id;
 	}
 
 	// Spawn braid on target for visual feedback
 	rr_lily_spawn_braid_on_target(target, player.entity.id);
-	braid := target.entity->get_component(Lily_String_Braid);
-	if braid != null braid->trigger("control_start");
+	braid := target.entity.get_component(Lily_String_Braid);
+	if braid != null braid.trigger("control_start");
 
 	if Game.is_server() {
 		sfx := SFX.default_sfx_desc();
@@ -2119,13 +2119,13 @@ rr_lily_start_mind_control :: proc(player: Player, target: Player) {
 
 	rr_lily_creature_trigger(player, "control_start");
 
-	if player->is_local_or_server() {
-		Notifier.notify(player, format_string("Mind controlling %!", {target->get_username()}));
+	if player.is_local_or_server() {
+		Notifier.notify(player, format_string("Mind controlling %!", {target.get_username()}));
 	}
 }
 
 rr_lily_update_mind_control :: proc(player: Player, dt: float) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.mind_control_active return;
 
@@ -2149,17 +2149,17 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 		tree_pos := lm.hair_tree_entity.world_position;
 		tree_dist := length(target.entity.world_position - tree_pos);
 		if tree_dist <= LILY_TREE_DELIVER_RANGE {
-			tree_comp := lm.hair_tree_entity->get_component(Lily_Hair_Tree);
+			tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 			if tree_comp != null {
-				request, has_request := tree_comp->get_current_request();
+				request, has_request := tree_comp.get_current_request();
 				if has_request && request == Tree_Request.ALIVE_PLAYER {
 					// Deliver alive player to tree
-					target->kill_with_killer_no_corpse(player.entity.id);
+					target.kill_with_killer_no_corpse(player.entity.id);
 					lm.kills += 1;
-					tree_comp->fulfill_request();
+					tree_comp.fulfill_request();
 					rr_lily_apply_tree_buffs(player);
-					if player->is_local_or_server() {
-						Notifier.notify(player, format_string("% delivered to the tree!", {target->get_username()}));
+					if player.is_local_or_server() {
+						Notifier.notify(player, format_string("% delivered to the tree!", {target.get_username()}));
 						if tree_comp.fulfilled_count >= LILY_DEATHBRAID_THRESHOLD {
 							Notifier.notify(player, "All requests fulfilled — Deathbraid is ready!");
 						} else {
@@ -2175,21 +2175,21 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 	}
 
 	// Mind Control camera UI
-	if player->is_local() {
+	if player.is_local() {
 		rr_lily_draw_mind_control_ui(player);
 	}
 }
 
 // Draw Mind Control overlay — timer + controlled player name
 rr_lily_draw_mind_control_ui :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	screen := UI.get_safe_screen_rect();
 	UI.push_layer(150);
 	defer UI.pop_layer();
 
-	top_bar := screen->top_rect()->offset(0.0, -80.0)->grow_bottom(50);
+	top_bar := screen.top_rect().offset(0.0, -80.0).grow_bottom(50);
 	UI.quad(top_bar, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.7});
 
 	// Timer
@@ -2203,7 +2203,7 @@ rr_lily_draw_mind_control_ui :: proc(player: Player) {
 	ts.do_outline = true;
 	ts.outline_thickness = 2;
 	ts.outline_color = v4.{0, 0, 0, 1};
-	timer_rect := top_bar->inset(5.0, 10.0, 5.0, 10.0);
+	timer_rect := top_bar.inset(5.0, 10.0, 5.0, 10.0);
 	UI.text(timer_rect, ts, "%s", {format_float(remaining, decimals=0)});
 
 	// "Mind Control: [name]" label
@@ -2217,27 +2217,27 @@ rr_lily_draw_mind_control_ui :: proc(player: Player) {
 	label_ts.outline_thickness = 2;
 	label_ts.outline_color = v4.{0, 0, 0, 1};
 	if target != null {
-		UI.text(top_bar, label_ts, "Mind Control: %", {target->get_username()});
+		UI.text(top_bar, label_ts, "Mind Control: %", {target.get_username()});
 	}
 }
 
 rr_lily_end_mind_control :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.mind_control_active return;
 
 	// Release target
 	target := get_player_by_entity_id(lm.mind_control_target_id);
 	if target != null {
-		target->remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
+		target.remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
 
 		// Remove braid visual — component lives on a child entity
-		child := target.entity.first_child;
+		child := target.entity.get_first_child();
 		while child != null {
-			next := child.next_sibling;
-			braid := child->get_component(Lily_String_Braid);
+			next := child.get_next_sibling();
+			braid := child.get_component(Lily_String_Braid);
 			if braid != null {
-				child->destroy();
+				child.destroy();
 			}
 			child = next;
 		}
@@ -2251,7 +2251,7 @@ rr_lily_end_mind_control :: proc(player: Player) {
 
 // Called when Lily is killed — break mind control
 rr_lily_on_lily_killed :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.mind_control_active {
 		rr_lily_end_mind_control(player);
@@ -2263,7 +2263,7 @@ rr_lily_on_lily_killed :: proc(player: Player) {
 // =============================================================================
 
 rr_lily_update_passives :: proc(player: Player, dt: float) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	// Thread Count: +3% speed per active string
@@ -2292,9 +2292,9 @@ rr_lily_update_passives :: proc(player: Player, dt: float) {
 // =============================================================================
 
 rr_lily_draw_web_sense :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
-	if !player->is_local() return;
+	if !player.is_local() return;
 	if lm.strung_player_ids.count == 0 return;
 
 	options := Tutorial_Arrow.default_options();
@@ -2305,7 +2305,7 @@ rr_lily_draw_web_sense :: proc(player: Player) {
 	options.bob_bias = 1.2;
 
 	// Hide arrows during tea party
-	lm_check := player.entity->get_component(Lily_Module);
+	lm_check := player.entity.get_component(Lily_Module);
 	if lm_check != null && lm_check.tea_party_active return;
 
 	// Purple tint for Lily's web sense arrows
@@ -2347,8 +2347,8 @@ rr_lily_draw_web_sense :: proc(player: Player) {
 
 		if is_far {
 			name_pos := arrow_pos + v2.{0, -0.7};
-			name_rect := Rect{name_pos, name_pos}->grow(0.15, 1.5, 0.15, 1.5);
-			UI.text(name_rect, name_ts, "%", {target->get_username()});
+			name_rect := Rect{name_pos, name_pos}.grow(0.15, 1.5, 0.15, 1.5);
+			UI.text(name_rect, name_ts, "%", {target.get_username()});
 		}
 	}
 }
@@ -2371,11 +2371,11 @@ Lily_Deathbraid_Tendril :: class : Component {
 
 		// Grow outward from center
 		dist := t * max_dist;
-		entity->set_local_position(v2.{cos(angle) * dist, sin(angle) * dist});
+		entity.set_local_position(v2.{cos(angle) * dist, sin(angle) * dist});
 
 		// Scale up
 		s := 0.5 + t * (max_scale - 0.5);
-		entity->set_local_scale(v2.{s, s});
+		entity.set_local_scale(v2.{s, s});
 	}
 }
 
@@ -2385,7 +2385,7 @@ LILY_DEATHBRAID_SUCK_PHASE :: 7.0;     // suck in players
 LILY_DEATHBRAID_KILL_PHASE :: 8.0;     // kill all
 
 rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.deathbraid_active return;
 
@@ -2394,38 +2394,38 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	lm.deathbraid_start_time = get_time();
 
 	// Freeze ALL players
-	foreach p: component_iterator(Player) {
+	for p: component_iterator(Player) {
 		if p == null continue;
 		if p.player_state != Player_State.ALIVE continue;
-		p->add_freeze_reason(LILY_DEATHBRAID_REASON);
+		p.add_freeze_reason(LILY_DEATHBRAID_REASON);
 	}
 
 	// Spawn mouth immediately
 	tree_pos := tree_entity.world_position;
 	mouth_entity := Scene.create_entity();
-	mouth_entity->set_local_position(tree_pos);
-	mouth_entity->set_local_scale(v2.{1.5, 1.5});
+	mouth_entity.set_local_position(tree_pos);
+	mouth_entity.set_local_scale(v2.{1.5, 1.5});
 
-	mouth_anim := mouth_entity->add_component(Spine_Animator);
+	mouth_anim := mouth_entity.add_component(Spine_Animator);
 	mouth_anim.depth_offset = 1.0; // Render below players (0) but above ground hair (2.0)
-	mouth_anim->awaken();
+	mouth_anim.awaken();
 	mouth_rig := get_asset(Spine_Asset, rr_lily_get_mouth_rig_path());
 	if mouth_anim.instance != null && mouth_rig != null {
-		mouth_anim.instance->set_skeleton(mouth_rig);
-		mouth_anim.instance->set_animation("idle", true, 0);
+		mouth_anim.instance.set_skeleton(mouth_rig);
+		mouth_anim.instance.set_animation("idle", true, 0);
 		rr_apply_shadow_mask(mouth_anim.instance);
 	}
 	lm.deathbraid_mouth_entity = mouth_entity;
 
 	// Ground hair spawns later in update (after FREEZE_PHASE)
 
-	if player->is_local_or_server() {
+	if player.is_local_or_server() {
 		Notifier.notify(player, "DEATHBRAID ACTIVATED!");
 	}
 }
 
 rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.deathbraid_active return;
 
@@ -2444,42 +2444,42 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 	}
 
 	// Camera + LOS — only set for the local player to avoid flickering
-	if player->is_local_or_server() {
+	if player.is_local_or_server() {
 		player.camera.follow_player = false;
 		player.camera.position = focus_pos;
 		camera_size := lerp(player.camera.size, 8.0, min(elapsed * 0.5, 1.0));
 		player.camera.size = camera_size;
 
 		if player.local_light_entity != null && #alive(player.local_light_entity) {
-			player.local_light_entity->set_parent(null, true);
-			player.local_light_entity->set_local_position(focus_pos);
+			player.local_light_entity.set_parent(null, true);
+			player.local_light_entity.set_local_position(focus_pos);
 		}
 	}
 
 	// Phase 2: Spawn ground hair tendrils (after freeze phase, mouth already visible)
 	if elapsed >= LILY_DEATHBRAID_FREEZE_PHASE && lm.deathbraid_ground_entity == null {
 		ground_parent := Scene.create_entity();
-		ground_parent->set_local_position(focus_pos);
-		ground_parent->set_local_scale(v2.{1.0, 1.0});
+		ground_parent.set_local_position(focus_pos);
+		ground_parent.set_local_scale(v2.{1.0, 1.0});
 
 		hair_tex := get_asset(Texture_Asset, "sprites/Hair_on_ground.png");
 		rng: u64 = rng_seed_time();
 
 		for h: 0..7 {
 			hair_entity := Scene.create_entity();
-			hair_entity->set_parent(ground_parent, false);
-			hair_entity->set_local_position(v2.{0, 0});
-			hair_entity->set_local_scale(v2.{0.5, 0.5});
+			hair_entity.set_parent(ground_parent, false);
+			hair_entity.set_local_position(v2.{0, 0});
+			hair_entity.set_local_scale(v2.{0.5, 0.5});
 
 			angle := rng_range_float(ref rng, 0.0, 6.283);
-			hair_entity->set_local_rotation(angle * 57.2958);
+			hair_entity.set_local_rotation(angle * 57.2958);
 
-			hair_sprite := hair_entity->add_component(Sprite_Renderer);
-			hair_sprite->set_texture(hair_tex);
+			hair_sprite := hair_entity.add_component(Sprite_Renderer);
+			hair_sprite.set_texture(hair_tex);
 			hair_sprite.color = v4.{1, 1, 1, 1};
 			hair_sprite.depth_offset = 2.0; // Below mouth (-1.0), on ground level
 
-			tendril := hair_entity->add_component(Lily_Deathbraid_Tendril);
+			tendril := hair_entity.add_component(Lily_Deathbraid_Tendril);
 			tendril.angle = angle;
 			tendril.max_dist = rng_range_float(ref rng, 4.0, 8.0);
 			tendril.max_scale = rng_range_float(ref rng, 3.0, 5.0);
@@ -2498,13 +2498,13 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 		// Set pull anim + spawn braids once at start of suck phase
 		just_started := (elapsed - dt) < LILY_DEATHBRAID_GROUND_PHASE;
 
-		foreach p: component_iterator(Player) {
+		for p: component_iterator(Player) {
 			if p == null continue;
 			if p.player_state != Player_State.ALIVE continue;
 			if p.player_type == Player_Type.TRAITOR continue;
 
 			if just_started {
-				p->set_trigger("lily_pull_start");
+				p.set_trigger("lily_pull_start");
 				// Spawn braid on players that don't already have one
 				rr_lily_spawn_braid_on_target(p, player.entity.id);
 			}
@@ -2512,17 +2512,17 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 			// Move directly toward mouth center (ignore navmesh/walls)
 			current := p.entity.world_position;
 			new_pos := lerp(current, focus_pos, suck_progress * 0.1);
-			p.entity->set_local_position(new_pos);
+			p.entity.set_local_position(new_pos);
 		}
 	}
 
 	// Phase 4: Kill all non-traitors
 	if elapsed >= LILY_DEATHBRAID_KILL_PHASE {
-		foreach p: component_iterator(Player) {
+		for p: component_iterator(Player) {
 			if p == null continue;
 			if p.player_state != Player_State.ALIVE continue;
 			if p.player_type == Player_Type.TRAITOR continue;
-			p->kill_with_killer(player.entity.id);
+			p.kill_with_killer(player.entity.id);
 		}
 
 		rr_lily_end_deathbraid(player);
@@ -2530,34 +2530,34 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 }
 
 rr_lily_end_deathbraid :: proc(player: Player) {
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.deathbraid_active return;
 
 	lm.deathbraid_active = false;
 
 	// Unfreeze all players, restore camera and LOS light
-	foreach p: component_iterator(Player) {
+	for p: component_iterator(Player) {
 		if p == null continue;
-		p->remove_freeze_reason(LILY_DEATHBRAID_REASON);
-		if p->is_local_or_server() {
+		p.remove_freeze_reason(LILY_DEATHBRAID_REASON);
+		if p.is_local_or_server() {
 			p.camera.follow_player = true;
 		}
 		if p.local_light_entity != null && #alive(p.local_light_entity) {
-			p.local_light_entity->set_parent(p.entity, false);
-			p.local_light_entity->set_local_position(v2.{0, 0});
+			p.local_light_entity.set_parent(p.entity, false);
+			p.local_light_entity.set_local_position(v2.{0, 0});
 		}
 	}
 
 	// Clean up entities (delayed destroy for visual)
 	if lm.deathbraid_mouth_entity != null && #alive(lm.deathbraid_mouth_entity) {
-		delayed := lm.deathbraid_mouth_entity->add_component(Lily_Delayed_Destroy);
+		delayed := lm.deathbraid_mouth_entity.add_component(Lily_Delayed_Destroy);
 		delayed.destroy_at = get_time() + 2.0;
 	}
 	lm.deathbraid_mouth_entity = null;
 
 	if lm.deathbraid_ground_entity != null && #alive(lm.deathbraid_ground_entity) {
-		delayed := lm.deathbraid_ground_entity->add_component(Lily_Delayed_Destroy);
+		delayed := lm.deathbraid_ground_entity.add_component(Lily_Delayed_Destroy);
 		delayed.destroy_at = get_time() + 2.0;
 	}
 	lm.deathbraid_ground_entity = null;
@@ -2572,7 +2572,7 @@ rr_lily_update :: proc(player: Player, dt: float) {
 	if player == null return;
 	if player.player_role != Player_Role.LILY_LOVEBRAIDS || player.player_type != Player_Type.TRAITOR return;
 
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	now := get_time();
@@ -2656,19 +2656,19 @@ Lily_Kill_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		if lm.tea_party_active return false;
 		return get_closest_kill_target(this, player) != null;
 	}
 
 	get_closest_kill_target :: proc(instance: Lily_Kill_Ability, player: Player) -> Player {
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		kill_range := LILY_KILL_RANGE_SCHLEEM;
 		if lm != null && lm.is_lily_form {
 			kill_range = LILY_KILL_RANGE_LILY;
@@ -2684,14 +2684,14 @@ Lily_Kill_Ability :: class : Ability_Base {
 		}
 
 		finder := make_finder(Player, search_pos, kill_range);
-		foreach target: component_iterator(Player) {
+		for target: component_iterator(Player) {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
 			// During Mind Control, don't target the controlled player
 			if lm != null && lm.mind_control_active && target.entity.id == lm.mind_control_target_id continue;
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -2704,22 +2704,22 @@ Lily_Kill_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			closest := get_closest_kill_target(this, player);
 			if closest != null {
-				lm := player.entity->get_component(Lily_Module);
+				lm := player.entity.get_component(Lily_Module);
 
 				// During Mind Control, play attack anim on puppet — other players see the puppet commit the kill
 				if lm != null && lm.mind_control_active {
 					puppet := get_player_by_entity_id(lm.mind_control_target_id);
 					if puppet != null {
-						puppet->set_facing_right(closest.entity.world_position.x > puppet.entity.world_position.x);
-						puppet->set_trigger("traitor_kill");
+						puppet.set_facing_right(closest.entity.world_position.x > puppet.entity.world_position.x);
+						puppet.set_trigger("traitor_kill");
 					}
 				} else if lm != null && lm.is_lily_form {
-					player->set_facing_right(closest.entity.world_position.x > player.entity.world_position.x);
+					player.set_facing_right(closest.entity.world_position.x > player.entity.world_position.x);
 					rr_lily_creature_trigger(player, "action");
-					player->set_trigger("lily_kill");
+					player.set_trigger("lily_kill");
 				} else {
-					player->set_facing_right(closest.entity.world_position.x > player.entity.world_position.x);
-					player->set_trigger("traitor_kill");
+					player.set_facing_right(closest.entity.world_position.x > player.entity.world_position.x);
+					player.set_trigger("traitor_kill");
 				}
 
 				// Award braid points before kill (need to check string status)
@@ -2727,7 +2727,7 @@ Lily_Kill_Ability :: class : Ability_Base {
 					rr_lily_award_kill_points(player, closest);
 				}
 
-				closest->kill_with_killer(player.entity.id);
+				closest.kill_with_killer(player.entity.id);
 
 				cd_mult := 1.0;
 				if lm != null cd_mult = lm.tree_cd_multiplier;
@@ -2735,7 +2735,7 @@ Lily_Kill_Ability :: class : Ability_Base {
 
 				if Game.is_server() {
 					sfx := SFX.default_sfx_desc();
-					sfx->set_position(closest.entity.world_position);
+					sfx.set_position(closest.entity.world_position);
 					sfx.volume = 0.25;
 					rr_play_sfx(LILY_SFX_KILL, sfx);
 				}
@@ -2744,7 +2744,7 @@ Lily_Kill_Ability :: class : Ability_Base {
 	}
 
 	on_draw_button :: method(rect: Rect) {
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm != null && lm.is_lily_form {
 			icon = get_asset(Texture_Asset, "sprites/icons/lily/Lily_Bun_Angry_Icon.png");
 		} else {
@@ -2765,11 +2765,11 @@ Lily_Transform_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		if lm.mind_control_active return false;
 		if lm.tea_party_active return false;
@@ -2778,7 +2778,7 @@ Lily_Transform_Ability :: class : Ability_Base {
 
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
-			lm := player.entity->get_component(Lily_Module);
+			lm := player.entity.get_component(Lily_Module);
 			if lm == null return;
 
 			if lm.is_lily_form {
@@ -2790,9 +2790,9 @@ Lily_Transform_Ability :: class : Ability_Base {
 					player.agent.movement_speed = player.agent.movement_speed / LILY_LILY_SPEED_MULTIPLIER;
 				}
 				rr_lily_swap_to_player(player);
-				player->set_trigger("lily_revert");
-				player->remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
-				player->add_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
+				player.set_trigger("lily_revert");
+				player.remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
+				player.add_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
 
 				if Game.is_server() {
 					sfx_desc := SFX.default_sfx_desc();
@@ -2801,9 +2801,9 @@ Lily_Transform_Ability :: class : Ability_Base {
 					rr_play_sfx(LILY_SFX_TRANSFORM_BACK, sfx_desc);
 				}
 
-				lock := player.entity->get_component(Lily_Transform_Lock);
+				lock := player.entity.get_component(Lily_Transform_Lock);
 				if lock == null {
-					lock = player.entity->add_component(Lily_Transform_Lock);
+					lock = player.entity.add_component(Lily_Transform_Lock);
 				}
 				lock.end_time = get_time() + LILY_TRANSFORM_ANIM_SECONDS;
 				lock.player_entity_id = player.entity.id;
@@ -2812,9 +2812,9 @@ Lily_Transform_Ability :: class : Ability_Base {
 				// Transform to Lily (110% speed)
 				rr_drag_body_force_drop_for_player(player);
 				lm.is_lily_form = true;
-				player->set_trigger("lily_transform");
-				player->remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
-				player->add_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
+				player.set_trigger("lily_transform");
+				player.remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
+				player.add_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
 				lm.skeleton_swap_at = get_time() + LILY_TRANSFORM_ANIM_SECONDS;
 
 				if Game.is_server() {
@@ -2824,9 +2824,9 @@ Lily_Transform_Ability :: class : Ability_Base {
 					rr_play_sfx(LILY_SFX_TRANSFORM, sfx_desc);
 				}
 
-				lock := player.entity->get_component(Lily_Transform_Lock);
+				lock := player.entity.get_component(Lily_Transform_Lock);
 				if lock == null {
-					lock = player.entity->add_component(Lily_Transform_Lock);
+					lock = player.entity.add_component(Lily_Transform_Lock);
 				}
 				lock.end_time = get_time() + LILY_TRANSFORM_ANIM_SECONDS;
 				lock.player_entity_id = player.entity.id;
@@ -2836,7 +2836,7 @@ Lily_Transform_Ability :: class : Ability_Base {
 	}
 
 	on_draw_button :: method(rect: Rect) {
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm != null && lm.is_lily_form {
 			icon = get_asset(Texture_Asset, "sprites/icons/transform_good.png");
 		} else {
@@ -2857,10 +2857,10 @@ Lily_Transform_Lock :: class : Component {
 			active = false;
 			p := get_player_by_entity_id(player_entity_id);
 			if p != null {
-				p->remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
+				p.remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
 
 				// Apply lily speed bonus
-				lm := p.entity->get_component(Lily_Module);
+				lm := p.entity.get_component(Lily_Module);
 				if lm != null && lm.is_lily_form && !lm.lily_speed_active {
 					lm.lily_speed_active = true;
 					p.agent.movement_speed = p.agent.movement_speed * LILY_LILY_SPEED_MULTIPLIER;
@@ -2882,11 +2882,11 @@ Lily_Hair_Tree_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		// Already planted — one-time use
 		if lm.hair_tree_planted return false;
@@ -2918,11 +2918,11 @@ Lily_String_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		// Schleem form only
 		if lm.is_lily_form return false;
@@ -2933,12 +2933,12 @@ Lily_String_Ability :: class : Ability_Base {
 
 	get_closest_string_target :: proc(instance: Lily_String_Ability, player: Player) -> Player {
 		finder := make_finder(Player, player.entity.world_position, LILY_STRING_RANGE);
-		foreach target: component_iterator(Player) {
+		for target: component_iterator(Player) {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -2947,22 +2947,22 @@ Lily_String_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			closest := get_closest_string_target(this, player);
 			if closest != null {
-				lm := player.entity->get_component(Lily_Module);
+				lm := player.entity.get_component(Lily_Module);
 				if lm == null return;
 
 				// Toggle: if already strung, remove string
 				if rr_lily_is_player_strung(player, closest.entity.id) {
 					rr_lily_remove_string(player, closest.entity.id);
 					rr_lily_remove_braid_from_target(closest);
-					if player->is_local_or_server() {
-						Notifier.notify(player, format_string("String removed from %", {closest->get_username()}));
+					if player.is_local_or_server() {
+						Notifier.notify(player, format_string("String removed from %", {closest.get_username()}));
 					}
 				} else {
 					// Attach string — target gets NO notification
 					rr_lily_add_string(player, closest.entity.id);
 					rr_lily_spawn_braid_on_target(closest, player.entity.id);
-					if player->is_local_or_server() {
-						Notifier.notify(player, format_string("String attached to %", {closest->get_username()}));
+					if player.is_local_or_server() {
+						Notifier.notify(player, format_string("String attached to %", {closest.get_username()}));
 					}
 				}
 
@@ -2979,13 +2979,13 @@ Lily_String_Ability :: class : Ability_Base {
 	}
 
 	on_draw_button :: method(rect: Rect) {
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm != null {
 			ts := UI.default_text_settings();
 			ts.size = 18;
 			ts.halign = .RIGHT;
 			ts.valign = .BOTTOM;
-			UI.text(rect->inset(5), ts, "%", {lm.strung_player_ids.count});
+			UI.text(rect.inset(5), ts, "%", {lm.strung_player_ids.count});
 		}
 		draw_ability_name_label(rect, Lily_String_Ability.NAME);
 	}
@@ -3004,12 +3004,12 @@ Lily_Steal_Eyes_Ability :: class : Ability_Base {
 
 	get_closest_steal_target :: proc(instance: Lily_Steal_Eyes_Ability, player: Player) -> Player {
 		finder := make_finder(Player, player.entity.world_position, LILY_STEAL_RANGE);
-		foreach target: component_iterator(Player) {
+		for target: component_iterator(Player) {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -3017,11 +3017,11 @@ Lily_Steal_Eyes_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		if lm.is_lily_form return false;
 		if lm.mind_control_active return false;
@@ -3033,14 +3033,14 @@ Lily_Steal_Eyes_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			closest := get_closest_steal_target(this, player);
 			if closest != null {
-				lm := player.entity->get_component(Lily_Module);
+				lm := player.entity.get_component(Lily_Module);
 				if lm == null return;
 				lm.carrying_eyes = true;
 				lm.stolen_eyes_from_id = closest.entity.id;
 				closest.lily_no_eyes = true;
 
-				if player->is_local_or_server() {
-					Notifier.notify(player, format_string("Stole %'s eyes!", {closest->get_username()}));
+				if player.is_local_or_server() {
+					Notifier.notify(player, format_string("Stole %'s eyes!", {closest.get_username()}));
 				}
 
 				cd_mult := lm.tree_cd_multiplier;
@@ -3065,12 +3065,12 @@ Lily_Steal_Legs_Ability :: class : Ability_Base {
 
 	get_closest_steal_target :: proc(instance: Lily_Steal_Legs_Ability, player: Player) -> Player {
 		finder := make_finder(Player, player.entity.world_position, LILY_STEAL_RANGE);
-		foreach target: component_iterator(Player) {
+		for target: component_iterator(Player) {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -3078,11 +3078,11 @@ Lily_Steal_Legs_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		if lm.is_lily_form return false;
 		if lm.mind_control_active return false;
@@ -3094,13 +3094,13 @@ Lily_Steal_Legs_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			closest := get_closest_steal_target(this, player);
 			if closest != null {
-				lm := player.entity->get_component(Lily_Module);
+				lm := player.entity.get_component(Lily_Module);
 				if lm == null return;
 				lm.carrying_legs = true;
 				lm.stolen_legs_from_id = closest.entity.id;
 
-				if player->is_local_or_server() {
-					Notifier.notify(player, format_string("Stole %'s legs!", {closest->get_username()}));
+				if player.is_local_or_server() {
+					Notifier.notify(player, format_string("Stole %'s legs!", {closest.get_username()}));
 				}
 
 				cd_mult := lm.tree_cd_multiplier;
@@ -3125,11 +3125,11 @@ Lily_Tea_Party_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		if !lm.is_lily_form return false;
 		if lm.tea_party_active return false;
@@ -3139,7 +3139,7 @@ Lily_Tea_Party_Ability :: class : Ability_Base {
 	}
 
 	get_closest_tea_target :: proc(instance: Lily_Tea_Party_Ability, player: Player) -> Player {
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return null;
 
 		finder := make_finder(Player, player.entity.world_position, LILY_TEA_PARTY_TABLE_RANGE);
@@ -3147,7 +3147,7 @@ Lily_Tea_Party_Ability :: class : Ability_Base {
 			target := get_player_by_entity_id(lm.strung_player_ids[i]);
 			if target == null continue;
 			if target.player_state != Player_State.ALIVE continue;
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -3178,12 +3178,12 @@ Lily_Mind_Control_Ability :: class : Ability_Base {
 
 	get_closest_target :: proc(instance: Lily_Mind_Control_Ability, player: Player) -> Player {
 		finder := make_finder(Player, player.entity.world_position, LILY_MIND_CONTROL_RANGE);
-		foreach target: component_iterator(Player) {
+		for target: component_iterator(Player) {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -3191,11 +3191,11 @@ Lily_Mind_Control_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		if !lm.is_lily_form return false;
 		if lm.mind_control_active return false;
@@ -3208,7 +3208,7 @@ Lily_Mind_Control_Ability :: class : Ability_Base {
 			closest := get_closest_target(this, player);
 			if closest != null {
 				rr_lily_start_mind_control(player, closest);
-				lm := player.entity->get_component(Lily_Module);
+				lm := player.entity.get_component(Lily_Module);
 				cd_mult := 1.0;
 				if lm != null cd_mult = lm.tree_cd_multiplier;
 				current_cooldown = LILY_MIND_CONTROL_COOLDOWN * cd_mult;
@@ -3231,7 +3231,7 @@ Lily_Mind_Control_Exit_Ability :: class : Ability_Base {
 
 	can_use :: method() -> bool {
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		return lm.mind_control_active;
 	}
@@ -3257,12 +3257,12 @@ Lily_Deathbraid_Ability :: class : Ability_Base {
 
 	// Find the tree if it has enough absorbs
 	find_ready_tree :: method() -> Entity {
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return null;
 		tree := lm.hair_tree_entity;
 		if tree == null return null;
 		if !#alive(tree) return null;
-		tc := tree->get_component(Lily_Hair_Tree);
+		tc := tree.get_component(Lily_Hair_Tree);
 		if tc != null && tc.fulfilled_count >= LILY_DEATHBRAID_THRESHOLD {
 			return tree;
 		}
@@ -3275,7 +3275,7 @@ Lily_Deathbraid_Ability :: class : Ability_Base {
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		if !lm.is_lily_form return false;
 		if lm.deathbraid_active return false;
@@ -3301,7 +3301,7 @@ Lily_Deathbraid_Ability :: class : Ability_Base {
 		ts.halign = .CENTER;
 		ts.valign = .BOTTOM;
 		ts.color = v4.{1.0, 0.2, 0.2, pulse};
-		UI.text(rect->inset(3), ts, "READY");
+		UI.text(rect.inset(3), ts, "READY");
 		draw_ability_name_label(rect, Lily_Deathbraid_Ability.NAME);
 	}
 }
@@ -3312,7 +3312,7 @@ Lily_Deathbraid_Ability :: class : Ability_Base {
 
 rr_lily_draw_abilities :: proc(player: Player, idx: int) -> int {
 	abilityIndex := idx;
-	lm := player.entity->get_component(Lily_Module);
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return abilityIndex;
 
 	// During Mind Control: Kill (through puppet) + Release
@@ -3365,8 +3365,8 @@ rr_lily_draw_abilities :: proc(player: Player, idx: int) -> int {
 
 
 rr_lily_draw_hud :: proc(player: Player) {
-	if !player->is_local() return;
-	lm := player.entity->get_component(Lily_Module);
+	if !player.is_local() return;
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	screen := UI.get_screen_rect();
@@ -3376,11 +3376,11 @@ rr_lily_draw_hud :: proc(player: Player) {
 	ts.valign = .TOP;
 	ts.color = v4.{1.0, 0.6, 0.8, 1.0};
 
-	hud_rect := screen->top_left_rect()->offset(20.0, 80.0)->grow(200.0, 200.0, 30.0, 30.0);
+	hud_rect := screen.top_left_rect().offset(20.0, 80.0).grow(200.0, 200.0, 30.0, 30.0);
 	UI.text(hud_rect, ts, "Braid Points: %", {lm.braid_points});
 
 	// Show string count
-	hud_rect2 := screen->top_left_rect()->offset(20.0, 105.0)->grow(200.0, 200.0, 30.0, 30.0);
+	hud_rect2 := screen.top_left_rect().offset(20.0, 105.0).grow(200.0, 200.0, 30.0, 30.0);
 	ts.size = 16;
 	ts.color = v4.{0.8, 0.8, 0.8, 0.8};
 	UI.text(hud_rect2, ts, "Strings: %", {lm.strung_player_ids.count});
@@ -3389,9 +3389,9 @@ rr_lily_draw_hud :: proc(player: Player) {
 
 	// Tree request status
 	if lm.hair_tree_planted && lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
-		tree_comp := lm.hair_tree_entity->get_component(Lily_Hair_Tree);
+		tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 		if tree_comp != null {
-			req_rect := screen->top_left_rect()->offset(20.0, y_offset)->grow(200.0, 200.0, 30.0, 30.0);
+			req_rect := screen.top_left_rect().offset(20.0, y_offset).grow(200.0, 200.0, 30.0, 30.0);
 			ts.color = v4.{1.0, 0.8, 0.9, 1.0};
 			if tree_comp.fulfilled_count >= LILY_TREE_TOTAL_REQUESTS {
 				UI.text(req_rect, ts, "Tree: DEATHBRAID READY");
@@ -3403,13 +3403,13 @@ rr_lily_draw_hud :: proc(player: Player) {
 
 			// Show carried items
 			if lm.carrying_eyes {
-				carry_rect := screen->top_left_rect()->offset(20.0, y_offset)->grow(200.0, 200.0, 30.0, 30.0);
+				carry_rect := screen.top_left_rect().offset(20.0, y_offset).grow(200.0, 200.0, 30.0, 30.0);
 				ts.color = v4.{0.9, 0.7, 0.7, 1.0};
 				UI.text(carry_rect, ts, "Carrying: Eyes");
 				y_offset += 25.0;
 			}
 			if lm.carrying_legs {
-				carry_rect := screen->top_left_rect()->offset(20.0, y_offset)->grow(200.0, 200.0, 30.0, 30.0);
+				carry_rect := screen.top_left_rect().offset(20.0, y_offset).grow(200.0, 200.0, 30.0, 30.0);
 				ts.color = v4.{0.9, 0.7, 0.7, 1.0};
 				UI.text(carry_rect, ts, "Carrying: Legs");
 				y_offset += 25.0;
@@ -3419,24 +3419,24 @@ rr_lily_draw_hud :: proc(player: Player) {
 
 	// Mind Control active indicator
 	if lm.mind_control_active {
-		mc_rect := screen->top_left_rect()->offset(20.0, y_offset)->grow(200.0, 200.0, 30.0, 30.0);
+		mc_rect := screen.top_left_rect().offset(20.0, y_offset).grow(200.0, 200.0, 30.0, 30.0);
 		ts.color = v4.{0.8, 0.4, 1.0, 1.0};
 		target := get_player_by_entity_id(lm.mind_control_target_id);
 		if target != null {
-			UI.text(mc_rect, ts, "Mind Control: %", {target->get_username()});
+			UI.text(mc_rect, ts, "Mind Control: %", {target.get_username()});
 		}
 	}
 }
 
 // Draw request icon above the tree in world space (visible only to Lily)
 rr_lily_draw_tree_request_icon :: proc(player: Player) {
-	if !player->is_local() return;
-	lm := player.entity->get_component(Lily_Module);
+	if !player.is_local() return;
+	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.hair_tree_entity == null return;
 	if !#alive(lm.hair_tree_entity) return;
 
-	tree_comp := lm.hair_tree_entity->get_component(Lily_Hair_Tree);
+	tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 	if tree_comp == null return;
 	if tree_comp.fulfilled_count >= LILY_TREE_TOTAL_REQUESTS return;
 
@@ -3449,7 +3449,7 @@ rr_lily_draw_tree_request_icon :: proc(player: Player) {
 
 	// Icon above the tree
 	icon_pos := tree_pos + v2.{0, 2.5};
-	icon_rect := Rect.{icon_pos, icon_pos}->grow(0.15, 0.4, 0.15, 0.4);
+	icon_rect := Rect.{icon_pos, icon_pos}.grow(0.15, 0.4, 0.15, 0.4);
 
 	// Pulsing glow
 	pulse := sin(get_time() * 2.0) * 0.15 + 0.85;
