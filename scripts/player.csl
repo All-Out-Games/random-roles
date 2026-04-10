@@ -79,9 +79,9 @@ Player :: class : Player_Base {
 	// Local-only camera zoom so dead players can see more of the map.
 	ghost_camera_zoom_active: bool;
 	ghost_camera_original_size: float;
-	// Server-side speed override applied while dead (spectator).
-	ghost_speed_override_active: bool;
-	ghost_speed_original_movement_speed: float;
+	// Canonical baseline speed captured once at join — used to hard-reset every round.
+	baseline_movement_speed: float;
+	baseline_movement_speed_saved: bool;
 	
 	// --- Lily (cross-player: any player can have eyes stolen) ---
 	lily_no_eyes: bool;
@@ -264,6 +264,12 @@ Player :: class : Player_Base {
 		// Restart ambience so late-joiners hear it (single loop).
 		rr_restart_ambience();
         append(ref players, this);
+
+		// Capture the engine-default movement speed exactly once.
+		if !baseline_movement_speed_saved {
+			baseline_movement_speed = agent.movement_speed;
+			baseline_movement_speed_saved = true;
+		}
 
 		this.ensure_anim_state_machine();
 
