@@ -1370,8 +1370,10 @@ on_player_go_dead :: proc(player: Player) {
 	// Safe to call even if already dropped (guard inside checks dragging_corpse_entity_id == 0).
 	rr_drag_body_force_drop_for_player(player);
 
-	// Reset GGG whip/creature state so a mid-pull whip doesn't persist as a ghost.
+	// Force-revert all transforming roles before switching to ghost speed.
 	rr_ggg_force_revert(player);
+	rr_mimicer_force_revert(player);
+	rr_werewolf_force_revert_for_meeting(player);
 
 	// Reset Lily creature state on death.
 	rr_lily_force_revert(player);
@@ -1383,13 +1385,10 @@ on_player_go_dead :: proc(player: Player) {
 	player.is_temporarily_resurrected = false;
 	player.temporarily_resurrected_until = 0.0;
 
-	// Ghost QoL: apply a server-side movement speed boost while spectating.
-	// (Movement is authoritative on the server.)
-	if !player.ghost_speed_override_active {
-		player.ghost_speed_original_movement_speed = player.agent.movement_speed;
-		player.ghost_speed_override_active = true;
+	// Ghost QoL: apply a movement speed boost while spectating.
+	if player.baseline_movement_speed_saved {
+		player.agent.movement_speed = player.baseline_movement_speed * GHOST_SPEED_MULTIPLIER;
 	}
-	player.agent.movement_speed = player.ghost_speed_original_movement_speed * GHOST_SPEED_MULTIPLIER;
 
 	player->add_ghost_reason("spectator");
 	player.agent->set_navmesh_to_lock_to(world_references.ghost_navmesh);
@@ -1408,10 +1407,9 @@ on_player_go_passive :: proc(player: Player) {
 	player.werewolf_saved_tasks_active = false;
 	world_references->teleport_near_lobby(player);
 	player->remove_ghost_reason("spectator");
-	// Restore baseline speed when leaving ghost mode.
-	if player.ghost_speed_override_active {
-		player.agent.movement_speed = player.ghost_speed_original_movement_speed;
-		player.ghost_speed_override_active = false;
+	// Hard-reset to canonical baseline speed — prevents any leaked multipliers.
+	if player.baseline_movement_speed_saved {
+		player.agent.movement_speed = player.baseline_movement_speed;
 	}
 	player.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
 	player->apply_voice_chat_masks_for_current_state();
@@ -1422,10 +1420,9 @@ on_player_go_alive :: proc(player: Player) {
 	player->revive();
 	player.player_state = Player_State.ALIVE;
 	player->remove_ghost_reason("spectator");
-	// Restore baseline speed when leaving ghost mode.
-	if player.ghost_speed_override_active {
-		player.agent.movement_speed = player.ghost_speed_original_movement_speed;
-		player.ghost_speed_override_active = false;
+	// Hard-reset to canonical baseline speed — prevents any leaked multipliers.
+	if player.baseline_movement_speed_saved {
+		player.agent.movement_speed = player.baseline_movement_speed;
 	}
 	player.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
 	rebuild_game_world_navmesh();
