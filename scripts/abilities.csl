@@ -274,6 +274,19 @@ Drag_Body_Ability :: class : Ability_Base {
 				if trapped != null return true;
 			}
 		}
+		// Lily: also allow if dragging a trapped player
+		if player.player_role == Player_Role.LILY_LOVEBRAIDS {
+			llm := player.entity.get_component(Lily_Module);
+			if llm != null && llm.dragging_live_player_id != 0 return true;
+		}
+		// Lily schleem form: can grab string-trapped players
+		if player.player_role == Player_Role.LILY_LOVEBRAIDS {
+			llm2 := player.entity.get_component(Lily_Module);
+			if llm2 != null && !llm2.is_lily_form {
+				trapped := rr_lily_get_closest_draggable_trapped_player(player);
+				if trapped != null return true;
+			}
+		}
 		return rr_drag_body_get_closest_draggable_corpse(player) != null;
 	}
 
@@ -287,6 +300,14 @@ Drag_Body_Ability :: class : Ability_Base {
 				ggg_live_dragging = true;
 			}
 		}
+		// Lily: also check live drag
+		lily_live_dragging := false;
+		if player != null && player.player_role == Player_Role.LILY_LOVEBRAIDS {
+			llm_drag := player.entity.get_component(Lily_Module);
+			if llm_drag != null && llm_drag.dragging_live_player_id != 0 {
+				lily_live_dragging = true;
+			}
+		}
 
 		// Toggle grab/drop.
 		if params.clicked && params.can_use && Game.is_server() {
@@ -298,6 +319,10 @@ Drag_Body_Ability :: class : Ability_Base {
 				rr_ggg_stop_live_drag(player);
 				return;
 			}
+			if lily_live_dragging {
+				rr_lily_stop_live_drag(player);
+				return;
+			}
 
 			// GGG human form: try to grab a trapped+blinded live player first
 			if player.player_role == Player_Role.GOO_GOO_GAGA {
@@ -306,6 +331,18 @@ Drag_Body_Ability :: class : Ability_Base {
 					trapped := rr_ggg_get_closest_draggable_trapped_player(player);
 					if trapped != null {
 						rr_ggg_start_live_drag(player, trapped);
+						return;
+					}
+				}
+			}
+
+			// Lily schleem form: try to grab a string-trapped player first
+			if player.player_role == Player_Role.LILY_LOVEBRAIDS {
+				llm_grab := player.entity.get_component(Lily_Module);
+				if llm_grab != null && !llm_grab.is_lily_form {
+					trapped := rr_lily_get_closest_draggable_trapped_player(player);
+					if trapped != null {
+						rr_lily_start_live_drag(player, trapped);
 						return;
 					}
 				}

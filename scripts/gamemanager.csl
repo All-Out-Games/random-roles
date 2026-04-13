@@ -2410,18 +2410,22 @@ unlock :: proc(player: Player) {
 			mm.stolen_faces = max(mm.stolen_faces, MIMICER_UNLEASH_UNLOCK_FACES);
 		}
 	}
-	// Lily: braid points
+	// Lily: plant tree if needed, then max out fulfilled requests
 	if role == Player_Role.LILY_LOVEBRAIDS {
 		lm := player.entity.get_component(Lily_Module);
 		if lm != null {
-			// Max out fulfilled requests on planted tree for Deathbraid testing
+			// Auto-plant tree if not yet planted
+			if !lm.hair_tree_planted {
+				rr_lily_place_hair_tree(player);
+			}
+			// Max out fulfilled requests for Deathbraid testing
 			if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
 				tc := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 				if tc != null {
 					tc.fulfilled_count = LILY_DEATHBRAID_THRESHOLD;
 					tc.grow();
 					rr_lily_apply_tree_buffs(player);
-					Notifier.notify(player, "Tree fully grown — Deathbraid ready!");
+					Notifier.notify(player, "Tree fully grown — all abilities unlocked!");
 				}
 			}
 		}
@@ -3411,8 +3415,11 @@ assign_players_to_types :: proc() {
 			ggm.dragging_live_player_id = 0;
 		}
 
-		// Lily no-eyes
+		// Lily no-eyes / crawl
 		p.lily_no_eyes = false;
+		if p.lily_crawling {
+			rr_lily_restore_legs(p);
+		}
 
 		// Pyromaniac
 		p.pyro_on_fire = false;
