@@ -8,14 +8,13 @@ You will be developing a multiplayer game in a custom scripting language (.csl)
 - Do not forget that **multiple players will be connecting**. Avoid global state that will break with multiple players. Store these as fields on the player.
 
 ### is_local_or_server() vs is_local()
+Both are **methods on Player_Base** — they are NOT standalone global functions.
 
-Both are **methods on Player_Base** — they are NOT standalone global functions and will produce a compile error if called that way from a non-Player class.
-
-- Inside a `Player_Base` subclass method: call as bare `is_local_or_server()` (implicit `this`)
+- Inside a `Player_Base` subclass method: call as bare `is_local_or_server()`
 - From any other component that has a player reference: call `player_ref.is_local_or_server()`
 
 ```csl
-// ✅ Correct — inside a Player_Base subclass
+// ✅ Correct
 Player :: class : Player_Base {
     ao_late_update :: method(dt: float) {
         if is_local_or_server() {
@@ -56,15 +55,11 @@ import "core:ao"
 import "ui" // add folder imports here if needed
 ```
 
-## Assets/Resources
 Find assets with the MCP: 
 asset_local_search (query: "tree")
+When referencing assets use <path>.<ext>, omit /res from the path. 
 
-- When referencing assets use <path>.<ext>, omit /res from the path. 
-- Engine assets are available with the $AO prefix.
-- Check that assets actually exist before using. 
-
-### Available Asset Types
+### Asset Types
 ```csl
 texture := get_asset(Texture_Asset, "ui/button.png");
 sound := get_asset(SFX_Asset, "sfx/click.wav");
@@ -72,9 +67,7 @@ spine := get_asset(Spine_Asset, "anims/dog/dog.spine");
 ```
 
 ## Entities
-Most entities should be placed in the scene using the mcp tools. 
-
-Use scripts to add entities that must be dynamically spawned (like towers or waves of enemies in a tower defense game)
+Place entities with the mcp tools, except for dynamically spawned entities:
 ```csl
 e := Scene.create_entity();
 e.set_local_position({10, 20});
@@ -89,7 +82,6 @@ e.destroy();
 ```
 
 ### Iterating Entities
-
 ```csl
 for entity: entity_iterator() {
 }
@@ -97,7 +89,7 @@ for entity: entity_iterator() {
 
 ### Iterating Children
 visit :: proc(entity: Entity) {
-    // <do something>
+    // logic
 
     current := entity.first_child;
     while current != null {
@@ -107,25 +99,23 @@ visit :: proc(entity: Entity) {
 }
 
 ## Components
-
 ### Out-of-the-box components
 #### Sprite_Renderer
 ```csl
 sprite := entity.get_component(Sprite_Renderer);
 sprite.set_texture(texture);
 sprite.color = {1, 1, 1, 1}; // RGBA
-sprite.depth_offset = 0.5;
-sprite.layer = 10;
+sprite.layer = -5;
 ```
 
 #### Prefab_Asset
 ```csl
-prefab_asset := get_asset(Prefab_Asset, "MyPrefab.prefab");
-entity := instantiate(prefab_asset);
+prefab := get_asset(Prefab_Asset, "MyPrefab.prefab");
+entity := instantiate(prefab);
 ```
 
 #### Spine_Animator
-Reference the spine skill. If you are asked to make an NPC, shop vendor, or other character, you must use the $AO/streamed_character rig as it has a ton of skins and animations! If adding through code, note that all streamed_characters will need at least the base/crewchsia skin added. 
+Reference the Spine skill. If you are asked to make an NPC, shop vendor, or other character, you must use the $AO/streamed_character rig which has a ton of skins and animations! If adding through code, note that all streamed_characters will need at least the base/crewchsia skin added. 
 
 ### Creating Custom Components
 > Make new components in dedicated files. You do not need to import them unless they're in a separate folder. 
@@ -134,8 +124,9 @@ Can override these lifecycle methods:
 
 - ao_start
 - ao_update
-- ao_late_update - After all updates
-- ao_end - When component is destroyed
+- ao_late_update
+- ao_end - when destroyed
+
 ```csl
 // orbiter.csl
 Orbiter :: class : Component {
@@ -170,7 +161,6 @@ Orbiter :: class : Component {
 > You can add components you've made to entities in the scene using the modify_scene tool. 
 
 #### Iterating Components
-
 ```csl
 for player: component_iterator(My_Player) {
 }
@@ -187,11 +177,9 @@ closest, found := Scene.get_closest_component_in_range(player_pos, 2.0, Pickup);
 
 ## Random
 ```csl
-rng: u64 = rng_seed(entity.id);
-// or
 rng: u64 = rng_root_seed();
 
-// Pass seed using ref. Range values are inclusive.
+// Range values are inclusive.
 random_float := rng_range_float(ref rng, 0, 1);
 random_int := rng_range_int(ref rng, 1, 10);
 ```
@@ -228,7 +216,7 @@ desc.delay = 0; // For lining up with animations
 desc.loop = false;
 desc.volume = 0.4;
 desc.speed_perturb = 0.1;
-// For sounds only one player should hear (UI clicks, etc...), wrap play calls with is_local
+// For sounds only one player should hear (UI clicks), wrap play calls with is_local
 sound_id := SFX.play(sound_asset, desc);
 
 SFX.stop(sound_id);
@@ -247,6 +235,8 @@ COST :: 50;
 if Economy.can_withdraw_currency(player, "Coins", COST) {
     Economy.withdraw_currency(player, "Coins", COST);
 }
+
+Any time players receive item or currencies you MUST play a sick animation of the item/coins going up or lerping over and have tactile sfx. 
 ```
 
 ## UI
@@ -261,7 +251,7 @@ if Economy.can_withdraw_currency(player, "Coins", COST) {
 
 ### Player_Base Reference
 - p.is_local_or_server() -> bool  // true on the local client and on the server; must be used for UI. 
-- p.is_local() -> bool            // true only on the local client; use for purely cosmetic effects
+- p.is_local() -> bool            // true only on the local client; use for purely cosmetic effects (not UI)
 - p.get_username()
 - p.get_user_id() -> string
 - p.avatar_color -> Color_Replace_Color 
@@ -272,14 +262,11 @@ if Economy.can_withdraw_currency(player, "Coins", COST) {
 ## Best Practices
 - CSL does not have closures, instead use `userdata: Object` passed to callbacks. Class instances can be stored in an `Object` variable and cast back to its original type.
 - Do not write your own input. Movement is handled by default. If you need to consume it, use player.agent.inputs_this_frame and ability buttons. 
-- Generally avoid custom player animations
-- When unsure about an API signature, find the appropriate skill. If no results are found, you may grep core.csl or generated.csl, but NEVER read them directly as they will ruin your context. 
+- When unsure about an API signature, find the appropriate skill. If no results are found, you may grep api_references/core/ao/[core/generated].csl_engine which is a massive file with ALL engine APIs. 
 
 After you make script changes, run the All Out MCP compile tool.
 When the prompt requires building a game world, do so using the allout MCP scene editing tools instead of scripts. 
 
-To add weapons to your game clone the https://github.com/All-Out-Games/reusable-weapons-csl.git repo with curl and follow the README. 
+To add weapons to your game clone the https://github.com/All-Out-Games/reusable-weapons-csl.git repo with curl and follow its README. 
 
-Keep your changes scoped to exactly what the user asked for and nothing more. 
-
-When entering a new project for the first time, start with the scene_summary tool. 
+Start with the scene_summary tool. Do exactly what the users asks for and nothing more. 

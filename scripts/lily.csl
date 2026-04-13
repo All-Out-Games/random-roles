@@ -111,8 +111,6 @@ LILY_CAFFEINE_DIRECTION_HOLD_SECONDS :: 0.4;
 LILY_MIND_CONTROL_COOLDOWN :: 60.0;
 LILY_MIND_CONTROL_DURATION :: 10.0;
 LILY_MIND_CONTROL_RANGE :: 3.0;     // melee range
-LILY_MIND_CONTROL_FOLLOW_DIST :: 1.5; // Lily follows behind at this distance
-LILY_MIND_CONTROL_FOLLOW_SPEED :: 5.0; // Lily follow speed
 
 // Passives
 LILY_THREAD_COUNT_SPEED_PER_STRING :: 0.03; // 3% per string
@@ -1077,8 +1075,10 @@ Lily_String_Braid :: class : Component {
 	lily_player_entity_id: u64;
 
 	is_visible_to_local_player :: method() -> bool {
-		// Braids are now visible to all players
-		return true;
+		// Only visible to Lily herself
+		local_player, ok := Game.get_local_player();
+		if !ok return false;
+		return local_player.entity.id == lily_player_entity_id;
 	}
 
 	apply_local_visibility :: method() {
@@ -2060,19 +2060,22 @@ Lily_Mind_Control_Puppet :: class : Component {
 			p.set_facing_right(input.x >= 0.0);
 		}
 
-		// Override Lily's input so she follows behind instead of moving with her own input
-		target_pos := p.entity.world_position;
-		lily_pos := lily.entity.world_position;
-		dir := target_pos - lily_pos;
-		dist := length(dir);
-		if dist > LILY_MIND_CONTROL_FOLLOW_DIST {
-			move_dir := normalize(dir);
-			overshoot := dist - LILY_MIND_CONTROL_FOLLOW_DIST;
-			strength := clamp(overshoot / LILY_MIND_CONTROL_FOLLOW_DIST, 0.0, 1.0);
-			lily.agent.input_this_frame = move_dir * strength;
-			lily.set_facing_right(dir.x >= 0.0);
-		} else {
-			lily.agent.input_this_frame = v2.{0, 0};
+		// Lily stays put — only the puppet moves
+		lily.agent.input_this_frame = v2.{0, 0};
+
+		// Draw "Mind Controlled!" banner at top of screen (below progress bar)
+		if p.is_local_or_server() {
+			screen := UI.get_screen_rect();
+			banner := screen.top_rect().offset(0.0, -140.0).grow_bottom(40);
+			ts := UI.default_text_settings();
+			ts.size = 36;
+			ts.halign = .CENTER;
+			ts.valign = .CENTER;
+			ts.color = v4.{0.8, 0.4, 1.0, 1.0};
+			ts.do_outline = true;
+			ts.outline_thickness = 3;
+			ts.outline_color = v4.{0, 0, 0, 1};
+			UI.text(banner, ts, "Mind Controlled!");
 		}
 	}
 
@@ -2096,7 +2099,7 @@ rr_lily_start_mind_control :: proc(player: Player, target: Player) {
 	// Block target's own input — Lily's input is forwarded via the Puppet component
 	target.add_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
 
-	// Lily's own input is overridden each frame in the update to follow behind the puppet
+	// Lily keeps her own movement during mind control
 
 	// Add input forwarding component
 	existing := target.entity.get_component(Lily_Mind_Control_Puppet);
@@ -2142,7 +2145,7 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	// Follow logic handled in Lily_Mind_Control_Puppet.ao_update (runs before movement)
+	// Input forwarding handled in Lily_Mind_Control_Puppet.ao_update
 
 	// Check if target is near the tree — auto-deliver for Alive Player request
 	if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
