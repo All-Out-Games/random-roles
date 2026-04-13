@@ -237,6 +237,8 @@ if Economy.can_withdraw_currency(player, "Coins", COST) {
 }
 
 Any time players receive item or currencies you MUST play a sick animation of the item/coins going up or lerping over and have tactile sfx. 
+
+Round based games should reset economy on ao_start with economy_delete_save_data()
 ```
 
 ## UI
