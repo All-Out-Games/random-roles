@@ -479,6 +479,9 @@ rr_lily_round_start :: proc(p: Player) {
 	llm.deathbraid_tree_entity = null;
 	llm.deathbraid_mouth_entity = null;
 	llm.deathbraid_ground_entity = null;
+	llm.deathbraid_vortex_entity = null;
+	llm.deathbraid_tentacle_entities.clear();
+	llm.deathbraid_pull_order.clear();
 	llm.web_sense_arrow_targets.clear();
 	p.active_tasks = List(Task_Base).{};
 }
@@ -3167,32 +3170,36 @@ rr_lily_draw_web_sense :: proc(player: Player) {
 // Deathbraid Grand Finale
 // =============================================================================
 
-// Tendril — grows outward from center along a random angle
-Lily_Deathbraid_Tendril :: class : Component {
-	angle: float;
-	max_dist: float;
-	max_scale: float;
-	grow_duration: float;
-	start_time: float;
+Lily_Deathbraid_Tentacle_Switcher :: class : Component {
+	switch_at: float;
+	animator: Spine_Animator;
+	switched: bool;
 
 	ao_update :: method(dt: float) {
-		t := (get_time() - start_time) / grow_duration;
-		if t > 1.0 t = 1.0;
-
-		// Grow outward from center
-		dist := t * max_dist;
-		entity.set_local_position(v2.{cos(angle) * dist, sin(angle) * dist});
-
-		// Scale up
-		s := 0.5 + t * (max_scale - 0.5);
-		entity.set_local_scale(v2.{s, s});
+		if switched return;
+		if get_time() >= switch_at {
+			switched = true;
+			if animator != null && animator.instance != null {
+				animator.instance.set_animation("base_idle", true, 0);
+			}
+		}
 	}
 }
 
-LILY_DEATHBRAID_FREEZE_PHASE :: 2.0;   // freeze + camera zoom
-LILY_DEATHBRAID_GROUND_PHASE :: 4.0;   // ground hair + mouth spawn
-LILY_DEATHBRAID_SUCK_PHASE :: 7.0;     // suck in players
-LILY_DEATHBRAID_KILL_PHASE :: 8.0;     // kill all
+LILY_DEATHBRAID_FREEZE_PHASE :: 1.5;    // freeze + camera zoom to mouth
+LILY_DEATHBRAID_TENTACLE_PHASE :: 2.5;  // tentacles emerge around map
+LILY_DEATHBRAID_VORTEX_PHASE :: 3.5;    // vortex spawns at center, braids appear on players
+LILY_DEATHBRAID_PULL_PHASE :: 4.5;      // staggered pull begins
+LILY_DEATHBRAID_STAGGER_DELAY :: 1.5;   // seconds between each player starting to get pulled
+LILY_DEATHBRAID_PULL_SPEED :: 0.03;     // lerp factor per frame (slow drag)
+LILY_DEATHBRAID_KILL_DIST :: 0.5;        // distance from mouth to kill
+LILY_DEATHBRAID_TIMEOUT :: 20.0;        // hard cap
+LILY_DEATHBRAID_TENTACLE_COUNT :: 8;    // tentacles around the map
+LILY_DEATHBRAID_TENTACLE_SPREAD :: 8.0;  // how far tentacles spawn from center
+LILY_DEATHBRAID_TENTACLE_MIN_DIST :: 4.0; // minimum distance from mouth
+LILY_DEATHBRAID_SHAKE_INTENSITY :: 0.15;
+LILY_DEATHBRAID_SHAKE_SPEED :: 20.0;
+LILY_DEATHBRAID_ZOOM_TARGET :: 7.0;     // camera zoom during cinematic
 
 rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	lm := player.entity.get_component(Lily_Module);
@@ -3202,22 +3209,34 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	lm.deathbraid_active = true;
 	lm.deathbraid_tree_entity = tree_entity;
 	lm.deathbraid_start_time = get_time();
+	lm.deathbraid_tentacle_entities.clear();
+	lm.deathbraid_pull_order.clear();
 
-	// Freeze ALL players
+	// Mouth spawns at conference room center (voting_spawn), not at the tree
+	center_pos := v2.{0, 0};
+	if world_references != null && world_references.voting_spawn != null && #alive(world_references.voting_spawn) {
+		center_pos = world_references.voting_spawn.world_position;
+	} else {
+		center_pos = tree_entity.world_position; // fallback
+	}
+
+	// Save camera size for restore
+	lm.deathbraid_camera_saved_size = player.camera.size;
+
+	// Freeze ALL alive players
 	for p: component_iterator(Player) {
 		if p == null continue;
 		if p.player_state != Player_State.ALIVE continue;
 		p.add_freeze_reason(LILY_DEATHBRAID_REASON);
 	}
 
-	// Spawn mouth immediately
-	tree_pos := tree_entity.world_position;
+	// Spawn mouth at conference room center
 	mouth_entity := Scene.create_entity();
-	mouth_entity.set_local_position(tree_pos);
+	mouth_entity.set_local_position(center_pos);
 	mouth_entity.set_local_scale(v2.{1.5, 1.5});
 
 	mouth_anim := mouth_entity.add_component(Spine_Animator);
-	mouth_anim.depth_offset = 1.0; // Render below players (0) but above ground hair (2.0)
+	mouth_anim.depth_offset = 1.0;
 	mouth_anim.awaken();
 	mouth_rig := get_asset(Spine_Asset, rr_lily_get_mouth_rig_path());
 	if mouth_anim.instance != null && mouth_rig != null {
@@ -3227,10 +3246,31 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	}
 	lm.deathbraid_mouth_entity = mouth_entity;
 
-	// Ground hair spawns later in update (after FREEZE_PHASE)
+	// Build staggered pull order — sort non-traitor alive players by distance (farthest first for drama)
+	// Store IDs and distances, then sort by distance
+	pull_dists: [..]float;
+	for p: component_iterator(Player) {
+		if p == null continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.player_type == Player_Type.TRAITOR continue;
+		lm.deathbraid_pull_order.append(p.entity.id);
 
-	if player.is_local_or_server() {
-		Notifier.notify(player, "DEATHBRAID ACTIVATED!");
+		pull_dists.append(length(p.entity.world_position - center_pos));
+	}
+
+	// Simple insertion sort by distance (farthest first)
+	count := lm.deathbraid_pull_order.count;
+	for i: 0..count - 1 {
+		for j: i + 1..count - 1 {
+			if pull_dists[j] > pull_dists[i] {
+				tmp_id := lm.deathbraid_pull_order[i];
+				lm.deathbraid_pull_order[i] = lm.deathbraid_pull_order[j];
+				lm.deathbraid_pull_order[j] = tmp_id;
+				tmp_d := pull_dists[i];
+				pull_dists[i] = pull_dists[j];
+				pull_dists[j] = tmp_d;
+			}
+		}
 	}
 }
 
@@ -3239,102 +3279,196 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 	if lm == null return;
 	if !lm.deathbraid_active return;
 
-	elapsed := get_time() - lm.deathbraid_start_time;
+	now := get_time();
+	elapsed := now - lm.deathbraid_start_time;
+
 	tree_pos := v2.{0, 0};
 	if lm.deathbraid_tree_entity != null && #alive(lm.deathbraid_tree_entity) {
 		tree_pos = lm.deathbraid_tree_entity.world_position;
 	}
 
-	// Hair tendril growth handled by Lily_Deathbraid_Tendril components
-
-	// Focus point — on mouth if spawned, otherwise on tree
 	focus_pos := tree_pos;
 	if lm.deathbraid_mouth_entity != null && #alive(lm.deathbraid_mouth_entity) {
 		focus_pos = lm.deathbraid_mouth_entity.world_position;
 	}
 
-	// Camera + LOS — only set for the local player to avoid flickering
-	if player.is_local_or_server() {
-		player.camera.follow_player = false;
-		player.camera.position = focus_pos;
-		camera_size := lerp(player.camera.size, 8.0, min(elapsed * 0.5, 1.0));
-		player.camera.size = camera_size;
+	// Camera/LOS/letterbox handled by rr_lily_update_deathbraid_camera (runs for ALL players)
 
-		if player.local_light_entity != null && #alive(player.local_light_entity) {
-			player.local_light_entity.set_parent(null, true);
-			player.local_light_entity.set_local_position(focus_pos);
+	// ── Phase: Tentacles emerge around the map ──
+	if elapsed >= LILY_DEATHBRAID_TENTACLE_PHASE && lm.deathbraid_tentacle_entities.count == 0 {
+		tentacle_rig := get_asset(Spine_Asset, "anims/roles/Lily/hair_tentacle/RAND004_hair_tentacle_big.spine");
+		rng: u64 = rng_root_seed() + get_frame_number();
+
+		shadow_tex := get_asset(Texture_Asset, "sprites/Shapes/shape_circle_gradient.png");
+
+		for i: 0..LILY_DEATHBRAID_TENTACLE_COUNT - 1 {
+			angle := (cast(float) i / cast(float) LILY_DEATHBRAID_TENTACLE_COUNT) * 6.283;
+			dist := LILY_DEATHBRAID_TENTACLE_SPREAD + rng_range_float(ref rng, -3.0, 3.0);
+			raw_pos := v2.{focus_pos.x + cos(angle) * dist, focus_pos.y + sin(angle) * dist};
+
+			// Clamp to navmesh so tentacles don't spawn in walls or outside the map
+			nav_point: v2;
+			nav_hint: s64;
+			pos := raw_pos;
+			if try_find_closest_point_on_navmesh(raw_pos, ref nav_point, ref nav_hint) {
+				pos = nav_point;
+			}
+
+			// Push away from center if too close
+			to_center := pos - focus_pos;
+			d := length(to_center);
+			if d < LILY_DEATHBRAID_TENTACLE_MIN_DIST && d > 0.01 {
+				dir := normalize(to_center);
+				pos = focus_pos + dir * LILY_DEATHBRAID_TENTACLE_MIN_DIST;
+			}
+
+			te := Scene.create_entity();
+			te.set_local_position(pos);
+			s := rng_range_float(ref rng, 1.0, 1.5);
+			te.set_local_scale(v2.{s, s});
+			// No rotation — tentacles emerge straight up from the floor
+
+			// Ground shadow beneath tentacle
+			shadow_e := Scene.create_entity();
+			shadow_e.set_parent(te, false);
+			shadow_e.set_local_position(v2.{0, 0});
+			shadow_e.set_local_scale(v2.{0.4, 0.25}); // Oval shadow
+			shadow_sprite := shadow_e.add_component(Sprite_Renderer);
+			shadow_sprite.set_texture(shadow_tex);
+			shadow_sprite.color = v4.{0, 0, 0, 0.5};
+			shadow_sprite.depth_offset = 3.0; // Below tentacle
+
+			ta := te.add_component(Spine_Animator);
+			ta.depth_offset = 2.0; // Ground level
+			ta.awaken();
+			if ta.instance != null && tentacle_rig != null {
+				ta.instance.set_skeleton(tentacle_rig);
+				ta.instance.set_skin("default");
+				ta.instance.refresh_skins();
+				ta.instance.set_animation("emerge_from_base", false, 0, 1.0);
+				rr_apply_shadow_mask(ta.instance);
+			}
+
+			// Component to switch to idle after emerge finishes
+			switcher := te.add_component(Lily_Deathbraid_Tentacle_Switcher);
+			switcher.switch_at = now + 1.5; // emerge anim ~1.5s
+			switcher.animator = ta;
+
+			lm.deathbraid_tentacle_entities.append(te);
+		}
+
+		// SFX for tentacles emerging
+		if Game.is_server() {
+			sfx := SFX.default_sfx_desc();
+			sfx.volume = 0.5;
+			SFX.play(get_asset(SFX_Asset, "sfx/lily/spider_death.wav"), sfx);
 		}
 	}
 
-	// Phase 2: Spawn ground hair tendrils (after freeze phase, mouth already visible)
-	if elapsed >= LILY_DEATHBRAID_FREEZE_PHASE && lm.deathbraid_ground_entity == null {
-		ground_parent := Scene.create_entity();
-		ground_parent.set_local_position(focus_pos);
-		ground_parent.set_local_scale(v2.{1.0, 1.0});
+	// ── Phase: Vortex VFX at center ──
+	if elapsed >= LILY_DEATHBRAID_VORTEX_PHASE && lm.deathbraid_vortex_entity == null {
+		vortex_entity := Scene.create_entity();
+		vortex_entity.set_local_position(focus_pos);
+		vortex_entity.set_local_scale(v2.{0.1, 0.1}); // Starts tiny, scales up
 
-		hair_tex := get_asset(Texture_Asset, "sprites/Hair_on_ground.png");
-		rng: u64 = rng_seed_time();
-
-		for h: 0..7 {
-			hair_entity := Scene.create_entity();
-			hair_entity.set_parent(ground_parent, false);
-			hair_entity.set_local_position(v2.{0, 0});
-			hair_entity.set_local_scale(v2.{0.5, 0.5});
-
-			angle := rng_range_float(ref rng, 0.0, 6.283);
-			hair_entity.set_local_rotation(angle * 57.2958);
-
-			hair_sprite := hair_entity.add_component(Sprite_Renderer);
-			hair_sprite.set_texture(hair_tex);
-			hair_sprite.color = v4.{1, 1, 1, 1};
-			hair_sprite.depth_offset = 2.0; // Below mouth (-1.0), on ground level
-
-			tendril := hair_entity.add_component(Lily_Deathbraid_Tendril);
-			tendril.angle = angle;
-			tendril.max_dist = rng_range_float(ref rng, 4.0, 8.0);
-			tendril.max_scale = rng_range_float(ref rng, 3.0, 5.0);
-			tendril.grow_duration = LILY_DEATHBRAID_GROUND_PHASE - LILY_DEATHBRAID_FREEZE_PHASE;
-			tendril.start_time = get_time();
+		va := vortex_entity.add_component(Spine_Animator);
+		va.depth_offset = 0.5; // Between ground and mouth
+		va.awaken();
+		vortex_rig := get_asset(Spine_Asset, "anims/vfx/vortex/skeleton.spine");
+		if va.instance != null && vortex_rig != null {
+			va.instance.set_skeleton(vortex_rig);
+			va.instance.set_skin("default");
+			va.instance.refresh_skins();
+			va.instance.set_animation("animation", true, 0);
 		}
+		// Semi-transparent
+		va.color_multiplier = v4.{1, 1, 1, 0.5};
 
-		lm.deathbraid_ground_entity = ground_parent;
+		lm.deathbraid_vortex_entity = vortex_entity;
+
+		// Spawn braids on all victims, play pull anim, switch to ghost navmesh so they go through walls
+		for p: component_iterator(Player) {
+			if p == null continue;
+			if p.player_state != Player_State.ALIVE continue;
+			if p.player_type == Player_Type.TRAITOR continue;
+			rr_lily_spawn_braid_on_target(p, player.entity.id);
+			p.set_trigger("lily_pull_start");
+			if world_references != null && world_references.ghost_navmesh != null {
+				p.agent.set_navmesh_to_lock_to(world_references.ghost_navmesh);
+			}
+		}
 	}
 
-	// Phase 3: Suck in all alive players + play pull anim
-	if elapsed >= LILY_DEATHBRAID_GROUND_PHASE {
-		suck_progress := (elapsed - LILY_DEATHBRAID_GROUND_PHASE) / (LILY_DEATHBRAID_SUCK_PHASE - LILY_DEATHBRAID_GROUND_PHASE);
-		if suck_progress > 1.0 suck_progress = 1.0;
+	// Scale vortex up over time
+	if lm.deathbraid_vortex_entity != null && #alive(lm.deathbraid_vortex_entity) {
+		vortex_t := clamp((elapsed - LILY_DEATHBRAID_VORTEX_PHASE) / 3.0, 0.0, 1.0);
+		vortex_scale := lerp(0.1, 5.0, vortex_t);
+		lm.deathbraid_vortex_entity.set_local_scale(v2.{vortex_scale, vortex_scale});
+	}
 
-		// Set pull anim + spawn braids once at start of suck phase
-		just_started := (elapsed - dt) < LILY_DEATHBRAID_GROUND_PHASE;
+	// ── Phase: Staggered pull — drag players one by one toward mouth ──
+	if elapsed >= LILY_DEATHBRAID_PULL_PHASE {
+		pull_elapsed := elapsed - LILY_DEATHBRAID_PULL_PHASE;
+		all_dead := true;
 
 		for p: component_iterator(Player) {
 			if p == null continue;
 			if p.player_state != Player_State.ALIVE continue;
 			if p.player_type == Player_Type.TRAITOR continue;
 
-			if just_started {
-				p.set_trigger("lily_pull_start");
-				// Spawn braid on players that don't already have one
-				rr_lily_spawn_braid_on_target(p, player.entity.id);
-			}
+			all_dead = false;
 
-			// Move directly toward mouth center (ignore navmesh/walls)
+			// Find this player's stagger index
+			stagger_idx := -1;
+			for i: 0..lm.deathbraid_pull_order.count - 1 {
+				if lm.deathbraid_pull_order[i] == p.entity.id {
+					stagger_idx = i;
+				}
+			}
+			if stagger_idx < 0 continue; // not in pull order (joined late?)
+
+			// Stagger: each player starts pulling after a delay
+			stagger_time := cast(float) stagger_idx * LILY_DEATHBRAID_STAGGER_DELAY;
+			if pull_elapsed < stagger_time continue;
+
+			// Drag toward mouth slowly
 			current := p.entity.world_position;
-			new_pos := lerp(current, focus_pos, suck_progress * 0.1);
-			p.entity.set_local_position(new_pos);
+			diff := focus_pos - current;
+			dist := length(diff);
+
+			if dist < LILY_DEATHBRAID_KILL_DIST {
+				// Close enough — kill
+				p.kill_with_killer(player.entity.id);
+
+				// Zoom punch on kill — felt by all players
+				for vp: component_iterator(Player) {
+					if vp == null continue;
+					if vp.is_local_or_server() {
+						vp.camera.size = vp.camera.size - 0.3;
+					}
+				}
+			} else {
+				new_pos := lerp(current, focus_pos, LILY_DEATHBRAID_PULL_SPEED);
+				p.entity.set_local_position(new_pos);
+			}
+		}
+
+		// All victims dead — end
+		if all_dead {
+			rr_lily_end_deathbraid(player);
+			return;
 		}
 	}
 
-	// Phase 4: Kill all non-traitors
-	if elapsed >= LILY_DEATHBRAID_KILL_PHASE {
+	// Hard timeout
+	if elapsed >= LILY_DEATHBRAID_TIMEOUT {
+		// Kill any remaining
 		for p: component_iterator(Player) {
 			if p == null continue;
 			if p.player_state != Player_State.ALIVE continue;
 			if p.player_type == Player_Type.TRAITOR continue;
 			p.kill_with_killer(player.entity.id);
 		}
-
 		rr_lily_end_deathbraid(player);
 	}
 }
@@ -3346,10 +3480,14 @@ rr_lily_end_deathbraid :: proc(player: Player) {
 
 	lm.deathbraid_active = false;
 
-	// Unfreeze all players, restore camera and LOS light
+	// Unfreeze all players, restore camera, LOS light, and navmesh
 	for p: component_iterator(Player) {
 		if p == null continue;
 		p.remove_freeze_reason(LILY_DEATHBRAID_REASON);
+		// Restore main navmesh
+		if world_references != null && world_references.main_navmesh != null {
+			p.agent.set_navmesh_to_lock_to(world_references.main_navmesh);
+		}
 		if p.is_local_or_server() {
 			p.camera.follow_player = true;
 		}
@@ -3359,19 +3497,100 @@ rr_lily_end_deathbraid :: proc(player: Player) {
 		}
 	}
 
-	// Clean up entities (delayed destroy for visual)
+	// Clean up mouth (delayed for visual)
 	if lm.deathbraid_mouth_entity != null && #alive(lm.deathbraid_mouth_entity) {
 		delayed := lm.deathbraid_mouth_entity.add_component(Lily_Delayed_Destroy);
 		delayed.destroy_at = get_time() + 2.0;
 	}
 	lm.deathbraid_mouth_entity = null;
 
+	// Clean up ground entity if still around
 	if lm.deathbraid_ground_entity != null && #alive(lm.deathbraid_ground_entity) {
 		delayed := lm.deathbraid_ground_entity.add_component(Lily_Delayed_Destroy);
 		delayed.destroy_at = get_time() + 2.0;
 	}
 	lm.deathbraid_ground_entity = null;
+
+	// Clean up vortex
+	if lm.deathbraid_vortex_entity != null && #alive(lm.deathbraid_vortex_entity) {
+		delayed := lm.deathbraid_vortex_entity.add_component(Lily_Delayed_Destroy);
+		delayed.destroy_at = get_time() + 2.0;
+	}
+	lm.deathbraid_vortex_entity = null;
+
+	// Clean up tentacles
+	for i: 0..lm.deathbraid_tentacle_entities.count - 1 {
+		te := lm.deathbraid_tentacle_entities[i];
+		if te != null && #alive(te) {
+			delayed := te.add_component(Lily_Delayed_Destroy);
+			delayed.destroy_at = get_time() + 2.0;
+		}
+	}
+	lm.deathbraid_tentacle_entities.clear();
+
+	// Destroy the hair tree — deathbraid is the grand finale
+	if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
+		delayed := lm.hair_tree_entity.add_component(Lily_Delayed_Destroy);
+		delayed.destroy_at = get_time() + 2.0;
+	}
+	lm.hair_tree_entity = null;
+	lm.hair_tree_planted = false;
+
 	lm.deathbraid_tree_entity = null;
+	lm.deathbraid_pull_order.clear();
+}
+
+// =============================================================================
+// Deathbraid Camera (called for ALL players, not just Lily)
+// =============================================================================
+
+rr_lily_update_deathbraid_camera :: proc(player: Player) {
+	if player == null return;
+	if !player.is_local_or_server() return;
+
+	// Find active deathbraid from any Lily player
+	for lp: component_iterator(Player) {
+		if lp == null continue;
+		if lp.player_role != Player_Role.LILY_LOVEBRAIDS continue;
+		if lp.player_type != Player_Type.TRAITOR continue;
+
+		lm := lp.entity.get_component(Lily_Module);
+		if lm == null continue;
+		if !lm.deathbraid_active continue;
+
+		now := get_time();
+		elapsed := now - lm.deathbraid_start_time;
+
+		focus_pos := v2.{0, 0};
+		if lm.deathbraid_mouth_entity != null && #alive(lm.deathbraid_mouth_entity) {
+			focus_pos = lm.deathbraid_mouth_entity.world_position;
+		} else if lm.deathbraid_tree_entity != null && #alive(lm.deathbraid_tree_entity) {
+			focus_pos = lm.deathbraid_tree_entity.world_position;
+		}
+
+		zoom_t := clamp(elapsed / LILY_DEATHBRAID_FREEZE_PHASE, 0.0, 1.0);
+		target_size := lerp(lm.deathbraid_camera_saved_size, LILY_DEATHBRAID_ZOOM_TARGET, zoom_t);
+
+		shake_str := 0.0;
+		if elapsed >= LILY_DEATHBRAID_PULL_PHASE {
+			pull_t := clamp((elapsed - LILY_DEATHBRAID_PULL_PHASE) / 6.0, 0.0, 1.0);
+			shake_str = pull_t * LILY_DEATHBRAID_SHAKE_INTENSITY;
+		}
+		shake_x := sin(now * LILY_DEATHBRAID_SHAKE_SPEED) * shake_str;
+		shake_y := cos(now * LILY_DEATHBRAID_SHAKE_SPEED * 1.3) * shake_str * 0.7;
+
+		player.camera.follow_player = false;
+		player.camera.size = target_size;
+		player.camera.position = v2.{focus_pos.x + shake_x, focus_pos.y + shake_y};
+
+		if player.local_light_entity != null && #alive(player.local_light_entity) {
+			player.local_light_entity.set_parent(null, true);
+			player.local_light_entity.set_local_position(focus_pos);
+		}
+
+		player.draw_letterbox_bars();
+		return; // found active deathbraid, done
+	}
 }
 
 // =============================================================================
