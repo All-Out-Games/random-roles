@@ -56,22 +56,24 @@ LILY_TREE_TELEPORT_COOLDOWN :: 30.0;
 LILY_TREE_INTERACT_RADIUS :: 2.5;
 LILY_TREE_DELIVER_RANGE :: 3.0; // range to deliver items to the tree
 
-// Tree growth scale per stage (0=Tiny, 1=Small, 2=Medium, 3=Big, 4=Giant/Deathbraid)
+// Tree growth scale per stage (0=Tiny through 6=Deathbraid)
 // [ART] sapling asset — will be swapped for proper growth stages later
 LILY_TREE_SCALE_STAGE_0 :: 0.4;
-LILY_TREE_SCALE_STAGE_1 :: 0.6;
-LILY_TREE_SCALE_STAGE_2 :: 0.8;
-LILY_TREE_SCALE_STAGE_3 :: 1.0;
-LILY_TREE_SCALE_STAGE_4 :: 1.3;
+LILY_TREE_SCALE_STAGE_1 :: 0.55;
+LILY_TREE_SCALE_STAGE_2 :: 0.7;
+LILY_TREE_SCALE_STAGE_3 :: 0.85;
+LILY_TREE_SCALE_STAGE_4 :: 1.0;
+LILY_TREE_SCALE_STAGE_5 :: 1.15;
+LILY_TREE_SCALE_STAGE_6 :: 1.3;
 
 // Tree buff per fulfilled request
-LILY_TREE_SPEED_BUFF_PER_STAGE :: 0.10;  // +10% movespeed per stage
-LILY_TREE_CD_REDUCTION_PER_STAGE :: 0.10; // -10% cooldowns per stage
+LILY_TREE_SPEED_BUFF_PER_STAGE :: 0.08;  // +8% movespeed per stage (6 stages)
+LILY_TREE_CD_REDUCTION_PER_STAGE :: 0.08; // -8% cooldowns per stage (6 stages)
 LILY_TREE_MODEL_SCALE_PER_STAGE :: 0.05; // Lily model grows slightly per stage
 
 // Tree requests
-LILY_TREE_TOTAL_REQUESTS :: 4;
-LILY_DEATHBRAID_THRESHOLD :: 4; // fulfilled requests needed for Deathbraid
+LILY_TREE_TOTAL_REQUESTS :: 6;
+LILY_DEATHBRAID_THRESHOLD :: 6; // fulfilled requests needed for Deathbraid
 
 // Tree delivery
 LILY_DELIVER_HOLD_TIME :: 2.0;
@@ -84,7 +86,7 @@ LILY_STEAL_COOLDOWN :: 20.0;
 // Eye Steal (machine)
 LILY_EYE_STEAL_COOLDOWN :: 60.0;
 LILY_EYE_MACHINE_SPEED :: 8.0;           // camera/machine movement speed
-LILY_EYE_MACHINE_ATTACK_RANGE :: 3.0;    // range to suck eyes
+LILY_EYE_MACHINE_ATTACK_RANGE :: 4.5;    // range to suck eyes
 LILY_EYE_MACHINE_ZOOM_SIZE :: 20.0;      // zoomed out camera size
 LILY_EYE_MACHINE_TUBE_OFFSET_Y :: 3.5;   // suction tube floats above camera center
 LILY_EYE_MACHINE_TUBE_BOB_AMP :: 0.3;   // bob amplitude
@@ -99,14 +101,17 @@ LILY_LEG_STEAL_COOLDOWN :: 60.0;
 LILY_SPIDER_RETURN_TIME :: 30.0; // seconds spider has to return to tree
 LILY_SPIDER_ATTACK_RANGE :: 1.5; // range to chomp a player
 LILY_SPIDER_SPEED :: 5.0;
+LILY_SPIDER_TREE_RETURN_RANGE :: 1.5; // spider must get this close to tree to deliver legs
 LILY_CRAWL_SPEED_MULTIPLIER :: 0.40; // 40% of normal speed
 
 // Tree Request types
 Tree_Request :: enum {
-	DEAD_PLAYER;   // deliver a corpse to the tree
-	EYES;          // steal a player's eyes, bring to tree
-	LEGS;          // steal a player's legs, bring to tree
-	ALIVE_PLAYER;  // deliver a living (strung) player to the tree
+	DEAD_PLAYER;           // deliver a corpse to the tree
+	EYES;                  // steal a player's eyes, bring to tree
+	LEGS;                  // steal a player's legs, bring to tree
+	ALIVE_PLAYER;          // deliver a living (strung) player to the tree
+	LEGS_AND_EYES;         // deliver both stolen legs AND stolen eyes
+	LIVE_PLAYER_NO_PARTS;  // deliver a living player who has no eyes AND no legs
 }
 
 // Pull (base ability — drag strung to tree)
@@ -699,7 +704,11 @@ Lily_Hair_Tree :: class : Component {
 	// Growth: tree scales up per stage
 	grow :: method() {
 		new_scale := LILY_TREE_SCALE_STAGE_0;
-		if fulfilled_count >= 4 {
+		if fulfilled_count >= 6 {
+			new_scale = LILY_TREE_SCALE_STAGE_6;
+		} else if fulfilled_count == 5 {
+			new_scale = LILY_TREE_SCALE_STAGE_5;
+		} else if fulfilled_count == 4 {
 			new_scale = LILY_TREE_SCALE_STAGE_4;
 		} else if fulfilled_count == 3 {
 			new_scale = LILY_TREE_SCALE_STAGE_3;
@@ -889,6 +898,12 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 			case .ALIVE_PLAYER:
 				// A living strung player must be near the tree
 				return find_alive_strung_near_tree(lm) != null;
+			case .LEGS_AND_EYES:
+				// Must be carrying both
+				return lm.carrying_eyes && lm.carrying_legs;
+			case .LIVE_PLAYER_NO_PARTS:
+				// A living strung player near tree who has no eyes AND no legs
+				return find_alive_strung_no_parts_near_tree(lm) != null;
 		}
 		return false;
 	}
@@ -913,6 +928,35 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 				dist := length(target.entity.world_position - tree_pos);
 				if dist <= LILY_TREE_DELIVER_RANGE {
 					return target;
+				}
+			}
+		}
+		return null;
+	}
+
+	// Find a living strung player near the tree who has no eyes AND no legs
+	find_alive_strung_no_parts_near_tree :: method(lm: Lily_Module) -> Player {
+		if tree_entity == null return null;
+		tree_pos := tree_entity.world_position;
+		for i: 0..lm.strung_player_ids.count-1 {
+			target := get_player_by_entity_id(lm.strung_player_ids[i]);
+			if target == null continue;
+			if target.player_state != Player_State.ALIVE continue;
+			if !target.lily_no_eyes continue;
+			if !target.lily_crawling continue;
+			dist := length(target.entity.world_position - tree_pos);
+			if dist <= LILY_TREE_DELIVER_RANGE {
+				return target;
+			}
+		}
+		if lm.dragging_live_player_id != 0 {
+			target := get_player_by_entity_id(lm.dragging_live_player_id);
+			if target != null && target.player_state == Player_State.ALIVE {
+				if target.lily_no_eyes && target.lily_crawling {
+					dist := length(target.entity.world_position - tree_pos);
+					if dist <= LILY_TREE_DELIVER_RANGE {
+						return target;
+					}
 				}
 			}
 		}
@@ -989,6 +1033,31 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 					Notifier.notify(player, format_string("% delivered to the tree!", {target.get_username()}));
 				}
 			}
+			case .LEGS_AND_EYES: {
+				// Consume both carried items
+				lm.carrying_eyes = false;
+				lm.stolen_eyes_from_id = 0;
+				lm.carrying_legs = false;
+				lm.stolen_legs_from_id = 0;
+				if player.is_local_or_server() {
+					Notifier.notify(player, "Legs & Eyes delivered to the tree!");
+				}
+			}
+			case .LIVE_PLAYER_NO_PARTS: {
+				target := find_alive_strung_no_parts_near_tree(lm);
+				if target == null return;
+				if lm.dragging_live_player_id != 0 && lm.dragging_live_player_id == target.entity.id {
+					rr_lily_stop_live_drag(player);
+					root := target.entity.get_component(Lily_String_Trap_Root);
+					if root != null root.free();
+				}
+				target.kill_with_killer_no_corpse(player.entity.id);
+				rr_lily_remove_string(player, target.entity.id);
+				lm.kills += 1;
+				if player.is_local_or_server() {
+					Notifier.notify(player, format_string("% consumed by the tree!", {target.get_username()}));
+				}
+			}
 		}
 
 		// Fulfill the request — grow tree, advance to next
@@ -1015,6 +1084,8 @@ rr_lily_get_request_name :: proc(tree_comp: Lily_Hair_Tree) -> string {
 		case .EYES: return "Eyes";
 		case .LEGS: return "Legs";
 		case .ALIVE_PLAYER: return "Alive Player";
+		case .LEGS_AND_EYES: return "Legs & Eyes";
+		case .LIVE_PLAYER_NO_PARTS: return "Eyeless Legless Player";
 	}
 	return "Unknown";
 }
@@ -1106,12 +1177,14 @@ rr_lily_place_hair_tree :: proc(player: Player) {
 	tree_comp.tree_animator = tree_anim;
 	tree_comp.fulfilled_count = 0;
 
-	// Fixed request order: Dead Player, Eyes, Legs, Alive Player
+	// Fixed request order: Dead Player, Eyes, Legs, Alive Player, then multi-requests
 	tree_comp.request_order.clear();
 	tree_comp.request_order.append(0); // DEAD_PLAYER
 	tree_comp.request_order.append(1); // EYES
 	tree_comp.request_order.append(2); // LEGS
 	tree_comp.request_order.append(3); // ALIVE_PLAYER
+	tree_comp.request_order.append(4); // LEGS_AND_EYES
+	tree_comp.request_order.append(5); // LIVE_PLAYER_NO_PARTS
 
 	deliver_interactable := tree_entity.add_component(Lily_Tree_Deliver_Interactable);
 	deliver_interactable.tree_entity = tree_entity;
@@ -2645,7 +2718,9 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 			tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 			if tree_comp != null {
 				request, has_request := tree_comp.get_current_request();
-				if has_request && request == Tree_Request.ALIVE_PLAYER {
+				can_deliver_alive := has_request && request == Tree_Request.ALIVE_PLAYER;
+				can_deliver_no_parts := has_request && request == Tree_Request.LIVE_PLAYER_NO_PARTS && target.lily_no_eyes && target.lily_crawling;
+				if can_deliver_alive || can_deliver_no_parts {
 					// Deliver alive player to tree
 					target.kill_with_killer_no_corpse(player.entity.id);
 					lm.kills += 1;
@@ -3613,6 +3688,7 @@ rr_lily_restore_legs :: proc(victim: Player) {
 	if victim == null return;
 	if !victim.lily_crawling return;
 	victim.agent.movement_speed = victim.lily_crawl_speed_saved;
+	victim.lily_crawl_ends_at = 0.0;
 	victim.lily_crawling = false;
 	victim.lily_crawl_speed_saved = 0.0;
 }
@@ -3653,10 +3729,16 @@ rr_lily_update_spider :: proc(player: Player, dt: float) {
 }
 
 // Spider component — lives on the spider entity, handles movement and attack.
+LILY_SPIDER_CHOMP_BITE_DELAY :: 0.75; // seconds into chomp animation when the leg steal actually happens
+LILY_SPIDER_CHOMP_TOTAL_DURATION :: 2.0; // total chomp lock duration
+
 Lily_Spider :: class : Component {
 	lily_entity_id: u64;
 	chomping: bool;
 	chomp_done_at: float;
+	chomp_bite_at: float; // when the actual leg steal triggers
+	chomp_victim_id: u64; // pending victim entity id
+	chomp_bite_applied: bool;
 	is_walking: bool;
 
 	ao_update :: method(dt: float) {
@@ -3673,6 +3755,11 @@ Lily_Spider :: class : Component {
 
 		// Handle chomp animation lock
 		if chomping {
+			// Apply the bite (leg steal) at the right moment in the animation
+			if !chomp_bite_applied && now >= chomp_bite_at {
+				chomp_bite_applied = true;
+				rr_lily_spider_apply_bite(lily, lm, chomp_victim_id);
+			}
 			if now >= chomp_done_at {
 				chomping = false;
 			} else {
@@ -3715,7 +3802,7 @@ Lily_Spider :: class : Component {
 			if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
 				tree_pos := lm.hair_tree_entity.world_position;
 				dist := length(spider_pos - tree_pos);
-				if dist <= LILY_TREE_DELIVER_RANGE {
+				if dist <= LILY_SPIDER_TREE_RETURN_RANGE {
 					// Auto-deliver legs to tree
 					tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 					if tree_comp != null {
@@ -3740,6 +3827,32 @@ Lily_Spider :: class : Component {
 			}
 			return; // spider has legs, just needs to return
 		}
+	}
+}
+
+// Called when the chomp animation reaches the bite moment — actually steals legs.
+rr_lily_spider_apply_bite :: proc(player: Player, lm: Lily_Module, victim_entity_id: u64) {
+	if lm == null return;
+	if lm.spider_has_legs return; // already stolen
+
+	victim := get_player_by_entity_id(victim_entity_id);
+	if victim == null return;
+
+	now := get_time();
+	lm.spider_has_legs = true;
+	lm.spider_victim_id = victim_entity_id;
+	lm.spider_return_deadline = now + LILY_SPIDER_RETURN_TIME;
+
+	rr_lily_apply_crawl(victim);
+	victim.lily_crawl_ends_at = lm.spider_return_deadline;
+
+	desc := SFX.default_sfx_desc();
+	desc.entity_to_follow = lm.spider_entity.id;
+	desc.volume = 0.5;
+	SFX.play(get_asset(SFX_Asset, "sfx/lily/spider_attack_chomp.wav"), desc);
+
+	if player.is_local_or_server() {
+		Notifier.notify(player, format_string("Stole %'s legs! Return to the tree!", {victim.get_username()}));
 	}
 }
 
@@ -3773,23 +3886,15 @@ rr_lily_spider_chomp :: proc(player: Player) {
 		lm.spider_animator.instance.set_animation("attack_chomp", false, 0);
 	}
 
-	// Lock spider movement during chomp
+	// Lock spider movement during chomp — leg steal is deferred to the bite moment
 	spider_comp := lm.spider_entity.get_component(Lily_Spider);
 	if spider_comp != null {
 		spider_comp.chomping = true;
-		spider_comp.chomp_done_at = now + 0.8;
+		spider_comp.chomp_done_at = now + LILY_SPIDER_CHOMP_TOTAL_DURATION;
+		spider_comp.chomp_bite_at = now + LILY_SPIDER_CHOMP_BITE_DELAY;
+		spider_comp.chomp_victim_id = closest.entity.id;
+		spider_comp.chomp_bite_applied = false;
 		spider_comp.is_walking = false;
-	}
-
-	// Steal legs
-	lm.spider_has_legs = true;
-	lm.spider_victim_id = closest.entity.id;
-	lm.spider_return_deadline = now + LILY_SPIDER_RETURN_TIME;
-
-	rr_lily_apply_crawl(closest);
-
-	if player.is_local_or_server() {
-		Notifier.notify(player, format_string("Stole %'s legs! Return to the tree!", {closest.get_username()}));
 	}
 }
 
@@ -3887,6 +3992,7 @@ rr_lily_draw_spider_timer :: proc(player: Player) {
 	if lm == null return;
 	if !lm.spider_active return;
 	if !lm.spider_has_legs return;
+	if lm.spider_entity == null || !#alive(lm.spider_entity) return;
 
 	now := get_time();
 	remaining := lm.spider_return_deadline - now;
@@ -3896,22 +4002,34 @@ rr_lily_draw_spider_timer :: proc(player: Player) {
 	frac := remaining - secs.(float);
 	if frac > 0.001 { secs += 1; }
 
-	screen := UI.get_screen_rect();
-	timer_rect := screen.top_rect().offset(0.0, -80.0).grow_bottom(40);
+	spider_pos := lm.spider_entity.world_position;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+
+	UI.push_z(spider_pos.y);
+	defer UI.pop_z();
+
+	label_pos := spider_pos + v2.{0.0, 1.2};
+
+	// Background pill
+	bg_rect := Rect{label_pos, label_pos}.grow(0.18, 0.8, 0.18, 0.8);
+	UI.quad(bg_rect, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.55});
 
 	ts := UI.default_text_settings();
-	ts.size = 28;
+	ts.size = 0.28;
 	ts.halign = .CENTER;
 	ts.valign = .CENTER;
 	ts.do_outline = true;
-	ts.outline_thickness = 2;
+	ts.outline_thickness = 0.04;
 	ts.outline_color = v4.{0, 0, 0, 1};
 
 	// Color: lerp from white to red as time runs out
 	t := clamp(remaining / LILY_SPIDER_RETURN_TIME, 0.0, 1.0);
 	ts.color = v4.{1.0, t, t, 1.0};
 
-	UI.text(timer_rect, ts, "Return to tree: %s", {secs});
+	text_rect := Rect{label_pos, label_pos}.grow(0.16, 0.58, 0.16, 0.58);
+	UI.text(text_rect, ts, format_string("Return: %s", .{secs}));
 }
 
 // =============================================================================
@@ -3944,7 +4062,7 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 	// Create AOE reticle entity (will be hidden for non-Lily via ao_on_state_sync)
 	aoe_e := Scene.create_entity();
 	aoe_e.set_local_position(tree_pos);
-	aoe_e.set_local_scale(v2.{1, 1});
+	aoe_e.set_local_scale(v2.{1.5, 1.5});
 	aoe_e.set_local_rotation(0.0);
 	aoe_sr := aoe_e.add_component(Sprite_Renderer);
 	aoe_tex := get_asset(Texture_Asset, "sprites/ground_reticle_white.png");
@@ -4004,11 +4122,13 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 	}
 	lm.eye_machine_aoe_entity = null;
 
-	// Restore camera
+	// Restore camera — set position before re-enabling follow to avoid a black frame
 	if player.is_local() {
-		player.camera.follow_player = true;
+		player.camera.position = player.entity.world_position;
 		player.camera.size = lm.eye_machine_camera_saved_size;
+		player.camera.follow_player = lm.eye_machine_camera_saved_follow;
 	}
+	lm.eye_machine_camera_saved_size = 0.0; // mark restored (prevents update guard re-firing)
 
 	lm.eye_machine_active = false;
 	lm.eye_machine_has_target = false;
@@ -4019,7 +4139,17 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
-	if !lm.eye_machine_active return;
+	if !lm.eye_machine_active {
+		// Guard: if server sync cleared eye_machine_active without end proc running,
+		// restore camera to avoid a black flash from LOS snapping back.
+		if player.is_local() && lm.eye_machine_camera_saved_size > 0.0 {
+			player.camera.position = player.entity.world_position;
+			player.camera.size = lm.eye_machine_camera_saved_size;
+			player.camera.follow_player = lm.eye_machine_camera_saved_follow;
+			lm.eye_machine_camera_saved_size = 0.0;
+		}
+		return;
+	}
 
 	now := get_time();
 
