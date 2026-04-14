@@ -469,14 +469,22 @@ Player :: class : Player_Base {
 			sm_ref.set_bool("lily_debuff_moving", is_moving);
 
 			// Fire start triggers on rising edge only (so start anim plays once)
-			if this.lily_no_eyes && !this.lily_no_eyes_prev {
+			// No-eyes main layer anim only fires when NOT also crawling (legless takes priority)
+			if this.lily_no_eyes && !this.lily_no_eyes_prev && !this.lily_crawling {
 				sm_ref.set_trigger("lily_no_eyes_start");
 			}
-			this.lily_no_eyes_prev = this.lily_no_eyes;
 
+			// Legless always fires — it takes priority and kicks out no-eyes on main layer
 			if this.lily_crawling && !this.lily_crawling_prev {
 				sm_ref.set_trigger("lily_crawl_start");
 			}
+
+			// If legs healed while still eyeless, resume no-eyes anims on main layer
+			if !this.lily_crawling && this.lily_crawling_prev && this.lily_no_eyes {
+				sm_ref.set_trigger("lily_no_eyes_start");
+			}
+
+			this.lily_no_eyes_prev = this.lily_no_eyes;
 			this.lily_crawling_prev = this.lily_crawling;
 		}
 
@@ -3125,9 +3133,11 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 
 		// Movement variable shared by no-eyes and legless locomotion on the main layer.
 		lily_debuff_moving_var := sm.create_variable("lily_debuff_moving", State_Machine_Variable.Kind.BOOL);
-
-		// --- No-eyes (main layer) — full-body Start → Idle/Run → End → Idle ---
 		lily_no_eyes_var := sm.create_variable("lily_no_eyes", State_Machine_Variable.Kind.BOOL);
+		lily_crawl_var := sm.create_variable("lily_crawling", State_Machine_Variable.Kind.BOOL);
+
+		// --- No-eyes (main layer) — only plays when NOT also legless ---
+		// When both are active, legless takes priority on main layer; No_Eyes_AL overlay still hides eyes.
 		lily_no_eyes_start_var := sm.create_variable("lily_no_eyes_start", State_Machine_Variable.Kind.TRIGGER);
 
 		no_eyes_start_state := layer.create_state("004RAND_LILY/No_Eyes_Start", false, 0.0);
@@ -3135,30 +3145,40 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		no_eyes_run_state := layer.create_state("004RAND_LILY/No_Eyes_Run", true, 0.0);
 		no_eyes_end_state := layer.create_state("004RAND_LILY/No_Eyes_End", false, 0.0);
 
-		// Any state → Start (one-shot trigger, fires once)
-		layer.create_global_transition(no_eyes_start_state, false).create_trigger_condition(lily_no_eyes_start_var);
+		// Any state → Start (trigger, only when not crawling)
+		ne_global := layer.create_global_transition(no_eyes_start_state, false);
+		ne_global.create_trigger_condition(lily_no_eyes_start_var);
 
 		// Start → Idle (after start anim completes)
 		layer.create_transition(no_eyes_start_state, no_eyes_idle_state, true);
 
-		// Idle ↔ Run (movement switching)
+		// Idle ↔ Run (movement switching, must still have no eyes and NOT be crawling)
 		ne_idle_to_run := layer.create_transition(no_eyes_idle_state, no_eyes_run_state, false);
 		ne_idle_to_run.create_bool_condition(lily_debuff_moving_var, true);
 		ne_idle_to_run.create_bool_condition(lily_no_eyes_var, true);
+		ne_idle_to_run.create_bool_condition(lily_crawl_var, false);
 		ne_run_to_idle := layer.create_transition(no_eyes_run_state, no_eyes_idle_state, false);
 		ne_run_to_idle.create_bool_condition(lily_debuff_moving_var, false);
 		ne_run_to_idle.create_bool_condition(lily_no_eyes_var, true);
+		ne_run_to_idle.create_bool_condition(lily_crawl_var, false);
 
-		// Idle/Run → End (when healed)
+		// Idle/Run → End (when healed OR when legs also stolen — legless takes over)
 		ne_idle_to_end := layer.create_transition(no_eyes_idle_state, no_eyes_end_state, false);
 		ne_idle_to_end.create_bool_condition(lily_no_eyes_var, false);
 		ne_run_to_end := layer.create_transition(no_eyes_run_state, no_eyes_end_state, false);
 		ne_run_to_end.create_bool_condition(lily_no_eyes_var, false);
 
+		// Also kick out of no-eyes anims when legs get stolen (legless will take over via its trigger)
+		ne_idle_to_end2 := layer.create_transition(no_eyes_idle_state, no_eyes_end_state, false);
+		ne_idle_to_end2.create_bool_condition(lily_crawl_var, true);
+		ne_run_to_end2 := layer.create_transition(no_eyes_run_state, no_eyes_end_state, false);
+		ne_run_to_end2.create_bool_condition(lily_crawl_var, true);
+
 		// End → Idle (after end anim completes)
 		layer.create_transition(no_eyes_end_state, idle_state, true);
 
-		// No-eyes AL overlay (track 1) — hides eye meshes, works with any animation.
+		// No-eyes AL overlay (track 1) — hides eye meshes, works with ANY main layer anim.
+		// Always active when lily_no_eyes is true, regardless of legless state.
 		eyes_al_layer := sm.create_layer("lily_no_eyes_al", 1);
 		eyes_al_off := eyes_al_layer.create_state("__CLEAR_TRACK__", true, 0.0);
 		eyes_al_on := eyes_al_layer.create_state("004RAND_LILY/No_Eyes_AL", true, 0.0);
@@ -3166,8 +3186,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		eyes_al_layer.create_transition(eyes_al_off, eyes_al_on, false).create_bool_condition(lily_no_eyes_var, true);
 		eyes_al_layer.create_transition(eyes_al_on, eyes_al_off, false).create_bool_condition(lily_no_eyes_var, false);
 
-		// --- Legless (main layer) — full-body Start → Idle/Run → End → Idle ---
-		lily_crawl_var := sm.create_variable("lily_crawling", State_Machine_Variable.Kind.BOOL);
+		// --- Legless (main layer) — takes priority over no-eyes ---
 		lily_crawl_start_var := sm.create_variable("lily_crawl_start", State_Machine_Variable.Kind.TRIGGER);
 
 		legless_start_state := layer.create_state("004RAND_LILY/Legless_Start", false, 0.0);
@@ -3175,7 +3194,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		legless_run_state := layer.create_state("004RAND_LILY/Legless_Run", true, 0.0);
 		legless_end_state := layer.create_state("004RAND_LILY/Legless_End", false, 0.0);
 
-		// Any state → Start (one-shot trigger, fires once)
+		// Any state → Start (trigger — overrides no-eyes anims via global transition)
 		layer.create_global_transition(legless_start_state, false).create_trigger_condition(lily_crawl_start_var);
 
 		// Start → Idle (after start anim completes)
@@ -3195,7 +3214,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		ll_run_to_end := layer.create_transition(legless_run_state, legless_end_state, false);
 		ll_run_to_end.create_bool_condition(lily_crawl_var, false);
 
-		// End → Idle (after end anim completes)
+		// End → Idle (or back to no-eyes if still blinded)
 		layer.create_transition(legless_end_state, idle_state, true);
 	}
 
