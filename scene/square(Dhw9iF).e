@@ -1,0 +1,34 @@
+14
+347892350977
+3787708549
+{
+  "name": "square",
+  "local_enabled": true,
+  "local_position": {
+    "X": -17.2515316009521484,
+    "Y": 6.9033932685852051
+  },
+  "local_rotation": 0.0000030735848213,
+  "local_scale": {
+    "X": 0.7583420872688293,
+    "Y": 3.3194448947906494
+  },
+  "previous_sibling": 3084986903,
+  "next_sibling": 312880428,
+  "parent": 367771135
+},
+{
+  "cid": 1,
+  "aoid": 4060962391,
+  "component_type": "Internal_Component",
+  "internal_component_type": "Sprite_Renderer",
+  "data": {
+    "texture": "sprites/Shapes/square.png",
+    "depth_offset": -0.5135701894760132,
+    "tint": {
+      "X": 0.0039215683937073,
+      "Y": 0.0039215683937073,
+      "Z": 0.0196078438311815
+    }
+  }
+}

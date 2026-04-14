@@ -1,0 +1,73 @@
+14
+4196183048193
+4055575154
+{
+  "name": "pod_base.png",
+  "local_enabled": true,
+  "local_position": {
+    "X": 19.1692905426025391,
+    "Y": -37.1002769470214844
+  },
+  "local_rotation": 0,
+  "local_scale": {
+    "X": 0.6000000834465027,
+    "Y": 0.6000001430511475
+  },
+  "previous_sibling": 3298157710,
+  "next_sibling": 3441857922,
+  "parent": 1040076128
+},
+{
+  "cid": 1,
+  "aoid": 51808388,
+  "component_type": "Internal_Component",
+  "internal_component_type": "Sprite_Renderer",
+  "data": {
+    "texture": "sprites/phota/Archives/pod_base.png",
+    "depth_offset": 0.7427558898925781
+  }
+},
+{
+  "cid": 2,
+  "aoid": 1151034191,
+  "component_type": "Internal_Component",
+  "internal_component_type": "Polygon_Collider",
+  "data": {
+    "make_navmesh_loop": true,
+    "flip_navmesh_loop": true,
+    "points": [
+      {
+        "X": -1.3264542818069458,
+        "Y": -0.3544426262378693
+      },
+      {
+        "X": -0.6612339615821838,
+        "Y": -0.8159638047218323
+      },
+      {
+        "X": 0.6958065629005432,
+        "Y": -0.8219147324562073
+      },
+      {
+        "X": 1.4852715730667114,
+        "Y": -0.2928543388843536
+      },
+      {
+        "X": 1.4970990419387817,
+        "Y": 0.4805946648120880
+      },
+      {
+        "X": 0.7244625687599182,
+        "Y": 1.0302392244338989
+      },
+      {
+        "X": -0.6523647904396057,
+        "Y": 1.0026398897171021
+      },
+      {
+        "X": -1.3264523744583130,
+        "Y": 0.5028496384620667
+      }
+    ]
+  }
+}

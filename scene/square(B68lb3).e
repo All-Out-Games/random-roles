@@ -1,0 +1,34 @@
+14
+1709396983809
+2062702327
+{
+  "name": "square",
+  "local_enabled": true,
+  "local_position": {
+    "X": 4.2424860000610352,
+    "Y": 0.6255760192871094
+  },
+  "local_rotation": 0,
+  "local_scale": {
+    "X": 0.2650315761566162,
+    "Y": 0.7294548749923706
+  },
+  "previous_sibling": 1673527516,
+  "next_sibling": 151612249,
+  "parent": 367771135
+},
+{
+  "cid": 1,
+  "aoid": 1500149436,
+  "component_type": "Internal_Component",
+  "internal_component_type": "Sprite_Renderer",
+  "data": {
+    "texture": "sprites/Shapes/square.png",
+    "depth_offset": -2.2837114334106445,
+    "tint": {
+      "X": 0.0019682869315147,
+      "Y": 0.0055353008210659,
+      "Z": 0.0192208420485258
+    }
+  }
+}

@@ -1,0 +1,69 @@
+14
+4419521347585
+1452873808
+{
+  "name": "dirt.png",
+  "local_enabled": true,
+  "local_position": {
+    "X": -1.6494272947311401,
+    "Y": 0.6840209960937500
+  },
+  "local_rotation": 0,
+  "local_scale": {
+    "X": 0.5555555820465088,
+    "Y": 0.5555555224418640
+  },
+  "next_sibling": 1530839849,
+  "parent": 2199280647
+},
+{
+  "cid": 1,
+  "aoid": 4286066496,
+  "component_type": "Internal_Component",
+  "internal_component_type": "Sprite_Renderer",
+  "data": {
+    "texture": "sprites/phota/Props/dirt.png",
+    "depth_offset": -0.0336208343505859,
+    "tint": {
+      "X": 0.2997403144836426,
+      "Y": 0.2695117294788361,
+      "Z": 0.2405439168214798
+    }
+  }
+},
+{
+  "cid": 2,
+  "aoid": 3540625959,
+  "component_type": "Internal_Component",
+  "internal_component_type": "Polygon_Collider",
+  "data": {
+    "make_navmesh_loop": true,
+    "flip_navmesh_loop": true,
+    "points": [
+      {
+        "X": -0.6498252153396606,
+        "Y": -0.3168716430664062
+      },
+      {
+        "X": -0.2785302996635437,
+        "Y": -0.5283336639404297
+      },
+      {
+        "X": 0.2624300122261047,
+        "Y": -0.5361289978027344
+      },
+      {
+        "X": 0.6973789930343628,
+        "Y": -0.1266345977783203
+      },
+      {
+        "X": 0.4725756645202637,
+        "Y": 0.3038997650146484
+      },
+      {
+        "X": -0.6455016136169434,
+        "Y": 0.3082237243652344
+      }
+    ]
+  }
+}
