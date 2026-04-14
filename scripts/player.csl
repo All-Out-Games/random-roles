@@ -663,7 +663,7 @@ Player :: class : Player_Base {
 	}
 
 	update_local_vision_light :: proc(using this: Player) {
-		if !this.is_local_or_server() return;
+		if !this.is_local() return;
 		if !#alive(this.entity) return;
 
 		this.ensure_local_vision_light();
@@ -3133,6 +3133,18 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		lily_hyper_end_state := layer.create_state("004RAND_LILY/Hyper_End", false, 0.5);
 		layer.create_global_transition(lily_hyper_end_state, false).create_trigger_condition(lily_hyper_end_var);
 		layer.create_transition(lily_hyper_end_state, idle_state, true);
+
+		// Tea sleep: Fall_Asleep -> Sleeping (loop) -> Wake_Up -> Idle
+		lily_tea_sleep_var := sm.create_variable("lily_tea_sleep", State_Machine_Variable.Kind.TRIGGER);
+		lily_fall_asleep_state := layer.create_state("Fall_Asleep", false, 1.0);
+		lily_sleeping_state := layer.create_state("Sleeping", true, 0.0);
+		layer.create_global_transition(lily_fall_asleep_state, false).create_trigger_condition(lily_tea_sleep_var);
+		layer.create_transition(lily_fall_asleep_state, lily_sleeping_state, true);
+
+		lily_tea_wake_var := sm.create_variable("lily_tea_wake", State_Machine_Variable.Kind.TRIGGER);
+		lily_wake_up_state := layer.create_state("Wake_Up", false, 0.5);
+		layer.create_global_transition(lily_wake_up_state, false).create_trigger_condition(lily_tea_wake_var);
+		layer.create_transition(lily_wake_up_state, idle_state, true);
 
 		// Hair string pull: Start -> Loop -> End
 		lily_pull_start_var := sm.create_variable("lily_pull_start", State_Machine_Variable.Kind.TRIGGER);

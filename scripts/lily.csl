@@ -102,6 +102,7 @@ LILY_BLIND_LOS_INNER :: 1.5;
 LILY_BLIND_LOS_OUTER :: 2.5;
 LILY_EYE_MACHINE_FREEZE_REASON :: "lily_eye_machine";
 LILY_EYES_PICKUP_RANGE :: 2.0;
+LILY_LEGS_PICKUP_RANGE :: 2.0;
 LILY_NO_EYES_START_DURATION :: 1.5; // approx duration of No_Eyes_Start anim before AL overlay activates
 
 // Leg Steal (spider)
@@ -127,17 +128,24 @@ LILY_PULL_HOLD_DURATION :: 2.5;
 LILY_PULL_DRAG_SPEED :: 2.0;
 LILY_PULL_SNAP_SPEED :: 15.0;
 
-// Tea Party (single target)
+// Tea Party (single target, 3 cups)
 LILY_TEA_PARTY_COOLDOWN :: 60.0;
-LILY_TEA_PARTY_TABLE_RANGE :: 20.0; // Max distance to target victim
+LILY_TEA_PARTY_RANGE :: 5.0;        // proximity range to activate on any player
 LILY_TEA_CUP_SPAWN_SECONDS :: 0.5;
 LILY_TEA_CUP_SPIN_SECONDS :: 10;
 LILY_TEA_CUP_SPIN_START_DELAY :: 2.0;
-LILY_TEA_PARTY_CHOICE_TIME :: 5.0; // seconds victim has to pick a cup
-LILY_TEA_PARTY_CAMERA_SIZE :: 4.0; // tight camera zoom during tea party
+LILY_TEA_PARTY_CHOICE_TIME :: 5.0;  // seconds victim has to pick a cup
+LILY_TEA_PARTY_CAMERA_SIZE :: 4.0;  // tight camera zoom during tea party
 LILY_CAFFEINE_SPEED_BOOST :: 1.75;
 LILY_CAFFEINE_DURATION :: 10.0;
 LILY_CAFFEINE_DIRECTION_HOLD_SECONDS :: 0.4;
+
+// Tea cup effects (indices into tea_party_cup_effects)
+LILY_TEA_CUP_CAFFEINE :: 0; // eyes fall off after running
+LILY_TEA_CUP_POISON :: 1;   // legs fall off
+LILY_TEA_CUP_SLEEP :: 2;    // falls asleep (frozen in place)
+LILY_TEA_SLEEP_DURATION :: 15.0;
+LILY_TEA_SLEEP_REASON :: "lily_tea_sleep";
 
 // Mind Control
 LILY_MIND_CONTROL_COOLDOWN :: 60.0;
@@ -435,7 +443,9 @@ rr_lily_round_start :: proc(p: Player) {
 	llm.tea_party_drinking = false;
 	llm.tea_party_drink_done_at = 0.0;
 	llm.tea_party_target_id = 0;
-	llm.tea_party_poison_cup = 0;
+	llm.tea_party_cup_effects[0] = 0;
+	llm.tea_party_cup_effects[1] = 0;
+	llm.tea_party_cup_effects[2] = 0;
 	llm.tea_table_entity = null;
 	llm.tea_table_animator = null;
 	llm.tea_tray_entity = null;
@@ -455,6 +465,9 @@ rr_lily_round_start :: proc(p: Player) {
 	llm.eye_pickup_animator = null;
 	llm.eye_pickup_active = false;
 	llm.eye_pickup_victim_id = 0;
+	llm.leg_pickup_entity = null;
+	llm.leg_pickup_active = false;
+	llm.leg_pickup_victim_id = 0;
 	llm.spider_active = false;
 	llm.spider_entity = null;
 	llm.spider_animator = null;
@@ -504,8 +517,9 @@ rr_lily_cleanup :: proc(player: Player) {
 	if lm.eye_machine_active {
 		rr_lily_end_eye_machine(player);
 	}
-	// Destroy eye pickup
+	// Destroy pickups
 	rr_lily_destroy_eye_pickup(player);
+	rr_lily_destroy_leg_pickup(player);
 
 	// End spider if active
 	if lm.spider_active {
@@ -594,6 +608,7 @@ rr_lily_remove_all_strings :: proc(player: Player) {
 		target := get_player_by_entity_id(lm.strung_player_ids[i]);
 		if target != null {
 			target.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
+			target.remove_freeze_reason(LILY_TEA_SLEEP_REASON);
 			target.remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
 			target.remove_freeze_reason(LILY_PULL_REASON);
 			target.remove_disable_movement_input_reason(LILY_CAFFEINE_REASON);
@@ -658,6 +673,9 @@ rr_lily_on_doctor_heal :: proc(healed_player: Player) {
 			}
 		}
 
+		// Wake from tea party sleep if asleep
+		healed_player.remove_freeze_reason(LILY_TEA_SLEEP_REASON);
+
 		// Restore stolen eyes if this player is the victim
 		if healed_player.lily_no_eyes {
 			healed_player.lily_no_eyes = false;
@@ -676,13 +694,17 @@ rr_lily_on_doctor_heal :: proc(healed_player: Player) {
 		}
 
 		// Restore stolen legs if this player is the victim
-		if healed_player.lily_crawling && lm.spider_victim_id == healed_player.entity.id {
+		if healed_player.lily_crawling {
 			rr_lily_restore_legs(healed_player);
 			// If spider is still active with these legs, cancel the delivery
-			if lm.spider_active && lm.spider_has_legs {
+			if lm.spider_active && lm.spider_has_legs && lm.spider_victim_id == healed_player.entity.id {
 				lm.spider_has_legs = false;
 				lm.spider_victim_id = 0;
 				lm.spider_return_deadline = 0.0;
+			}
+			// Destroy leg pickup if it exists for this victim
+			if lm.leg_pickup_active && lm.leg_pickup_victim_id == healed_player.entity.id {
+				rr_lily_destroy_leg_pickup(player);
 			}
 			// If legs were already delivered (carrying_legs), cancel that too
 			if lm.carrying_legs && lm.stolen_legs_from_id == healed_player.entity.id {
@@ -1646,16 +1668,16 @@ rr_lily_start_tea_party :: proc(player: Player, target: Player) {
 	table_rig := get_asset(Spine_Asset, rr_lily_get_table_rig_path());
 	if table_anim.instance != null && table_rig != null {
 		table_anim.instance.set_skeleton(table_rig);
-		table_anim.instance.set_animation("2_Player/Idle", true, 0);
+		table_anim.instance.set_animation("3_Player/Idle", true, 0);
 		rr_apply_shadow_mask(table_anim.instance);
 	}
 
 	lm.tea_table_entity = table_entity;
 	lm.tea_table_animator = table_anim;
 
-	// --- Layer 2: Spawn 2 cups ---
+	// --- Layer 2: Spawn 3 cups ---
 	lm.tea_cup_entities.clear();
-	rr_lily_spawn_tea_cups(player, table_anim, 2);
+	rr_lily_spawn_tea_cups(player, table_anim, 3);
 
 	// --- Layer 3: Tray overlay ---
 	tray_entity := Scene.create_entity();
@@ -1680,9 +1702,26 @@ rr_lily_start_tea_party :: proc(player: Player, target: Player) {
 	lm.tea_party_drink_done = false;
 	lm.tea_party_choice_deadline = 0.0;
 
-	// Random poison assignment: 50/50 left or right
-	rng: u64 = rng_seed_time();
-	lm.tea_party_poison_cup = rng_range_int(ref rng, 1, 2);
+	// Shuffle 3 cup effects: caffeine(0), poison(1), sleep(2)
+	// Mix frame number into seed so each use gets a different shuffle
+	rng: u64 = rng_root_seed() + get_frame_number();
+	// Burn a few values to decorrelate similar seeds
+	rng_range_int(ref rng, 0, 1);
+	rng_range_int(ref rng, 0, 1);
+
+	// Start with all 3 effects, then pick randomly for each slot
+	available: [3]int;
+	available[0] = LILY_TEA_CUP_CAFFEINE;
+	available[1] = LILY_TEA_CUP_POISON;
+	available[2] = LILY_TEA_CUP_SLEEP;
+	remaining := 3;
+	for i: 0..2 {
+		pick := rng_range_int(ref rng, 0, remaining - 1);
+		lm.tea_party_cup_effects[i] = available[pick];
+		// Move last element into picked slot to shrink pool
+		available[pick] = available[remaining - 1];
+		remaining = remaining - 1;
+	}
 
 	// Place victim at table seat
 	seat_world := rr_lily_get_seat_position(lm, 1);
@@ -1783,11 +1822,13 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 			}
 
 			// Play the correct drink animation based on outcome
-			is_poison := lm.tea_party_chosen_cup == lm.tea_party_poison_cup;
-			if is_poison {
+			cup_effect := lm.tea_party_cup_effects[lm.tea_party_chosen_cup - 1];
+			if cup_effect == LILY_TEA_CUP_POISON {
 				victim.set_trigger("lily_tea_death");
-			} else {
+			} else if cup_effect == LILY_TEA_CUP_CAFFEINE {
 				victim.set_trigger("lily_tea_hyper");
+			} else {
+				victim.set_trigger("lily_tea_safe");
 			}
 			lm.tea_party_drinking = true;
 			lm.tea_party_drink_done_at = now + 2.0; // drink anim duration
@@ -1823,8 +1864,8 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 	if victim_picked != 0 || now >= lm.tea_party_choice_deadline {
 		// If no pick, random assignment
 		if victim_picked == 0 {
-			rng: u64 = rng_seed_time();
-			victim_picked = rng_range_int(ref rng, 1, 2);
+			rng: u64 = rng_root_seed();
+			victim_picked = rng_range_int(ref rng, 1, 3);
 		}
 
 		// Start settle phase: chosen cup slides to player, other cup despawns
@@ -1879,7 +1920,7 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 
 	// Draw red glow on poison cup for Lily (local only)
 	if player.is_local() {
-		rr_lily_draw_poison_cup_glow(player);
+		rr_lily_draw_cup_glow(player);
 	}
 
 	// Timeout safety
@@ -1888,27 +1929,28 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 	}
 }
 
-// Resolve the cup choice — poison or caffeine
+// Resolve the cup choice — caffeine (eyes off), poison (legs off), or live (safe)
 rr_lily_tea_party_resolve :: proc(player: Player, victim: Player, chosen_cup: int) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if victim == null return;
 
-	is_poison := chosen_cup == lm.tea_party_poison_cup;
+	cup_effect := lm.tea_party_cup_effects[chosen_cup - 1];
 
-	if is_poison {
-		// Poison — victim dies
+	if cup_effect == LILY_TEA_CUP_POISON {
+		// Poison — legs fall off (crawl effect) + spawn leg pickup
 		victim.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
-		victim.kill_with_killer(player.entity.id);
-		// Reset anim state to idle so ghost doesn't show death pose
-		if victim.animator != null && victim.animator.instance != null {
-			victim.animator.instance.set_animation("idle", true, 0);
-		}
+		rr_lily_apply_crawl(victim);
+		drop_pos := victim.entity.world_position + v2.{0.0, -0.3};
+		rr_lily_spawn_leg_pickup(player, victim.entity.id, drop_pos);
 		if player.is_local_or_server() {
-			Notifier.notify(player, format_string("% drank poison!", {victim.get_username()}));
+			Notifier.notify(player, format_string("%'s legs fell off!", {victim.get_username()}));
 		}
-	} else {
-		// Caffeine — uncontrollable movement (anim already playing)
+		if victim.is_local_or_server() {
+			Notifier.notify(victim, "Your legs fell off!");
+		}
+	} else if cup_effect == LILY_TEA_CUP_CAFFEINE {
+		// Caffeine — uncontrollable movement, then eyes fall off
 		victim.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
 		victim.add_disable_movement_input_reason(LILY_CAFFEINE_REASON);
 
@@ -1917,6 +1959,8 @@ rr_lily_tea_party_resolve :: proc(player: Player, victim: Player, chosen_cup: in
 		caffeine_timer.ends_at = get_time() + LILY_CAFFEINE_DURATION;
 		caffeine_timer.player_entity_id = victim.entity.id;
 		caffeine_timer.speed_multiplier = LILY_CAFFEINE_SPEED_BOOST;
+		caffeine_timer.steal_eyes_on_end = true;
+		caffeine_timer.lily_entity_id = player.entity.id;
 		victim.agent.movement_speed = victim.agent.movement_speed * LILY_CAFFEINE_SPEED_BOOST;
 
 		if victim.is_local_or_server() {
@@ -1925,33 +1969,77 @@ rr_lily_tea_party_resolve :: proc(player: Player, victim: Player, chosen_cup: in
 		if player.is_local_or_server() {
 			Notifier.notify(player, format_string("% got caffeine!", {victim.get_username()}));
 		}
+	} else {
+		// Sleep — victim falls asleep (frozen in place)
+		victim.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
+		victim.add_freeze_reason(LILY_TEA_SLEEP_REASON);
+
+		// Trigger sleep animation via state machine
+		victim.set_trigger("lily_tea_sleep");
+
+		// Spawn timer to wake them up
+		sleep_entity := Scene.create_entity();
+		sleep_timer := sleep_entity.add_component(Lily_Tea_Sleep_Timer);
+		sleep_timer.ends_at = get_time() + LILY_TEA_SLEEP_DURATION;
+		sleep_timer.player_entity_id = victim.entity.id;
+
+		// Add string trap root so victim is draggable to the tree
+		root := victim.entity.get_component(Lily_String_Trap_Root);
+		if root == null {
+			root = victim.entity.add_component(Lily_String_Trap_Root);
+		}
+		root.lily_entity_id = player.entity.id;
+		root.root_ends_at = get_time() + LILY_TEA_SLEEP_DURATION;
+		root.active = true;
+		root.being_carried = false;
+
+		if player.is_local_or_server() {
+			Notifier.notify(player, format_string("% fell asleep!", {victim.get_username()}));
+		}
+		if victim.is_local_or_server() {
+			Notifier.notify(victim, "You fell asleep...");
+		}
 	}
 
-	// NO string reset — strings remain after tea party
 	rr_lily_end_tea_party(player);
 }
 
-// Draw red glow on poison cup (Lily's screen only)
-rr_lily_draw_poison_cup_glow :: proc(player: Player) {
+// Draw color-coded glow on each cup (Lily's screen only)
+// Red = poison (legs), Yellow = caffeine (eyes), Green = live (safe)
+rr_lily_draw_cup_glow :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
-	if lm.tea_party_poison_cup < 1 return;
-	if lm.tea_party_poison_cup > lm.tea_cup_entities.count return;
-
-	poison_cup := lm.tea_cup_entities[lm.tea_party_poison_cup - 1];
-	if poison_cup == null return;
-	if !#alive(poison_cup) return;
+	if lm.tea_cup_entities.count < 3 return;
 
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
 
-	cup_pos := poison_cup.world_position;
-	UI.push_z(cup_pos.y - 0.1);
-	defer UI.pop_z();
-
 	pulse := sin(get_time() * 4.0) * 0.15 + 0.85;
-	glow_rect := Rect{cup_pos, cup_pos}.grow(0.4);
-	UI.quad(glow_rect, core_globals.white_sprite, v4.{1.0, 0.0, 0.0, 0.3 * pulse});
+
+	for i: 0..2 {
+		cup := lm.tea_cup_entities[i];
+		if cup == null continue;
+		if !#alive(cup) continue;
+
+		cup_pos := cup.world_position;
+		UI.push_z(cup_pos.y - 0.1);
+
+		effect := lm.tea_party_cup_effects[i];
+		color: v4;
+		if effect == LILY_TEA_CUP_POISON {
+			color = v4.{1.0, 0.0, 0.0, 0.3 * pulse}; // red — legs off
+		} else if effect == LILY_TEA_CUP_CAFFEINE {
+			color = v4.{1.0, 0.8, 0.0, 0.3 * pulse}; // yellow — eyes off
+		} else {
+			color = v4.{0.3, 0.5, 1.0, 0.3 * pulse}; // blue — sleep
+		}
+
+		glow_tex := get_asset(Texture_Asset, "sprites/Shapes/shape_circle_gradient.png");
+		glow_rect := Rect{cup_pos, cup_pos}.grow(0.6);
+		UI.quad(glow_rect, glow_tex, color);
+
+		UI.pop_z();
+	}
 }
 
 rr_lily_end_tea_party :: proc(player: Player) {
@@ -1961,7 +2049,9 @@ rr_lily_end_tea_party :: proc(player: Player) {
 
 	lm.tea_party_active = false;
 	lm.tea_party_drink_done = false;
+	lm.tea_party_drinking = false;
 	lm.tea_party_victim_chose = false;
+	lm.tea_party_chosen_cup = 0;
 	lm.tea_party_choice_deadline = 0.0;
 
 	// Restore camera
@@ -2071,32 +2161,42 @@ rr_lily_draw_tea_party_victim_ui :: proc(player: Player) {
 	btn_ts.valign = .CENTER;
 	btn_ts.color = v4.{1, 1, 1, 1};
 
-	left_rect := screen.center_rect().offset(-120.0, 0.0).grow(35.0, 100.0, 35.0, 100.0);
-	right_rect := screen.center_rect().offset(120.0, 0.0).grow(35.0, 100.0, 35.0, 100.0);
+	left_rect := screen.center_rect().offset(-180.0, 0.0).grow(35.0, 80.0, 35.0, 80.0);
+	mid_rect := screen.center_rect().offset(0.0, 0.0).grow(35.0, 80.0, 35.0, 80.0);
+	right_rect := screen.center_rect().offset(180.0, 0.0).grow(35.0, 80.0, 35.0, 80.0);
 
-	if UI.button(left_rect, bs, btn_ts, "Left Cup").clicked {
+	if UI.button(left_rect, bs, btn_ts, "Cup 1").clicked {
 		vc.choice = 1;
 	}
 
 	bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_1.png");
-	UI.push_id("right_cup", {});
-	defer UI.pop_id();
-	if UI.button(right_rect, bs, btn_ts, "Right Cup").clicked {
+	UI.push_id("cup_2", {});
+	if UI.button(mid_rect, bs, btn_ts, "Cup 2").clicked {
 		vc.choice = 2;
 	}
+	UI.pop_id();
+
+	bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_3.png");
+	UI.push_id("cup_3", {});
+	if UI.button(right_rect, bs, btn_ts, "Cup 3").clicked {
+		vc.choice = 3;
+	}
+	UI.pop_id();
 }
 
 // Caffeine effect timer — forced movement at high speed
 Lily_Caffeine_Timer :: class : Component {
 	ends_at: float;
 	player_entity_id: u64;
+	lily_entity_id: u64;      // Lily player who started this (for eye pickup spawning)
 	speed_multiplier: float;
+	steal_eyes_on_end: bool;  // if true, victim's eyes fall off when caffeine ends
 	rng: u64;
 	current_dir: v2;
 	next_direction_change_at: float;
 
 	ao_start :: method() {
-		rng = rng_seed_time();
+		rng = rng_root_seed();
 		angle := rng_range_float(ref rng, 0.0, 6.28);
 		current_dir = v2.{cos(angle), sin(angle)};
 		next_direction_change_at = get_time() + LILY_CAFFEINE_DIRECTION_HOLD_SECONDS;
@@ -2133,6 +2233,48 @@ Lily_Caffeine_Timer :: class : Component {
 			p.agent.input_this_frame = v2.{0, 0};
 			p.agent.velocity = v2.{0, 0};
 			p.set_trigger("lily_hyper_end");
+
+			// Eyes fall off after caffeine rush — spawn pickup for Lily
+			if steal_eyes_on_end && !p.lily_no_eyes {
+				p.lily_no_eyes = true;
+				lily_player := get_player_by_entity_id(lily_entity_id);
+				if lily_player != null {
+					drop_pos := p.entity.world_position + v2.{0.0, -0.3};
+					rr_lily_spawn_eye_pickup(lily_player, p.entity.id, drop_pos);
+				}
+				if p.is_local_or_server() {
+					Notifier.notify(p, "Your eyes fell out!");
+				}
+			}
+
+			entity.destroy();
+		}
+	}
+}
+
+// Sleep effect timer — frozen in place, wakes up after duration
+Lily_Tea_Sleep_Timer :: class : Component {
+	ends_at: float;
+	player_entity_id: u64;
+
+	ao_update :: method(dt: float) {
+		p := get_player_by_entity_id(player_entity_id);
+		if p == null {
+			entity.destroy();
+			return;
+		}
+
+		if get_time() >= ends_at || p.player_state != Player_State.ALIVE {
+			p.remove_freeze_reason(LILY_TEA_SLEEP_REASON);
+			p.set_trigger("lily_tea_wake");
+
+			// Free the drag root so they can move again
+			root := p.entity.get_component(Lily_String_Trap_Root);
+			if root != null root.free();
+
+			if p.is_local_or_server() {
+				Notifier.notify(p, "You woke up!");
+			}
 			entity.destroy();
 		}
 	}
@@ -3909,7 +4051,7 @@ Lily_Spider :: class : Component {
 				rr_lily_end_spider(lily, true);
 
 				if lily.is_local_or_server() {
-					Notifier.notify(lily, "Spider returned with legs! Deliver them to the tree.");
+					Notifier.notify(lily, "Spider returned with legs!");
 				}
 				return;
 			}
@@ -4610,7 +4752,88 @@ Lily_Eyes_Pickup_Interactable :: class : Interactable {
 		rr_lily_destroy_eye_pickup(player);
 
 		if player.is_local_or_server() {
-			Notifier.notify(player, "Eyes collected! Deliver them to the tree.");
+			Notifier.notify(player, "Eyes collected!");
+		}
+	}
+}
+
+// Spawn a leg pickup entity at the given position.
+rr_lily_spawn_leg_pickup :: proc(player: Player, victim_id: u64, pos: v2) {
+	lm := player.entity.get_component(Lily_Module);
+	if lm == null return;
+
+	// Destroy old pickup if any
+	rr_lily_destroy_leg_pickup(player);
+
+	e := Scene.create_entity();
+	e.set_local_position(pos);
+	e.set_local_scale(v2.{0.5, 0.5});
+
+	sprite := e.add_component(Sprite_Renderer);
+	leg_tex := get_asset(Texture_Asset, "sprites/icons/lily/Dismembered_Player_Leg.png");
+	if leg_tex != null {
+		sprite.set_texture(leg_tex);
+	}
+
+	pickup := e.add_component(Lily_Legs_Pickup_Interactable);
+	pickup.lily_entity_id = player.entity.id;
+	pickup.victim_id = victim_id;
+
+	lm.leg_pickup_entity = e;
+	lm.leg_pickup_active = true;
+	lm.leg_pickup_victim_id = victim_id;
+}
+
+// Destroy leg pickup entity.
+rr_lily_destroy_leg_pickup :: proc(player: Player) {
+	lm := player.entity.get_component(Lily_Module);
+	if lm == null return;
+	if lm.leg_pickup_entity != null && #alive(lm.leg_pickup_entity) {
+		lm.leg_pickup_entity.destroy();
+	}
+	lm.leg_pickup_entity = null;
+	lm.leg_pickup_active = false;
+	lm.leg_pickup_victim_id = 0;
+}
+
+// Interactable component on the leg pickup entity — lets Lily collect stolen legs.
+Lily_Legs_Pickup_Interactable :: class : Interactable {
+	lily_entity_id: u64;
+	victim_id: u64;
+
+	ao_start :: method() {
+		this.set_listener(this);
+		this.set_text("Pick Up Legs");
+		this.set_hold_text("Picking up...");
+		radius = LILY_LEGS_PICKUP_RANGE;
+		required_hold_time = 0.5;
+		prompt_offset = v2.{0, 1.0};
+		priority = 70;
+	}
+
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
+		if player.entity.id != lily_entity_id return false;
+		lm := player.entity.get_component(Lily_Module);
+		if lm == null return false;
+		if lm.carrying_legs return false; // already carrying legs
+		return true;
+	}
+
+	on_interact :: method(player: Player) {
+		lm := player.entity.get_component(Lily_Module);
+		if lm == null return;
+		lm.carrying_legs = true;
+		lm.stolen_legs_from_id = victim_id;
+
+		// Destroy the pickup
+		rr_lily_destroy_leg_pickup(player);
+
+		if player.is_local_or_server() {
+			Notifier.notify(player, "Legs collected!");
 		}
 	}
 }
@@ -4821,20 +5044,17 @@ Lily_Tea_Party_Ability :: class : Ability_Base {
 		if !lm.is_lily_form return false;
 		if lm.tea_party_active return false;
 		if lm.mind_control_active return false;
-		if lm.strung_player_ids.count == 0 return false;
 		return get_closest_tea_target(this, player) != null;
 	}
 
 	get_closest_tea_target :: proc(instance: Lily_Tea_Party_Ability, player: Player) -> Player {
-		lm := player.entity.get_component(Lily_Module);
-		if lm == null return null;
-
-		finder := make_finder(Player, player.entity.world_position, LILY_TEA_PARTY_TABLE_RANGE);
-		for i: 0..lm.strung_player_ids.count-1 {
-			target := get_player_by_entity_id(lm.strung_player_ids[i]);
-			if target == null continue;
-			if target.player_state != Player_State.ALIVE continue;
-			finder.check(target, target.entity.world_position);
+		// Find closest alive non-traitor player within range
+		finder := make_finder(Player, player.entity.world_position, LILY_TEA_PARTY_RANGE);
+		for p: component_iterator(Player) {
+			if p.entity.id == player.entity.id continue;
+			if p.player_state != Player_State.ALIVE continue;
+			if p.player_type == Player_Type.TRAITOR continue;
+			finder.check(p, p.entity.world_position);
 		}
 		return finder.closest;
 	}
