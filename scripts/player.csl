@@ -86,6 +86,7 @@ Player :: class : Player_Base {
 	// --- Lily (cross-player: any player can have eyes/legs stolen) ---
 	lily_no_eyes: bool;
 	lily_no_eyes_prev: bool;    // edge detection for start trigger
+	lily_no_eyes_al_at: float;  // time at which to enable AL overlay (0 = not pending)
 	lily_crawling: bool;
 	lily_crawling_prev: bool;   // edge detection for start trigger
 	lily_crawl_speed_saved: float;
@@ -472,6 +473,8 @@ Player :: class : Player_Base {
 			// No-eyes main layer anim only fires when NOT also crawling (legless takes priority)
 			if this.lily_no_eyes && !this.lily_no_eyes_prev && !this.lily_crawling {
 				sm_ref.set_trigger("lily_no_eyes_start");
+				// Schedule AL overlay to activate after No_Eyes_Start anim finishes
+				this.lily_no_eyes_al_at = get_time() + LILY_NO_EYES_START_DURATION;
 			}
 
 			// Legless always fires — it takes priority and kicks out no-eyes on main layer
@@ -482,6 +485,17 @@ Player :: class : Player_Base {
 			// If legs healed while still eyeless, resume no-eyes anims on main layer
 			if !this.lily_crawling && this.lily_crawling_prev && this.lily_no_eyes {
 				sm_ref.set_trigger("lily_no_eyes_start");
+				this.lily_no_eyes_al_at = get_time() + LILY_NO_EYES_START_DURATION;
+			}
+
+			// AL overlay: only enable after No_Eyes_Start anim has finished playing
+			now := get_time();
+			al_active := this.lily_no_eyes && this.lily_no_eyes_al_at > 0.0 && now >= this.lily_no_eyes_al_at;
+			sm_ref.set_bool("lily_no_eyes_al", al_active);
+
+			// Clear AL delay when eyes are restored
+			if !this.lily_no_eyes {
+				this.lily_no_eyes_al_at = 0.0;
 			}
 
 			this.lily_no_eyes_prev = this.lily_no_eyes;
@@ -686,6 +700,7 @@ Player :: class : Player_Base {
     ao_late_update :: proc(using this: Player, delta_time: float) {
         if this.is_local_or_server() {
 			rr_bc_draw_camera_ui(this, delta_time);
+			rr_lily_draw_carried_icons(this);
 
 			// Ghost QoL: zoom the local dead player's camera out a bit so they can
 			// see more of the map while spectating.
@@ -3178,13 +3193,14 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer.create_transition(no_eyes_end_state, idle_state, true);
 
 		// No-eyes AL overlay (track 1) — hides eye meshes, works with ANY main layer anim.
-		// Always active when lily_no_eyes is true, regardless of legless state.
+		// Only activates after No_Eyes_Start anim finishes (driven by lily_no_eyes_al bool).
+		lily_no_eyes_al_var := sm.create_variable("lily_no_eyes_al", State_Machine_Variable.Kind.BOOL);
 		eyes_al_layer := sm.create_layer("lily_no_eyes_al", 1);
 		eyes_al_off := eyes_al_layer.create_state("__CLEAR_TRACK__", true, 0.0);
 		eyes_al_on := eyes_al_layer.create_state("004RAND_LILY/No_Eyes_AL", true, 0.0);
 		eyes_al_layer.set_initial_state(eyes_al_off);
-		eyes_al_layer.create_transition(eyes_al_off, eyes_al_on, false).create_bool_condition(lily_no_eyes_var, true);
-		eyes_al_layer.create_transition(eyes_al_on, eyes_al_off, false).create_bool_condition(lily_no_eyes_var, false);
+		eyes_al_layer.create_transition(eyes_al_off, eyes_al_on, false).create_bool_condition(lily_no_eyes_al_var, true);
+		eyes_al_layer.create_transition(eyes_al_on, eyes_al_off, false).create_bool_condition(lily_no_eyes_al_var, false);
 
 		// --- Legless (main layer) — takes priority over no-eyes ---
 		lily_crawl_start_var := sm.create_variable("lily_crawl_start", State_Machine_Variable.Kind.TRIGGER);
@@ -4364,6 +4380,22 @@ update_minimap_ui :: proc(player: Player) {
 			n_ui := rr_minimap_world_to_ui(map_rect, nest_comp.entity.world_position);
 			n_r := Rect{n_ui, n_ui}.grow_unscaled(n_size, n_size, n_size, n_size);
 			UI.quad(n_r.fit_aspect(nest_icon2.get_aspect()), nest_icon2, v4.{1.0, 0.3, 0.3, 1.0});
+		}
+	}
+
+	// --- Lily: Hair Tree marker (traitor only) ---
+	if player.is_local_or_server() && player.player_role == Player_Role.LILY_LOVEBRAIDS {
+		lily_mod := player.entity.get_component(Lily_Module);
+		if lily_mod != null && lily_mod.hair_tree_planted && lily_mod.hair_tree_entity != null && #alive(lily_mod.hair_tree_entity) {
+			tree_icon := get_asset(Texture_Asset, "sprites/icons/lily/Hair_Tree_Icon.png");
+			if tree_icon != null {
+				tree_size := map_rect.height() * 0.035;
+				if tree_size < 16.0 { tree_size = 16.0; }
+				if tree_size > 48.0 { tree_size = 48.0; }
+				tree_ui := rr_minimap_world_to_ui(map_rect, lily_mod.hair_tree_entity.world_position);
+				tree_r := Rect{tree_ui, tree_ui}.grow_unscaled(tree_size, tree_size, tree_size, tree_size);
+				UI.quad(tree_r.fit_aspect(tree_icon.get_aspect()), tree_icon, v4.{0.8, 0.4, 0.9, 1.0});
+			}
 		}
 	}
 

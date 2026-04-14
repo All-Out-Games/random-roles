@@ -41,7 +41,7 @@ rr_lily_get_spider_rig_path :: proc() -> string {
 // Kill
 LILY_KILL_COOLDOWN :: 25.0;
 LILY_KILL_RANGE_SCHLEEM :: 15.0;
-LILY_KILL_RANGE_LILY :: 18.0; // Extended melee range in Lily form
+LILY_KILL_RANGE_LILY :: 30.0; // Extended melee range in Lily form (doubled)
 
 // Transform
 LILY_TRANSFORM_ANIM_SECONDS :: 1.0;
@@ -55,6 +55,7 @@ LILY_STRING_RANGE :: 10.0;
 LILY_TREE_TELEPORT_COOLDOWN :: 30.0;
 LILY_TREE_INTERACT_RADIUS :: 2.5;
 LILY_TREE_DELIVER_RANGE :: 3.0; // range to deliver items to the tree
+LILY_TREE_VISIBILITY_RANGE :: 8.0; // non-traitors only see tree when this close
 
 // Tree growth scale per stage (0=Tiny through 6=Deathbraid)
 // [ART] sapling asset — will be swapped for proper growth stages later
@@ -101,13 +102,14 @@ LILY_BLIND_LOS_INNER :: 1.5;
 LILY_BLIND_LOS_OUTER :: 2.5;
 LILY_EYE_MACHINE_FREEZE_REASON :: "lily_eye_machine";
 LILY_EYES_PICKUP_RANGE :: 2.0;
+LILY_NO_EYES_START_DURATION :: 1.5; // approx duration of No_Eyes_Start anim before AL overlay activates
 
 // Leg Steal (spider)
 LILY_LEG_STEAL_COOLDOWN :: 60.0;
-LILY_SPIDER_RETURN_TIME :: 30.0; // seconds spider has to return to tree
+LILY_SPIDER_RETURN_TIME :: 30.0; // seconds spider has to return to player
 LILY_SPIDER_ATTACK_RANGE :: 1.5; // range to chomp a player
 LILY_SPIDER_SPEED :: 5.0;
-LILY_SPIDER_TREE_RETURN_RANGE :: 1.5; // spider must get this close to tree to deliver legs
+LILY_SPIDER_PLAYER_RETURN_RANGE :: 2.0; // spider must get this close to player to deliver legs
 LILY_CRAWL_SPEED_MULTIPLIER :: 0.40; // 40% of normal speed
 
 // Tree Request types
@@ -167,6 +169,8 @@ LILY_PULL_REASON :: "lily_pull_drag";
 LILY_STRING_TRAP_REASON :: "lily_string_trap_root";
 LILY_SPIDER_FREEZE_REASON :: "lily_spider_control";
 LILY_CRAWL_REASON :: "lily_leg_steal_crawl";
+LILY_ABILITY_INVIS_REASON :: "lily_ability_invis";
+LILY_ABILITY_INVIS_ALPHA :: 0.35;
 
 // --- SFX paths (placeholder — replace with actual SFX when available) ---
 // [ART] SFX assets needed for Lily
@@ -251,6 +255,23 @@ rr_lily_swap_to_player :: proc(player: Player) {
 	lm.creature_visible = false;
 	player.remove_invisibility_reason(LILY_INVIS_REASON);
 	player.remove_name_invisibility_reason(LILY_NAME_INVIS_REASON);
+}
+
+// Toggle ability invisibility: invisible to non-traitors, semi-transparent to Lily herself.
+rr_lily_set_ability_invis :: proc(player: Player, active: bool) {
+	if active {
+		if player.is_local() {
+			if player.animator != null && player.animator.instance != null {
+				player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
+			}
+		}
+	} else {
+		if player.is_local() {
+			if player.animator != null && player.animator.instance != null {
+				player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 1.0};
+			}
+		}
+	}
 }
 
 rr_lily_creature_trigger :: proc(player: Player, trigger_name: string) {
@@ -729,6 +750,35 @@ Lily_Hair_Tree :: class : Component {
 
 // Tree can no longer be destroyed by other players — it's Lily's permanent base.
 
+// Proximity-based visibility — non-traitors only see the tree when close.
+Lily_Tree_Visibility :: class : Component {
+	ao_update :: method(dt: float) {
+		spine := entity.get_component(Spine_Animator);
+		if spine == null return;
+		if spine.instance == null return;
+
+		local_player, ok := Game.get_local_player();
+		if !ok {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 0};
+			return;
+		}
+		// Lily (traitor) always sees her tree
+		if local_player.player_type == Player_Type.TRAITOR {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
+			return;
+		}
+		// Other players fade in when close
+		dist := length(local_player.entity.world_position - entity.world_position);
+		if dist <= LILY_TREE_VISIBILITY_RANGE {
+			alpha := 1.0 - clamp((dist - LILY_TREE_VISIBILITY_RANGE + 2.0) / 2.0, 0.0, 1.0);
+			alpha = clamp(alpha, 0.0, 1.0);
+			spine.instance.color_multiplier = v4.{1, 1, 1, alpha};
+		} else {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 0};
+		}
+	}
+}
+
 // Pull interactable — Lily holds to pull a strung player toward the tree.
 Lily_Tree_Pull_Interactable :: class : Interactable {
 	tree_entity: Entity;
@@ -1197,6 +1247,8 @@ rr_lily_place_hair_tree :: proc(player: Player) {
 
 	pull_interactable := tree_entity.add_component(Lily_Tree_Pull_Interactable);
 	pull_interactable.tree_entity = tree_entity;
+
+	tree_entity.add_component(Lily_Tree_Visibility);
 
 	lm.hair_tree_entity = tree_entity;
 	lm.hair_tree_planted = true;
@@ -2260,19 +2312,28 @@ Lily_Mind_Control_Puppet :: class : Component {
 		// Lily stays put — only the puppet moves
 		lily.agent.input_this_frame = v2.{0, 0};
 
-		// Draw "Mind Controlled!" banner at top of screen (below progress bar)
+		// Draw "Mind Controlled!" above the victim's head in world space
 		if p.is_local_or_server() {
-			screen := UI.get_screen_rect();
-			banner := screen.top_rect().offset(0.0, -140.0).grow_bottom(40);
+			UI.push_world_draw_context();
+			defer UI.pop_draw_context();
+
+			head_pos := p.entity.world_position + v2.{0, 2.2};
+			UI.push_z(head_pos.y + 0.01);
+			defer UI.pop_z();
+
+			text_rect := Rect.{head_pos, head_pos}.grow(0.15, 2.0, 0.15, 2.0);
 			ts := UI.default_text_settings();
-			ts.size = 36;
+			ts.size = 0.40;
 			ts.halign = .CENTER;
 			ts.valign = .CENTER;
 			ts.color = v4.{0.8, 0.4, 1.0, 1.0};
 			ts.do_outline = true;
 			ts.outline_thickness = 3;
 			ts.outline_color = v4.{0, 0, 0, 1};
-			UI.text(banner, ts, "Mind Controlled!");
+
+			pulse := sin(get_time() * 3.0) * 0.15 + 0.85;
+			ts.color.w = pulse;
+			UI.text(text_rect, ts, "Mind Controlled!");
 		}
 	}
 
@@ -2679,6 +2740,9 @@ rr_lily_start_mind_control :: proc(player: Player, target: Player) {
 
 	rr_lily_creature_trigger(player, "control_start");
 
+	// Make Lily semi-transparent to herself, invisible to others
+	rr_lily_set_ability_invis(player, true);
+
 	if player.is_local_or_server() {
 		Notifier.notify(player, format_string("Mind controlling %!", {target.get_username()}));
 	}
@@ -2704,12 +2768,13 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 
 	// Input forwarding handled in Lily_Mind_Control_Puppet.ao_update
 
-	// Lily's camera and LOS follow the puppet
-	if player.is_local() {
-		player.camera.follow_player = false;
-		player.camera.position = target.entity.world_position;
+	// Lily's camera follows the puppet — runs on both sides so server
+	// doesn't fight the client (avoids jitter from reconciliation).
+	player.camera.follow_player = false;
+	player.camera.position = target.entity.world_position;
 
-		// Unparent light and set world position directly (avoids parent scale flip issues)
+	// LOS light follows puppet (local-only cosmetic)
+	if player.is_local() {
 		if player.local_light_entity != null && #alive(player.local_light_entity) {
 			player.local_light_entity.set_parent(null, true);
 			player.local_light_entity.set_local_position(target.entity.world_position);
@@ -2754,45 +2819,55 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 	}
 }
 
-// Draw Mind Control overlay — timer + controlled player name
+// Draw Mind Control timer above the controlled player's head (visible to Lily).
 rr_lily_draw_mind_control_ui :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
-	screen := UI.get_safe_screen_rect();
-	UI.push_layer(150);
-	defer UI.pop_layer();
+	target := get_player_by_entity_id(lm.mind_control_target_id);
+	if target == null return;
 
-	top_bar := screen.top_rect().offset(0.0, -80.0).grow_bottom(50);
-	UI.quad(top_bar, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.7});
-
-	// Timer
 	remaining := lm.mind_control_ends_at - get_time();
 	if remaining < 0.0 remaining = 0.0;
-	ts := UI.default_text_settings();
-	ts.size = 20;
-	ts.halign = .RIGHT;
-	ts.valign = .CENTER;
-	ts.color = v4.{1.0, 0.8, 0.2, 1.0};
-	ts.do_outline = true;
-	ts.outline_thickness = 2;
-	ts.outline_color = v4.{0, 0, 0, 1};
-	timer_rect := top_bar.inset(5.0, 10.0, 5.0, 10.0);
-	UI.text(timer_rect, ts, "%s", {format_float(remaining, decimals=0)});
+	remaining_i := (remaining + 0.999).(int);
+	if remaining_i < 0 remaining_i = 0;
 
-	// "Mind Control: [name]" label
-	target := get_player_by_entity_id(lm.mind_control_target_id);
-	label_ts := UI.default_text_settings();
-	label_ts.size = 22;
-	label_ts.halign = .CENTER;
-	label_ts.valign = .CENTER;
-	label_ts.color = v4.{0.8, 0.4, 1.0, 1.0};
-	label_ts.do_outline = true;
-	label_ts.outline_thickness = 2;
-	label_ts.outline_color = v4.{0, 0, 0, 1};
-	if target != null {
-		UI.text(top_bar, label_ts, "Mind Control: %", {target.get_username()});
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+
+	head_pos := target.entity.world_position + v2.{0, 2.2};
+	UI.push_z(head_pos.y + 0.01);
+	defer UI.pop_z();
+
+	text_rect := Rect.{head_pos, head_pos}.grow(0.15, 1.5, 0.15, 1.5);
+
+	// Timer
+	ts := UI.default_text_settings();
+	ts.size = 0.35;
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 3;
+	ts.outline_color = v4.{0, 0, 0, 1};
+	if remaining < 3.0 {
+		ts.color = v4.{1.0, 0.3, 0.3, 1.0};
+	} else {
+		ts.color = v4.{0.8, 0.4, 1.0, 1.0};
 	}
+	UI.text(text_rect, ts, "%", {remaining_i});
+
+	// Name label below timer
+	name_pos := target.entity.world_position + v2.{0, 1.8};
+	name_rect := Rect.{name_pos, name_pos}.grow(0.15, 1.5, 0.15, 1.5);
+	name_ts := UI.default_text_settings();
+	name_ts.size = 0.22;
+	name_ts.halign = .CENTER;
+	name_ts.valign = .CENTER;
+	name_ts.color = v4.{0.8, 0.4, 1.0, 0.9};
+	name_ts.do_outline = true;
+	name_ts.outline_thickness = 2;
+	name_ts.outline_color = v4.{0, 0, 0, 0.8};
+	UI.text(name_rect, name_ts, "Mind Control");
 }
 
 rr_lily_end_mind_control :: proc(player: Player) {
@@ -2826,6 +2901,9 @@ rr_lily_end_mind_control :: proc(player: Player) {
 
 	lm.mind_control_active = false;
 	lm.mind_control_target_id = 0;
+
+	// Restore visibility
+	rr_lily_set_ability_invis(player, false);
 
 	rr_lily_creature_trigger(player, "control_end");
 }
@@ -3218,6 +3296,16 @@ rr_lily_update :: proc(player: Player, dt: float) {
 	// Passives
 	rr_lily_update_passives(player, dt);
 
+	// Re-apply ability invis alpha every frame (server sync resets color_multiplier)
+	if player.is_local() {
+		ability_invis := lm.mind_control_active || lm.spider_active;
+		if ability_invis {
+			if player.animator != null && player.animator.instance != null {
+				player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
+			}
+		}
+	}
+
 	// Update creature locomotion anims
 	rr_lily_update_creature_anims(player, dt);
 
@@ -3593,18 +3681,17 @@ Lily_String_Ability :: class : Ability_Base {
 // Spider (Leg Steal)
 // =============================================================================
 
-// Spawns the spider entity at the tree position and starts spider control mode.
+// Spawns the spider entity at the player position and starts spider control mode.
 rr_lily_spawn_spider :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.spider_active return;
-	if lm.hair_tree_entity == null || !#alive(lm.hair_tree_entity) return;
 
-	tree_pos := lm.hair_tree_entity.world_position;
+	spawn_pos := player.entity.world_position;
 
-	// Create spider entity at tree
+	// Create spider entity at player position
 	se := Scene.create_entity();
-	se.set_local_position(tree_pos);
+	se.set_local_position(spawn_pos);
 	se.set_local_scale(v2.{1, 1});
 	se.set_local_rotation(0.0);
 
@@ -3629,9 +3716,13 @@ rr_lily_spawn_spider :: proc(player: Player) {
 	lm.spider_victim_id = 0;
 	lm.spider_return_deadline = 0.0;
 	lm.spider_attack_cooldown = 0.0;
+	lm.spider_leg_sprite = null;
 
 	// Lily's input is forwarded to the spider then zeroed each frame (like mind control).
 	// Don't use add_disable_movement_input_reason — it prevents input from being read.
+
+	// Make Lily semi-transparent to herself, invisible to others
+	rr_lily_set_ability_invis(player, true);
 
 	if player.is_local_or_server() {
 		Notifier.notify(player, "Spider deployed! Find a victim...");
@@ -3644,12 +3735,13 @@ rr_lily_end_spider :: proc(player: Player, delivered: bool) {
 	if lm == null return;
 	if !lm.spider_active return;
 
-	// Destroy spider entity
+	// Destroy spider entity (leg sprite is a child, destroyed with it)
 	if lm.spider_entity != null && #alive(lm.spider_entity) {
 		lm.spider_entity.destroy();
 	}
 	lm.spider_entity = null;
 	lm.spider_animator = null;
+	lm.spider_leg_sprite = null;
 
 	// Restore Lily's camera and LOS
 	if player.is_local() {
@@ -3678,6 +3770,9 @@ rr_lily_end_spider :: proc(player: Player, delivered: bool) {
 	lm.spider_has_legs = false;
 	lm.spider_victim_id = 0;
 	lm.spider_return_deadline = 0.0;
+
+	// Restore visibility
+	rr_lily_set_ability_invis(player, false);
 }
 
 // Apply crawl effect to a victim (40% speed, crawl animation).
@@ -3803,35 +3898,22 @@ Lily_Spider :: class : Component {
 
 		spider_pos := entity.world_position;
 
-		// If spider has legs, check if near tree to deliver
+		// If spider has legs, check if near Lily (player) to deliver
 		if lm.spider_has_legs {
-			if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
-				tree_pos := lm.hair_tree_entity.world_position;
-				dist := length(spider_pos - tree_pos);
-				if dist <= LILY_SPIDER_TREE_RETURN_RANGE {
-					// Auto-deliver legs to tree
-					tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
-					if tree_comp != null {
-						request, has_request := tree_comp.get_current_request();
-						if has_request && request == Tree_Request.LEGS {
-							// Tree wants legs right now — fulfill directly
-							tree_comp.fulfill_request();
-							rr_lily_apply_tree_buffs(lily);
-						} else {
-							// Tree isn't asking for legs yet — carry them for later
-							lm.carrying_legs = true;
-							lm.stolen_legs_from_id = lm.spider_victim_id;
-						}
-					}
-					rr_lily_end_spider(lily, true);
+			lily_pos := lily.entity.world_position;
+			dist := length(spider_pos - lily_pos);
+			if dist <= LILY_SPIDER_PLAYER_RETURN_RANGE {
+				// Spider reached Lily — hand off legs to carry
+				lm.carrying_legs = true;
+				lm.stolen_legs_from_id = lm.spider_victim_id;
+				rr_lily_end_spider(lily, true);
 
-					if lily.is_local_or_server() {
-						Notifier.notify(lily, "Spider returned! Legs delivered to the tree!");
-					}
-					return;
+				if lily.is_local_or_server() {
+					Notifier.notify(lily, "Spider returned with legs! Deliver them to the tree.");
 				}
+				return;
 			}
-			return; // spider has legs, just needs to return
+			return; // spider has legs, just needs to return to player
 		}
 	}
 }
@@ -3852,13 +3934,28 @@ rr_lily_spider_apply_bite :: proc(player: Player, lm: Lily_Module, victim_entity
 	rr_lily_apply_crawl(victim);
 	victim.lily_crawl_ends_at = lm.spider_return_deadline;
 
+	// Attach dismembered leg sprite to spider
+	if lm.spider_entity != null && #alive(lm.spider_entity) {
+		leg_e := Scene.create_entity();
+		leg_e.set_parent(lm.spider_entity, false);
+		leg_e.set_local_position(v2.{0.0, 0.8});
+		leg_e.set_local_scale(v2.{1.5, 1.5});
+		leg_sr := leg_e.add_component(Sprite_Renderer);
+		leg_tex := get_asset(Texture_Asset, "sprites/icons/lily/Dismembered_Player_Leg.png");
+		if leg_sr != null && leg_tex != null {
+			leg_sr.set_texture(leg_tex);
+			leg_sr.layer = 55;
+		}
+		lm.spider_leg_sprite = leg_e;
+	}
+
 	desc := SFX.default_sfx_desc();
 	desc.entity_to_follow = lm.spider_entity.id;
 	desc.volume = 0.5;
 	SFX.play(get_asset(SFX_Asset, "sfx/lily/spider_attack_chomp.wav"), desc);
 
 	if player.is_local_or_server() {
-		Notifier.notify(player, format_string("Stole %'s legs! Return to the tree!", {victim.get_username()}));
+		Notifier.notify(player, format_string("Stole %'s legs! Return to Lily!", {victim.get_username()}));
 	}
 }
 
@@ -4047,14 +4144,13 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if lm.eye_machine_active return;
-	if lm.hair_tree_entity == null || !#alive(lm.hair_tree_entity) return;
 
-	tree_pos := lm.hair_tree_entity.world_position;
-	lm.eye_machine_pos = tree_pos;
+	spawn_pos := player.entity.world_position;
+	lm.eye_machine_pos = spawn_pos;
 
 	// Create suction tube entity (visible to ALL players)
 	tube_e := Scene.create_entity();
-	tube_e.set_local_position(v2.{tree_pos.x, tree_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y});
+	tube_e.set_local_position(v2.{spawn_pos.x, spawn_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y});
 	tube_e.set_local_scale(v2.{1, 1});
 	tube_e.set_local_rotation(0.0);
 	tube_sprite := tube_e.add_component(Sprite_Renderer);
@@ -4067,7 +4163,7 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 
 	// Create AOE reticle entity (will be hidden for non-Lily via ao_on_state_sync)
 	aoe_e := Scene.create_entity();
-	aoe_e.set_local_position(tree_pos);
+	aoe_e.set_local_position(spawn_pos);
 	aoe_e.set_local_scale(v2.{1.5, 1.5});
 	aoe_e.set_local_rotation(0.0);
 	aoe_sr := aoe_e.add_component(Sprite_Renderer);
@@ -4102,7 +4198,7 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 		lm.eye_machine_camera_saved_follow = player.camera.follow_player;
 		player.camera.follow_player = false;
 		player.camera.size = LILY_EYE_MACHINE_ZOOM_SIZE;
-		player.camera.position = tree_pos;
+		player.camera.position = spawn_pos;
 	}
 
 	if player.is_local_or_server() {
@@ -4581,12 +4677,6 @@ Lily_Steal_Eyes_Ability :: class : Ability_Base {
 		if lm.eye_machine_active return false;
 		if lm.spider_active return false;
 		if lm.carrying_eyes return false;
-		// Must have tree planted and be near the tree to activate
-		if !lm.hair_tree_planted return false;
-		if lm.hair_tree_entity == null return false;
-		if !#alive(lm.hair_tree_entity) return false;
-		dist := length(player.entity.world_position - lm.hair_tree_entity.world_position);
-		if dist > LILY_TREE_INTERACT_RADIUS return false;
 		return true;
 	}
 
@@ -4691,12 +4781,6 @@ Lily_Steal_Legs_Ability :: class : Ability_Base {
 		if lm.mind_control_active return false;
 		if lm.spider_active return false; // spider already deployed
 		if lm.carrying_legs return false;  // already carrying legs
-		// Must have tree planted and be near the tree to activate
-		if !lm.hair_tree_planted return false;
-		if lm.hair_tree_entity == null return false;
-		if !#alive(lm.hair_tree_entity) return false;
-		dist := length(player.entity.world_position - lm.hair_tree_entity.world_position);
-		if dist > LILY_TREE_INTERACT_RADIUS return false;
 		return true;
 	}
 
@@ -5216,4 +5300,45 @@ rr_lily_draw_tree_request_icon :: proc(player: Player) {
 
 	request_name := rr_lily_get_request_name(tree_comp);
 	UI.text(icon_rect, ts, request_name);
+}
+
+// Draw carried-item icons above Lily's head in world space (visible only to Lily).
+rr_lily_draw_carried_icons :: proc(player: Player) {
+	if !player.is_local() return;
+	lm := player.entity.get_component(Lily_Module);
+	if lm == null return;
+	if !lm.carrying_eyes && !lm.carrying_legs return;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+
+	pos := player.entity.world_position;
+	bob := sin(get_time() * 2.5) * 0.08;
+	both := lm.carrying_eyes && lm.carrying_legs;
+	size := 0.25;
+
+	UI.push_z(pos.y + 0.01);
+	defer UI.pop_z();
+
+	if lm.carrying_eyes {
+		eye_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/npc/npc_icon_b/eyeball_L.png");
+		if eye_tex != null {
+			x_off := 0.0;
+			if both x_off = -0.3;
+			icon_pos := pos + v2.{x_off, 2.0 + bob};
+			r := Rect.{icon_pos, icon_pos}.grow(size, size, size, size);
+			UI.quad(r, eye_tex, v4.{1, 1, 1, 1});
+		}
+	}
+
+	if lm.carrying_legs {
+		leg_tex := get_asset(Texture_Asset, "sprites/icons/lily/Dismembered_Player_Leg.png");
+		if leg_tex != null {
+			x_off := 0.0;
+			if both x_off = 0.3;
+			icon_pos := pos + v2.{x_off, 2.0 + bob};
+			r := Rect.{icon_pos, icon_pos}.grow(size, size, size, size);
+			UI.quad(r, leg_tex, v4.{1, 1, 1, 1});
+		}
+	}
 }

@@ -256,8 +256,9 @@ Lily_Module :: class : Component {
 	spider_animator: Spine_Animator;
 	spider_has_legs: bool;          // spider successfully stole legs
 	spider_victim_id: u64;          // entity ID of player whose legs were stolen
-	spider_return_deadline: float;  // time by which spider must reach tree
+	spider_return_deadline: float;  // time by which spider must reach player
 	spider_attack_cooldown: float;  // prevent spam chomps
+	spider_leg_sprite: Entity;      // dismembered leg shown on spider while carrying
 
 	// Eye Steal (Machine)
 	eye_machine_active: bool;
@@ -291,4 +292,23 @@ Lily_Module :: class : Component {
 
 	// Web Sense passive arrow tracking
 	web_sense_arrow_targets: [..]u64;
+
+	// Client-side invisibility for mind control & spider (hide from non-traitors)
+	ao_on_state_sync :: method() {
+		local_player, ok := Game.get_local_player();
+		if !ok return;
+
+		player := entity.get_component(Player);
+		if player == null return;
+
+		is_using_ability := mind_control_active || spider_active;
+
+		if is_using_ability && local_player.player_type != Player_Type.TRAITOR {
+			player.add_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+			player.add_name_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+		} else {
+			player.remove_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+			player.remove_name_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+		}
+	}
 }
