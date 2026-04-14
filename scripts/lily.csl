@@ -88,9 +88,15 @@ LILY_EYE_STEAL_COOLDOWN :: 60.0;
 LILY_EYE_MACHINE_SPEED :: 8.0;           // camera/machine movement speed
 LILY_EYE_MACHINE_ATTACK_RANGE :: 4.5;    // range to suck eyes
 LILY_EYE_MACHINE_ZOOM_SIZE :: 20.0;      // zoomed out camera size
-LILY_EYE_MACHINE_TUBE_OFFSET_Y :: 3.5;   // suction tube floats above camera center
-LILY_EYE_MACHINE_TUBE_BOB_AMP :: 0.3;   // bob amplitude
-LILY_EYE_MACHINE_TUBE_BOB_SPEED :: 3.0; // bob frequency
+LILY_EYE_MACHINE_TUBE_OFFSET_Y :: 5.0;   // suction tube floats above camera center
+LILY_EYE_MACHINE_TUBE_BOB_AMP :: 0.3;    // bob amplitude
+LILY_EYE_MACHINE_TUBE_BOB_SPEED :: 3.0;  // bob frequency
+LILY_EYE_MACHINE_ZOOM_DURATION :: 0.8;   // camera zoom-in time (no FX)
+LILY_EYE_MACHINE_SUCTION_DURATION :: 1.0; // suction phase (shake + CA)
+LILY_EYE_MACHINE_LINGER_TIME :: 2.0;     // tube fly-up + camera return
+LILY_EYE_MACHINE_ZOOM_ATTACK :: 8.0;     // close-up camera size
+LILY_EYE_MACHINE_SHAKE_INTENSITY :: 0.2;  // camera shake strength
+LILY_EYE_MACHINE_SHAKE_SPEED :: 25.0;    // camera shake frequency
 LILY_BLIND_LOS_INNER :: 1.5;
 LILY_BLIND_LOS_OUTER :: 2.5;
 LILY_EYE_MACHINE_FREEZE_REASON :: "lily_eye_machine";
@@ -3314,7 +3320,7 @@ Lily_Kill_Ability :: class : Ability_Base {
 					player.set_trigger("lily_kill");
 				} else {
 					player.set_facing_right(closest.entity.world_position.x > player.entity.world_position.x);
-					player.set_trigger("traitor_kill");
+					player.set_trigger("lily_kill");
 				}
 
 				closest.kill_with_killer(player.entity.id);
@@ -3903,7 +3909,7 @@ Lily_Spider_Attack_Ability :: class : Ability_Base {
 	NAME :: "Chomp";
 
 	on_init :: proc(instance: Lily_Spider_Attack_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Standard_Kill_Icon.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Hair_Mouth_Icon.png");
 	}
 
 	get_closest_target :: proc(player: Player) -> Player {
@@ -3960,7 +3966,7 @@ Lily_Spider_Cancel_Ability :: class : Ability_Base {
 	NAME :: "Cancel";
 
 	on_init :: proc(instance: Lily_Spider_Cancel_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Standard_Kill_Icon.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Hair_Mouth_Icon.png");
 	}
 
 	can_use :: method() -> bool {
@@ -4122,6 +4128,21 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 	}
 	lm.eye_machine_aoe_entity = null;
 
+	// Unfreeze victim if still frozen (cancelled or round ended mid-attack)
+	if lm.eye_machine_victim_id != 0 {
+		victim := get_player_by_entity_id(lm.eye_machine_victim_id);
+		if victim != null {
+			victim.remove_freeze_reason(LILY_EYE_MACHINE_FREEZE_REASON);
+		}
+		lm.eye_machine_victim_id = 0;
+	}
+
+	// Stop suction loop SFX if still playing
+	if lm.eye_machine_suction_sfx_id != 0 {
+		SFX.stop(lm.eye_machine_suction_sfx_id);
+		lm.eye_machine_suction_sfx_id = 0;
+	}
+
 	// Restore camera — set position before re-enabling follow to avoid a black frame
 	if player.is_local() {
 		player.camera.position = player.entity.world_position;
@@ -4133,6 +4154,8 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 	lm.eye_machine_active = false;
 	lm.eye_machine_has_target = false;
 	lm.eye_machine_lowering = false;
+	lm.eye_machine_linger_until = 0.0;
+	lm.eye_machine_linger_start = 0.0;
 }
 
 // Per-frame eye machine update: move camera with input, position entities, check targets.
@@ -4141,7 +4164,7 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 	if lm == null return;
 	if !lm.eye_machine_active {
 		// Guard: if server sync cleared eye_machine_active without end proc running,
-		// restore camera to avoid a black flash from LOS snapping back.
+		// restore camera and clear post-processing to avoid black flash / lingering FX.
 		if player.is_local() && lm.eye_machine_camera_saved_size > 0.0 {
 			player.camera.position = player.entity.world_position;
 			player.camera.size = lm.eye_machine_camera_saved_size;
@@ -4153,14 +4176,124 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 
 	now := get_time();
 
-	// Handle lowering attack completion
+	// ---- CAMERA (runs every frame, all phases — server sync overwrites) ----
+	// ---- CAMERA + VFX (every frame, all phases) ----
+	if player.is_local() {
+		player.camera.follow_player = false;
+
+		if lm.eye_machine_lowering {
+			elapsed := now - lm.eye_machine_lower_start_at;
+
+			// Zoom progress (capped at 1.0 even during suction sub-phase)
+			total_duration := LILY_EYE_MACHINE_ZOOM_DURATION + LILY_EYE_MACHINE_SUCTION_DURATION;
+			zoom_t := clamp(elapsed / LILY_EYE_MACHINE_ZOOM_DURATION, 0.0, 1.0);
+			zoom_ease := zoom_t * zoom_t;
+
+			player.camera.size = lerp(LILY_EYE_MACHINE_ZOOM_SIZE, LILY_EYE_MACHINE_ZOOM_ATTACK, zoom_ease);
+
+			// Camera position lerps to victim
+			cam_x := lerp(lm.eye_machine_pos.x, lm.eye_machine_victim_pos.x, zoom_ease);
+			cam_y := lerp(lm.eye_machine_pos.y, lm.eye_machine_victim_pos.y, zoom_ease);
+
+			// Shake starts when zoom is 95% done, builds through suction
+			if zoom_ease >= 0.95 {
+				suction_elapsed := elapsed - LILY_EYE_MACHINE_ZOOM_DURATION * 0.95;
+				suction_total := total_duration - LILY_EYE_MACHINE_ZOOM_DURATION * 0.95;
+				shake_t := clamp(suction_elapsed / suction_total, 0.0, 1.0);
+				shake_str := shake_t * LILY_EYE_MACHINE_SHAKE_INTENSITY;
+				cam_x = cam_x + sin(now * LILY_EYE_MACHINE_SHAKE_SPEED) * shake_str;
+				cam_y = cam_y + cos(now * LILY_EYE_MACHINE_SHAKE_SPEED * 1.3) * shake_str * 0.7;
+			}
+
+			player.camera.position = v2.{cam_x, cam_y};
+			player.draw_letterbox_bars();
+
+		} else if lm.eye_machine_linger_until > 0.0 {
+			// Phase: LINGER — hold on victim, shake decays, tube flies away
+			linger_elapsed := now - lm.eye_machine_linger_start;
+			linger_total := LILY_EYE_MACHINE_LINGER_TIME;
+			t := clamp(linger_elapsed / linger_total, 0.0, 1.0);
+
+			// Camera on victim with decaying shake
+			decay := 1.0 - t;
+			shake_str := decay * LILY_EYE_MACHINE_SHAKE_INTENSITY;
+			shake_x := sin(now * LILY_EYE_MACHINE_SHAKE_SPEED) * shake_str;
+			shake_y := cos(now * LILY_EYE_MACHINE_SHAKE_SPEED * 1.3) * shake_str * 0.7;
+
+			player.camera.size = LILY_EYE_MACHINE_ZOOM_ATTACK;
+			player.camera.position = v2.{
+				lm.eye_machine_victim_pos.x + shake_x,
+				lm.eye_machine_victim_pos.y + shake_y
+			};
+
+			player.draw_letterbox_bars();
+
+		} else {
+			// Phase: IDLE/MOVING — normal overview
+			player.camera.size = LILY_EYE_MACHINE_ZOOM_SIZE;
+			player.camera.position = lm.eye_machine_pos;
+		}
+	}
+
+	// ---- PHASE: SUCTION (lowering) ----
 	if lm.eye_machine_lowering {
+		elapsed := now - lm.eye_machine_lower_start_at;
+		total_duration := LILY_EYE_MACHINE_ZOOM_DURATION + LILY_EYE_MACHINE_SUCTION_DURATION;
+		drift_t := clamp(elapsed / LILY_EYE_MACHINE_ZOOM_DURATION, 0.0, 1.0);
+		drift_ease := drift_t * drift_t;
+
+		// Tube drifts from machine pos to above victim during zoom
+		if lm.eye_machine_tube_entity != null && #alive(lm.eye_machine_tube_entity) {
+			tube_x := lerp(lm.eye_machine_pos.x, lm.eye_machine_victim_pos.x, drift_ease);
+			tube_y := lerp(
+				lm.eye_machine_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y,
+				lm.eye_machine_victim_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y,
+				drift_ease
+			);
+			bob := sin(now * LILY_EYE_MACHINE_TUBE_BOB_SPEED) * LILY_EYE_MACHINE_TUBE_BOB_AMP;
+			lm.eye_machine_tube_entity.set_local_position(v2.{tube_x, tube_y + bob});
+		}
+
 		if now >= lm.eye_machine_lower_done_at {
 			rr_lily_eye_machine_finish_attack(player);
 		}
-		return; // locked during attack
+		return;
 	}
 
+	// ---- PHASE: LINGER (tube flies up, camera returns) ----
+	if lm.eye_machine_linger_until > 0.0 {
+		// Tube holds above victim, then flies up and fades out (last 30% of linger)
+		if lm.eye_machine_tube_entity != null && #alive(lm.eye_machine_tube_entity) {
+			linger_elapsed := now - lm.eye_machine_linger_start;
+			linger_total := LILY_EYE_MACHINE_LINGER_TIME;
+			fly_start := linger_total * 0.7;
+
+			if linger_elapsed < fly_start {
+				// Hold tube above victim with gentle bob
+				bob := sin(now * LILY_EYE_MACHINE_TUBE_BOB_SPEED) * LILY_EYE_MACHINE_TUBE_BOB_AMP;
+				lm.eye_machine_tube_entity.set_local_position(v2.{lm.eye_machine_victim_pos.x, lm.eye_machine_victim_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y + bob});
+			} else {
+				// Fly up high and fade out
+				fly_t := clamp((linger_elapsed - fly_start) / (linger_total - fly_start), 0.0, 1.0);
+				fly_ease := fly_t * fly_t; // accelerate upward
+				fly_y := lm.eye_machine_victim_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y + fly_ease * 10.0;
+				lm.eye_machine_tube_entity.set_local_position(v2.{lm.eye_machine_victim_pos.x, fly_y});
+
+				tube_sr := lm.eye_machine_tube_entity.get_component(Sprite_Renderer);
+				if tube_sr != null {
+					tube_sr.color = v4.{1.0, 1.0, 1.0, 1.0 - fly_t};
+				}
+			}
+		}
+
+		if now >= lm.eye_machine_linger_until {
+			lm.eye_machine_linger_until = 0.0;
+			rr_lily_end_eye_machine(player);
+		}
+		return;
+	}
+
+	// ---- PHASE: IDLE/MOVING ----
 	// Input reading and movement happen in Lily_Eye_Machine.ao_update (runs before this).
 
 	// Update tube entity position (floats above machine pos with gentle bob)
@@ -4172,14 +4305,6 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 	// Update AOE VFX position
 	if lm.eye_machine_aoe_entity != null && #alive(lm.eye_machine_aoe_entity) {
 		lm.eye_machine_aoe_entity.set_local_position(lm.eye_machine_pos);
-	}
-
-	// Camera follows machine (every frame — server sync overwrites)
-	// LOS radii are set to 999 in get_local_light_radii when eye_machine_active, so no fog.
-	if player.is_local() {
-		player.camera.follow_player = false;
-		player.camera.size = LILY_EYE_MACHINE_ZOOM_SIZE;
-		player.camera.position = lm.eye_machine_pos;
 	}
 
 	// Check for valid target in range (for AOE color + attack availability)
@@ -4218,46 +4343,92 @@ rr_lily_eye_machine_find_target :: proc(player: Player) -> Player {
 	return finder.closest;
 }
 
-// Start the lowering/attack — locks machine during animation.
+// Start the attack — freeze victim, zoom camera, begin suction.
 rr_lily_eye_machine_start_attack :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.eye_machine_active return;
 	if lm.eye_machine_lowering return;
-	if !lm.eye_machine_has_target return;
 
+	closest := rr_lily_eye_machine_find_target(player);
+	if closest == null return;
+
+	now := get_time();
 	lm.eye_machine_lowering = true;
-	lm.eye_machine_lower_done_at = get_time() + 0.8; // fast hydraulic press
+	lm.eye_machine_lower_start_at = now;
+	lm.eye_machine_lower_done_at = now + LILY_EYE_MACHINE_ZOOM_DURATION + LILY_EYE_MACHINE_SUCTION_DURATION;
+	lm.eye_machine_victim_pos = closest.entity.world_position;
+	lm.eye_machine_victim_id = closest.entity.id;
 
-	// Play a quick SFX
+	// Freeze the victim in place
+	closest.add_freeze_reason(LILY_EYE_MACHINE_FREEZE_REASON);
+
+	// Hide AOE reticle during cinematic
+	if lm.eye_machine_aoe_entity != null && #alive(lm.eye_machine_aoe_entity) {
+		lm.eye_machine_aoe_entity.set_local_enabled(false);
+	}
+
+	// Suction start SFX (whoosh as camera zooms)
 	desc := SFX.default_sfx_desc();
 	desc.volume = 0.5;
-	sfx := get_asset(SFX_Asset, "sfx/mechanisms/trigger_mechanism.wav");
-	if sfx != null {
-		SFX.play(sfx, desc);
+	whoosh := get_asset(SFX_Asset, "sfx/Whoosh_1e3125.wav");
+	if whoosh != null {
+		SFX.play(whoosh, desc);
+	}
+
+	// Start looping suction SFX
+	desc2 := SFX.default_sfx_desc();
+	desc2.volume = 0.3;
+	desc2.loop = true;
+	suction_loop := get_asset(SFX_Asset, "sfx/suction_loop_47fce8.wav");
+	if suction_loop != null {
+		lm.eye_machine_suction_sfx_id = SFX.play(suction_loop, desc2);
 	}
 }
 
-// Finish the attack: blind victim, spawn eye pickup, end machine mode.
+// Finish the attack: blind victim, spawn eye pickup near them, begin linger (tube fly-up).
 rr_lily_eye_machine_finish_attack :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
-	closest := rr_lily_eye_machine_find_target(player);
-	if closest != null {
+	// Find the victim we locked
+	victim := get_player_by_entity_id(lm.eye_machine_victim_id);
+	if victim != null {
 		// Blind the victim
-		closest.lily_no_eyes = true;
+		victim.lily_no_eyes = true;
 
-		// Spawn eye pickup at machine position
-		rr_lily_spawn_eye_pickup(player, closest.entity.id, lm.eye_machine_pos);
+		// Unfreeze victim
+		victim.remove_freeze_reason(LILY_EYE_MACHINE_FREEZE_REASON);
+
+		// Spawn eye pickup slightly in front of the victim
+		drop_pos := victim.entity.world_position + v2.{0.0, -0.3};
+		rr_lily_spawn_eye_pickup(player, victim.entity.id, drop_pos);
 
 		if player.is_local_or_server() {
-			Notifier.notify(player, format_string("Stole %'s eyes! Pick them up!", {closest.get_username()}));
+			Notifier.notify(player, format_string("Stole %'s eyes! Pick them up!", {victim.get_username()}));
 		}
 	}
+	lm.eye_machine_victim_id = 0;
 
-	// End machine mode (eyes are on the ground now, Lily needs to walk there)
-	rr_lily_end_eye_machine(player);
+	// Stop suction loop SFX
+	if lm.eye_machine_suction_sfx_id != 0 {
+		SFX.stop(lm.eye_machine_suction_sfx_id);
+		lm.eye_machine_suction_sfx_id = 0;
+	}
+
+	// Gore SFX (squelch)
+	desc := SFX.default_sfx_desc();
+	desc.volume = 0.5;
+	gore := get_asset(SFX_Asset, "sfx/gore_explosion_death_66eeb3.wav");
+	if gore != null {
+		SFX.play(gore, desc);
+	}
+
+	// Begin linger — tube flies up, camera returns to player
+	now := get_time();
+	lm.eye_machine_lowering = false;
+	lm.eye_machine_linger_until = now + LILY_EYE_MACHINE_LINGER_TIME;
+	lm.eye_machine_linger_start = now;
 }
 
 // Spawn a hovering eyes pickup entity at the given position.
@@ -4393,7 +4564,7 @@ Lily_Steal_Eyes_Ability :: class : Ability_Base {
 	NAME :: "Steal Eyes";
 
 	on_init :: proc(instance: Lily_Steal_Eyes_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Standard_Kill_Icon.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Suction_Tube_Icon.png");
 	}
 
 	can_use :: method() -> bool {
@@ -4441,7 +4612,7 @@ Lily_Eye_Machine_Attack_Ability :: class : Ability_Base {
 	NAME :: "Lower Machine";
 
 	on_init :: proc(instance: Lily_Eye_Machine_Attack_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Standard_Kill_Icon.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Suction_Tube_Icon.png");
 	}
 
 	can_use :: method() -> bool {
@@ -4454,7 +4625,8 @@ Lily_Eye_Machine_Attack_Ability :: class : Ability_Base {
 		if lm == null return false;
 		if !lm.eye_machine_active return false;
 		if lm.eye_machine_lowering return false;
-		return lm.eye_machine_has_target;
+		// Check target fresh instead of relying on cached has_target
+		return rr_lily_eye_machine_find_target(player) != null;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -4473,7 +4645,7 @@ Lily_Eye_Machine_Cancel_Ability :: class : Ability_Base {
 	NAME :: "Cancel";
 
 	on_init :: proc(instance: Lily_Eye_Machine_Cancel_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Standard_Kill_Icon.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Suction_Tube_Icon.png");
 	}
 
 	can_use :: method() -> bool {
@@ -4503,8 +4675,7 @@ Lily_Steal_Legs_Ability :: class : Ability_Base {
 	NAME :: "Steal Legs";
 
 	on_init :: proc(instance: Lily_Steal_Legs_Ability) {
-		// [ART] placeholder icon — swap for proper legs/spider icon
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Standard_Kill_Icon.png");
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Braid_Point_Icon.png");
 	}
 
 	can_use :: method() -> bool {
@@ -4749,7 +4920,7 @@ Lily_String_Trap_Ability :: class : Ability_Base {
 	activated_this_session: bool;
 
 	on_init :: proc(instance: Lily_String_Trap_Ability) {
-		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Hair_Tree_Icon.png"); // [ART] placeholder
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/lily/Braid_Trap_Icon.png");
 		instance.is_aimed_ability = true;
 	}
 

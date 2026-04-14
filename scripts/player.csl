@@ -85,7 +85,9 @@ Player :: class : Player_Base {
 	
 	// --- Lily (cross-player: any player can have eyes/legs stolen) ---
 	lily_no_eyes: bool;
+	lily_no_eyes_prev: bool;    // edge detection for start trigger
 	lily_crawling: bool;
+	lily_crawling_prev: bool;   // edge detection for start trigger
 	lily_crawl_speed_saved: float;
 	lily_crawl_ends_at: float;
 
@@ -458,10 +460,24 @@ Player :: class : Player_Base {
 		// Lily Lovebraids per-frame update (transform, strings, RLGL, tea party, dollhouse).
 		rr_lily_update(this, delta_time);
 
-		// Drive lily no-eyes overlay animation (track 1) on all clients.
+		// Drive lily debuff animations on all clients.
 		if this.animator != null && this.animator.instance != null && this.animator.instance.state_machine != null {
-			this.animator.instance.state_machine.set_bool("lily_no_eyes", this.lily_no_eyes);
-			this.animator.instance.state_machine.set_bool("lily_crawling", this.lily_crawling);
+			sm_ref := this.animator.instance.state_machine;
+			sm_ref.set_bool("lily_no_eyes", this.lily_no_eyes);
+			sm_ref.set_bool("lily_crawling", this.lily_crawling);
+			is_moving := length_squared(this.agent.velocity) > 0.01;
+			sm_ref.set_bool("lily_debuff_moving", is_moving);
+
+			// Fire start triggers on rising edge only (so start anim plays once)
+			if this.lily_no_eyes && !this.lily_no_eyes_prev {
+				sm_ref.set_trigger("lily_no_eyes_start");
+			}
+			this.lily_no_eyes_prev = this.lily_no_eyes;
+
+			if this.lily_crawling && !this.lily_crawling_prev {
+				sm_ref.set_trigger("lily_crawl_start");
+			}
+			this.lily_crawling_prev = this.lily_crawling;
 		}
 
 		// Tea party victim cup choice UI.
@@ -3107,29 +3123,80 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer.create_global_transition(lily_pull_end_state, false).create_trigger_condition(lily_pull_end_var);
 		layer.create_transition(lily_pull_end_state, idle_state, true);
 
-		// No-eyes overlay (track 1) — separate layer so main animations play underneath.
-		eyes_layer := sm.create_layer("lily_no_eyes", 1);
-		no_eyes_off_state := eyes_layer.create_state("__CLEAR_TRACK__", true, 0.0);
-		no_eyes_on_state := eyes_layer.create_state("004RAND_LILY/No_Eyes_AL", true, 0.0);
-		eyes_layer.set_initial_state(no_eyes_off_state);
+		// Movement variable shared by no-eyes and legless locomotion on the main layer.
+		lily_debuff_moving_var := sm.create_variable("lily_debuff_moving", State_Machine_Variable.Kind.BOOL);
 
+		// --- No-eyes (main layer) — full-body Start → Idle/Run → End → Idle ---
 		lily_no_eyes_var := sm.create_variable("lily_no_eyes", State_Machine_Variable.Kind.BOOL);
-		off_to_on := eyes_layer.create_transition(no_eyes_off_state, no_eyes_on_state, false);
-		off_to_on.create_bool_condition(lily_no_eyes_var, true);
-		on_to_off := eyes_layer.create_transition(no_eyes_on_state, no_eyes_off_state, false);
-		on_to_off.create_bool_condition(lily_no_eyes_var, false);
+		lily_no_eyes_start_var := sm.create_variable("lily_no_eyes_start", State_Machine_Variable.Kind.TRIGGER);
 
-		// Crawl overlay (track 2) — forced crawl when legs are stolen.
-		crawl_layer := sm.create_layer("lily_crawl", 2);
-		crawl_off_state := crawl_layer.create_state("__CLEAR_TRACK__", true, 0.0);
-		crawl_on_state := crawl_layer.create_state("004RAND_hitman/Broken_Leg_Crawl", true, 0.0);
-		crawl_layer.set_initial_state(crawl_off_state);
+		no_eyes_start_state := layer.create_state("004RAND_LILY/No_Eyes_Start", false, 0.0);
+		no_eyes_idle_state := layer.create_state("004RAND_LILY/No_Eyes_Idle", true, 0.0);
+		no_eyes_run_state := layer.create_state("004RAND_LILY/No_Eyes_Run", true, 0.0);
+		no_eyes_end_state := layer.create_state("004RAND_LILY/No_Eyes_End", false, 0.0);
 
+		// Any state → Start (one-shot trigger, fires once)
+		layer.create_global_transition(no_eyes_start_state, false).create_trigger_condition(lily_no_eyes_start_var);
+
+		// Start → Idle (after start anim completes)
+		layer.create_transition(no_eyes_start_state, no_eyes_idle_state, true);
+
+		// Idle ↔ Run (movement switching)
+		ne_idle_to_run := layer.create_transition(no_eyes_idle_state, no_eyes_run_state, false);
+		ne_idle_to_run.create_bool_condition(lily_debuff_moving_var, true);
+		ne_idle_to_run.create_bool_condition(lily_no_eyes_var, true);
+		ne_run_to_idle := layer.create_transition(no_eyes_run_state, no_eyes_idle_state, false);
+		ne_run_to_idle.create_bool_condition(lily_debuff_moving_var, false);
+		ne_run_to_idle.create_bool_condition(lily_no_eyes_var, true);
+
+		// Idle/Run → End (when healed)
+		ne_idle_to_end := layer.create_transition(no_eyes_idle_state, no_eyes_end_state, false);
+		ne_idle_to_end.create_bool_condition(lily_no_eyes_var, false);
+		ne_run_to_end := layer.create_transition(no_eyes_run_state, no_eyes_end_state, false);
+		ne_run_to_end.create_bool_condition(lily_no_eyes_var, false);
+
+		// End → Idle (after end anim completes)
+		layer.create_transition(no_eyes_end_state, idle_state, true);
+
+		// No-eyes AL overlay (track 1) — hides eye meshes, works with any animation.
+		eyes_al_layer := sm.create_layer("lily_no_eyes_al", 1);
+		eyes_al_off := eyes_al_layer.create_state("__CLEAR_TRACK__", true, 0.0);
+		eyes_al_on := eyes_al_layer.create_state("004RAND_LILY/No_Eyes_AL", true, 0.0);
+		eyes_al_layer.set_initial_state(eyes_al_off);
+		eyes_al_layer.create_transition(eyes_al_off, eyes_al_on, false).create_bool_condition(lily_no_eyes_var, true);
+		eyes_al_layer.create_transition(eyes_al_on, eyes_al_off, false).create_bool_condition(lily_no_eyes_var, false);
+
+		// --- Legless (main layer) — full-body Start → Idle/Run → End → Idle ---
 		lily_crawl_var := sm.create_variable("lily_crawling", State_Machine_Variable.Kind.BOOL);
-		crawl_off_to_on := crawl_layer.create_transition(crawl_off_state, crawl_on_state, false);
-		crawl_off_to_on.create_bool_condition(lily_crawl_var, true);
-		crawl_on_to_off := crawl_layer.create_transition(crawl_on_state, crawl_off_state, false);
-		crawl_on_to_off.create_bool_condition(lily_crawl_var, false);
+		lily_crawl_start_var := sm.create_variable("lily_crawl_start", State_Machine_Variable.Kind.TRIGGER);
+
+		legless_start_state := layer.create_state("004RAND_LILY/Legless_Start", false, 0.0);
+		legless_idle_state := layer.create_state("004RAND_LILY/Legless_Idle", true, 0.0);
+		legless_run_state := layer.create_state("004RAND_LILY/Legless_Run", true, 0.0);
+		legless_end_state := layer.create_state("004RAND_LILY/Legless_End", false, 0.0);
+
+		// Any state → Start (one-shot trigger, fires once)
+		layer.create_global_transition(legless_start_state, false).create_trigger_condition(lily_crawl_start_var);
+
+		// Start → Idle (after start anim completes)
+		layer.create_transition(legless_start_state, legless_idle_state, true);
+
+		// Idle ↔ Run (movement switching)
+		ll_idle_to_run := layer.create_transition(legless_idle_state, legless_run_state, false);
+		ll_idle_to_run.create_bool_condition(lily_debuff_moving_var, true);
+		ll_idle_to_run.create_bool_condition(lily_crawl_var, true);
+		ll_run_to_idle := layer.create_transition(legless_run_state, legless_idle_state, false);
+		ll_run_to_idle.create_bool_condition(lily_debuff_moving_var, false);
+		ll_run_to_idle.create_bool_condition(lily_crawl_var, true);
+
+		// Idle/Run → End (when healed)
+		ll_idle_to_end := layer.create_transition(legless_idle_state, legless_end_state, false);
+		ll_idle_to_end.create_bool_condition(lily_crawl_var, false);
+		ll_run_to_end := layer.create_transition(legless_run_state, legless_end_state, false);
+		ll_run_to_end.create_bool_condition(lily_crawl_var, false);
+
+		// End → Idle (after end anim completes)
+		layer.create_transition(legless_end_state, idle_state, true);
 	}
 
 	// Adds the animation state machine.
