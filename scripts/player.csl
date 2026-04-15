@@ -3933,6 +3933,10 @@ rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 	if player == null return;
 	if world_references == null return;
 
+	pyro_mod := player.entity.get_component(Pyro_Module);
+	if pyro_mod == null return;
+	pyro_mod.ensure_props_cached();
+
 	icon        := get_asset(Texture_Asset, "sprites/pyro_task_icon.png");
 	icon_fire   := get_asset(Texture_Asset, "sprites/pyro_task_icon_fire.png");
 	burned_col  := v4.{1.0, 0.15, 0.0, 1.0}; // deep orange-red for fully burned rooms
@@ -3941,29 +3945,13 @@ rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 	flash_alpha := sin(get_time() * 7.0) * 0.4 + 0.6; // oscillates 0.2–1.0
 	burning_col := v4.{1.0, 0.08, 0.05, flash_alpha};
 
-	// Assign each room a color by its encounter order in entity_iterator().
-	// entity_iterator() is stable for scene entities, so this is consistent every frame.
+	// Assign each room a color by its encounter order.
 	room_idx := 0;
 
-	for e: entity_iterator() {
+	for ri: 0..pyro_mod.cached_rooms.count-1 {
+		e := pyro_mod.cached_rooms[ri];
 		if e == null continue;
 		if !#alive(e) continue;
-		if e.get_name() != "Props" continue;
-
-		// Only show rooms that have Min/Max bounds markers (eligible for fire).
-		has_bounds := false;
-		bounds_check := e.get_first_child();
-		while bounds_check != null {
-			if #alive(bounds_check) {
-				bc_name := bounds_check.get_name();
-				if bc_name == "MIN" || bc_name == "MAX" {
-					has_bounds = true;
-					break;
-				}
-			}
-			bounds_check = bounds_check.get_next_sibling();
-		}
-		if !has_bounds continue;
 
 		// Only show rooms that are part of the pyro's current objectives on the map.
 		is_objective_room := false;
