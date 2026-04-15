@@ -1655,9 +1655,14 @@ update_tasks_ui :: proc(player: Player) {
 		// Pyro objectives (plain Task_Base, matched by id).
 		if task.id == "pyro_burn_1_corpse" {
 			pyro := player.entity.get_component(Pyro_Module);
-			pyro_corpses := 0;
-			if pyro != null { pyro_corpses = pyro.corpses_burned; }
-			task_progress = format_string("%/1", .{pyro_corpses});
+			if pyro != null {
+				pyro_corpses := pyro.corpses_burned;
+				if pyro_corpses != pyro.cached_corpse_progress_val || pyro.cached_corpse_progress_str.count == 0 {
+					pyro.cached_corpse_progress_val = pyro_corpses;
+					pyro.cached_corpse_progress_str = format_string("%/1", .{pyro_corpses});
+				}
+				task_progress = pyro.cached_corpse_progress_str;
+			}
 		}
 
 		text_rect := entry_content;

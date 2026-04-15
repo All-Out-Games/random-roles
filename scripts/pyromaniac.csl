@@ -7,6 +7,53 @@ Pyro_Module :: class : Component {
 	rooms_burned_out: int;
 	world_fire_unlocked_time: float;
 	room_exposure_timer: float;
+
+	// Cached prop entities (built once at start, avoids per-frame entity_iterator scan)
+	cached_props: [..]Entity;
+	// Cached room ("Props") entities that have MIN/MAX bounds (for minimap drawing)
+	cached_rooms: [..]Entity;
+	props_cached: bool;
+
+	// Cached UI strings (avoid per-frame format_string allocations)
+	cached_lock_str: string;
+	cached_lock_corpses: int;
+	cached_lock_rooms: int;
+	cached_fire_str: string;
+	cached_fire_secs: int;
+	cached_corpse_progress_str: string;
+	cached_corpse_progress_val: int;
+
+	ao_start :: method() {
+		ensure_props_cached();
+	}
+
+	ensure_props_cached :: method() {
+		if props_cached return;
+		if world_references == null return;
+		world_references.find_props_child_entities(ref cached_props, clear_first=true);
+		// Also cache room entities (Props with MIN/MAX bounds children)
+		cached_rooms.clear();
+		for e: entity_iterator() {
+			if e == null continue;
+			if !#alive(e) continue;
+			if !e.compare_name("Props") continue;
+			has_bounds := false;
+			child := e.get_first_child();
+			while child != null {
+				if #alive(child) {
+					if child.compare_name("MIN") || child.compare_name("MAX") {
+						has_bounds = true;
+						break;
+					}
+				}
+				child = child.get_next_sibling();
+			}
+			if has_bounds {
+				cached_rooms.append(e);
+			}
+		}
+		props_cached = true;
+	}
 }
 
 // --- Pyromaniac (Anarchist role) ---
@@ -123,11 +170,10 @@ rr_pyro_get_room_bounds :: proc(room_root: Entity, min_pos: ref v2, max_pos: ref
 	child := room_root.get_first_child();
 	while child != null {
 		if child != null && #alive(child) {
-			name := child.get_name();
-			if name == "MIN" {
+			if child.compare_name("MIN") {
 				raw_min = child.world_position;
 				found_min = true;
-			} else if name == "MAX" {
+			} else if child.compare_name("MAX") {
 				raw_max = child.world_position;
 				found_max = true;
 			}
@@ -315,7 +361,11 @@ rr_pyro_draw_room_exposure_timer :: proc(player: Player) {
 	ts.outline_thickness = 0.04;
 	ts.outline_color = v4.{0.0, 0.0, 0.0, 1.0};
 
-	UI.text(label_rect, ts, format_string("FIRE IN %", .{secs_i}));
+	if secs_i != pyro.cached_fire_secs || pyro.cached_fire_str.count == 0 {
+		pyro.cached_fire_secs = secs_i;
+		pyro.cached_fire_str = format_string("FIRE IN %", .{secs_i});
+	}
+	UI.text(label_rect, ts, pyro.cached_fire_str);
 }
 
 rr_pyro_extinguish_all_fires :: proc() {
@@ -421,7 +471,7 @@ rr_pyro_find_props_room_root :: proc(start: Entity) -> Entity {
 
 	cur := start;
 	while cur != null {
-		if cur.get_name() == "Props" {
+		if cur.compare_name("Props") {
 			return cur;
 		}
 		cur = cur.get_parent();

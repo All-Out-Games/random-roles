@@ -2888,16 +2888,17 @@ rr_pyro_get_closest_unlit_prop :: proc(player: Player) -> Entity {
 	if player == null return null;
 	if world_references == null return null;
 
-	props: [..]Entity;
-	world_references.find_props_child_entities(ref props, clear_first=true);
-	if props.count <= 0 return null;
+	pyro_mod := player.entity.get_component(Pyro_Module);
+	if pyro_mod == null return null;
+	pyro_mod.ensure_props_cached();
+	if pyro_mod.cached_props.count <= 0 return null;
 
 	best: Entity = null;
 	best_dist_sq := 0.0;
 	r_sq := PYRO_LIGHT_FIRE_RANGE * PYRO_LIGHT_FIRE_RANGE;
 
-	for i: 0..props.count-1 {
-		e := props[i];
+	for i: 0..pyro_mod.cached_props.count-1 {
+		e := pyro_mod.cached_props[i];
 		if e == null continue;
 		if !#alive(e) continue;
 		// Skip non-visual entities like MIN/MAX bound markers.
@@ -3161,16 +3162,18 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 		ts.outline_color = v4.{0, 0, 0, 1};
 		UI.text(rect.inset(2).cut_top(20), ts, "LOCKED");
 
-		// Show objective progress underneath.
-		prog := format_string("Corpse %/1  Rooms %/%", .{
-			min(pyro.corpses_burned, 1),
-			min(pyro.rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
-			PYRO_ROOMS_BURNOUT_TARGET
-		});
+		// Show objective progress underneath (cached to avoid per-frame format_string).
+		c := min(pyro.corpses_burned, 1);
+		r := min(pyro.rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET);
+		if c != pyro.cached_lock_corpses || r != pyro.cached_lock_rooms || pyro.cached_lock_str.count == 0 {
+			pyro.cached_lock_corpses = c;
+			pyro.cached_lock_rooms = r;
+			pyro.cached_lock_str = format_string("Corpse %/1  Rooms %/%", .{c, r, PYRO_ROOMS_BURNOUT_TARGET});
+		}
 		ts2 := ts;
 		ts2.size = 14;
 		ts2.valign = .BOTTOM;
-		UI.text(rect.inset(2).cut_bottom(18), ts2, prog);
+		UI.text(rect.inset(2).cut_bottom(18), ts2, pyro.cached_lock_str);
 	}
 }
 

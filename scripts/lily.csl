@@ -267,16 +267,24 @@ rr_lily_swap_to_player :: proc(player: Player) {
 
 // Toggle ability invisibility: invisible to non-traitors, semi-transparent to Lily herself.
 rr_lily_set_ability_invis :: proc(player: Player, active: bool) {
+	lm := player.entity.get_component(Lily_Module);
 	if active {
 		if player.is_local() {
 			if player.animator != null && player.animator.instance != null {
 				player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
+			}
+			// Also fade the creature entity (visible during lily form abilities like mind control)
+			if lm != null && lm.creature_animator != null && lm.creature_animator.instance != null {
+				lm.creature_animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
 			}
 		}
 	} else {
 		if player.is_local() {
 			if player.animator != null && player.animator.instance != null {
 				player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 1.0};
+			}
+			if lm != null && lm.creature_animator != null && lm.creature_animator.instance != null {
+				lm.creature_animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 1.0};
 			}
 		}
 	}
@@ -3664,6 +3672,9 @@ rr_lily_update :: proc(player: Player, dt: float) {
 			if player.animator != null && player.animator.instance != null {
 				player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
 			}
+			if lm.creature_animator != null && lm.creature_animator.instance != null {
+				lm.creature_animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
+			}
 		}
 	}
 
@@ -4232,7 +4243,14 @@ Lily_Spider :: class : Component {
 		// Forward input to spider movement
 		if length_squared(input) > 0.01 {
 			dir := normalize(input);
-			entity.set_local_position(entity.local_position + dir * LILY_SPIDER_SPEED * dt);
+			desired := entity.local_position + dir * LILY_SPIDER_SPEED * dt;
+			nav_pt: v2;
+			tri_hint: s64;
+			if try_find_closest_point_on_navmesh(desired, ref nav_pt, ref tri_hint) {
+				entity.set_local_position(nav_pt);
+			} else {
+				entity.set_local_position(desired);
+			}
 
 			// Flip spider sprite based on direction
 			if dir.x < 0.0 {
@@ -4306,6 +4324,7 @@ rr_lily_spider_apply_bite :: proc(player: Player, lm: Lily_Module, victim_entity
 		if leg_sr != null && leg_tex != null {
 			leg_sr.set_texture(leg_tex);
 			leg_sr.layer = 55;
+			leg_sr.mask_in_shadow = true;
 		}
 		lm.spider_leg_sprite = leg_e;
 	}
@@ -5741,43 +5760,61 @@ rr_lily_draw_tree_request_icon :: proc(player: Player) {
 	UI.text(icon_rect, ts, request_name);
 }
 
-// Draw carried-item icons above Lily's head in world space (visible only to Lily).
-rr_lily_draw_carried_icons :: proc(player: Player) {
-	if !player.is_local() return;
-	lm := player.entity.get_component(Lily_Module);
-	if lm == null return;
-	if !lm.carrying_eyes && !lm.carrying_legs return;
+// Ensure a carried-item icon entity exists, parented to the player with mask_in_shadow.
+rr_lily_ensure_carried_icon :: proc(icon_entity: ref Entity, player_entity: Entity, texture_path: string) -> Entity {
+	if icon_entity != null && #alive(icon_entity) return icon_entity;
 
-	UI.push_world_draw_context();
-	defer UI.pop_draw_context();
+	e := Scene.create_entity();
+	e.set_parent(player_entity, false);
+	e.set_local_scale(v2.{0.5, 0.5});
 
-	pos := player.entity.world_position;
-	bob := sin(get_time() * 2.5) * 0.08;
-	both := lm.carrying_eyes && lm.carrying_legs;
-	size := 0.25;
-
-	UI.push_z(pos.y + 0.01);
-	defer UI.pop_z();
-
-	if lm.carrying_eyes {
-		eye_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/npc/npc_icon_b/eyeball_L.png");
-		if eye_tex != null {
-			x_off := 0.0;
-			if both x_off = -0.3;
-			icon_pos := pos + v2.{x_off, 2.0 + bob};
-			r := Rect.{icon_pos, icon_pos}.grow(size, size, size, size);
-			UI.quad(r, eye_tex, v4.{1, 1, 1, 1});
-		}
+	sr := e.add_component(Sprite_Renderer);
+	tex := get_asset(Texture_Asset, texture_path);
+	if sr != null && tex != null {
+		sr.set_texture(tex);
+		sr.layer = 55;
+		sr.mask_in_shadow = true;
 	}
 
+	icon_entity = e;
+	return e;
+}
+
+// Update carried-item icon entities above Lily's head (shadow-maskable).
+rr_lily_draw_carried_icons :: proc(player: Player) {
+	lm := player.entity.get_component(Lily_Module);
+	if lm == null return;
+
+	both := lm.carrying_eyes && lm.carrying_legs;
+	bob := sin(get_time() * 2.5) * 0.08;
+
+	// Eye icon
+	if lm.carrying_eyes {
+		rr_lily_ensure_carried_icon(ref lm.carried_eye_icon, player.entity, "$AO/ui/kit/Icons/npc/npc_icon_b/eyeball_L.png");
+		if lm.carried_eye_icon != null && #alive(lm.carried_eye_icon) {
+			x_off := 0.0;
+			if both x_off = -0.3;
+			lm.carried_eye_icon.set_local_position(v2.{x_off, 2.0 + bob});
+		}
+	} else {
+		if lm.carried_eye_icon != null && #alive(lm.carried_eye_icon) {
+			lm.carried_eye_icon.destroy();
+		}
+		lm.carried_eye_icon = null;
+	}
+
+	// Leg icon
 	if lm.carrying_legs {
-		leg_tex := get_asset(Texture_Asset, "sprites/icons/lily/Dismembered_Player_Leg.png");
-		if leg_tex != null {
+		rr_lily_ensure_carried_icon(ref lm.carried_leg_icon, player.entity, "sprites/icons/lily/Dismembered_Player_Leg.png");
+		if lm.carried_leg_icon != null && #alive(lm.carried_leg_icon) {
 			x_off := 0.0;
 			if both x_off = 0.3;
-			icon_pos := pos + v2.{x_off, 2.0 + bob};
-			r := Rect.{icon_pos, icon_pos}.grow(size, size, size, size);
-			UI.quad(r, leg_tex, v4.{1, 1, 1, 1});
+			lm.carried_leg_icon.set_local_position(v2.{x_off, 2.0 + bob});
 		}
+	} else {
+		if lm.carried_leg_icon != null && #alive(lm.carried_leg_icon) {
+			lm.carried_leg_icon.destroy();
+		}
+		lm.carried_leg_icon = null;
 	}
 }

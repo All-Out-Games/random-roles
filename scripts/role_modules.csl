@@ -260,6 +260,10 @@ Lily_Module :: class : Component {
 	spider_attack_cooldown: float;  // prevent spam chomps
 	spider_leg_sprite: Entity;      // dismembered leg shown on spider while carrying
 
+	// Above-head carried item icon entities (shadow-maskable)
+	carried_eye_icon: Entity;
+	carried_leg_icon: Entity;
+
 	// Eye Steal (Machine)
 	eye_machine_active: bool;
 	eye_machine_pos: v2;              // current world position of the machine/camera
@@ -316,9 +320,17 @@ Lily_Module :: class : Component {
 		if is_using_ability && local_player.player_type != Player_Type.TRAITOR {
 			player.add_invisibility_reason(LILY_ABILITY_INVIS_REASON);
 			player.add_name_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+			// Hide creature entity from non-traitors during abilities (mind control uses lily form)
+			if creature_entity != null && #alive(creature_entity) {
+				creature_entity.set_local_enabled(false);
+			}
 		} else {
 			player.remove_invisibility_reason(LILY_ABILITY_INVIS_REASON);
 			player.remove_name_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+			// Restore creature visibility if it should be showing
+			if creature_visible && creature_entity != null && #alive(creature_entity) {
+				creature_entity.set_local_enabled(true);
+			}
 		}
 	}
 }

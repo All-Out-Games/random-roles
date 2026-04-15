@@ -754,9 +754,8 @@ waiting_for_restart: bool;
 lobby_relaxed_min_players_active: bool;
 lobby_under_min_players_since: float;
 voting_start_time: float;
-rr_server_queue_name: string = "default";
-rr_server_available_initialized: bool;
-rr_last_server_available: bool;
+rr_matchmaking_initialized: bool;
+rr_last_matchmaking_priority: int;
 
 // After voting completes, keep the game in VOTING briefly to reveal the result.
 RR_VOTE_RESULTS_REVEAL_SECONDS :: 6.0;
@@ -812,11 +811,11 @@ rr_vote_eject_player_id: u64;
 rr_vote_eject_anim_started: bool;
 rr_vote_eject_anim_start_time: float;
 
-rr_set_server_available :: proc(available: bool) {
-	if rr_server_available_initialized && rr_last_server_available == available return;
-	Server.queue_set_server_available(rr_server_queue_name, available);
-	rr_last_server_available = available;
-	rr_server_available_initialized = true;
+rr_set_matchmaking :: proc(priority: int) {
+	if rr_matchmaking_initialized && rr_last_matchmaking_priority == priority return;
+	Server.set_matchmaking_priority(priority);
+	rr_last_matchmaking_priority = priority;
+	rr_matchmaking_initialized = true;
 }
 
 rr_is_round_running :: proc() -> bool {
@@ -864,26 +863,28 @@ rr_lobby_seconds_until_round_start :: proc() -> float {
 	return countdown_seconds;
 }
 
-rr_update_server_queue_availability :: proc() {
+rr_update_matchmaking_priority :: proc() {
 	player_count := players.elements.count;
 	running := rr_is_round_running();
-	available := true;
+	priority := 0; // 0 = send me players
 
 	// Explicit busy case from product rules.
 	if player_count > 4 && running {
-		available = false;
+		priority = 1;
 	}
 	// Explicit open case from product rules.
 	else if player_count < 4 {
-		available = true;
+		priority = 0;
 	}
 	// Not currently running: only stay open if the next round is still >10s away.
 	else if !running {
-		available = rr_lobby_seconds_until_round_start() > 10.0;
+		if rr_lobby_seconds_until_round_start() <= 10.0 {
+			priority = 1;
+		}
 	}
 	// Running with exactly 4 players keeps previous "open" behavior unless told otherwise.
 
-	rr_set_server_available(available);
+	rr_set_matchmaking(priority);
 }
 rr_vote_eject_text_sfx_played: bool;
 rr_vote_eject_anim_sfx_played: bool;
@@ -975,7 +976,7 @@ rr_find_entity_named :: proc(name: string) -> Entity {
 	for e: entity_iterator() {
 		if e == null continue;
 		if !#alive(e) continue;
-		if e.get_name() == name {
+		if e.compare_name(name) {
 			return e;
 		}
 	}
@@ -1757,7 +1758,7 @@ intro_popup: Intro_Popup;
 victory_popup: Victory_Popup;
 
 ao_start :: proc() {
-	rr_set_server_available(true);
+	rr_set_matchmaking(0);
 	rr_refresh_rng_state();
 	setup_lobby();
 	body_found_popup = new();
@@ -1773,7 +1774,7 @@ ao_start :: proc() {
   }
 
 ao_update :: proc(dt: float) {
-	rr_update_server_queue_availability();
+	rr_update_matchmaking_priority();
 
 	// Keep timed sabotages progressing regardless of game_state (e.g., lockdown during voting).
 	rr_update_lockdown();
@@ -1807,22 +1808,12 @@ ao_update :: proc(dt: float) {
   }
 
 get_alive_player_count :: proc() -> int {
-	// Clean up null/invalid players by rebuilding the list with only valid players
-	valid_players: List(Player);
-	for i: 0..players.elements.count-1 {
-		player := players.elements[i];
-		// Only keep players that are not null and have alive entities
-		if player != null && #alive(player.entity) {
-			append(ref valid_players, player);
-		}
-	}
-	// Replace the old list with the cleaned list
-	players = valid_players;
-	
-	// Count alive players
 	alive_count := 0;
 	for i: 0..players.elements.count-1 {
-		if players.elements[i].player_state == Player_State.ALIVE {
+		player := players.elements[i];
+		if player == null continue;
+		if !#alive(player.entity) continue;
+		if player.player_state == Player_State.ALIVE {
 			alive_count += 1;
 		}
 	}
@@ -3486,16 +3477,15 @@ assign_players_to_types :: proc() {
 			for room_e: entity_iterator() {
 				if room_e == null continue;
 				if !#alive(room_e) continue;
-				if room_e.get_name() != "Props" continue;
+				if !room_e.compare_name("Props") continue;
 
 				has_min := false;
 				has_max := false;
 				bounds_child := room_e.get_first_child();
 				while bounds_child != null {
 					if #alive(bounds_child) {
-						bc_n := bounds_child.get_name();
-						if bc_n == "MIN" { has_min = true; }
-						else if bc_n == "MAX" { has_max = true; }
+						if bounds_child.compare_name("MIN") { has_min = true; }
+						else if bounds_child.compare_name("MAX") { has_max = true; }
 					}
 					bounds_child = bounds_child.get_next_sibling();
 				}
