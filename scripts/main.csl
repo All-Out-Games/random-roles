@@ -8,22 +8,22 @@ Door :: class : Component {
     is_open: bool;
 
     ao_start :: proc(using this: Door) {
-        collider_entity->set_local_enabled(force_locked);
+        collider_entity.set_local_enabled(force_locked);
     }
 
     open_door :: proc(using this: Door) {
         force_locked = false;
-        collider_entity->set_local_enabled(force_locked);
+        collider_entity.set_local_enabled(force_locked);
     }
 
     close_door :: proc(using this: Door) {
         force_locked = true;
-        collider_entity->set_local_enabled(force_locked);
+        collider_entity.set_local_enabled(force_locked);
     }
 
     ao_update :: proc(using this: Door, delta_time: float) {
         found_player := false;
-        foreach player: component_iterator(Player) {
+        for player: component_iterator(Player) {
             if length_squared(player.entity.world_position - collider_entity.world_position) < 1.0 {
                 found_player = true;
                 break;
@@ -64,7 +64,7 @@ World_References :: class : Component {
     teleport_near_lobby :: proc(using this: World_References, player: Player) {
         rng := rng_seed(player.entity.id);
         random_offset :=  v2.{rng_range_float(ref rng, -2.0, 2.0), rng_range_float(ref rng, -2.0,2.0)};
-        player.entity->set_local_position(lobby_spawn.world_position + random_offset);
+        player.entity.set_local_position(lobby_spawn.world_position + random_offset);
     }
 
     teleport_to_voting :: proc(using this: World_References, player: Player) {
@@ -87,32 +87,32 @@ World_References :: class : Component {
         nav_point: v2;
         triangle_hint: s64;
         try_find_closest_point_on_navmesh(voting_spawn.world_position + offset, ref nav_point, ref triangle_hint);
-        player.entity->set_local_position(voting_spawn.world_position + offset);
+        player.entity.set_local_position(voting_spawn.world_position + offset);
     }
 
     spawn_corpse :: proc(using this: World_References, player: Player) {
         corpse := Scene.instantiate(corpse_prefab);
-        corpse->set_local_position(player.entity.world_position);
-        corpse->set_local_rotation(player.entity.world_rotation);
-        corpse->set_local_scale(player.entity.world_scale);
+        corpse.set_local_position(player.entity.world_position);
+        corpse.set_local_rotation(player.entity.world_rotation);
+        corpse.set_local_scale(player.entity.world_scale);
 
-        corpse_component := corpse->get_component(Corpse);
+        corpse_component := corpse.get_component(Corpse);
         if corpse_component != null {
             corpse_component.has_been_reported = false;
             corpse_component.owner_player_entity_id = player.entity.id;
         }
 
-        spine_Animator := corpse->get_component(Spine_Animator);
+        spine_Animator := corpse.get_component(Spine_Animator);
         if spine_Animator != null && spine_Animator.instance != null && player.animator != null && player.animator.instance != null {
             // Note: color replace API is on the Spine instance (not the component).
-            spine_Animator.instance->set_color_replace_color(player.animator.instance.color_replace_color);
+            spine_Animator.instance.set_color_replace_color(player.animator.instance.color_replace_color);
 
-            spine_Animator.instance->disable_all_skins();
-            player_skins := player.animator.instance->get_skins();
+            spine_Animator.instance.disable_all_skins();
+            player_skins := player.animator.instance.get_skins();
             for i: 0..player_skins.count-1 {
-                spine_Animator.instance->enable_skin(player_skins[i]);
+                spine_Animator.instance.enable_skin(player_skins[i]);
             }
-            spine_Animator.instance->refresh_skins();
+            spine_Animator.instance.refresh_skins();
         }
     }
 }

@@ -17,7 +17,7 @@ Player :: class : Player_Base {
     mimicer_bought: bool;
 
     Notify :: proc(using this: Player, message: string) {
-        if this->is_local_or_server() {
+        if this.is_local_or_server() {
             Notifier.notify(message);
         }
     }
@@ -31,8 +31,8 @@ Player :: class : Player_Base {
             this.agent.movement_speed *= HUB_WALK_SPEED_MULTIPLIER;
 
             if world_references != null {
-                world_references->teleport_near_lobby(this);
-                this.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
+                world_references.teleport_near_lobby(this);
+                this.agent.set_navmesh_to_lock_to(world_references.main_navmesh);
             }
         }
     }
@@ -52,13 +52,13 @@ Player :: class : Player_Base {
             return;
         }
 
-        this->apply_hub_camera_zoom_once();
-        this->draw_hub_portal_indicator();
+        this.apply_hub_camera_zoom_once();
+        this.draw_hub_portal_indicator();
 
         // Draw world-space leaderboard UI from the player update context.
-        if this->is_local_or_server() {
-            foreach lb: component_iterator(Leaderboard) {
-                lb->draw();
+        if this.is_local_or_server() {
+            for lb: component_iterator(Leaderboard) {
+                lb.draw();
             }
 
             draw_roles_guide_open_button(this);
@@ -68,22 +68,22 @@ Player :: class : Player_Base {
 
     kill :: proc(using this: Player) {
         if world_references != null {
-            world_references->spawn_corpse(this);
+            world_references.spawn_corpse(this);
         }
     }
 
     revive :: proc(using this: Player) {
-        this->set_trigger("RESET");
+        this.set_trigger("RESET");
     }
 
     set_trigger :: proc(using this: Player, trigger: string) {
         if this.animator.instance != null && this.animator.instance.state_machine != null {
-            this.animator.instance.state_machine->set_trigger(trigger);
+            this.animator.instance.state_machine.set_trigger(trigger);
         }
     }
 
     apply_hub_camera_zoom_once :: proc(using this: Player) {
-        if !this->is_local() {
+        if !this.is_local() {
             return;
         }
         if hub_camera_size_applied {
@@ -95,7 +95,7 @@ Player :: class : Player_Base {
     }
 
     draw_hub_portal_indicator :: proc(using this: Player) {
-        if !this->is_local() {
+        if !this.is_local() {
             return;
         }
 
@@ -127,7 +127,7 @@ Task_Interactable :: class : Component {
 
     ao_start :: proc(using this: Task_Interactable) {
         if interactable != null {
-            interactable->set_listener(this);
+            interactable.set_listener(this);
         }
     }
 
@@ -144,7 +144,7 @@ Call_Meeting_Interactable :: class : Component {
 
     ao_start :: proc(using this: Call_Meeting_Interactable) {
         if interactable != null {
-            interactable->set_listener(this);
+            interactable.set_listener(this);
         }
     }
 
@@ -158,7 +158,7 @@ Call_Meeting_Interactable :: class : Component {
 
 destroy_corpses_for_player :: proc(player_entity_id: u64) {
     corpses_to_destroy: List(Entity);
-    foreach corpse: component_iterator(Corpse) {
+    for corpse: component_iterator(Corpse) {
         if corpse.owner_player_entity_id == player_entity_id {
             append(ref corpses_to_destroy, corpse.entity);
         }
@@ -167,7 +167,7 @@ destroy_corpses_for_player :: proc(player_entity_id: u64) {
     for i: 0..corpses_to_destroy.elements.count-1 {
         e := corpses_to_destroy.elements[i];
         if #alive(e) {
-            e->destroy();
+            e.destroy();
         }
     }
 }

@@ -1,0 +1,33 @@
+14
+6206227742721
+476121328
+{
+  "name": "stonestep_D1.png",
+  "local_enabled": true,
+  "local_position": {
+    "X": 0.0252838134765625,
+    "Y": 0.8580036163330078
+  },
+  "local_rotation": 314.8683776855468750,
+  "local_scale": {
+    "X": 1,
+    "Y": 1
+  },
+  "next_sibling": 1326524437,
+  "parent": 3089404831
+},
+{
+  "cid": 1,
+  "aoid": 308229507,
+  "component_type": "Internal_Component",
+  "internal_component_type": "Sprite_Renderer",
+  "data": {
+    "texture": "sprites/phota/Floor/stonestep_D1.png",
+    "tint": {
+      "X": 0.4763863384723663,
+      "Y": 0.5035054683685303,
+      "Z": 0.8244153261184692
+    },
+    "layer": -5
+  }
+}

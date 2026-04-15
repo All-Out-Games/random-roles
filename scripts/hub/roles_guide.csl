@@ -239,9 +239,9 @@ draw_roles_guide :: proc(player: Player) {
 
     safe := UI.get_safe_screen_rect();
 
-    PANEL_W := safe->width() * 0.80;
-    PANEL_H := safe->height() * 0.82;
-    panel_rect := safe->center_rect()->grow_unscaled(PANEL_H * 0.5, PANEL_W * 0.5, PANEL_H * 0.5, PANEL_W * 0.5);
+    PANEL_W := safe.width() * 0.80;
+    PANEL_H := safe.height() * 0.82;
+    panel_rect := safe.center_rect().grow_unscaled(PANEL_H * 0.5, PANEL_W * 0.5, PANEL_H * 0.5, PANEL_W * 0.5);
 
     // 9-slice panel background (matches task help backing)
     HELP_SLICE_PX :: 16.0;
@@ -264,10 +264,10 @@ draw_roles_guide :: proc(player: Player) {
         UI.quad(panel_rect, core_globals.white_sprite, v4.{0.07, 0.07, 0.11, 0.97});
     }
 
-    content := panel_rect->inset(16, 18, 16, 18);
+    content := panel_rect.inset(16, 18, 16, 18);
 
     // ---- Title bar ----
-    title_strip := content->cut_top(46);
+    title_strip := content.cut_top(46);
 
     title_ts := UI.default_text_settings();
     title_ts.size             = 36;
@@ -285,7 +285,7 @@ draw_roles_guide :: proc(player: Player) {
 
     CLOSE_HALF :: 30.0;
     CLOSE_PAD  :: 10.0;
-    close_rect := panel_rect->top_right_rect()->offset(-CLOSE_PAD, -CLOSE_PAD)->grow(CLOSE_HALF);
+    close_rect := panel_rect.top_right_rect().offset(-CLOSE_PAD, -CLOSE_PAD).grow(CLOSE_HALF);
 
     close_bs := UI.default_button_settings();
     close_bs.sprite        = get_asset(Texture_Asset, "ui/close_icon.png");
@@ -298,19 +298,19 @@ draw_roles_guide :: proc(player: Player) {
         player.roles_guide_open = false;
     }
 
-    content->cut_top(10);
+    content.cut_top(10);
 
     // ---- Split left list | right detail ----
     LIST_W :: 240.0;
     GAP    :: 14.0;
 
-    left_panel := content->cut_left(LIST_W);
-    content->cut_left(GAP);
+    left_panel := content.cut_left(LIST_W);
+    content.cut_left(GAP);
 
     // Vertical divider
-    vert_div := content->cut_left(1);
+    vert_div := content.cut_left(1);
     UI.quad(vert_div, core_globals.white_sprite, v4.{1, 1, 1, 0.1});
-    content->cut_left(GAP);
+    content.cut_left(GAP);
 
     rg_draw_role_list(player, left_panel);
     rg_draw_role_detail(player, content);
@@ -323,16 +323,16 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
 
     // ---- Filter tabs ----
     TAB_H :: 50.0;
-    tab_strip := list_area->cut_top(TAB_H);
-    list_area->cut_top(6);
+    tab_strip := list_area.cut_top(TAB_H);
+    list_area.cut_top(6);
 
-    tab_w := tab_strip->width() / 4.0;
+    tab_w := tab_strip.width() / 4.0;
 
     for ti: 0..3 {
         UI.push_id("rg_tab_%", {ti});
         defer UI.pop_id();
 
-        tab_rect := tab_strip->cut_left_unscaled(tab_w);
+        tab_rect := tab_strip.cut_left_unscaled(tab_w);
         is_active := player.roles_guide_filter == ti;
 
         tab_bs := UI.default_button_settings();
@@ -373,7 +373,7 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
         if ti == 2 { tab_label = "ANA"; }
         if ti == 3 { tab_label = "TRA"; }
 
-        if UI.button(tab_rect->inset_unscaled(2, 2, 2, 2), tab_bs, tab_ts, tab_label).clicked {
+        if UI.button(tab_rect.inset_unscaled(2, 2, 2, 2), tab_bs, tab_ts, tab_label).clicked {
             player.roles_guide_filter = ti;
         }
     }
@@ -399,7 +399,7 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
 
     // ---- Scrollable role list ----
     scroll_area    := list_area;
-    scrollbar_area := scroll_area->cut_right(6)->inset(2);
+    scrollbar_area := scroll_area.cut_right(6).inset(2);
 
     ROW_H   :: 60.0;
     ROW_GAP :: 5.0;
@@ -433,11 +433,11 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
             // ---- Group header on team change ----
             if team != prev_team {
                 if prev_team.count > 0 {
-                    sc->cut_top(HDR_GAP + 2);
+                    sc.cut_top(HDR_GAP + 2);
                 }
 
-                hdr_row := sc->cut_top(HDR_H);
-                sc->cut_top(HDR_GAP);
+                hdr_row := sc.cut_top(HDR_H);
+                sc.cut_top(HDR_GAP);
 
                 hdr_ts := UI.default_text_settings();
                 hdr_ts.size              = 16;
@@ -453,7 +453,7 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
                 // Subtle colored underline
                 line_color := rg_get_role_color(i);
                 line_color.w = 0.25;
-                line_rect := hdr_row->bottom_rect()->grow_unscaled(0, 0, 1, 0);
+                line_rect := hdr_row.bottom_rect().grow_unscaled(0, 0, 1, 0);
                 UI.quad(line_rect, core_globals.white_sprite, line_color);
 
                 UI.expand_current_scroll_view(hdr_row);
@@ -464,8 +464,8 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
             UI.push_id("rg_rl_%", {i});
             defer UI.pop_id();
 
-            row := sc->cut_top(ROW_H);
-            sc->cut_top(ROW_GAP);
+            row := sc.cut_top(ROW_H);
+            sc.cut_top(ROW_GAP);
 
             is_selected := player.roles_guide_selected == i;
             is_locked   := rg_is_role_locked(player, i);
@@ -493,33 +493,33 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
             result := UI.begin_button(row, btn_bs, UI.default_text_settings(), ""); {
                 defer UI.end_button();
 
-                inner := result.rect->inset(4, 8, 4, 10);
+                inner := result.rect.inset(4, 8, 4, 10);
 
                 // Reserve space for stars on the right
                 diff_stars := rg_get_role_difficulty_stars(i);
                 STAR_HALF :: 8.0;
                 STAR_SP   :: 2.0;
                 total_stars_w := 3.0 * STAR_HALF * 2.0 + 2.0 * STAR_SP;
-                stars_strip := inner->cut_right(total_stars_w);
+                stars_strip := inner.cut_right(total_stars_w);
 
                 star_layout := UI.make_directional_layout(stars_strip, .RIGHT);
                 for si: 0..2 {
-                    s_rect := star_layout->next(STAR_HALF * 2.0);
+                    s_rect := star_layout.next(STAR_HALF * 2.0);
                     star_tex := star_empty;
                     if si < diff_stars { star_tex = star_gold; }
                     if star_tex != null {
-                        UI.quad(s_rect->center_rect()->grow(STAR_HALF)->fit_aspect(star_tex->get_aspect()), star_tex);
+                        UI.quad(s_rect.center_rect().grow(STAR_HALF).fit_aspect(star_tex.get_aspect()), star_tex);
                     }
                 }
 
                 // Lock icon if role is locked
                 if is_locked {
                     LOCK_HALF :: 10.0;
-                    lock_slot := inner->cut_left(LOCK_HALF * 2.0 + 4.0);
+                    lock_slot := inner.cut_left(LOCK_HALF * 2.0 + 4.0);
                     lock_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_1/lock_closed.png");
                     if lock_tex != null {
-                        lock_rect := lock_slot->center_rect()->grow(LOCK_HALF);
-                        UI.quad(lock_rect->fit_aspect(lock_tex->get_aspect()), lock_tex, v4.{1, 1, 1, 0.8});
+                        lock_rect := lock_slot.center_rect().grow(LOCK_HALF);
+                        UI.quad(lock_rect.fit_aspect(lock_tex.get_aspect()), lock_tex, v4.{1, 1, 1, 0.8});
                     }
                 }
 
@@ -542,7 +542,7 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
                 if i == 14 {
                     NEW_BADGE_H :: 14.0;
                     NEW_BADGE_W :: 30.0;
-                    badge_rect := result.rect->top_right_rect()->offset(-4, -2)->grow_unscaled(NEW_BADGE_H, NEW_BADGE_W, 0, 0);
+                    badge_rect := result.rect.top_right_rect().offset(-4, -2).grow_unscaled(NEW_BADGE_H, NEW_BADGE_W, 0, 0);
                     UI.quad(badge_rect, core_globals.white_sprite, v4.{0.1, 0.6, 1.0, 0.9});
 
                     new_badge_ts := UI.default_text_settings();
@@ -565,8 +565,8 @@ rg_draw_role_list :: proc(player: Player, rect: Rect) {
         }
     }
 
-    sb_rect := sv->compute_scroll_bar_rect(scrollbar_area);
-    if sb_rect->height() < scrollbar_area->height() - 1.0 {
+    sb_rect := sv.compute_scroll_bar_rect(scrollbar_area);
+    if sb_rect.height() < scrollbar_area.height() - 1.0 {
         UI.quad(scrollbar_area, core_globals.white_sprite, v4.{0.1, 0.1, 0.1, 0.4});
         UI.quad(sb_rect,        core_globals.white_sprite, v4.{0.4, 0.4, 0.4, 0.6});
     }
@@ -588,13 +588,13 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
     detail_icon_path := rg_get_role_detail_icon(idx);
     diff_stars       := rg_get_role_difficulty_stars(idx);
 
-    header_strip := content->cut_top(HEADER_H);
+    header_strip := content.cut_top(HEADER_H);
 
     if detail_icon_path.count > 0 {
         role_icon_tex := get_asset(Texture_Asset, detail_icon_path);
         if role_icon_tex != null {
-            icon_rect := header_strip->center_rect()->grow(ICON_HALF);
-            UI.quad(icon_rect->fit_aspect(role_icon_tex->get_aspect(), .KEEP_HEIGHT), role_icon_tex, v4.{1, 1, 1, 1});
+            icon_rect := header_strip.center_rect().grow(ICON_HALF);
+            UI.quad(icon_rect.fit_aspect(role_icon_tex.get_aspect(), .KEEP_HEIGHT), role_icon_tex, v4.{1, 1, 1, 1});
         }
 
         // Stars to the right of the icon
@@ -602,14 +602,14 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
         star_empty := get_asset(Texture_Asset, "ui/star_empty2 2.png");
         STAR_HALF :: 12.0;
         STAR_GAP  :: 4.0;
-        stars_anchor := header_strip->center_rect()->offset(ICON_HALF + 14.0, 0);
+        stars_anchor := header_strip.center_rect().offset(ICON_HALF + 14.0, 0);
         for si: 0..2 {
             offset_y := (si.(float) - 1.0) * (STAR_HALF * 2.0 + STAR_GAP);
-            star_rect := stars_anchor->offset(0, -offset_y)->grow(STAR_HALF);
+            star_rect := stars_anchor.offset(0, -offset_y).grow(STAR_HALF);
             star_tex := star_empty;
             if si < diff_stars { star_tex = star_gold; }
             if star_tex != null {
-                UI.quad(star_rect->fit_aspect(star_tex->get_aspect()), star_tex, v4.{1, 1, 1, 1});
+                UI.quad(star_rect.fit_aspect(star_tex.get_aspect()), star_tex, v4.{1, 1, 1, 1});
             }
         }
     }
@@ -617,18 +617,18 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
     // ---- Locked banner ----
     is_locked := rg_is_role_locked(player, idx);
     if is_locked {
-        content->cut_top(6);
+        content.cut_top(6);
         LOCK_BANNER_H :: 32.0;
-        lock_banner := content->cut_top(LOCK_BANNER_H);
+        lock_banner := content.cut_top(LOCK_BANNER_H);
         UI.quad(lock_banner, core_globals.white_sprite, v4.{0.15, 0.12, 0.05, 0.6});
 
-        lock_inner := lock_banner->inset(4, 8, 4, 8);
+        lock_inner := lock_banner.inset(4, 8, 4, 8);
         LOCK_ICON_HALF :: 10.0;
-        lock_icon_slot := lock_inner->cut_left(LOCK_ICON_HALF * 2.0 + 6.0);
+        lock_icon_slot := lock_inner.cut_left(LOCK_ICON_HALF * 2.0 + 6.0);
         lock_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_1/lock_closed.png");
         if lock_tex != null {
-            lock_icon_rect := lock_icon_slot->center_rect()->grow(LOCK_ICON_HALF);
-            UI.quad(lock_icon_rect->fit_aspect(lock_tex->get_aspect()), lock_tex, v4.{1, 0.85, 0.3, 1});
+            lock_icon_rect := lock_icon_slot.center_rect().grow(LOCK_ICON_HALF);
+            UI.quad(lock_icon_rect.fit_aspect(lock_tex.get_aspect()), lock_tex, v4.{1, 0.85, 0.3, 1});
         }
 
         lock_ts := UI.default_text_settings();
@@ -642,15 +642,15 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
         UI.text(lock_inner, lock_ts, "LOCKED - Available in Shop");
     }
 
-    content->cut_top(8);
+    content.cut_top(8);
 
     // Thin divider
-    UI.quad(content->cut_top(1), core_globals.white_sprite, v4.{1, 1, 1, 0.1});
-    content->cut_top(10);
+    UI.quad(content.cut_top(1), core_globals.white_sprite, v4.{1, 1, 1, 0.1});
+    content.cut_top(10);
 
     // ---- Description ----
     DESC_H :: 90.0;
-    desc_area := content->cut_top(DESC_H);
+    desc_area := content.cut_top(DESC_H);
 
     desc_ts := UI.default_text_settings();
     desc_ts.size              = 28;
@@ -669,15 +669,15 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
     // ---- Tips ----
     tips := rg_get_role_tips(idx);
     if tips.count > 0 {
-        content->cut_top(8);
+        content.cut_top(8);
 
         TIPS_H :: 60.0;
-        tips_area := content->cut_top(TIPS_H);
+        tips_area := content.cut_top(TIPS_H);
 
-        tips_bg := tips_area->inset(2);
+        tips_bg := tips_area.inset(2);
         UI.quad(tips_bg, core_globals.white_sprite, v4.{0.12, 0.12, 0.18, 0.5});
 
-        tips_inner := tips_bg->inset(8, 10, 8, 10);
+        tips_inner := tips_bg.inset(8, 10, 8, 10);
 
         tips_ts := UI.default_text_settings();
         tips_ts.size              = 22;
@@ -694,14 +694,14 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
         UI.text(tips_inner, tips_ts, "TIP: %", {tips});
     }
 
-    content->cut_top(10);
+    content.cut_top(10);
 
     // Thin divider
-    UI.quad(content->cut_top(1), core_globals.white_sprite, v4.{1, 1, 1, 0.1});
-    content->cut_top(8);
+    UI.quad(content.cut_top(1), core_globals.white_sprite, v4.{1, 1, 1, 0.1});
+    content.cut_top(8);
 
     // ---- Abilities section label ----
-    ab_label := content->cut_top(26);
+    ab_label := content.cut_top(26);
     ab_label_ts := UI.default_text_settings();
     ab_label_ts.size             = 19;
     ab_label_ts.color            = v4.{0.6, 0.6, 0.65, 1};
@@ -711,7 +711,7 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
     ab_label_ts.outline_thickness = 2;
     ab_label_ts.outline_color    = v4.{0, 0, 0, 1};
     UI.text(ab_label, ab_label_ts, "ABILITIES");
-    content->cut_top(6);
+    content.cut_top(6);
 
     // ---- Abilities list ----
     ab_entries: [..]Rg_Ability_Entry;
@@ -732,7 +732,7 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
 
     // Scroll view for abilities
     scroll_area    := content;
-    scrollbar_area := scroll_area->cut_right(6)->inset(2);
+    scrollbar_area := scroll_area.cut_right(6).inset(2);
 
     settings: Scroll_View_Settings;
     settings.vertical     = true;
@@ -754,25 +754,25 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
             UI.push_id("rg_ab_%", {i});
             defer UI.pop_id();
 
-            row := sc->cut_top(ROW_H);
+            row := sc.cut_top(ROW_H);
             if i < ab_entries.count - 1 {
-                sc->cut_top(ROW_GAP);
+                sc.cut_top(ROW_GAP);
             }
 
-            row_inner := row->inset(6, 8, 6, 8);
+            row_inner := row.inset(6, 8, 6, 8);
 
             // Icon slot
             if entry.icon_path.count > 0 {
-                icon_slot := row_inner->cut_left(ICON_SIZE * 2.0 + 12.0);
+                icon_slot := row_inner.cut_left(ICON_SIZE * 2.0 + 12.0);
                 icon_tex  := get_asset(Texture_Asset, entry.icon_path);
                 if icon_tex != null {
-                    icon_rect := icon_slot->center_rect()->grow(ICON_SIZE);
-                    UI.quad(icon_rect->fit_aspect(icon_tex->get_aspect()), icon_tex, v4.{1, 1, 1, 1});
+                    icon_rect := icon_slot.center_rect().grow(ICON_SIZE);
+                    UI.quad(icon_rect.fit_aspect(icon_tex.get_aspect()), icon_tex, v4.{1, 1, 1, 1});
                 }
             }
 
             // Ability name
-            name_row := row_inner->cut_top(26);
+            name_row := row_inner.cut_top(26);
             ab_name_ts := UI.default_text_settings();
             ab_name_ts.size             = 30;
             ab_name_ts.color            = v4.{1, 1, 1, 1};
@@ -799,7 +799,7 @@ rg_draw_role_detail :: proc(player: Player, rect: Rect) {
         }
     }
 
-    sb_rect := sv->compute_scroll_bar_rect(scrollbar_area);
+    sb_rect := sv.compute_scroll_bar_rect(scrollbar_area);
     UI.quad(scrollbar_area, core_globals.white_sprite, v4.{0.1, 0.1, 0.1, 0.4});
     UI.quad(sb_rect,        core_globals.white_sprite, v4.{0.4, 0.4, 0.4, 0.6});
 }
@@ -812,7 +812,7 @@ draw_roles_guide_open_button :: proc(player: Player) {
 
     BTN_HALF :: 60.0;
     safe     := UI.get_safe_screen_rect();
-    btn_rect := safe->right_center_rect()->offset(-(BTN_HALF + 16.0), 0)->grow(BTN_HALF);
+    btn_rect := safe.right_center_rect().offset(-(BTN_HALF + 16.0), 0).grow(BTN_HALF);
 
     bs := UI.default_button_settings();
     bs.sprite        = get_asset(Texture_Asset, "ui/info_icon_b.png");
@@ -834,6 +834,6 @@ draw_roles_guide_open_button :: proc(player: Player) {
     label_ts.do_outline        = true;
     label_ts.outline_thickness = 4;
     label_ts.outline_color     = v4.{0, 0, 0, 1};
-    label_rect := btn_rect->bottom_rect()->offset(0, -10)->grow_unscaled(18, 70, 0, 70);
+    label_rect := btn_rect.bottom_rect().offset(0, -10).grow_unscaled(18, 70, 0, 70);
     UI.text(label_rect, label_ts, "Role Guide");
 }

@@ -11,9 +11,9 @@ rr_try_get_hub_portal_position :: proc(out_position: ref v2) -> bool {
 
 Hub_Normal_Queue_Portal :: class : Interactable {
     ao_start :: method() {
-        this->set_listener(this);
-        this->set_text("Play Random Roles");
-        this->set_hold_text("");
+        this.set_listener(this);
+        this.set_text("Play Random Roles");
+        this.set_hold_text("");
         if radius <= 0.0 radius = 1.75;
         if priority == 0 priority = 100;
 
@@ -33,13 +33,18 @@ Hub_Normal_Queue_Portal :: class : Interactable {
         if !Game.is_server() return;
         if player == null return;
 
-        // Transfer to game
+        // Transfer to game — use staging game ID when running on the staging hub.
+        game_id := MAIN_GAME_ID;
+        if Game.get_game_id() == STAGING_HUB_GAME_ID {
+            game_id = STAGING_MAIN_GAME_ID;
+        }
+
         host_id, has_host := Server.get_private_server_host_id();
         if has_host  {
-            gameId:= format_string("%:%", {MAIN_GAME_ID, host_id});
-            Server.transfer_player_to_game(player, gameId);
+            transfer_id := format_string("%:%", {game_id, host_id});
+            Server.transfer_player_to_game(player, transfer_id);
         } else {
-            Server.transfer_player_to_game(player, MAIN_GAME_ID);
+            Server.transfer_player_to_game(player, game_id);
         }
     }
 }
@@ -93,12 +98,12 @@ Hub_Friends_Portal_Text :: class : Component {
 
         // Measure the wrapped text first, then size the background to fit it.
         // Give the measurement rect plenty of height so multi-line text can expand.
-        max_rect := Rect{pos, pos}->grow(0.60, 1.40, 0.60, 1.40);
+        max_rect := Rect{pos, pos}.grow(0.60, 1.40, 0.60, 1.40);
         padding := 0.10;
-        text_bounds := UI.measure_text(max_rect->inset(padding, padding, padding, padding), ts, text, {});
+        text_bounds := UI.measure_text(max_rect.inset(padding, padding, padding, padding), ts, text, {});
 
         // Background expands to cover actual text bounds + padding.
-        bg_rect := text_bounds->grow(padding, padding, padding, padding);
+        bg_rect := text_bounds.grow(padding, padding, padding, padding);
 
         // Rounded-corner backing using actual 9-slice rendering (via Button_Settings).
         bg_tex := get_asset(Texture_Asset, "$AO/new/Settings Modal/9_slice_modal.png");
