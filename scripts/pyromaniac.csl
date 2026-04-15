@@ -7,6 +7,28 @@ Pyro_Module :: class : Component {
 	rooms_burned_out: int;
 	world_fire_unlocked_time: float;
 	room_exposure_timer: float;
+
+	// Cached prop entities (built once at start, avoids per-frame entity_iterator scan)
+	cached_props: [..]Entity;
+	props_cached: bool;
+
+	ao_start :: method() {
+		if world_references != null {
+			world_references.find_props_child_entities(ref cached_props, clear_first=true);
+			props_cached = true;
+		}
+	}
+
+	get_cached_props :: method(results: ref [..]Entity) {
+		if !props_cached && world_references != null {
+			world_references.find_props_child_entities(ref cached_props, clear_first=true);
+			props_cached = true;
+		}
+		results.clear();
+		for i: 0..cached_props.count-1 {
+			results.append(cached_props[i]);
+		}
+	}
 }
 
 // --- Pyromaniac (Anarchist role) ---
