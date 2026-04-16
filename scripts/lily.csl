@@ -2440,6 +2440,36 @@ rr_lily_pull_cycle_target :: proc(player: Player, direction: int) {
 // Mind Control
 // =============================================================================
 
+// Check if a player is immobilised by any stun, trap, or freeze effect.
+rr_lily_is_target_immobile :: proc(p: Player) -> bool {
+	if p == null return false;
+
+	ws := p.entity.get_component(Werewolf_Infection_Stun);
+	if ws != null && ws.active return true;
+
+	hm := p.entity.get_component(Hitman_Mine_Stun);
+	if hm != null && hm.active return true;
+
+	pe := p.entity.get_component(Pranked_Effect);
+	if pe != null && pe.phase == 1 return true;
+
+	sa := p.entity.get_component(Stunned_By_Autograph_Effect);
+	if sa != null && sa.active return true;
+
+	gr := p.entity.get_component(GGG_Trap_Root_Effect);
+	if gr != null && gr.active return true;
+
+	lr := p.entity.get_component(Lily_String_Trap_Root);
+	if lr != null && lr.active && !lr.being_carried return true;
+
+	ms := p.entity.get_component(Mimicer_Stun);
+	if ms != null && ms.active return true;
+
+	if p.lily_crawling return true;
+
+	return false;
+}
+
 // Forwards Lily's input to the controlled target each frame
 Lily_Mind_Control_Puppet :: class : Component {
 	lily_entity_id: u64;
@@ -2455,11 +2485,15 @@ Lily_Mind_Control_Puppet :: class : Component {
 		if p.player_state != Player_State.ALIVE return;
 		if lm.mind_control_target_id != p.entity.id return;
 
-		// Forward Lily's input to the controlled player
-		input := lily.agent.input_this_frame;
-		p.agent.input_this_frame = input;
-		if length_squared(input) > 0.01 {
-			p.set_facing_right(input.x >= 0.0);
+		// Don't forward movement if the target is stunned, trapped, or frozen by another effect.
+		target_immobile := rr_lily_is_target_immobile(p);
+		if !target_immobile {
+			// Forward Lily's input to the controlled player
+			input := lily.agent.input_this_frame;
+			p.agent.input_this_frame = input;
+			if length_squared(input) > 0.01 {
+				p.set_facing_right(input.x >= 0.0);
+			}
 		}
 
 		// Lily stays put — only the puppet moves
@@ -5766,7 +5800,7 @@ rr_lily_ensure_carried_icon :: proc(icon_entity: ref Entity, player_entity: Enti
 
 	e := Scene.create_entity();
 	e.set_parent(player_entity, false);
-	e.set_local_scale(v2.{0.5, 0.5});
+	e.set_local_scale(v2.{1.0, 1.0});
 
 	sr := e.add_component(Sprite_Renderer);
 	tex := get_asset(Texture_Asset, texture_path);
