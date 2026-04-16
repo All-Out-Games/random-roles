@@ -11,12 +11,14 @@ RR_Rng_State :: class {
 }
 
 rr_rng_state: RR_Rng_State;
+rr_rng_refresh_count: u64;
 
 rr_refresh_rng_state :: proc() {
 	if rr_rng_state == null {
 		rr_rng_state = new(RR_Rng_State);
 	}
-	rr_rng_state.value = rng_seed((get_real_time() * 1000000000).(u64));
+	rr_rng_refresh_count += 1;
+	rr_rng_state.value = rng_seed(rng_root_seed() + rr_rng_refresh_count * 7919);
 }
 
 
@@ -3220,7 +3222,7 @@ assign_players_to_types :: proc() {
 	}
 
 	// Build unforced player list and assign types with purchase boosts.
-	rng := rng_seed((get_real_time() * 1000000.0).(u64) + player_count.(u64) + round_number.(u64));
+	rng := rng_seed(rng_root_seed() + player_count.(u64) + round_number.(u64) * 7919);
 	unforced_for_types: [..]Player;
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
@@ -3504,7 +3506,7 @@ assign_players_to_types :: proc() {
 			}
 
 			// Partial Fisher-Yates shuffle — pick PYRO_ROOMS_BURNOUT_TARGET rooms at random.
-			rng: u64 = rng_seed_time();
+			rng: u64 = rng_seed(rng_root_seed() + round_number.(u64) + candidate_rooms.count.(u64) * 7919);
 			pick_count := min(PYRO_ROOMS_BURNOUT_TARGET, candidate_rooms.count);
 			for pick_i: 0..pick_count-1 {
 				remaining := candidate_rooms.count - pick_i;
