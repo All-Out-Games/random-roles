@@ -70,9 +70,9 @@ BC_CAMERA_LOCK_REASON :: "bc_camera_viewing";
 rr_bc_round_start :: proc(p: Player) {
 	rr_bc_cleanup(p);
 	if p.player_role != Player_Role.BIG_CHARLIE return;
-	bcm := p.entity->get_component(Big_Charlie_Module);
+	bcm := p.entity.get_component(Big_Charlie_Module);
 	if bcm == null {
-		bcm = p.entity->add_component(Big_Charlie_Module);
+		bcm = p.entity.add_component(Big_Charlie_Module);
 	}
 	bcm.flesh_mass = 0;
 	bcm.is_monster_form = false;
@@ -86,46 +86,46 @@ rr_bc_round_start :: proc(p: Player) {
 	bcm.slough_speed_ends_at = 0.0;
 	bcm.camera_active = false;
 	bcm.camera_nugget_index = 0;
-	bcm.nugget_entities->clear();
-	bcm.nest_entities->clear();
+	bcm.nugget_entities.clear();
+	bcm.nest_entities.clear();
 	p.active_tasks = List(Task_Base).{};
 }
 
 rr_bc_ensure_creature_entity :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if bc.creature_entity != null && #alive(bc.creature_entity) return;
 
 	ce := Scene.create_entity();
-	ce->set_parent(player.entity, false);
-	ce->set_local_position(v2.{0, 0});
-	ce->set_local_scale(v2.{1, 1});
-	ce->set_local_rotation(0.0);
+	ce.set_parent(player.entity, false);
+	ce.set_local_position(v2.{0, 0});
+	ce.set_local_scale(v2.{1, 1});
+	ce.set_local_rotation(0.0);
 
-	ca := ce->add_component(Spine_Animator);
-	ca->awaken();
+	ca := ce.add_component(Spine_Animator);
+	ca.awaken();
 	if ca.instance != null {
-		ca.instance->set_skeleton(get_asset(Spine_Asset, BC_CREATURE_RIG));
-		ca.instance->set_skin("BigCharlie_Base");
-		ca.instance->refresh_skins();
-		ca.instance->set_animation("Idle", true, 0);
+		ca.instance.set_skeleton(get_asset(Spine_Asset, BC_CREATURE_RIG));
+		ca.instance.set_skin("BigCharlie_Base");
+		ca.instance.refresh_skins();
+		ca.instance.set_animation("Idle", true, 0);
 		rr_bc_setup_creature_state_machine(ca);
 		rr_apply_shadow_mask(ca.instance);
 	}
 
-	ce->set_local_enabled(false);
+	ce.set_local_enabled(false);
 	bc.creature_entity = ce;
 	bc.creature_animator = ca;
 }
 
 rr_bc_destroy_creature_entity :: proc(player: Player) {
-	player->remove_invisibility_reason(BC_INVIS_REASON);
-	player->remove_name_invisibility_reason(BC_NAME_INVIS_REASON);
+	player.remove_invisibility_reason(BC_INVIS_REASON);
+	player.remove_name_invisibility_reason(BC_NAME_INVIS_REASON);
 
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc != null {
 		if bc.creature_entity != null && #alive(bc.creature_entity) {
-			bc.creature_entity->destroy();
+			bc.creature_entity.destroy();
 		}
 		bc.creature_entity = null;
 		bc.creature_animator = null;
@@ -134,42 +134,42 @@ rr_bc_destroy_creature_entity :: proc(player: Player) {
 }
 
 rr_bc_swap_to_creature :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	rr_bc_ensure_creature_entity(player);
 	if bc.creature_entity == null return;
 
-	player->add_invisibility_reason(BC_INVIS_REASON);
-	player->add_name_invisibility_reason(BC_NAME_INVIS_REASON);
-	bc.creature_entity->set_local_enabled(true);
+	player.add_invisibility_reason(BC_INVIS_REASON);
+	player.add_name_invisibility_reason(BC_NAME_INVIS_REASON);
+	bc.creature_entity.set_local_enabled(true);
 	bc.creature_visible = true;
 
 	if bc.creature_animator != null && bc.creature_animator.instance != null {
 		if bc.creature_animator.instance.state_machine != null {
-			bc.creature_animator.instance.state_machine->set_trigger("spawn_in");
+			bc.creature_animator.instance.state_machine.set_trigger("spawn_in");
 		}
 	}
 }
 
 rr_bc_swap_to_player :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if !bc.creature_visible return;
 	if bc.creature_entity != null && #alive(bc.creature_entity) {
-		bc.creature_entity->set_local_enabled(false);
+		bc.creature_entity.set_local_enabled(false);
 	}
 	bc.creature_visible = false;
-	player->remove_invisibility_reason(BC_INVIS_REASON);
-	player->remove_name_invisibility_reason(BC_NAME_INVIS_REASON);
+	player.remove_invisibility_reason(BC_INVIS_REASON);
+	player.remove_name_invisibility_reason(BC_NAME_INVIS_REASON);
 }
 
 rr_bc_creature_trigger :: proc(player: Player, trigger_name: string) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if bc.creature_animator == null return;
 	if bc.creature_animator.instance == null return;
 	if bc.creature_animator.instance.state_machine != null {
-		bc.creature_animator.instance.state_machine->set_trigger(trigger_name);
+		bc.creature_animator.instance.state_machine.set_trigger(trigger_name);
 	}
 }
 
@@ -179,69 +179,69 @@ rr_bc_creature_trigger :: proc(player: Player, trigger_name: string) {
 
 rr_bc_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 	sm := State_Machine.create();
-	layer := sm->create_layer("main", 0);
+	layer := sm.create_layer("main", 0);
 
-	is_moving := sm->create_variable("is_moving", .BOOL);
-	spawn_in_trigger := sm->create_variable("spawn_in", .TRIGGER);
-	bone_snap_trigger := sm->create_variable("bone_snap", .TRIGGER);
-	absorb_trigger := sm->create_variable("absorb", .TRIGGER);
-	stampede_trigger := sm->create_variable("stampede", .TRIGGER);
-	tendril_trigger := sm->create_variable("tendril", .TRIGGER);
-	growth_trigger := sm->create_variable("growth", .TRIGGER);
+	is_moving := sm.create_variable("is_moving", .BOOL);
+	spawn_in_trigger := sm.create_variable("spawn_in", .TRIGGER);
+	bone_snap_trigger := sm.create_variable("bone_snap", .TRIGGER);
+	absorb_trigger := sm.create_variable("absorb", .TRIGGER);
+	stampede_trigger := sm.create_variable("stampede", .TRIGGER);
+	tendril_trigger := sm.create_variable("tendril", .TRIGGER);
+	growth_trigger := sm.create_variable("growth", .TRIGGER);
 
 	// Normal locomotion
-	idle_state := layer->create_state("Idle", true, 0.0);
-	run_state := layer->create_state("Run", true, 0.0);
-	layer->set_initial_state(idle_state);
+	idle_state := layer.create_state("Idle", true, 0.0);
+	run_state := layer.create_state("Run", true, 0.0);
+	layer.set_initial_state(idle_state);
 
-	idle_to_run := layer->create_transition(idle_state, run_state, false);
-	idle_to_run->create_bool_condition(is_moving, true);
-	run_to_idle := layer->create_transition(run_state, idle_state, false);
-	run_to_idle->create_bool_condition(is_moving, false);
+	idle_to_run := layer.create_transition(idle_state, run_state, false);
+	idle_to_run.create_bool_condition(is_moving, true);
+	run_to_idle := layer.create_transition(run_state, idle_state, false);
+	run_to_idle.create_bool_condition(is_moving, false);
 
 	// Spawn in
-	spawn_state := layer->create_state("Transform_Monster_End", false, 1.0);
-	to_spawn := layer->create_global_transition(spawn_state, false);
-	to_spawn->create_trigger_condition(spawn_in_trigger);
-	layer->create_transition(spawn_state, idle_state, true);
+	spawn_state := layer.create_state("Transform_Monster_End", false, 1.0);
+	to_spawn := layer.create_global_transition(spawn_state, false);
+	to_spawn.create_trigger_condition(spawn_in_trigger);
+	layer.create_transition(spawn_state, idle_state, true);
 
 	// Bone Snap kill animation
-	bone_snap_state := layer->create_state("Bone_Snap_Kill", false, 1.5);
-	to_bone_snap := layer->create_global_transition(bone_snap_state, true);
-	to_bone_snap->create_trigger_condition(bone_snap_trigger);
-	layer->create_transition(bone_snap_state, idle_state, true);
+	bone_snap_state := layer.create_state("Bone_Snap_Kill", false, 1.5);
+	to_bone_snap := layer.create_global_transition(bone_snap_state, true);
+	to_bone_snap.create_trigger_condition(bone_snap_trigger);
+	layer.create_transition(bone_snap_state, idle_state, true);
 
 	// Absorb (Slough)
-	absorb_start_state := layer->create_state("Absorb_Start", false, 0.5);
-	to_absorb := layer->create_global_transition(absorb_start_state, true);
-	to_absorb->create_trigger_condition(absorb_trigger);
-	absorb_expansion_state := layer->create_state("Absorb_Expansion", false, 0.8);
-	layer->create_transition(absorb_start_state, absorb_expansion_state, true);
-	absorb_end_state := layer->create_state("Absorb_End", false, 0.5);
-	layer->create_transition(absorb_expansion_state, absorb_end_state, true);
-	layer->create_transition(absorb_end_state, idle_state, true);
+	absorb_start_state := layer.create_state("Absorb_Start", false, 0.5);
+	to_absorb := layer.create_global_transition(absorb_start_state, true);
+	to_absorb.create_trigger_condition(absorb_trigger);
+	absorb_expansion_state := layer.create_state("Absorb_Expansion", false, 0.8);
+	layer.create_transition(absorb_start_state, absorb_expansion_state, true);
+	absorb_end_state := layer.create_state("Absorb_End", false, 0.5);
+	layer.create_transition(absorb_expansion_state, absorb_end_state, true);
+	layer.create_transition(absorb_end_state, idle_state, true);
 
 	// Stampede roar
-	stampede_state := layer->create_state("Stampede_Roar", false, 2.0);
-	to_stampede := layer->create_global_transition(stampede_state, false);
-	to_stampede->create_trigger_condition(stampede_trigger);
+	stampede_state := layer.create_state("Stampede_Roar", false, 2.0);
+	to_stampede := layer.create_global_transition(stampede_state, false);
+	to_stampede.create_trigger_condition(stampede_trigger);
 	// After roar -> Stampede_AL (ambient loop during rampage) handled via growth trigger
-	layer->create_transition(stampede_state, idle_state, true);
+	layer.create_transition(stampede_state, idle_state, true);
 
 	// Tendril shoot (Marrow)
-	tendril_state := layer->create_state("Shoot_Tendril", false, 1.0);
-	to_tendril := layer->create_global_transition(tendril_state, true);
-	to_tendril->create_trigger_condition(tendril_trigger);
-	layer->create_transition(tendril_state, idle_state, true);
+	tendril_state := layer.create_state("Shoot_Tendril", false, 1.0);
+	to_tendril := layer.create_global_transition(tendril_state, true);
+	to_tendril.create_trigger_condition(tendril_trigger);
+	layer.create_transition(tendril_state, idle_state, true);
 
 	// Growth pulse
-	growth_state := layer->create_state("Growth", false, 1.0);
-	to_growth := layer->create_global_transition(growth_state, true);
-	to_growth->create_trigger_condition(growth_trigger);
-	layer->create_transition(growth_state, idle_state, true);
+	growth_state := layer.create_state("Growth", false, 1.0);
+	to_growth := layer.create_global_transition(growth_state, true);
+	to_growth.create_trigger_condition(growth_trigger);
+	layer.create_transition(growth_state, idle_state, true);
 
-	ca->awaken();
-	ca.instance->set_state_machine(sm, true);
+	ca.awaken();
+	ca.instance.set_state_machine(sm, true);
 }
 
 // =============================================================================
@@ -261,7 +261,7 @@ rr_bc_update_growth :: proc(player: Player, bc: Big_Charlie_Module, dt: float) {
 	bc.current_scale = lerp(bc.current_scale, bc.target_scale, 5.0 * dt);
 
 	if bc.creature_visible && bc.creature_entity != null && #alive(bc.creature_entity) {
-		bc.creature_entity->set_local_scale(v2.{bc.current_scale, bc.current_scale});
+		bc.creature_entity.set_local_scale(v2.{bc.current_scale, bc.current_scale});
 	}
 }
 
@@ -286,7 +286,7 @@ BC_Lil_Nugget :: class : Component {
 		// Delayed destruction (let absorbed animation play)
 		if pending_destroy {
 			if get_time() >= destroy_at {
-				entity->destroy();
+				entity.destroy();
 			}
 			return;
 		}
@@ -303,9 +303,9 @@ BC_Lil_Nugget :: class : Component {
 				nav_point: v2;
 				nav_hint: s64;
 				if try_find_closest_point_on_navmesh(new_pos, ref nav_point, ref nav_hint) {
-					entity->set_local_position(nav_point);
+					entity.set_local_position(nav_point);
 				} else {
-					entity->set_local_position(new_pos);
+					entity.set_local_position(new_pos);
 				}
 			}
 			return;
@@ -318,7 +318,7 @@ BC_Lil_Nugget :: class : Component {
 rr_bc_spawn_nugget :: proc(position: v2, owner_player_entity_id: u64) -> Entity {
 	bc_player := get_player_by_entity_id(owner_player_entity_id);
 	if bc_player == null return null;
-	bc := bc_player.entity->get_component(Big_Charlie_Module);
+	bc := bc_player.entity.get_component(Big_Charlie_Module);
 	if bc == null return null;
 
 	// Enforce nugget cap
@@ -326,69 +326,69 @@ rr_bc_spawn_nugget :: proc(position: v2, owner_player_entity_id: u64) -> Entity 
 	if bc.nugget_entities.count >= BC_MAX_NUGGETS return null;
 
 	nugget_entity := Scene.create_entity();
-	nugget_entity->set_local_position(position);
-	nugget_entity->set_local_scale(v2.{0.5, 0.5});
+	nugget_entity.set_local_position(position);
+	nugget_entity.set_local_scale(v2.{0.5, 0.5});
 
-	spine := nugget_entity->add_component(Spine_Animator);
-	spine->awaken();
+	spine := nugget_entity.add_component(Spine_Animator);
+	spine.awaken();
 	if spine.instance != null {
-		spine.instance->set_skeleton(get_asset(Spine_Asset, BC_NUGGET_RIG));
-		spine.instance->set_skin("normal");
-		spine.instance->refresh_skins();
-		spine.instance->set_animation("Spawn", false, 0);
+		spine.instance.set_skeleton(get_asset(Spine_Asset, BC_NUGGET_RIG));
+		spine.instance.set_skin("normal");
+		spine.instance.refresh_skins();
+		spine.instance.set_animation("Spawn", false, 0);
 	}
 
 	rr_bc_setup_nugget_state_machine(spine);
 
-	nugget_comp := nugget_entity->add_component(BC_Lil_Nugget);
+	nugget_comp := nugget_entity.add_component(BC_Lil_Nugget);
 	nugget_comp.owner_player_entity_id = owner_player_entity_id;
 	nugget_comp.spawn_time = get_time();
 
-	bc.nugget_entities->append(nugget_entity);
+	bc.nugget_entities.append(nugget_entity);
 	return nugget_entity;
 }
 
 rr_bc_setup_nugget_state_machine :: proc(spine: Spine_Animator) {
 	sm := State_Machine.create();
-	layer := sm->create_layer("main", 0);
+	layer := sm.create_layer("main", 0);
 
-	is_moving := sm->create_variable("is_moving", .BOOL);
-	stampede_trigger := sm->create_variable("stampede_start", .TRIGGER);
-	absorb_trigger := sm->create_variable("absorbed", .TRIGGER);
-	look_up_trigger := sm->create_variable("look_up", .TRIGGER);
+	is_moving := sm.create_variable("is_moving", .BOOL);
+	stampede_trigger := sm.create_variable("stampede_start", .TRIGGER);
+	absorb_trigger := sm.create_variable("absorbed", .TRIGGER);
+	look_up_trigger := sm.create_variable("look_up", .TRIGGER);
 
-	idle_state := layer->create_state("Idle", true, 0.0);
-	run_state := layer->create_state("Run", true, 0.0);
-	layer->set_initial_state(idle_state);
+	idle_state := layer.create_state("Idle", true, 0.0);
+	run_state := layer.create_state("Run", true, 0.0);
+	layer.set_initial_state(idle_state);
 
-	idle_to_run := layer->create_transition(idle_state, run_state, false);
-	idle_to_run->create_bool_condition(is_moving, true);
-	run_to_idle := layer->create_transition(run_state, idle_state, false);
-	run_to_idle->create_bool_condition(is_moving, false);
+	idle_to_run := layer.create_transition(idle_state, run_state, false);
+	idle_to_run.create_bool_condition(is_moving, true);
+	run_to_idle := layer.create_transition(run_state, idle_state, false);
+	run_to_idle.create_bool_condition(is_moving, false);
 
 	// Stampede run
-	stampede_start_state := layer->create_state("Stampede/Start", false, 0.3);
-	to_stampede := layer->create_global_transition(stampede_start_state, false);
-	to_stampede->create_trigger_condition(stampede_trigger);
-	stampede_run_state := layer->create_state("Stampede/Run", true, 0.0);
-	layer->create_transition(stampede_start_state, stampede_run_state, true);
+	stampede_start_state := layer.create_state("Stampede/Start", false, 0.3);
+	to_stampede := layer.create_global_transition(stampede_start_state, false);
+	to_stampede.create_trigger_condition(stampede_trigger);
+	stampede_run_state := layer.create_state("Stampede/Run", true, 0.0);
+	layer.create_transition(stampede_start_state, stampede_run_state, true);
 
 	// Absorbed
-	absorbed_start_state := layer->create_state("Absorbed_Start", false, 0.5);
-	to_absorbed := layer->create_global_transition(absorbed_start_state, false);
-	to_absorbed->create_trigger_condition(absorb_trigger);
-	absorbed_loop_state := layer->create_state("Absorbed_Loop", true, 0.0);
-	layer->create_transition(absorbed_start_state, absorbed_loop_state, true);
+	absorbed_start_state := layer.create_state("Absorbed_Start", false, 0.5);
+	to_absorbed := layer.create_global_transition(absorbed_start_state, false);
+	to_absorbed.create_trigger_condition(absorb_trigger);
+	absorbed_loop_state := layer.create_state("Absorbed_Loop", true, 0.0);
+	layer.create_transition(absorbed_start_state, absorbed_loop_state, true);
 
 	// Look up (intro)
-	look_up_start := layer->create_state("Look_Up_Start", false, 0.5);
-	to_look_up := layer->create_global_transition(look_up_start, false);
-	to_look_up->create_trigger_condition(look_up_trigger);
-	look_up_loop := layer->create_state("Look_Up_Loop", true, 0.0);
-	layer->create_transition(look_up_start, look_up_loop, true);
+	look_up_start := layer.create_state("Look_Up_Start", false, 0.5);
+	to_look_up := layer.create_global_transition(look_up_start, false);
+	to_look_up.create_trigger_condition(look_up_trigger);
+	look_up_loop := layer.create_state("Look_Up_Loop", true, 0.0);
+	layer.create_transition(look_up_start, look_up_loop, true);
 
-	spine->awaken();
-	spine.instance->set_state_machine(sm, true);
+	spine.awaken();
+	spine.instance.set_state_machine(sm, true);
 }
 
 rr_bc_cleanup_dead_nuggets :: proc(bc: Big_Charlie_Module) {
@@ -396,7 +396,7 @@ rr_bc_cleanup_dead_nuggets :: proc(bc: Big_Charlie_Module) {
 	while i < bc.nugget_entities.count {
 		e := bc.nugget_entities[i];
 		if e == null || !#alive(e) {
-			bc.nugget_entities->unordered_remove_by_index(i);
+			bc.nugget_entities.unordered_remove_by_index(i);
 		} else {
 			i += 1;
 		}
@@ -412,10 +412,10 @@ rr_bc_destroy_all_nuggets :: proc(bc: Big_Charlie_Module) {
 	for i: 0..bc.nugget_entities.count-1 {
 		e := bc.nugget_entities[i];
 		if e != null && #alive(e) {
-			e->destroy();
+			e.destroy();
 		}
 	}
-	bc.nugget_entities->clear();
+	bc.nugget_entities.clear();
 }
 
 // =============================================================================
@@ -444,7 +444,7 @@ BC_Nest :: class : Component {
 		// Delayed destroy after break animation
 		if pending_break {
 			if now >= break_destroy_at {
-				entity->destroy();
+				entity.destroy();
 			}
 			return;
 		}
@@ -473,9 +473,9 @@ BC_Nest_Break_Interactable :: class : Interactable {
 	nest: BC_Nest;
 
 	ao_start :: method() {
-		this->set_listener(this);
-		this->set_text("Break Nest");
-		this->set_hold_text("Breaking...");
+		this.set_listener(this);
+		this.set_text("Break Nest");
+		this.set_hold_text("Breaking...");
 		required_hold_time = BC_MARROW_NEST_BREAK_SECONDS;
 		radius = 2.5;
 	}
@@ -507,9 +507,9 @@ BC_Nest_Doctor_Reverse_Interactable :: class : Interactable {
 	nest: BC_Nest;
 
 	ao_start :: method() {
-		this->set_listener(this);
-		this->set_text("Reverse Nesting");
-		this->set_hold_text("Reversing...");
+		this.set_listener(this);
+		this.set_text("Reverse Nesting");
+		this.set_hold_text("Reversing...");
 		required_hold_time = 2.0;
 		radius = 2.5;
 	}
@@ -535,41 +535,41 @@ rr_bc_create_nest :: proc(corpse_entity: Entity, owner_player_entity_id: u64) ->
 	if corpse_entity == null || !#alive(corpse_entity) return null;
 
 	nest_entity := Scene.create_entity();
-	nest_entity->set_local_position(corpse_entity.world_position);
+	nest_entity.set_local_position(corpse_entity.world_position);
 
-	spine := nest_entity->add_component(Spine_Animator);
-	spine->awaken();
+	spine := nest_entity.add_component(Spine_Animator);
+	spine.awaken();
 	if spine.instance != null {
-		spine.instance->set_skeleton(get_asset(Spine_Asset, BC_MOUND_RIG));
-		spine.instance->set_animation("Form", false, 0);
+		spine.instance.set_skeleton(get_asset(Spine_Asset, BC_MOUND_RIG));
+		spine.instance.set_animation("Form", false, 0);
 	}
 
-	nest := nest_entity->add_component(BC_Nest);
+	nest := nest_entity.add_component(BC_Nest);
 	nest.owner_player_entity_id = owner_player_entity_id;
 	nest.corpse_entity = corpse_entity;
 
 	// Hide the corpse under the nest
-	corpse_entity->set_local_enabled(false);
+	corpse_entity.set_local_enabled(false);
 
 	// Add break interactable
-	brk := nest_entity->add_component(BC_Nest_Break_Interactable);
+	brk := nest_entity.add_component(BC_Nest_Break_Interactable);
 	brk.nest = nest;
 
 	// Add doctor reverse interactable (time-limited)
-	doc := nest_entity->add_component(BC_Nest_Doctor_Reverse_Interactable);
+	doc := nest_entity.add_component(BC_Nest_Doctor_Reverse_Interactable);
 	doc.nest = nest;
 
 	// Track nest
 	bc_player := get_player_by_entity_id(owner_player_entity_id);
 	if bc_player != null {
-		bc := bc_player.entity->get_component(Big_Charlie_Module);
+		bc := bc_player.entity.get_component(Big_Charlie_Module);
 		if bc != null {
-			bc.nest_entities->append(nest_entity);
+			bc.nest_entities.append(nest_entity);
 		}
 	}
 
 	// Block coroner investigation on this corpse
-	corpse := corpse_entity->get_component(Corpse);
+	corpse := corpse_entity.get_component(Corpse);
 	if corpse != null {
 		corpse.bc_nested = true;
 	}
@@ -582,25 +582,25 @@ rr_bc_break_nest :: proc(nest: BC_Nest) {
 
 	// Reveal the corpse underneath
 	if nest.corpse_entity != null && #alive(nest.corpse_entity) {
-		nest.corpse_entity->set_local_enabled(true);
-		corpse := nest.corpse_entity->get_component(Corpse);
+		nest.corpse_entity.set_local_enabled(true);
+		corpse := nest.corpse_entity.get_component(Corpse);
 		if corpse != null {
 			corpse.bc_nested = false;
 		}
 	}
 
 	// Play break animation then destroy
-	spine := nest.entity->get_component(Spine_Animator);
+	spine := nest.entity.get_component(Spine_Animator);
 	if spine != null && spine.instance != null {
-		spine.instance->set_animation("Broken_Open_Fresh", false, 0);
+		spine.instance.set_animation("Broken_Open_Fresh", false, 0);
 	}
 
 	// Remove from owner tracking
 	bc_player := get_player_by_entity_id(nest.owner_player_entity_id);
 	if bc_player != null {
-		bc := bc_player.entity->get_component(Big_Charlie_Module);
+		bc := bc_player.entity.get_component(Big_Charlie_Module);
 		if bc != null {
-			bc.nest_entities->unordered_remove_by_value(nest.entity);
+			bc.nest_entities.unordered_remove_by_value(nest.entity);
 		}
 	}
 
@@ -614,7 +614,7 @@ rr_bc_cleanup_dead_nests :: proc(bc: Big_Charlie_Module) {
 	while i < bc.nest_entities.count {
 		e := bc.nest_entities[i];
 		if e == null || !#alive(e) {
-			bc.nest_entities->unordered_remove_by_index(i);
+			bc.nest_entities.unordered_remove_by_index(i);
 		} else {
 			i += 1;
 		}
@@ -626,18 +626,18 @@ rr_bc_destroy_all_nests :: proc(bc: Big_Charlie_Module) {
 		e := bc.nest_entities[i];
 		if e != null && #alive(e) {
 			// Reveal corpse before destroying
-			nest := e->get_component(BC_Nest);
+			nest := e.get_component(BC_Nest);
 			if nest != null && nest.corpse_entity != null && #alive(nest.corpse_entity) {
-				nest.corpse_entity->set_local_enabled(true);
-				corpse := nest.corpse_entity->get_component(Corpse);
+				nest.corpse_entity.set_local_enabled(true);
+				corpse := nest.corpse_entity.get_component(Corpse);
 				if corpse != null {
 					corpse.bc_nested = false;
 				}
 			}
-			e->destroy();
+			e.destroy();
 		}
 	}
-	bc.nest_entities->clear();
+	bc.nest_entities.clear();
 }
 
 // =============================================================================
@@ -651,7 +651,7 @@ rr_bc_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_entit
 	if killer == null return;
 	if killer.player_role != Player_Role.BIG_CHARLIE return;
 
-	bc := killer.entity->get_component(Big_Charlie_Module);
+	bc := killer.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 
 	bc.flesh_mass += 1;
@@ -660,7 +660,7 @@ rr_bc_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_entit
 	if bc.is_monster_form && bc.creature_visible {
 		rr_bc_creature_trigger(killer, "bone_snap");
 	} else {
-		killer->set_trigger("traitor_kill");
+		killer.set_trigger("traitor_kill");
 	}
 
 	// Delay growth pulse so bone snap animation plays first
@@ -691,7 +691,7 @@ rr_bc_apply_trample :: proc(target: Player, source_player_entity_id: u64) {
 	target.bc_trampled_blind_until = get_time() + BC_STAMPEDE_TRAMPLE_BLIND_DURATION;
 
 	// Trigger trampled animation on victim
-	target->set_trigger("bc_trampled_start");
+	target.set_trigger("bc_trampled_start");
 
 	// Wet squelch SFX loop while trampled (server-only to prevent double-play)
 	if Game.is_server() {
@@ -717,7 +717,7 @@ rr_bc_update_trampled :: proc(player: Player, dt: float) {
 	if player.animator != null && player.animator.instance != null {
 		if player.animator.instance.state_machine != null {
 			is_moving := length(player.agent.velocity) > 0.5;
-			player.animator.instance.state_machine->set_bool("bc_trampled_moving", is_moving);
+			player.animator.instance.state_machine.set_bool("bc_trampled_moving", is_moving);
 		}
 	}
 
@@ -728,7 +728,7 @@ rr_bc_update_trampled :: proc(player: Player, dt: float) {
 			SFX.stop(player.bc_trample_sfx_id);
 			player.bc_trample_sfx_id = 0;
 		}
-		player->set_trigger("bc_trampled_heal_natural");
+		player.set_trigger("bc_trampled_heal_natural");
 	}
 }
 
@@ -741,7 +741,7 @@ rr_bc_heal_trample :: proc(player: Player) {
 		SFX.stop(player.bc_trample_sfx_id);
 		player.bc_trample_sfx_id = 0;
 	}
-	player->set_trigger("bc_trampled_heal_player");
+	player.set_trigger("bc_trampled_heal_player");
 }
 
 // =============================================================================
@@ -753,7 +753,7 @@ BC_CAMERA_LOS_INNER :: 14.0;
 BC_CAMERA_LOS_OUTER :: 18.0;
 
 rr_bc_enter_camera :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if bc.camera_active return;
 	if get_time() < bc.camera_lockout_until return;
@@ -763,10 +763,10 @@ rr_bc_enter_camera :: proc(player: Player) {
 
 	bc.camera_active = true;
 	bc.camera_nugget_index = 0;
-	player->add_freeze_reason(BC_CAMERA_LOCK_REASON);
+	player.add_freeze_reason(BC_CAMERA_LOCK_REASON);
 
 	// Override camera
-	if player->is_local() {
+	if player.is_local() {
 		bc.camera_original_size = player.camera.size;
 		player.camera.follow_player = false;
 		player.camera.size = BC_CAMERA_ZOOM_SIZE;
@@ -774,22 +774,22 @@ rr_bc_enter_camera :: proc(player: Player) {
 }
 
 rr_bc_exit_camera :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if !bc.camera_active return;
 
 	bc.camera_active = false;
-	player->remove_freeze_reason(BC_CAMERA_LOCK_REASON);
+	player.remove_freeze_reason(BC_CAMERA_LOCK_REASON);
 
 	// Restore camera
-	if player->is_local() {
+	if player.is_local() {
 		player.camera.follow_player = true;
 		player.camera.size = bc.camera_original_size;
 	}
 }
 
 rr_bc_camera_next :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if !bc.camera_active return;
 
@@ -803,7 +803,7 @@ rr_bc_camera_next :: proc(player: Player) {
 }
 
 rr_bc_camera_prev :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if !bc.camera_active return;
 
@@ -820,7 +820,7 @@ rr_bc_camera_prev :: proc(player: Player) {
 }
 
 rr_bc_camera_select :: proc(player: Player, index: int) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if !bc.camera_active return;
 
@@ -836,7 +836,7 @@ rr_bc_camera_select :: proc(player: Player, index: int) {
 }
 
 rr_bc_get_camera_nugget :: proc(player: Player) -> Entity {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return null;
 	if !bc.camera_active return null;
 
@@ -854,7 +854,7 @@ rr_bc_get_camera_nugget :: proc(player: Player) -> Entity {
 // =============================================================================
 
 rr_bc_start_stampede :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 
 	rr_bc_cleanup_dead_nuggets(bc);
@@ -874,19 +874,19 @@ rr_bc_start_stampede :: proc(player: Player) {
 		nugget_entity := bc.nugget_entities[i];
 		if nugget_entity == null || !#alive(nugget_entity) continue;
 
-		nugget := nugget_entity->get_component(BC_Lil_Nugget);
+		nugget := nugget_entity.get_component(BC_Lil_Nugget);
 		if nugget == null continue;
 
 		nugget.is_stampeding = true;
 		nugget.stampede_target_pos = player.entity.world_position;
 
 		// Trigger stampede animation
-		nugget_spine := nugget_entity->get_component(Spine_Animator);
+		nugget_spine := nugget_entity.get_component(Spine_Animator);
 		if nugget_spine != null && nugget_spine.instance != null {
 			if nugget_spine.instance.state_machine != null {
-				nugget_spine.instance->set_skin("stampede");
-				nugget_spine.instance->refresh_skins();
-				nugget_spine.instance.state_machine->set_trigger("stampede_start");
+				nugget_spine.instance.set_skin("stampede");
+				nugget_spine.instance.refresh_skins();
+				nugget_spine.instance.state_machine.set_trigger("stampede_start");
 			}
 		}
 	}
@@ -901,7 +901,7 @@ rr_bc_update_stampede :: proc(player: Player, bc: Big_Charlie_Module, dt: float)
 		nugget_entity := bc.nugget_entities[i];
 		if nugget_entity == null || !#alive(nugget_entity) continue;
 
-		nugget := nugget_entity->get_component(BC_Lil_Nugget);
+		nugget := nugget_entity.get_component(BC_Lil_Nugget);
 		if nugget == null continue;
 
 		if nugget.pending_destroy continue;
@@ -911,7 +911,7 @@ rr_bc_update_stampede :: proc(player: Player, bc: Big_Charlie_Module, dt: float)
 		nugget.stampede_target_pos = player_pos;
 
 		// Trample nearby players along the path
-		foreach target: component_iterator(Player) {
+		for target: component_iterator(Player) {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
@@ -928,10 +928,10 @@ rr_bc_update_stampede :: proc(player: Player, bc: Big_Charlie_Module, dt: float)
 		dist := length(nugget_entity.world_position - player_pos);
 		if dist < 1.0 {
 			// Absorbed — trigger animation, delay destroy so it plays
-			nugget_spine := nugget_entity->get_component(Spine_Animator);
+			nugget_spine := nugget_entity.get_component(Spine_Animator);
 			if nugget_spine != null && nugget_spine.instance != null {
 				if nugget_spine.instance.state_machine != null {
-					nugget_spine.instance.state_machine->set_trigger("absorbed");
+					nugget_spine.instance.state_machine.set_trigger("absorbed");
 				}
 			}
 			nugget.is_stampeding = false;
@@ -955,8 +955,8 @@ rr_bc_start_rampage :: proc(player: Player, bc: Big_Charlie_Module) {
 
 	// Switch to stampede skin
 	if bc.creature_animator != null && bc.creature_animator.instance != null {
-		bc.creature_animator.instance->set_skin("BigCharlie_Stampede");
-		bc.creature_animator.instance->refresh_skins();
+		bc.creature_animator.instance.set_skin("BigCharlie_Stampede");
+		bc.creature_animator.instance.refresh_skins();
 	}
 }
 
@@ -966,8 +966,8 @@ rr_bc_end_rampage :: proc(player: Player, bc: Big_Charlie_Module) {
 
 	// Revert to normal skin
 	if bc.creature_animator != null && bc.creature_animator.instance != null {
-		bc.creature_animator.instance->set_skin("BigCharlie_Base");
-		bc.creature_animator.instance->refresh_skins();
+		bc.creature_animator.instance.set_skin("BigCharlie_Base");
+		bc.creature_animator.instance.refresh_skins();
 	}
 }
 
@@ -976,7 +976,7 @@ rr_bc_end_rampage :: proc(player: Player, bc: Big_Charlie_Module) {
 // =============================================================================
 
 rr_bc_perform_slough :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 
 	rr_bc_cleanup_dead_nuggets(bc);
@@ -1000,14 +1000,14 @@ rr_bc_perform_slough :: proc(player: Player) {
 	if closest_nugget == null return;
 
 	// Absorb the nugget
-	closest_nugget->destroy();
+	closest_nugget.destroy();
 	rr_bc_cleanup_dead_nuggets(bc);
 
 	// Play absorb animation
 	rr_bc_creature_trigger(player, "absorb");
 
 	// Knockback nearby players
-	foreach target: component_iterator(Player) {
+	for target: component_iterator(Player) {
 		if target == null continue;
 		if target.entity.id == player.entity.id continue;
 		if target.player_state != Player_State.ALIVE continue;
@@ -1034,7 +1034,7 @@ rr_bc_perform_slough :: proc(player: Player) {
 // =============================================================================
 
 rr_bc_start_transform :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if bc.is_monster_form return;
 
@@ -1044,10 +1044,10 @@ rr_bc_start_transform :: proc(player: Player) {
 		intro_offset := v2.{1.2, -0.3};
 		intro_nugget := rr_bc_spawn_nugget(player.entity.world_position + intro_offset, player.entity.id);
 		if intro_nugget != null {
-			nugget_spine := intro_nugget->get_component(Spine_Animator);
+			nugget_spine := intro_nugget.get_component(Spine_Animator);
 			if nugget_spine != null && nugget_spine.instance != null {
 				if nugget_spine.instance.state_machine != null {
-					nugget_spine.instance.state_machine->set_trigger("look_up");
+					nugget_spine.instance.state_machine.set_trigger("look_up");
 				}
 			}
 		}
@@ -1056,19 +1056,19 @@ rr_bc_start_transform :: proc(player: Player) {
 	bc.is_monster_form = true;
 	bc.skeleton_swap_at = get_time() + BC_TRANSFORM_ANIM_SECONDS;
 
-	player->set_trigger("bc_transform");
-	player->add_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
+	player.set_trigger("bc_transform");
+	player.add_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
 }
 
 rr_bc_start_revert :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if !bc.is_monster_form return;
 
 	bc.is_monster_form = false;
 
-	player->set_trigger("bc_revert");
-	player->add_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
+	player.set_trigger("bc_revert");
+	player.add_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
 
 	rr_bc_swap_to_player(player);
 	// Schedule unlock after revert animation plays
@@ -1076,13 +1076,13 @@ rr_bc_start_revert :: proc(player: Player) {
 }
 
 rr_bc_force_revert :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 
 	bc.is_monster_form = false;
 	bc.skeleton_swap_at = 0.0;
 	rr_bc_swap_to_player(player);
-	player->remove_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
+	player.remove_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
 
 	// End camera if active
 	rr_bc_exit_camera(player);
@@ -1109,7 +1109,7 @@ rr_bc_update :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 
 	now := get_time();
@@ -1133,7 +1133,7 @@ rr_bc_update :: proc(player: Player, dt: float) {
 	// Delayed skeleton swap (after transform animation)
 	if bc.skeleton_swap_at > 0.0 && now >= bc.skeleton_swap_at {
 		bc.skeleton_swap_at = 0.0;
-		player->remove_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
+		player.remove_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
 		if bc.is_monster_form && !bc.creature_visible {
 			rr_bc_swap_to_creature(player);
 		}
@@ -1152,13 +1152,13 @@ rr_bc_update :: proc(player: Player, dt: float) {
 	if bc.creature_visible && bc.creature_animator != null && bc.creature_animator.instance != null {
 		if bc.creature_animator.instance.state_machine != null {
 			is_moving := length(player.agent.velocity) > 0.5;
-			bc.creature_animator.instance.state_machine->set_bool("is_moving", is_moving);
+			bc.creature_animator.instance.state_machine.set_bool("is_moving", is_moving);
 		}
 		// Face direction
 		if player.agent.velocity.x > 0.1 {
-			bc.creature_entity->set_local_scale(v2.{-abs(bc.current_scale), bc.current_scale});
+			bc.creature_entity.set_local_scale(v2.{-abs(bc.current_scale), bc.current_scale});
 		} else if player.agent.velocity.x < -0.1 {
-			bc.creature_entity->set_local_scale(v2.{abs(bc.current_scale), bc.current_scale});
+			bc.creature_entity.set_local_scale(v2.{abs(bc.current_scale), bc.current_scale});
 		}
 	}
 
@@ -1174,7 +1174,7 @@ rr_bc_update :: proc(player: Player, dt: float) {
 	}
 
 	// Camera: override every frame on local client (server sync resets follow_player)
-	if bc.camera_active && player->is_local() {
+	if bc.camera_active && player.is_local() {
 		player.camera.follow_player = false;
 		player.camera.size = BC_CAMERA_ZOOM_SIZE;
 		nugget := rr_bc_get_camera_nugget(player);
@@ -1190,7 +1190,7 @@ rr_bc_update :: proc(player: Player, dt: float) {
 	for i: 0..bc.nugget_entities.count-1 {
 		nugget_entity := bc.nugget_entities[i];
 		if nugget_entity == null || !#alive(nugget_entity) continue;
-		nugget := nugget_entity->get_component(BC_Lil_Nugget);
+		nugget := nugget_entity.get_component(BC_Lil_Nugget);
 		if nugget != null && nugget.is_stampeding {
 			has_stampeding = true;
 			break;
@@ -1212,7 +1212,7 @@ bc_viscera_spine_ready: bool;
 
 rr_bc_draw_trampled_overlay :: proc(player: Player) {
 	if player == null return;
-	if !player->is_local() return;
+	if !player.is_local() return;
 	if !player.bc_trampled return;
 
 	now := get_time();
@@ -1221,8 +1221,8 @@ rr_bc_draw_trampled_overlay :: proc(player: Player) {
 	// Lazy-init viscera spine
 	if !bc_viscera_spine_ready {
 		bc_viscera_spine = Spine_Instance.create();
-		bc_viscera_spine->set_skeleton(get_asset(Spine_Asset, BC_VISCERA_RIG));
-		bc_viscera_spine->set_animation("viscera_splash", false, 0);
+		bc_viscera_spine.set_skeleton(get_asset(Spine_Asset, BC_VISCERA_RIG));
+		bc_viscera_spine.set_animation("viscera_splash", false, 0);
 		bc_viscera_spine_ready = true;
 	}
 
@@ -1243,9 +1243,9 @@ rr_bc_draw_trampled_overlay :: proc(player: Player) {
 
 rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 	if player == null return;
-	if !player->is_local_or_server() return;
+	if !player.is_local_or_server() return;
 
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return;
 	if !bc.camera_active return;
 
@@ -1271,7 +1271,7 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 	ts.outline_thickness = 2;
 	ts.outline_color = v4.{0, 0, 0, 1};
 
-	label_rect := safe->top_center_rect()->grow(22, 200, 22, 200)->offset(0, -120);
+	label_rect := safe.top_center_rect().grow(22, 200, 22, 200).offset(0, -120);
 	UI.text(label_rect, ts, "Nugget Camera %/%", {bc.camera_nugget_index + 1, bc.nugget_entities.count});
 
 	// Warning text below label
@@ -1284,7 +1284,7 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 	info_ts.outline_thickness = 2;
 	info_ts.outline_color = v4.{0, 0, 0, 1};
 
-	warn_rect := label_rect->offset(0, -32);
+	warn_rect := label_rect.offset(0, -32);
 	UI.text(warn_rect, info_ts, "You are frozen and vulnerable");
 
 	bs := UI.default_button_settings();
@@ -1295,18 +1295,18 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 	btn_ts.outline_thickness = 2;
 	btn_ts.outline_color = v4.{0, 0, 0, 1};
 
-	control_area := safe->bottom_center_rect()->grow(34, 300, 34, 300)->offset(0, 86);
-	exit_rect := control_area->subrect(0.32, 0.0, 0.68, 1.0);
+	control_area := safe.bottom_center_rect().grow(34, 300, 34, 300).offset(0, 86);
+	exit_rect := control_area.subrect(0.32, 0.0, 0.68, 1.0);
 
 	if bc.nugget_entities.count > 1 {
-		list_bg_rect := control_area->offset(0, 86)->grow(62, 0, 62, 0);
+		list_bg_rect := control_area.offset(0, 86).grow(62, 0, 62, 0);
 		UI.quad(list_bg_rect, core_globals.white_sprite, v4.{0.05, 0.02, 0.02, 0.72});
 
-		list_label_rect := list_bg_rect->top_center_rect()->grow(14, 160, 14, 160)->offset(0, -10);
+		list_label_rect := list_bg_rect.top_center_rect().grow(14, 160, 14, 160).offset(0, -10);
 		UI.text(list_label_rect, info_ts, "Jump to Nugget");
 
-		list_content := list_bg_rect->inset(36, 18, 16, 18);
-		row_top := list_content->cut_top(44);
+		list_content := list_bg_rect.inset(36, 18, 16, 18);
+		row_top := list_content.cut_top(44);
 		row_bottom := list_content;
 
 		top_count := min(bc.nugget_entities.count, 5);
@@ -1322,7 +1322,7 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 			}
 
 			button_label := format_string("%", {i + 1});
-			if UI.button(top_layout->next(88), select_bs, btn_ts, button_label).clicked {
+			if UI.button(top_layout.next(88), select_bs, btn_ts, button_label).clicked {
 				rr_bc_camera_select(player, i);
 			}
 		}
@@ -1342,14 +1342,14 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 				}
 
 				button_label := format_string("%", {nugget_index + 1});
-				if UI.button(bottom_layout->next(88), select_bs, btn_ts, button_label).clicked {
+				if UI.button(bottom_layout.next(88), select_bs, btn_ts, button_label).clicked {
 					rr_bc_camera_select(player, nugget_index);
 				}
 			}
 		}
 
-		prev_rect := control_area->subrect(0.0, 0.0, 0.28, 1.0);
-		next_rect := control_area->subrect(0.72, 0.0, 1.0, 1.0);
+		prev_rect := control_area.subrect(0.0, 0.0, 0.28, 1.0);
+		next_rect := control_area.subrect(0.72, 0.0, 1.0, 1.0);
 
 		UI.push_id("bc_cam_prev", {});
 		defer UI.pop_id();
@@ -1376,13 +1376,13 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 // =============================================================================
 
 rr_bc_cleanup :: proc(player: Player) {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc != null {
 		rr_bc_destroy_all_nuggets(bc);
 		rr_bc_destroy_all_nests(bc);
 	}
 	rr_bc_destroy_creature_entity(player);
 	rr_bc_exit_camera(player);
-	player->remove_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
-	player->remove_freeze_reason(BC_CAMERA_LOCK_REASON);
+	player.remove_disable_movement_input_reason(BC_TRANSFORM_LOCK_REASON);
+	player.remove_freeze_reason(BC_CAMERA_LOCK_REASON);
 }

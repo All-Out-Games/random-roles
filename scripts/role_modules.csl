@@ -119,20 +119,20 @@ Mimicer_Module :: class : Component {
 		local_player, ok := Game.get_local_player();
 		if !ok return;
 
-		player := entity->get_component(Player);
+		player := entity.get_component(Player);
 		if player == null return;
 
 		if is_prowling && prowl_near_wall && local_player.player_type != Player_Type.TRAITOR {
-			player->add_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
-			player->add_name_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+			player.add_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+			player.add_name_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
 			if creature_visible && creature_entity != null {
-				creature_entity->set_local_enabled(false);
+				creature_entity.set_local_enabled(false);
 			}
 		} else {
-			player->remove_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
-			player->remove_name_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+			player.remove_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
+			player.remove_name_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
 			if creature_visible && creature_entity != null {
-				creature_entity->set_local_enabled(true);
+				creature_entity.set_local_enabled(true);
 			}
 		}
 	}
@@ -179,7 +179,6 @@ Big_Charlie_Module :: class : Component {
 
 // --- Lily Lovebraids ---
 Lily_Module :: class : Component {
-	braid_points: int;
 	kills: int;
 
 	// Transform (Schleem ↔ Lily)
@@ -222,7 +221,7 @@ Lily_Module :: class : Component {
 	pull_tree_entity: Entity;
 	pull_snapping: bool;
 
-	// Tea Party (single target)
+	// Tea Party (single target, 3 cups)
 	tea_table_entity: Entity;
 	tea_table_animator: Spine_Animator;
 	tea_tray_entity: Entity;
@@ -231,10 +230,10 @@ Lily_Module :: class : Component {
 	tea_party_ends_at: float;
 	tea_party_start_time: float;
 	tea_party_target_id: u64;
-	tea_party_poison_cup: int;     // 1=left, 2=right
+	tea_party_cup_effects: [3]int;   // shuffled effect per cup index: 0=caffeine, 1=poison, 2=live
 	tea_party_choice_deadline: float;
 	tea_party_victim_chose: bool;
-	tea_party_chosen_cup: int;       // which cup was picked (1 or 2)
+	tea_party_chosen_cup: int;       // which cup was picked (1, 2, or 3)
 	tea_party_settle_at: float;      // when cup arrives in front of player
 	tea_party_drinking: bool;        // drink anim playing
 	tea_party_drink_done_at: float;  // when drink anim finishes → apply effect
@@ -246,14 +245,92 @@ Lily_Module :: class : Component {
 	mind_control_active: bool;
 	mind_control_ends_at: float;
 	mind_control_target_id: u64;
+	mind_control_picking: bool; // UIK player picker is open
+
+	// String Trap
+	dragging_live_player_id: u64; // entity ID of trapped player being dragged
+
+	// Spider (Leg Steal)
+	spider_active: bool;
+	spider_entity: Entity;
+	spider_animator: Spine_Animator;
+	spider_has_legs: bool;          // spider successfully stole legs
+	spider_victim_id: u64;          // entity ID of player whose legs were stolen
+	spider_return_deadline: float;  // time by which spider must reach player
+	spider_attack_cooldown: float;  // prevent spam chomps
+	spider_leg_sprite: Entity;      // dismembered leg shown on spider while carrying
+
+	// Above-head carried item icon entities (shadow-maskable)
+	carried_eye_icon: Entity;
+	carried_leg_icon: Entity;
+
+	// Eye Steal (Machine)
+	eye_machine_active: bool;
+	eye_machine_pos: v2;              // current world position of the machine/camera
+	eye_machine_tube_entity: Entity;  // suction tube sprite (visible to all)
+	eye_machine_aoe_entity: Entity;   // AOE reticle (visible to Lily only)
+	eye_machine_camera_saved_size: float;
+	eye_machine_camera_saved_follow: bool;
+	eye_machine_has_target: bool;     // a valid player is in range
+	eye_machine_lowering: bool;       // zoom-in + suction phase
+	eye_machine_lower_done_at: float; // when suction finishes → steal
+	eye_machine_lower_start_at: float; // when attack started (for lerps)
+	eye_machine_linger_until: float;  // tube fly-up + camera return phase
+	eye_machine_linger_start: float;  // when linger started
+	eye_machine_victim_pos: v2;       // victim world pos (camera target)
+	eye_machine_victim_id: u64;       // frozen victim entity ID
+	eye_machine_suction_sfx_id: u64;  // looping suction SFX handle
+
+	// Eye Pickup (dropped after machine steals eyes)
+	eye_pickup_entity: Entity;
+	eye_pickup_animator: Spine_Animator;
+	eye_pickup_active: bool;
+	eye_pickup_victim_id: u64;        // whose eyes these are
+
+	// Leg Pickup (dropped after tea party poison or spider steal)
+	leg_pickup_entity: Entity;
+	leg_pickup_active: bool;
+	leg_pickup_victim_id: u64;        // whose legs these are
 
 	// Deathbraid
 	deathbraid_active: bool;
 	deathbraid_tree_entity: Entity;
 	deathbraid_mouth_entity: Entity;
 	deathbraid_ground_entity: Entity;
+	deathbraid_vortex_entity: Entity;
+	deathbraid_tentacle_entities: [..]Entity;
 	deathbraid_start_time: float;
+	deathbraid_camera_saved_size: float;
+	deathbraid_pull_order: [..]u64;     // entity IDs sorted by distance, for staggered pull
+
 
 	// Web Sense passive arrow tracking
 	web_sense_arrow_targets: [..]u64;
+
+	// Client-side invisibility for mind control & spider (hide from non-traitors)
+	ao_on_state_sync :: method() {
+		local_player, ok := Game.get_local_player();
+		if !ok return;
+
+		player := entity.get_component(Player);
+		if player == null return;
+
+		is_using_ability := mind_control_active || spider_active;
+
+		if is_using_ability && local_player.player_type != Player_Type.TRAITOR {
+			player.add_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+			player.add_name_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+			// Hide creature entity from non-traitors during abilities (mind control uses lily form)
+			if creature_entity != null && #alive(creature_entity) {
+				creature_entity.set_local_enabled(false);
+			}
+		} else {
+			player.remove_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+			player.remove_name_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+			// Restore creature visibility if it should be showing
+			if creature_visible && creature_entity != null && #alive(creature_entity) {
+				creature_entity.set_local_enabled(true);
+			}
+		}
+	}
 }

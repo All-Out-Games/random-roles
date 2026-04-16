@@ -28,11 +28,11 @@ rr_draw_vote_outcome_panel :: proc() {
 
 	UI.quad(screen, white, v4.{0, 0, 0, 0.82});
 
-	panel_rect := screen->center_rect()->grow(470, 700, 470, 700)->offset(120, 0);
+	panel_rect := screen.center_rect().grow(470, 700, 470, 700).offset(120, 0);
 	rr_ui_draw_modal_panel(panel_rect);
 
-	content := panel_rect->inset(26);
-	header := content->cut_top(80);
+	content := panel_rect.inset(26);
+	header := content.cut_top(80);
 	body := content;
 
 	title_ts := UI.default_text_settings();
@@ -62,7 +62,7 @@ rr_draw_vote_outcome_panel :: proc() {
 		p := get_player_by_entity_id(rr_last_vote_ejected_player_id);
 		name := "Someone";
 		if p != null {
-			name = p.entity->get_name();
+			name = p.entity.get_name();
 		}
 		message = format_string("% has been ejected!", .{name});
 	}
@@ -88,10 +88,10 @@ rr_draw_vote_reveal_overlay :: proc() {
 	UI.push_layer(20010);
 	defer UI.pop_layer();
 
-	panel_rect := screen->center_rect()->grow(470, 700, 470, 700)->offset(120, 0);
-	content := panel_rect->inset(26);
-	header := content->cut_top(120);
-	footer := content->cut_bottom(120);
+	panel_rect := screen.center_rect().grow(470, 700, 470, 700).offset(120, 0);
+	content := panel_rect.inset(26);
+	header := content.cut_top(120);
+	footer := content.cut_bottom(120);
 	grid := content;
 
 	// --- Build vote lists (entity IDs for stable network matching) ---
@@ -117,8 +117,8 @@ rr_draw_vote_reveal_overlay :: proc() {
 					break;
 				}
 			}
-			skip_voters->append(voter);
-			skip_sort_ids->append(voter.entity.id);
+			skip_voters.append(voter);
+			skip_sort_ids.append(voter.entity.id);
 			sk := skip_voters.count - 1;
 			while sk > ins {
 				p := sk - 1;
@@ -140,10 +140,10 @@ rr_draw_vote_reveal_overlay :: proc() {
 			}
 		}
 
-		voters->append(voter);
-		voted_target_ids->append(voter.voted_for.entity.id);
-		is_presidential_votes->append(voter.player_role == Player_Role.PRESIDENT);
-		voter_sort_ids->append(voter.entity.id);
+		voters.append(voter);
+		voted_target_ids.append(voter.voted_for.entity.id);
+		is_presidential_votes.append(voter.player_role == Player_Role.PRESIDENT);
+		voter_sort_ids.append(voter.entity.id);
 
 		k := voters.count - 1;
 		while k > insert_idx {
@@ -165,12 +165,12 @@ rr_draw_vote_reveal_overlay :: proc() {
 	rows :: 3;
 	tile_aspect := 3.15;
 	if vote_tile_backing != null {
-		tile_aspect = vote_tile_backing->get_aspect();
+		tile_aspect = vote_tile_backing.get_aspect();
 	}
 
 	spacing := 16.0;
-	gw := grid->width();
-	gh := grid->height();
+	gw := grid.width();
+	gh := grid.height();
 	max_w_per := (gw - spacing * (cols - 1).(float)) / cols.(float);
 	max_h_per := (gh - spacing * (rows - 1).(float)) / rows.(float);
 	card_h := min(max_h_per, max_w_per / tile_aspect);
@@ -192,13 +192,13 @@ rr_draw_vote_reveal_overlay :: proc() {
 		y0 := y_top - card_h;
 		card_rect := Rect.{v2.{x0, y0}, v2.{x0 + card_w, y0 + card_h}};
 
-		tile_entity_ids->append(p.entity.id);
-		target_rects->append(card_rect);
+		tile_entity_ids.append(p.entity.id);
+		target_rects.append(card_rect);
 	}
 
 	marker_slots: [..]int;
 	for i: 0..tile_entity_ids.count-1 {
-		marker_slots->append(0);
+		marker_slots.append(0);
 	}
 
 	// Derive reveal start from the synced global end time (avoids per-instance
@@ -240,13 +240,13 @@ rr_draw_vote_reveal_overlay :: proc() {
 		slot := marker_slots[target_idx];
 		marker_slots[target_idx] += 1;
 
-		marker_size := clamp(target_rect->height() * 0.25, 22.0, 40.0);
+		marker_size := clamp(target_rect.height() * 0.25, 22.0, 40.0);
 		gap := marker_size * 0.15;
 
-		tile_center := target_rect->center();
+		tile_center := target_rect.center();
 		base_x := tile_center.x + slot.(float) * (marker_size + gap);
 		// Raise marker line so dots sit in the visual center of each vote tile.
-		base_y := tile_center.y + target_rect->height() * 0.10;
+		base_y := tile_center.y + target_rect.height() * 0.10;
 
 		local_t := reveal_elapsed - appearance_time;
 		appear_t := clamp(local_t / appear_seconds, 0.0, 1.0);
@@ -256,7 +256,7 @@ rr_draw_vote_reveal_overlay :: proc() {
 		half := marker_size * 0.5 * anim_scale;
 		draw_rect := Rect.{v2.{base_x - half, base_y - half}, v2.{base_x + half, base_y + half}};
 		if vote_point != null {
-			draw_rect = draw_rect->fit_aspect(vote_point->get_aspect());
+			draw_rect = draw_rect.fit_aspect(vote_point.get_aspect());
 		}
 
 		voter := voters[i];
@@ -284,17 +284,17 @@ rr_draw_vote_reveal_overlay :: proc() {
 
 	// --- Draw skip vote markers to the right of the skip button ---
 	if skip_voters.count > 0 {
-		footer_inner := footer->inset(18)->cut_top_unscaled(20);
-		skip_btn_rect := footer_inner->bottom_center_rect()->grow(36, 260, 36, 260);
+		footer_inner := footer.inset(18).cut_top_unscaled(20);
+		skip_btn_rect := footer_inner.bottom_center_rect().grow(36, 260, 36, 260);
 		vote_skip_button := get_asset(Texture_Asset, "ui/voting/skip_vote_button.png");
 		if vote_skip_button != null {
-			skip_btn_rect = skip_btn_rect->fit_aspect(vote_skip_button->get_aspect());
+			skip_btn_rect = skip_btn_rect.fit_aspect(vote_skip_button.get_aspect());
 		}
 
-		skip_marker_size := clamp(skip_btn_rect->height() * 0.45, 22.0, 40.0);
+		skip_marker_size := clamp(skip_btn_rect.height() * 0.45, 22.0, 40.0);
 		skip_gap := skip_marker_size * 0.15;
 		skip_start_x := skip_btn_rect.max.x + skip_gap + skip_marker_size * 0.5;
-		skip_cy := skip_btn_rect->center().y;
+		skip_cy := skip_btn_rect.center().y;
 
 		total_vote_count := voters.count;
 
@@ -315,7 +315,7 @@ rr_draw_vote_reveal_overlay :: proc() {
 			half := skip_marker_size * 0.5 * anim_scale;
 			draw_rect := Rect.{v2.{sx - half, skip_cy - half}, v2.{sx + half, skip_cy + half}};
 			if vote_point != null {
-				draw_rect = draw_rect->fit_aspect(vote_point->get_aspect());
+				draw_rect = draw_rect.fit_aspect(vote_point.get_aspect());
 			}
 
 			voter := skip_voters[i];
@@ -354,12 +354,12 @@ rr_draw_recent_deaths_ui :: proc(local_player: Player, open_time: float) -> bool
 
 	UI.quad(screen, white, v4.{0, 0, 0, overlay_alpha});
 
-	panel_rect := screen->center_rect()->grow(470, 700, 470, 700)->offset(x_off + 120.0, 0);
+	panel_rect := screen.center_rect().grow(470, 700, 470, 700).offset(x_off + 120.0, 0);
 	rr_ui_draw_modal_panel(panel_rect);
 
-	content := panel_rect->inset(24);
-	header := content->cut_top(70);
-	footer := content->cut_bottom(72);
+	content := panel_rect.inset(24);
+	header := content.cut_top(70);
+	footer := content.cut_bottom(72);
 
 	title_ts := UI.default_text_settings();
 	title_ts.size = 44;
@@ -373,7 +373,7 @@ rr_draw_recent_deaths_ui :: proc(local_player: Player, open_time: float) -> bool
 
 	// Scrollable list of deaths since last meeting.
 	scroll_area := content;
-	scroll_bar_area := scroll_area->cut_right(10)->inset(2);
+	scroll_bar_area := scroll_area.cut_right(10).inset(2);
 
 	svs: Scroll_View_Settings;
 	svs.vertical = true;
@@ -394,7 +394,7 @@ rr_draw_recent_deaths_ui :: proc(local_player: Player, open_time: float) -> bool
 		row_ts.drop_shadow_color = v4.{0, 0, 0, 1};
 
 		if deaths_since_last_meeting.elements.count <= 0 {
-			none_rect := list_rect->cut_top(64);
+			none_rect := list_rect.cut_top(64);
 			row_ts.halign = .CENTER;
 			UI.text(none_rect, row_ts, "None");
 		} else {
@@ -403,25 +403,25 @@ rr_draw_recent_deaths_ui :: proc(local_player: Player, open_time: float) -> bool
 				p := get_player_by_entity_id(id);
 				name := "Unknown";
 				if p != null {
-					name = p.entity->get_name();
+					name = p.entity.get_name();
 				}
 
-				row := list_rect->cut_top(64);
-				UI.quad(row->inset(2), white, v4.{0.08, 0.1, 0.14, 0.65});
-				UI.text(row->inset(14, 14, 14, 14), row_ts, name);
+				row := list_rect.cut_top(64);
+				UI.quad(row.inset(2), white, v4.{0.08, 0.1, 0.14, 0.65});
+				UI.text(row.inset(14, 14, 14, 14), row_ts, name);
 
-				list_rect->cut_top(8);
+				list_rect.cut_top(8);
 			}
 		}
 	}
 
 	// Manual scroll bar
-	scroll_bar_rect := sv->compute_scroll_bar_rect(scroll_bar_area);
+	scroll_bar_rect := sv.compute_scroll_bar_rect(scroll_bar_area);
 	UI.quad(scroll_bar_area, white, v4.{0.025, 0.025, 0.025, 1});
 	UI.quad(scroll_bar_rect, white, v4.{0.12, 0.12, 0.12, 1});
 
 	// Continue button
-	btn_rect := footer->center_rect()->grow(18, 170, 18, 170);
+	btn_rect := footer.center_rect().grow(18, 170, 18, 170);
 	bs := UI.default_button_settings();
 	bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_2.png"); // green
 	bs.press_scaling = 0.96;
@@ -441,7 +441,7 @@ rr_draw_recent_deaths_ui :: proc(local_player: Player, open_time: float) -> bool
 rr_draw_voting_ui :: proc(local_player: Player) {
 	screen := UI.get_safe_screen_rect();
 	// Note: `UI.spine` is affected by the UI scale factor. Our tile layout math uses rect
-	// pixel sizes (from `rect->width()/height()`), so convert any pixel-derived scale values
+	// pixel sizes (from `rect.width()/height()`), so convert any pixel-derived scale values
 	// back into "1080p units" by dividing by the current UI scale factor.
 	ui_scale := UI.get_current_scale_factor();
 	if ui_scale <= 0.001 { ui_scale = 1.0; }
@@ -494,7 +494,7 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 	UI.quad(screen, white, c_overlay);
 
 	// Main panel (9-sliced)
-	panel_rect := screen->center_rect()->grow(470, 700, 470, 700)->offset(120, 0);
+	panel_rect := screen.center_rect().grow(470, 700, 470, 700).offset(120, 0);
 	{
 		bs_panel := UI.default_button_settings();
 		bs_panel.sprite = kit_panel;
@@ -515,9 +515,9 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 		UI.begin_button(panel_rect, bs_panel, {}, ""); { defer UI.end_button(); }
 	}
 
-	content := panel_rect->inset(26);
-	header := content->cut_top(120);
-	footer := content->cut_bottom(120);
+	content := panel_rect.inset(26);
+	header := content.cut_top(120);
+	footer := content.cut_bottom(120);
 	grid := content;
 
 	// --- Timer (top-right) ---
@@ -534,12 +534,12 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 	if pct < 0.0 { pct = 0.0; }
 	if pct > 1.0 { pct = 1.0; }
 
-	title_row := header->cut_top(64);
+	title_row := header.cut_top(64);
 	title_full := title_row;
-	called_by_w := min(320.0, title_row->width() * 0.33);
-	called_by_area := title_row->cut_left_unscaled(called_by_w)->inset(6, 6, 6, 6);
-	timer_w := min(310.0, title_row->width() * 0.33);
-	timer_area := title_row->cut_right_unscaled(timer_w);
+	called_by_w := min(320.0, title_row.width() * 0.33);
+	called_by_area := title_row.cut_left_unscaled(called_by_w).inset(6, 6, 6, 6);
+	timer_w := min(310.0, title_row.width() * 0.33);
+	timer_area := title_row.cut_right_unscaled(timer_w);
 	title_rect := title_full;
 
 	title_ts := UI.default_text_settings();
@@ -552,7 +552,7 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 	title_ts.outline_color = v4.{0, 0, 0, 1};
 	UI.text(title_rect, title_ts, "Voting Screen");
 
-	timer_box := timer_area->inset(12, 18, 12, 18);
+	timer_box := timer_area.inset(12, 18, 12, 18);
 	timer_panel_color := v4.{0.14, 0.26, 0.55, 0.92};
 	UI.quad(timer_box, white, timer_panel_color);
 
@@ -562,17 +562,17 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 	} else if remaining <= 30.0 {
 		t_color = v4.{1.0, 0.85, 0.25, 1.0};
 	}
-	badge_size := timer_box->height() * 2;
-	badge_rect := timer_box->left_center_rect()->grow_unscaled(badge_size * 0.5, badge_size * 0.5, badge_size * 0.5, badge_size * 0.5);
-	badge_rect = badge_rect->offset_unscaled(-badge_size * 0.3, 0.2);
+	badge_size := timer_box.height() * 2;
+	badge_rect := timer_box.left_center_rect().grow_unscaled(badge_size * 0.5, badge_size * 0.5, badge_size * 0.5, badge_size * 0.5);
+	badge_rect = badge_rect.offset_unscaled(-badge_size * 0.3, 0.2);
 	if timer_texture != null {
-		badge_draw := badge_rect->fit_aspect(timer_texture->get_aspect());
+		badge_draw := badge_rect.fit_aspect(timer_texture.get_aspect());
 		UI.quad(badge_draw, timer_texture, v4.{1, 1, 1, 1});
 	} else {
 		UI.quad(badge_rect, white, v4.{0.12, 0.16, 0.25, 1});
 	}
 
-	num_rect := badge_rect->inset(12);
+	num_rect := badge_rect.inset(12);
 	num_ts := UI.default_text_settings();
 	num_ts.size = 42;
 	num_ts.color = t_color;
@@ -582,16 +582,16 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 	num_ts.outline_thickness = 3;
 	num_ts.outline_color = v4.{0, 0, 0, 1};
 
-	bar_rect := timer_box->inset(12, 16, 12, 16)->cut_bottom_unscaled(8);
+	bar_rect := timer_box.inset(12, 16, 12, 16).cut_bottom_unscaled(8);
 	UI.quad(bar_rect, white, v4.{0.20, 0.45, 0.85, 0.95});
-	fill := bar_rect->inset(2)->subrect(0, 0, pct, 1);
+	fill := bar_rect.inset(2).subrect(0, 0, pct, 1);
 	UI.quad(fill, white, v4.{0.95, 0.20, 0.20, 1});
 
 	UI.text(num_rect, num_ts, format_string("%", .{format_float(remaining, decimals=0)}));
 
 	// --- Called by (top-left) ---
-	icon_rect := called_by_area->cut_left_unscaled(64);
-	label_rect := called_by_area->cut_top_unscaled(24);
+	icon_rect := called_by_area.cut_left_unscaled(64);
+	label_rect := called_by_area.cut_top_unscaled(24);
 	name_rect := called_by_area;
 
 	label_ts := UI.default_text_settings();
@@ -617,13 +617,13 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 	if meeting_initiator_id != 0 {
 		caller := get_player_by_entity_id(meeting_initiator_id);
 		caller_name = "Unknown";
-		if caller != null { caller_name = caller.entity->get_name(); }
+		if caller != null { caller_name = caller.entity.get_name(); }
 		initiator_str = "Called by:";
 	}
 	if initiator_str.count > 0 {
 		if call_meeting_icon != null {
-			icon_draw := icon_rect->fit_aspect(call_meeting_icon->get_aspect());
-			icon_draw = icon_draw->scale(-1.0, 1.0);
+			icon_draw := icon_rect.fit_aspect(call_meeting_icon.get_aspect());
+			icon_draw = icon_draw.scale(-1.0, 1.0);
 			UI.quad(icon_draw, call_meeting_icon, v4.{1, 1, 1, 1});
 		}
 		UI.text(label_rect, label_ts, initiator_str);
@@ -647,12 +647,12 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 		rows :: 3;
 		tile_aspect := 3.15;
 		if vote_tile_backing != null {
-			tile_aspect = vote_tile_backing->get_aspect();
+			tile_aspect = vote_tile_backing.get_aspect();
 		}
 
 		spacing := 16.0;
-		gw := grid->width();
-		gh := grid->height();
+		gw := grid.width();
+		gh := grid.height();
 
 		max_w_per := (gw - spacing * (cols - 1).(float)) / cols.(float);
 		max_h_per := (gh - spacing * (rows - 1).(float)) / rows.(float);
@@ -791,14 +791,14 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 				}
 
 				if vote_tile_top != null {
-					overlay_aspect := vote_tile_top->get_aspect();
-					overlay_w := draw_rect->width();
+					overlay_aspect := vote_tile_top.get_aspect();
+					overlay_w := draw_rect.width();
 					overlay_h := overlay_w / overlay_aspect;
-					if overlay_h > draw_rect->height() {
-						overlay_h = draw_rect->height();
+					if overlay_h > draw_rect.height() {
+						overlay_h = draw_rect.height();
 						overlay_w = overlay_h * overlay_aspect;
 					}
-					overlay_x0 := draw_rect.min.x + (draw_rect->width() - overlay_w) * 0.5;
+					overlay_x0 := draw_rect.min.x + (draw_rect.width() - overlay_w) * 0.5;
 					overlay_y1 := draw_rect.max.y;
 					overlay_rect := Rect.{v2.{overlay_x0, overlay_y1 - overlay_h}, v2.{overlay_x0 + overlay_w, overlay_y1}};
 					UI.quad(overlay_rect, vote_tile_top, top_color);
@@ -809,7 +809,7 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 				}
 			}
 
-			rig_area := draw_rect->subrect(0.15, 0.1, 0.26, 0.8);
+			rig_area := draw_rect.subrect(0.15, 0.1, 0.26, 0.8);
 			if p.animator != null && p.animator.instance != null {
 				if is_dead {
 					UI.push_color_multiplier(v4.{0.55, 0.55, 0.55, 0.95});
@@ -822,19 +822,19 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 				}
 
 				if is_selected || is_dead {
-					shadow_pos := rig_area->center() + v2.{-draw_rect->width() * 0.06, -draw_rect->height() * 0.01};
-					shadow_size := (rig_area->height() * 0.55) / ui_scale;
-					shadow_rect := Rect.{shadow_pos, shadow_pos}->grow(shadow_size);
-					UI.quad(shadow_rect->fit_aspect(vote_schleem_shadow->get_aspect()), vote_schleem_shadow, v4.{1, 1, 1, 1.0});
+					shadow_pos := rig_area.center() + v2.{-draw_rect.width() * 0.06, -draw_rect.height() * 0.01};
+					shadow_size := (rig_area.height() * 0.55) / ui_scale;
+					shadow_rect := Rect.{shadow_pos, shadow_pos}.grow(shadow_size);
+					UI.quad(shadow_rect.fit_aspect(vote_schleem_shadow.get_aspect()), vote_schleem_shadow, v4.{1, 1, 1, 1.0});
 				}
 
-				s := (rig_area->height() * 1.15) / ui_scale;
+				s := (rig_area.height() * 1.15) / ui_scale;
 				s = clamp(s, 90.0, 165.0);
-				pos := rig_area->center() + v2.{-draw_rect->width() * 0.01, -draw_rect->height() * 0.30};
+				pos := rig_area.center() + v2.{-draw_rect.width() * 0.01, -draw_rect.height() * 0.30};
 				UI.spine(pos, p.animator.instance, v2.{s, s}, 0.0);
 			}
 
-			name_area := draw_rect->subrect(0.20, 0.00, 1.00, 0.50)->inset(10, 10, 10, 10);
+			name_area := draw_rect.subrect(0.20, 0.00, 1.00, 0.50).inset(10, 10, 10, 10);
 			if is_selected {
 				name_ts.color = v4.{1, 1, 1, 1};
 			} else if is_dead {
@@ -842,30 +842,30 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 			} else {
 				name_ts.color = get_vote_tile_name(p.avatar_color);
 			}
-			UI.text(name_area, name_ts, p.entity->get_name());
+			UI.text(name_area, name_ts, p.entity.get_name());
 
 			if check_icon != null && p.has_voted {
-				check_rect := draw_rect->top_right_rect()->offset(-24, -24)->grow(22);
-				UI.quad(check_rect->fit_aspect(check_icon->get_aspect()), check_icon, c_good);
+				check_rect := draw_rect.top_right_rect().offset(-24, -24).grow(22);
+				UI.quad(check_rect.fit_aspect(check_icon.get_aspect()), check_icon, c_good);
 			}
 
 			if gun_icon != null && is_selected {
-				gun_rect := draw_rect->top_left_rect()->offset(150, -24)->grow(32);
-				UI.quad(gun_rect->fit_aspect(gun_icon->get_aspect()), gun_icon, v4.{1, 1, 1, 1});
+				gun_rect := draw_rect.top_left_rect().offset(150, -24).grow(32);
+				UI.quad(gun_rect.fit_aspect(gun_icon.get_aspect()), gun_icon, v4.{1, 1, 1, 1});
 			}
 
 			if is_dead {
 				if dead_icon != null {
-					dead_rect := draw_rect->center_rect()->offset(0, 0)->grow(42);
-					UI.quad(dead_rect->fit_aspect(dead_icon->get_aspect()), dead_icon, v4.{1, 1, 1, 1});
+					dead_rect := draw_rect.center_rect().offset(0, 0).grow(42);
+					UI.quad(dead_rect.fit_aspect(dead_icon.get_aspect()), dead_icon, v4.{1, 1, 1, 1});
 				}
 			}
 
 			if clicked && can_vote_for {
 				cast_vote(local_player, p);
-				if local_player != null && local_player->is_local() {
+				if local_player != null && local_player.is_local() {
 					sfx := SFX.default_sfx_desc();
-					sfx->set_position(local_player.entity.world_position);
+					sfx.set_position(local_player.entity.world_position);
 					sfx.volume = 0.85;
 					sfx.volume_perturb = 0.1;
 					sfx.speed_perturb = 0.05;
@@ -878,8 +878,8 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 	}
 
 	// --- Footer: Skip Vote button ---
-	footer_inner := footer->inset(18)->cut_top_unscaled(20);
-	btn_rect := footer_inner->bottom_center_rect()->grow(36, 260, 36, 260);
+	footer_inner := footer.inset(18).cut_top_unscaled(20);
+	btn_rect := footer_inner.bottom_center_rect().grow(36, 260, 36, 260);
 
 	skip_bs := UI.default_button_settings();
 	skip_bs.sprite = vote_skip_button;
@@ -907,14 +907,14 @@ rr_draw_voting_ui :: proc(local_player: Player) {
 	}
 
 	if skip_bs.sprite != null {
-		btn_rect = btn_rect->fit_aspect(skip_bs.sprite->get_aspect());
+		btn_rect = btn_rect.fit_aspect(skip_bs.sprite.get_aspect());
 	}
 
 	if UI.button(btn_rect, skip_bs, skip_ts, "Skip Vote").clicked {
 		cast_skip_vote(local_player);
-		if local_player != null && local_player->is_local() {
+		if local_player != null && local_player.is_local() {
 			sfx := SFX.default_sfx_desc();
-			sfx->set_position(local_player.entity.world_position);
+			sfx.set_position(local_player.entity.world_position);
 			sfx.volume = 0.85;
 			sfx.volume_perturb = 0.1;
 			sfx.speed_perturb = 0.05;

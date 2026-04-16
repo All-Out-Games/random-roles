@@ -46,7 +46,7 @@ build_voted_list :: proc() -> string {
 		if v.player_state != Player_State.ALIVE continue;
 		if !v.has_voted continue;
 
-		n := v.entity->get_name();
+		n := v.entity.get_name();
 		if names.count > 0 {
 			names = format_string("%, %", .{names, n});
 		} else {
@@ -62,7 +62,7 @@ draw_ability_name_label :: proc(button_rect: Rect, label: string) {
 	bg := get_asset(Texture_Asset, "$AO/white.png");
 
 	// Draw a small strip at the bottom of the button for readability.
-	label_rect := button_rect->inset(8)->cut_bottom(30);
+	label_rect := button_rect.inset(8).cut_bottom(30);
 	UI.quad(label_rect, bg, v4.{0, 0, 0, 0.55});
 
 	ts := UI.default_text_settings();
@@ -87,7 +87,7 @@ Kill_Ability :: class : Ability_Base {
 		// GGG creature form has extended kill range (lunge)
 		kill_range := 5.0;
 		if player.player_role == Player_Role.GOO_GOO_GAGA {
-			gm := player.entity->get_component(GGG_Module);
+			gm := player.entity.get_component(GGG_Module);
 			if gm != null && gm.is_creature_form {
 				kill_range = GGG_CREATURE_KILL_RANGE;
 			}
@@ -112,7 +112,7 @@ Kill_Ability :: class : Ability_Base {
             if player.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR {
                 continue;
             }
-            finder->check(target, target.entity.world_position);
+            finder.check(target, target.entity.world_position);
         }
         return finder.closest;
     }
@@ -120,7 +120,7 @@ Kill_Ability :: class : Ability_Base {
     can_use :: method() -> bool {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
         return get_closest_alive_player(this, player) != null;
     }
@@ -133,7 +133,7 @@ Kill_Ability :: class : Ability_Base {
 
         // GGG: queue kill during active whip pull → insta-kill on arrival
 		if params.clicked && player.player_role == Player_Role.GOO_GOO_GAGA {
-			gm_whip := player.entity->get_component(GGG_Module);
+			gm_whip := player.entity.get_component(GGG_Module);
 			if gm_whip != null && gm_whip.foil_whip_active && !gm_whip.foil_whip_kill_on_arrive {
 				gm_whip.foil_whip_kill_on_arrive = true;
 				if player.player_role == Player_Role.GOO_GOO_GAGA {
@@ -149,15 +149,15 @@ Kill_Ability :: class : Ability_Base {
             closest_alive_player := get_closest_alive_player(this, player);
             if closest_alive_player != null {
 				// Face the victim and play the base kill animation on the player rig.
-				player->set_facing_right(closest_alive_player.entity.world_position.x > player.entity.world_position.x);
-				player->set_trigger("traitor_kill");
+				player.set_facing_right(closest_alive_player.entity.world_position.x > player.entity.world_position.x);
+				player.set_trigger("traitor_kill");
 
-                closest_alive_player->kill_with_killer(player.entity.id);
+                closest_alive_player.kill_with_killer(player.entity.id);
 
 				// Traitor knife kill SFX (server-authoritative; replicates to clients).
 				if Game.is_server() && player != null && player.player_type == Player_Type.TRAITOR {
 					sfx := SFX.default_sfx_desc();
-					sfx->set_position(closest_alive_player.entity.world_position);
+					sfx.set_position(closest_alive_player.entity.world_position);
 					sfx.volume = 0.35;
 					sfx.volume_perturb = 0.08;
 					sfx.speed_perturb = 0.06;
@@ -168,10 +168,10 @@ Kill_Ability :: class : Ability_Base {
 
 					// GGG pounce/wrap SFX + animation on kill
 					if player.player_role == Player_Role.GOO_GOO_GAGA {
-						gm := player.entity->get_component(GGG_Module);
+						gm := player.entity.get_component(GGG_Module);
 						if gm != null && gm.is_creature_form {
 							pounce_sfx := SFX.default_sfx_desc();
-							pounce_sfx->set_position(closest_alive_player.entity.world_position);
+							pounce_sfx.set_position(closest_alive_player.entity.world_position);
 							pounce_sfx.volume = 0.15;
 							pounce_sfx.speed_perturb = 0.05;
 							rr_play_sfx("sfx/ggg_pounce_wrap.wav", pounce_sfx);
@@ -193,7 +193,7 @@ Kill_Ability :: class : Ability_Base {
 	on_draw_button :: proc(instance: Kill_Ability, rect: Rect) {
 		p := instance.player;
 		if p != null && p.player_role == Player_Role.GOO_GOO_GAGA {
-			gm := p.entity->get_component(GGG_Module);
+			gm := p.entity.get_component(GGG_Module);
 			if gm != null && gm.is_creature_form {
 				instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/kill_wrap_player.png");
 			} else {
@@ -214,7 +214,7 @@ rr_drag_body_get_closest_draggable_corpse :: proc(player: Player) -> Corpse {
 	if game_state != Game_State.INGAME return null;
 
 	finder := make_finder(Corpse, player.entity.world_position, DRAG_BODY_GRAB_RANGE);
-	foreach corpse: component_iterator(Corpse) {
+	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
 		if corpse.has_been_reported continue;
@@ -229,14 +229,14 @@ rr_drag_body_get_closest_draggable_corpse :: proc(player: Player) -> Corpse {
 			continue;
 		}
 
-		finder->check(corpse, corpse.entity.world_position);
+		finder.check(corpse, corpse.entity.world_position);
 	}
 	return finder.closest;
 }
 
 rr_drag_body_find_corpse_by_entity_id :: proc(corpse_entity_id: u64) -> Corpse {
 	if corpse_entity_id == 0 return null;
-	foreach corpse: component_iterator(Corpse) {
+	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
 		if corpse.entity.id == corpse_entity_id {
@@ -256,21 +256,34 @@ Drag_Body_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 
 		// Allow button to stay enabled while already dragging (so you can drop).
 		if player.dragging_corpse_entity_id != 0 return true;
 		// GGG: also allow if dragging a live player
 		if player.player_role == Player_Role.GOO_GOO_GAGA {
-			gm := player.entity->get_component(GGG_Module);
+			gm := player.entity.get_component(GGG_Module);
 			if gm != null && gm.dragging_live_player_id != 0 return true;
 		}
 		// GGG human form: can also grab trapped+blinded live players
 		if player.player_role == Player_Role.GOO_GOO_GAGA {
-			gm2 := player.entity->get_component(GGG_Module);
+			gm2 := player.entity.get_component(GGG_Module);
 			if gm2 != null && !gm2.is_creature_form {
 				trapped := rr_ggg_get_closest_draggable_trapped_player(player);
+				if trapped != null return true;
+			}
+		}
+		// Lily: also allow if dragging a trapped player
+		if player.player_role == Player_Role.LILY_LOVEBRAIDS {
+			llm := player.entity.get_component(Lily_Module);
+			if llm != null && llm.dragging_live_player_id != 0 return true;
+		}
+		// Lily schleem form: can grab string-trapped players
+		if player.player_role == Player_Role.LILY_LOVEBRAIDS {
+			llm2 := player.entity.get_component(Lily_Module);
+			if llm2 != null && !llm2.is_lily_form {
+				trapped := rr_lily_get_closest_draggable_trapped_player(player);
 				if trapped != null return true;
 			}
 		}
@@ -282,9 +295,17 @@ Drag_Body_Ability :: class : Ability_Base {
 		// GGG: also check live drag
 		ggg_live_dragging := false;
 		if player != null && player.player_role == Player_Role.GOO_GOO_GAGA {
-			gm_drag := player.entity->get_component(GGG_Module);
+			gm_drag := player.entity.get_component(GGG_Module);
 			if gm_drag != null && gm_drag.dragging_live_player_id != 0 {
 				ggg_live_dragging = true;
+			}
+		}
+		// Lily: also check live drag
+		lily_live_dragging := false;
+		if player != null && player.player_role == Player_Role.LILY_LOVEBRAIDS {
+			llm_drag := player.entity.get_component(Lily_Module);
+			if llm_drag != null && llm_drag.dragging_live_player_id != 0 {
+				lily_live_dragging = true;
 			}
 		}
 
@@ -298,14 +319,30 @@ Drag_Body_Ability :: class : Ability_Base {
 				rr_ggg_stop_live_drag(player);
 				return;
 			}
+			if lily_live_dragging {
+				rr_lily_stop_live_drag(player);
+				return;
+			}
 
 			// GGG human form: try to grab a trapped+blinded live player first
 			if player.player_role == Player_Role.GOO_GOO_GAGA {
-				gm_grab := player.entity->get_component(GGG_Module);
+				gm_grab := player.entity.get_component(GGG_Module);
 				if gm_grab != null && !gm_grab.is_creature_form {
 					trapped := rr_ggg_get_closest_draggable_trapped_player(player);
 					if trapped != null {
 						rr_ggg_start_live_drag(player, trapped);
+						return;
+					}
+				}
+			}
+
+			// Lily schleem form: try to grab a string-trapped player first
+			if player.player_role == Player_Role.LILY_LOVEBRAIDS {
+				llm_grab := player.entity.get_component(Lily_Module);
+				if llm_grab != null && !llm_grab.is_lily_form {
+					trapped := rr_lily_get_closest_draggable_trapped_player(player);
+					if trapped != null {
+						rr_lily_start_live_drag(player, trapped);
 						return;
 					}
 				}
@@ -349,7 +386,7 @@ Drag_Body_Ability :: class : Ability_Base {
 						SFX.stop(player.drag_body_sfx_id);
 						player.drag_body_sfx_id = 0;
 					}
-					player->set_trigger("RESET");
+					player.set_trigger("RESET");
 				}
 				return;
 			}
@@ -432,12 +469,12 @@ rr_werewolf_clear_infection :: proc(player: Player) {
 	rr_werewolf_clear_infected_task_override(player);
 
 	// Revert wolf look.
-	player->set_trigger("RESET");
+	player.set_trigger("RESET");
 	player.werewolf_skin_enable_at = 0.0;
 	player.werewolf_skin_disable_at = get_time();
 	player.werewolf_infected_transform_trigger_at = 0.0;
 
-	player->Notify("The infection wore off!");
+	player.Notify("The infection wore off!");
 }
 
 rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_werewolf: bool) -> Player {
@@ -458,7 +495,7 @@ rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_we
 			continue;
 		}
 
-		finder->check(target, target.entity.world_position);
+		finder.check(target, target.entity.world_position);
 	}
 	return finder.closest;
 }
@@ -480,7 +517,7 @@ rr_werewolf_apply_infection :: proc(infector: Player, target: Player) {
 	target.werewolf_infection_expires_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS + WEREWOLF_INFECTION_DURATION_SECONDS;
 
 	// Bite animation plays immediately on the infector.
-	infector->set_trigger("werewolf_infection_bite");
+	infector.set_trigger("werewolf_infection_bite");
 	// The victim's transform animation + skin change is delayed so they look normal for a while.
 	// For the full delay period nothing visible happens to the victim -- no stun, no notification,
 	// no task swap. Everything reveals at the transform moment.
@@ -517,7 +554,7 @@ rr_werewolf_pass_infection :: proc(biter: Player, new_target: Player) {
 	new_target.werewolf_infection_expires_at = get_time() + 1.0 + WEREWOLF_INFECTION_DURATION_SECONDS;
 
 	// Restore the cured player's look.
-	biter->set_trigger("RESET");
+	biter.set_trigger("RESET");
 	biter.werewolf_skin_enable_at = 0.0;
 	biter.werewolf_skin_disable_at = get_time();
 	biter.werewolf_infected_transform_trigger_at = 0.0;
@@ -529,16 +566,16 @@ rr_werewolf_pass_infection :: proc(biter: Player, new_target: Player) {
 	new_target.werewolf_skin_disable_at = 0.0;
 
 	// Apply effects immediately (notification, task override, stun).
-	new_target->Notify("You were bitten! Pass it on to return to normal.");
+	new_target.Notify("You were bitten! Pass it on to return to normal.");
 	rr_werewolf_apply_infected_task_override(new_target);
 
-	stun := new_target.entity->get_component(Werewolf_Infection_Stun);
+	stun := new_target.entity.get_component(Werewolf_Infection_Stun);
 	if stun == null {
-		stun = new_target.entity->add_component(Werewolf_Infection_Stun);
+		stun = new_target.entity.add_component(Werewolf_Infection_Stun);
 	}
-	stun->arm(WEREWOLF_INFECTION_STUN_SECONDS);
+	stun.arm(WEREWOLF_INFECTION_STUN_SECONDS);
 
-	biter->Notify("You passed the bite. You're back to normal.");
+	biter.Notify("You passed the bite. You're back to normal.");
 }
 
 Werewolf_Infection_Stun :: class : Component {
@@ -548,18 +585,18 @@ Werewolf_Infection_Stun :: class : Component {
 	arm :: proc(using this: Werewolf_Infection_Stun, seconds: float) {
 		if seconds <= 0.0 { seconds = 0.1; }
 		end_time = get_time() + seconds;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
 			// Ensure this reason does not stack if arm() is called repeatedly.
-			p->remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
-			p->add_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
+			p.remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
+			p.add_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
 		}
 		active = true;
 	}
 
 	ao_update :: proc(using this: Werewolf_Infection_Stun, dt: float) {
 		if !active return;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
@@ -567,22 +604,22 @@ Werewolf_Infection_Stun :: class : Component {
 
 		// Safety: exit if gameplay ended or player died.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
+			p.remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
 			active = false;
 			return;
 		}
 
 		if get_time() >= end_time {
-			p->remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
+			p.remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
 			active = false;
 		}
 	}
 
 	ao_end :: proc(using this: Werewolf_Infection_Stun) {
 		if !active return;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
-			p->remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
+			p.remove_disable_movement_input_reason(WEREWOLF_INFECTION_STUN_REASON);
 		}
 		active = false;
 	}
@@ -595,18 +632,18 @@ Werewolf_Devour_Lock :: class : Component {
 	arm :: proc(using this: Werewolf_Devour_Lock, seconds: float) {
 		if seconds <= 0.0 { seconds = 0.1; }
 		end_time = get_time() + seconds;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
 			// Ensure this reason does not stack if arm() is called repeatedly.
-			p->remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
-			p->add_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
+			p.remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
+			p.add_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
 		}
 		active = true;
 	}
 
 	ao_update :: proc(using this: Werewolf_Devour_Lock, dt: float) {
 		if !active return;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
@@ -614,22 +651,22 @@ Werewolf_Devour_Lock :: class : Component {
 
 		// Safety: exit if gameplay ended or player died.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
+			p.remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
 			active = false;
 			return;
 		}
 
 		if get_time() >= end_time {
-			p->remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
+			p.remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
 			active = false;
 		}
 	}
 
 	ao_end :: proc(using this: Werewolf_Devour_Lock) {
 		if !active return;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
-			p->remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
+			p.remove_disable_movement_input_reason(WEREWOLF_DEVOUR_LOCK_REASON);
 		}
 		active = false;
 	}
@@ -645,11 +682,11 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.WEREWOLF return false;
-		wm := player.entity->get_component(Werewolf_Module);
+		wm := player.entity.get_component(Werewolf_Module);
 		if wm == null return false;
 		if !wm.is_wolf_form return false;
 		return rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true) != null;
@@ -665,18 +702,18 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 			target := rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true);
 			if target != null {
 				// Lock movement so the bite animation plays before control returns.
-				lock := player.entity->get_component(Werewolf_Devour_Lock);
+				lock := player.entity.get_component(Werewolf_Devour_Lock);
 				if lock == null {
-					lock = player.entity->add_component(Werewolf_Devour_Lock);
+					lock = player.entity.add_component(Werewolf_Devour_Lock);
 				}
-				lock->arm(WEREWOLF_DEVOUR_LOCK_SECONDS);
+				lock.arm(WEREWOLF_DEVOUR_LOCK_SECONDS);
 
 				// Face the target and play bite animation.
-				player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
-				player->set_trigger("werewolf_infection_bite");
+				player.set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
+				player.set_trigger("werewolf_infection_bite");
 
 				// Devour consumes the target entirely â€" no corpse left behind.
-				target->kill_with_killer_no_corpse(player.entity.id);
+				target.kill_with_killer_no_corpse(player.entity.id);
 				current_cooldown = WEREWOLF_DEVOUR_COOLDOWN_SECONDS;
 			}
 		}
@@ -697,13 +734,13 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.WEREWOLF return false;
 		// Usable in both human and wolf form.
 		// Unlock after 1 kill.
-		wm := player.entity->get_component(Werewolf_Module);
+		wm := player.entity.get_component(Werewolf_Module);
 		if wm == null return false;
 		if wm.kills < WEREWOLF_INFECT_UNLOCK_KILLS return false;
 		return rr_werewolf_find_melee_target(player, WEREWOLF_INFECT_RANGE, true) != null;
@@ -717,9 +754,9 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			wm2 := player.entity->get_component(Werewolf_Module);
+			wm2 := player.entity.get_component(Werewolf_Module);
 			if player != null && player.player_role == Player_Role.WEREWOLF && wm2 != null && wm2.kills < WEREWOLF_INFECT_UNLOCK_KILLS {
-				player->Notify(format_string("Infect locked: get %/% kills as Werewolf to unlock.", .{
+				player.Notify(format_string("Infect locked: get %/% kills as Werewolf to unlock.", .{
 					min(wm2.kills, WEREWOLF_INFECT_UNLOCK_KILLS),
 					WEREWOLF_INFECT_UNLOCK_KILLS
 				}));
@@ -740,7 +777,7 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 
 		// Locked overlay (shown until unlocked).
 		p := instance.player;
-		pwm := p.entity->get_component(Werewolf_Module);
+		pwm := p.entity.get_component(Werewolf_Module);
 		if p != null && p.player_role == Player_Role.WEREWOLF && pwm != null && pwm.kills < WEREWOLF_INFECT_UNLOCK_KILLS {
 			ts := UI.default_text_settings();
 			ts.size = 18;
@@ -749,7 +786,7 @@ Werewolf_Infecting_Bite_Ability :: class : Ability_Base {
 			ts.do_outline = true;
 			ts.outline_thickness = 2;
 			ts.outline_color = v4.{0, 0, 0, 1};
-			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+			UI.text(rect.inset(2).cut_top(20), ts, "LOCKED");
 		}
 	}
 }
@@ -766,11 +803,11 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.WEREWOLF return false;
-		wm := player.entity->get_component(Werewolf_Module);
+		wm := player.entity.get_component(Werewolf_Module);
 		if wm == null return false;
 		if !wm.is_wolf_form return false;
 		// Unlock after 2 kills.
@@ -786,9 +823,9 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			wm2 := player.entity->get_component(Werewolf_Module);
+			wm2 := player.entity.get_component(Werewolf_Module);
 			if player != null && player.player_role == Player_Role.WEREWOLF && wm2 != null && wm2.kills < WEREWOLF_CLAW_UNLOCK_KILLS {
-				player->Notify(format_string("Claw locked: get %/% kills as Werewolf to unlock.", .{
+				player.Notify(format_string("Claw locked: get %/% kills as Werewolf to unlock.", .{
 					min(wm2.kills, WEREWOLF_CLAW_UNLOCK_KILLS),
 					WEREWOLF_CLAW_UNLOCK_KILLS
 				}));
@@ -800,7 +837,7 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 			p := shoot_projectile(player.entity.world_position, activation.direction * WEREWOLF_CLAW_PROJECTILE_SPEED, 1, WEREWOLF_CLAW_PROJECTILE_LIFETIME, player.entity);
 			// Slightly bigger hit radius for a "slash" feel.
 			if p != null {
-				proj := p->get_component(RR_Projectile);
+				proj := p.get_component(RR_Projectile);
 				if proj != null {
 					proj.hit_radius = 0.65;
 				}
@@ -814,7 +851,7 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 
 		// Locked overlay (shown while in wolf form until unlocked).
 		p := instance.player;
-		pwm := p.entity->get_component(Werewolf_Module);
+		pwm := p.entity.get_component(Werewolf_Module);
 		if p != null && p.player_role == Player_Role.WEREWOLF && pwm != null && pwm.kills < WEREWOLF_CLAW_UNLOCK_KILLS {
 			ts := UI.default_text_settings();
 			ts.size = 18;
@@ -823,7 +860,7 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 			ts.do_outline = true;
 			ts.outline_thickness = 2;
 			ts.outline_color = v4.{0, 0, 0, 1};
-			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+			UI.text(rect.inset(2).cut_top(20), ts, "LOCKED");
 		}
 	}
 }
@@ -845,7 +882,7 @@ Werewolf_Pass_Bite_Ability :: class : Ability_Base {
 			if target == biter continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_role == Player_Role.WEREWOLF continue; // exclude werewolf(s)
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -853,7 +890,7 @@ Werewolf_Pass_Bite_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if !player.werewolf_infected return false;
 		return get_closest_pass_target(this, player) != null;
 	}
@@ -884,7 +921,7 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.WEREWOLF return false;
 		// Usable in both forms: transform into wolf OR revert back to schleem.
@@ -893,13 +930,13 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
-			wm := player.entity->get_component(Werewolf_Module);
+			wm := player.entity.get_component(Werewolf_Module);
 			if wm == null return;
 			if wm.is_wolf_form {
 				// Revert to schleem form early.
 				wm.is_wolf_form = false;
 				wm.transform_ends_at = 0.0;
-				player->set_trigger("RESET");
+				player.set_trigger("RESET");
 				player.werewolf_skin_enable_at = 0.0;
 				player.werewolf_skin_disable_at = get_time();
 
@@ -911,12 +948,12 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 				wm.transform_ends_at = get_time() + WEREWOLF_TRANSFORM_MAX_DURATION_SECONDS;
 
 				// Howl animation.
-				player->set_trigger("werewolf_howl");
+				player.set_trigger("werewolf_howl");
 
 				// Server-authoritative SFX (replicated to all clients).
 				if Game.is_server() {
 					sfx := SFX.default_sfx_desc();
-					sfx->set_position(player.entity.world_position);
+					sfx.set_position(player.entity.world_position);
 					sfx.volume = 0.9;
 					sfx.volume_perturb = 0.05;
 					sfx.speed_perturb = 0.05;
@@ -938,7 +975,7 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 
 	on_draw_button :: proc(instance: Werewolf_Transform_Ability, rect: Rect) {
 		p := instance.player;
-		pwm := p.entity->get_component(Werewolf_Module);
+		pwm := p.entity.get_component(Werewolf_Module);
 		if p != null && pwm != null && pwm.is_wolf_form {
 			// Swap icon to "transform back" while in wolf form.
 			instance.icon = get_asset(Texture_Asset, "sprites/icons/transform_good.png");
@@ -954,7 +991,7 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 			ts.outline_thickness = 2;
 			ts.outline_color = v4.{0, 0, 0, 1};
 			ts.color = v4.{1.0, 0.25, 0.25, 1.0};
-			UI.text(rect->inset(2)->cut_bottom(20), ts, format_string("WOLF %s", .{remaining_s}));
+			UI.text(rect.inset(2).cut_bottom(20), ts, format_string("WOLF %s", .{remaining_s}));
 		} else {
 			// Swap icon back to "transform to wolf" while in schleem form.
 			instance.icon = get_asset(Texture_Asset, "sprites/icons/transform_evil.png");
@@ -972,16 +1009,16 @@ Hitman_Mine_Stun :: class : Component {
 		stun_end_time = get_time() + seconds;
 		active = true;
 
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
-			p->add_disable_movement_input_reason(HITMAN_MINE_STUN_REASON);
-			p->set_trigger("hitman_broken_leg_idle");
+			p.add_disable_movement_input_reason(HITMAN_MINE_STUN_REASON);
+			p.set_trigger("hitman_broken_leg_idle");
 		}
 	}
 
 	ao_update :: proc(using this: Hitman_Mine_Stun, dt: float) {
 		if !active return;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
@@ -989,17 +1026,17 @@ Hitman_Mine_Stun :: class : Component {
 
 		// Safety: exit if gameplay ended or player died.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(HITMAN_MINE_STUN_REASON);
+			p.remove_disable_movement_input_reason(HITMAN_MINE_STUN_REASON);
 			// Ensure we leave the broken-leg loop when the stun ends early.
-			p->set_trigger("RESET");
+			p.set_trigger("RESET");
 			active = false;
 			return;
 		}
 
 		if get_time() >= stun_end_time {
-			p->remove_disable_movement_input_reason(HITMAN_MINE_STUN_REASON);
+			p.remove_disable_movement_input_reason(HITMAN_MINE_STUN_REASON);
 			// Stop broken-leg idle when stun ends.
-			p->set_trigger("RESET");
+			p.set_trigger("RESET");
 			active = false;
 		}
 	}
@@ -1014,15 +1051,15 @@ Hitman_Neck_Snap_Lock :: class : Component {
 		end_time = get_time() + seconds;
 		active = true;
 
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
-			p->add_disable_movement_input_reason(HITMAN_NECK_SNAP_LOCK_REASON);
+			p.add_disable_movement_input_reason(HITMAN_NECK_SNAP_LOCK_REASON);
 		}
 	}
 
 	ao_update :: proc(using this: Hitman_Neck_Snap_Lock, dt: float) {
 		if !active return;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
@@ -1030,15 +1067,15 @@ Hitman_Neck_Snap_Lock :: class : Component {
 
 		// Safety: exit if gameplay ended or player died.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(HITMAN_NECK_SNAP_LOCK_REASON);
-			p->set_trigger("RESET");
+			p.remove_disable_movement_input_reason(HITMAN_NECK_SNAP_LOCK_REASON);
+			p.set_trigger("RESET");
 			active = false;
 			return;
 		}
 
 		if get_time() >= end_time {
-			p->remove_disable_movement_input_reason(HITMAN_NECK_SNAP_LOCK_REASON);
-			p->set_trigger("RESET");
+			p.remove_disable_movement_input_reason(HITMAN_NECK_SNAP_LOCK_REASON);
+			p.set_trigger("RESET");
 			active = false;
 		}
 	}
@@ -1059,18 +1096,18 @@ Hitman_Mine_Fling :: class : Component {
 		last_pos = entity.world_position;
 		stuck_frames = 0;
 
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
-			p->add_disable_movement_input_reason(HITMAN_MINE_FLING_REASON);
-			p->set_facing_right(dir.x > 0);
-			p->set_trigger("hitman_fly_forward");
+			p.add_disable_movement_input_reason(HITMAN_MINE_FLING_REASON);
+			p.set_facing_right(dir.x > 0);
+			p.set_trigger("hitman_fly_forward");
 			p.agent.velocity = dir * speed;
 		}
 	}
 
 	ao_update :: proc(using this: Hitman_Mine_Fling, dt: float) {
 		if !active return;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
@@ -1078,7 +1115,7 @@ Hitman_Mine_Fling :: class : Component {
 
 		// Safety: exit if gameplay ended or player died.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(HITMAN_MINE_FLING_REASON);
+			p.remove_disable_movement_input_reason(HITMAN_MINE_FLING_REASON);
 			active = false;
 			return;
 		}
@@ -1099,14 +1136,14 @@ Hitman_Mine_Fling :: class : Component {
 
 		collided := stuck_frames >= 3;
 		if collided || get_time() >= end_time {
-			p->remove_disable_movement_input_reason(HITMAN_MINE_FLING_REASON);
-			p->set_trigger("hitman_collide_midair_land");
+			p.remove_disable_movement_input_reason(HITMAN_MINE_FLING_REASON);
+			p.set_trigger("hitman_collide_midair_land");
 
-			stun := entity->get_component(Hitman_Mine_Stun);
+			stun := entity.get_component(Hitman_Mine_Stun);
 			if stun == null {
-				stun = entity->add_component(Hitman_Mine_Stun);
+				stun = entity.add_component(Hitman_Mine_Stun);
 			}
-			stun->arm(HITMAN_MINE_STUN_SECONDS);
+			stun.arm(HITMAN_MINE_STUN_SECONDS);
 
 			active = false;
 		}
@@ -1123,8 +1160,8 @@ Hitman_Sniper_Camera_Zoom :: class : Component {
 		end_time = get_time() + duration;
 		active = true;
 
-		p := entity->get_component(Player);
-		if p != null && p->is_local() {
+		p := entity.get_component(Player);
+		if p != null && p.is_local() {
 			orig_size = p.camera.size;
 			p.camera.size = HITMAN_SNIPER_CAMERA_ZOOMED_OUT_SIZE;
 		}
@@ -1132,14 +1169,14 @@ Hitman_Sniper_Camera_Zoom :: class : Component {
 
 	ao_update :: proc(using this: Hitman_Sniper_Camera_Zoom, dt: float) {
 		if !active return;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
 		}
 
 		if get_time() >= end_time {
-			if p->is_local() {
+			if p.is_local() {
 				p.camera.size = orig_size;
 			}
 			active = false;
@@ -1168,7 +1205,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 				continue;
 			}
 
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -1176,7 +1213,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
@@ -1190,7 +1227,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
 		// Apply any contract-based cooldown adjustments (from kills via other methods).
-		hm := player.entity->get_component(Hitman_Module);
+		hm := player.entity.get_component(Hitman_Module);
 		if player != null && player.player_role == Player_Role.HITMAN && hm != null && hm.kill_cooldown_adjust_seconds != 0.0 {
 			current_cooldown = max(0.0, current_cooldown + hm.kill_cooldown_adjust_seconds);
 			hm.kill_cooldown_adjust_seconds = 0.0;
@@ -1200,21 +1237,21 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 			target := get_closest_alive_target(this, player);
 			if target != null {
 				// Lock movement so the animation completes before control returns.
-				lock := player.entity->get_component(Hitman_Neck_Snap_Lock);
+				lock := player.entity.get_component(Hitman_Neck_Snap_Lock);
 				if lock == null {
-					lock = player.entity->add_component(Hitman_Neck_Snap_Lock);
+					lock = player.entity.add_component(Hitman_Neck_Snap_Lock);
 				}
-				lock->arm(HITMAN_NECK_SNAP_LOCK_SECONDS);
+				lock.arm(HITMAN_NECK_SNAP_LOCK_SECONDS);
 
 				if hm != null hm.last_kill_style = Hitman_Kill_Style.NECK_SNAP;
-				player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
-				player->set_trigger("hitman_kill_snap_neck");
-				target->kill_with_killer(player.entity.id);
+				player.set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
+				player.set_trigger("hitman_kill_snap_neck");
+				target.kill_with_killer(player.entity.id);
 
 				// Hitman strangle/neck-snap kill SFX (server-authoritative; replicates to clients).
 				if Game.is_server() {
 					sfx := SFX.default_sfx_desc();
-					sfx->set_position(target.entity.world_position);
+					sfx.set_position(target.entity.world_position);
 					sfx.volume = 0.9;
 					sfx.volume_perturb = 0.08;
 					sfx.speed_perturb = 0.06;
@@ -1246,12 +1283,12 @@ Hitman_Mine_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
 		// Unlock after 1 kill.
-		hm := player.entity->get_component(Hitman_Module);
+		hm := player.entity.get_component(Hitman_Module);
 		if hm == null return false;
 		if hm.kills < HITMAN_MINE_UNLOCK_KILLS return false;
 		return true;
@@ -1265,9 +1302,9 @@ Hitman_Mine_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			hm := player.entity->get_component(Hitman_Module);
+			hm := player.entity.get_component(Hitman_Module);
 			if player != null && player.player_role == Player_Role.HITMAN && hm != null && hm.kills < HITMAN_MINE_UNLOCK_KILLS {
-				player->Notify(format_string("Mine locked: get %/% kills as Hitman to unlock.", .{
+				player.Notify(format_string("Mine locked: get %/% kills as Hitman to unlock.", .{
 					min(hm.kills, HITMAN_MINE_UNLOCK_KILLS),
 					HITMAN_MINE_UNLOCK_KILLS
 				}));
@@ -1300,12 +1337,12 @@ Hitman_Mine_Ability :: class : Ability_Base {
 		}
 
 		target_pos := get_mouse_world_position();
-		if player->is_local() {
+		if player.is_local() {
 			UI.push_world_draw_context();
 			defer UI.pop_draw_context();
 			UI.push_z(target_pos.y);
 			defer UI.pop_z();
-			UI.quad(Rect{target_pos, target_pos}->grow(0.10, 0.10, 0.10, 0.10), core_globals.white_sprite, v4.{1, 0.4, 0.1, 0.9});
+			UI.quad(Rect{target_pos, target_pos}.grow(0.10, 0.10, 0.10, 0.10), core_globals.white_sprite, v4.{1, 0.4, 0.1, 0.9});
 		}
 
 		if aiming.activate && params.can_use {
@@ -1321,13 +1358,13 @@ Hitman_Mine_Ability :: class : Ability_Base {
 
 		// Locked overlay (still show button for learnability).
 		p := instance.player;
-		hm := p.entity->get_component(Hitman_Module);
+		hm := p.entity.get_component(Hitman_Module);
 		if p != null && p.player_role == Player_Role.HITMAN && hm != null && hm.kills < HITMAN_MINE_UNLOCK_KILLS {
 			ts := UI.default_text_settings();
 			ts.size = 18;
 			ts.halign = .CENTER;
 			ts.valign = .TOP;
-			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+			UI.text(rect.inset(2).cut_top(20), ts, "LOCKED");
 		}
 	}
 }
@@ -1348,12 +1385,12 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
 		// Unlock after 2 kills.
-		hm := player.entity->get_component(Hitman_Module);
+		hm := player.entity.get_component(Hitman_Module);
 		if hm == null return false;
 		if hm.kills < HITMAN_SNIPER_UNLOCK_KILLS return false;
 		// Needs a valid contract target to snipe.
@@ -1363,7 +1400,7 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 
 	set_camera_zoom :: proc(using this: Hitman_Sniper_Ability, active: bool) {
 		// Only the local player has a camera, so guard with is_local_or_server (same as other camera tweaks).
-		if !player->is_local_or_server() {
+		if !player.is_local_or_server() {
 			return;
 		}
 		if active {
@@ -1381,7 +1418,7 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 	}
 
 	cleanup_targeting :: proc(using this: Hitman_Sniper_Ability) {
-		this->set_camera_zoom(false);
+		this.set_camera_zoom(false);
 		was_targeting = false;
 		activated_this_session = false;
 	}
@@ -1423,9 +1460,9 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			hm := player.entity->get_component(Hitman_Module);
+			hm := player.entity.get_component(Hitman_Module);
 			if player != null && player.player_role == Player_Role.HITMAN && hm != null && hm.kills < HITMAN_SNIPER_UNLOCK_KILLS {
-				player->Notify(format_string("Sniper locked: get %/% kills as Hitman to unlock.", .{
+				player.Notify(format_string("Sniper locked: get %/% kills as Hitman to unlock.", .{
 					min(hm.kills, HITMAN_SNIPER_UNLOCK_KILLS),
 					HITMAN_SNIPER_UNLOCK_KILLS
 				}));
@@ -1439,7 +1476,7 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 
 		// Camera zoom while targeting (the helper sets player.active_ability during aim mode).
 		targeting := player.active_ability != null;
-		this->set_camera_zoom(targeting);
+		this.set_camera_zoom(targeting);
 
 		// Reset tracking state when not targeting.
 		if !targeting {
@@ -1447,15 +1484,15 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 		}
 
 		// Crosshair on cursor/touch point (local visual).
-		if targeting && player->is_local() {
+		if targeting && player.is_local() {
 			target_pos := get_mouse_world_position();
 			UI.push_world_draw_context();
 			defer UI.pop_draw_context();
 			UI.push_z(target_pos.y);
 			defer UI.pop_z();
 			reticle := get_asset(Texture_Asset, RETICLE_TEXTURE_PATH);
-			reticle_rect := Rect{target_pos, target_pos}->grow(0.44, 0.44, 0.44, 0.44);
-			UI.quad(reticle_rect->fit_aspect(reticle->get_aspect()), reticle, v4.{1, 1, 1, 0.95});
+			reticle_rect := Rect{target_pos, target_pos}.grow(0.44, 0.44, 0.44, 0.44);
+			UI.quad(reticle_rect.fit_aspect(reticle.get_aspect()), reticle, v4.{1, 1, 1, 0.95});
 		}
 
 		if activated_this_session {
@@ -1474,14 +1511,14 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 				return;
 			}
 
-			hm := player.entity->get_component(Hitman_Module);
+			hm := player.entity.get_component(Hitman_Module);
 			if hm != null hm.last_kill_style = Hitman_Kill_Style.SNIPER;
-			player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
-			player->set_trigger("hitman_shoot_sniper");
-			target->kill_with_killer(player.entity.id);
+			player.set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
+			player.set_trigger("hitman_shoot_sniper");
+			target.kill_with_killer(player.entity.id);
 			current_cooldown = HITMAN_SNIPER_COOLDOWN_SECONDS;
 
-			this->set_camera_zoom(false);
+			this.set_camera_zoom(false);
 			activated_this_session = false;
 		}
 	}
@@ -1491,13 +1528,13 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 
 		// Locked overlay (still show button for learnability).
 		p := instance.player;
-		hm := p.entity->get_component(Hitman_Module);
+		hm := p.entity.get_component(Hitman_Module);
 		if p != null && p.player_role == Player_Role.HITMAN && hm != null && hm.kills < HITMAN_SNIPER_UNLOCK_KILLS {
 			ts := UI.default_text_settings();
 			ts.size = 18;
 			ts.halign = .CENTER;
 			ts.valign = .TOP;
-			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+			UI.text(rect.inset(2).cut_top(20), ts, "LOCKED");
 		}
 	}
 }
@@ -1511,7 +1548,7 @@ rr_force_reset_hitman_sniper_zoom :: proc(player: Player) {
 
 		if ability.#type == Hitman_Sniper_Ability {
 			sniper := ability.(Hitman_Sniper_Ability);
-			sniper->cleanup_targeting();
+			sniper.cleanup_targeting();
 		}
 	}
 
@@ -1529,26 +1566,26 @@ Resurrect_Ability :: class : Ability_Base {
 
     get_closest_resurrectable_corpse :: proc(instance: Resurrect_Ability, doctor: Player) -> Corpse {
         finder := make_finder(Corpse, doctor.entity.world_position, 5.0);
-        foreach corpse: component_iterator(Corpse) {
+        for corpse: component_iterator(Corpse) {
             // Corpse must belong to a currently-dead player.
             target := get_player_by_entity_id(corpse.owner_player_entity_id);
             if target == null continue;
             if target.player_state != Player_State.DEAD continue;
-            finder->check(corpse, corpse.entity.world_position);
+            finder.check(corpse, corpse.entity.world_position);
         }
         return finder.closest;
     }
 
     get_closest_spew_victim :: proc(instance: Resurrect_Ability, doctor: Player) -> Player {
         finder := make_finder(Player, doctor.entity.world_position, 5.0);
-        foreach p: component_iterator(Player) {
+        for p: component_iterator(Player) {
             if p == null continue;
             if p.entity.id == doctor.entity.id continue;
             if p.player_state != Player_State.ALIVE continue;
             has_spew := p.mimicer_blinded || p.mimicer_distorted_until > 0.0;
             has_trample := p.bc_trampled;
             if !has_spew && !has_trample && !rr_lily_is_player_strung_by_any(p) continue;
-            finder->check(p, p.entity.world_position);
+            finder.check(p, p.entity.world_position);
         }
         return finder.closest;
     }
@@ -1556,10 +1593,10 @@ Resurrect_Ability :: class : Ability_Base {
     can_use :: method() -> bool {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
         if player.player_type != Player_Type.CIVILIAN return false;
         if player.player_role != Player_Role.DOCTOR return false;
-        dm := player.entity->get_component(Doctor_Module);
+        dm := player.entity.get_component(Doctor_Module);
         if dm == null return false;
         if dm.resurrects_used >= DOCTOR_RESURRECTS_PER_ROUND return false;
         if get_closest_resurrectable_corpse(this, player) != null return true;
@@ -1570,25 +1607,25 @@ Resurrect_Ability :: class : Ability_Base {
 
     on_update :: proc(instance: Resurrect_Ability, params: ref Ability_Update_Params) {
         if params.clicked && params.can_use {
-            corpse := instance->get_closest_resurrectable_corpse(instance.player);
+            corpse := instance.get_closest_resurrectable_corpse(instance.player);
             if corpse == null {
                 // No corpse — try curing a nearby Spew/Trample victim instead.
-                spew_victim := instance->get_closest_spew_victim(instance.player);
+                spew_victim := instance.get_closest_spew_victim(instance.player);
                 if spew_victim != null {
                     if spew_victim.mimicer_blinded || spew_victim.mimicer_distorted_until > 0.0 {
                         rr_mimicer_cure_spew(spew_victim);
-                        instance.player->Notify(format_string("Cured %!", .{spew_victim.entity->get_name()}));
-                        spew_victim->Notify("The Doctor cured your corruption!");
+                        instance.player.Notify(format_string("Cured %!", .{spew_victim.entity.get_name()}));
+                        spew_victim.Notify("The Doctor cured your corruption!");
                     }
                     if spew_victim.bc_trampled {
                         rr_bc_heal_trample(spew_victim);
-                        instance.player->Notify(format_string("Healed %!", .{spew_victim.entity->get_name()}));
-                        spew_victim->Notify("The Doctor healed your injuries!");
+                        instance.player.Notify(format_string("Healed %!", .{spew_victim.entity.get_name()}));
+                        spew_victim.Notify("The Doctor healed your injuries!");
                     }
                     if rr_lily_is_player_strung_by_any(spew_victim) {
                         rr_lily_on_doctor_heal(spew_victim);
-                        instance.player->Notify(format_string("Cut strings on %!", .{spew_victim.entity->get_name()}));
-                        spew_victim->Notify("The Doctor freed you from Lily's strings!");
+                        instance.player.Notify(format_string("Cut strings on %!", .{spew_victim.entity.get_name()}));
+                        spew_victim.Notify("The Doctor freed you from Lily's strings!");
                     }
                     instance.current_cooldown = 1.0;
                 }
@@ -1606,18 +1643,18 @@ Resurrect_Ability :: class : Ability_Base {
             target.was_corpse_reported_before_resurrect = corpse.has_been_reported;
 
             // Consume a use.
-            dm := instance.player.entity->get_component(Doctor_Module);
+            dm := instance.player.entity.get_component(Doctor_Module);
             if dm != null {
                 dm.resurrects_used += 1;
             }
 
             // Remove the body (they "stand up").
             if #alive(corpse.entity) {
-                corpse.entity->destroy();
+                corpse.entity.destroy();
             }
 
             // Revive at the corpse position.
-            target.entity->set_local_position(revive_pos);
+            target.entity.set_local_position(revive_pos);
             on_player_go_alive(target);
 
             target.is_temporarily_resurrected = true;
@@ -1626,13 +1663,13 @@ Resurrect_Ability :: class : Ability_Base {
             // Feedback
             dm_uses := 0;
             if dm != null { dm_uses = dm.resurrects_used; }
-            instance.player->Notify(format_string("Resurrected % for %s (%/% used)", .{
-                target.entity->get_name(),
+            instance.player.Notify(format_string("Resurrected % for %s (%/% used)", .{
+                target.entity.get_name(),
                 format_float(DOCTOR_RESURRECT_DURATION_SECONDS, decimals=0),
                 dm_uses,
                 DOCTOR_RESURRECTS_PER_ROUND
             }));
-            target->Notify(format_string("You were resurrected for %s (no tasks).", .{format_float(DOCTOR_RESURRECT_DURATION_SECONDS, decimals=0)}));
+            target.Notify(format_string("You were resurrected for %s (no tasks).", .{format_float(DOCTOR_RESURRECT_DURATION_SECONDS, decimals=0)}));
 
             // Small cooldown to prevent double-click spamming; uses-per-round is the main limiter.
             instance.current_cooldown = 1.0;
@@ -1650,12 +1687,12 @@ Resurrect_Ability :: class : Ability_Base {
         ts.size = 18;
         ts.halign = .CENTER;
         ts.valign = .TOP;
-        dm := player.entity->get_component(Doctor_Module);
+        dm := player.entity.get_component(Doctor_Module);
         used := 0;
         if dm != null { used = dm.resurrects_used; }
         remaining := DOCTOR_RESURRECTS_PER_ROUND - used;
         if remaining < 0 { remaining = 0; }
-        UI.text(rect->inset(2)->cut_top(20), ts, format_string("%/%", .{remaining, DOCTOR_RESURRECTS_PER_ROUND}));
+        UI.text(rect.inset(2).cut_top(20), ts, format_string("%/%", .{remaining, DOCTOR_RESURRECTS_PER_ROUND}));
     }
 }
 
@@ -1693,14 +1730,14 @@ Coroner_DNA_Vial_Display :: class : Component {
 			return;
 		}
 
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
 		}
 
 		// Cosmetic only: only show to the coroner's local client.
-		if !p->is_local() {
+		if !p.is_local() {
 			return;
 		}
 
@@ -1731,16 +1768,16 @@ Coroner_DNA_Vial_Display :: class : Component {
 
 		// World-space sizing (meters)
 		size := 0.22;
-		rect := Rect{pos, pos}->grow(size, size, size, size);
+		rect := Rect{pos, pos}.grow(size, size, size, size);
 
 		// Vial first
-		UI.quad(rect->fit_aspect(vial_tex->get_aspect()), vial_tex, v4.{1, 1, 1, 1});
+		UI.quad(rect.fit_aspect(vial_tex.get_aspect()), vial_tex, v4.{1, 1, 1, 1});
 
 		// Glow on top of the vial
 		glow_alpha := clamp(1.0 - ((now - start_time) / CORONER_DNA_MATCH_VIAL_DISPLAY_SECONDS) * 0.1, 0.0, 1.0);
 		glow_col := color;
 		glow_col.w = glow_col.w * glow_alpha;
-		UI.quad(rect->grow(0.10)->fit_aspect(glow_tex->get_aspect()), glow_tex, glow_col);
+		UI.quad(rect.grow(0.10).fit_aspect(glow_tex.get_aspect()), glow_tex, glow_col);
 	}
 }
 
@@ -1753,14 +1790,14 @@ DNA_Sample_Ability :: class : Ability_Base {
 
 	get_closest_sampleable_corpse :: proc(instance: DNA_Sample_Ability, coroner: Player) -> Corpse {
 		finder := make_finder(Corpse, coroner.entity.world_position, CORONER_DNA_SAMPLE_RANGE);
-		foreach corpse: component_iterator(Corpse) {
+		for corpse: component_iterator(Corpse) {
 			if corpse.has_been_reported continue;
 			if corpse.has_dna_been_sampled continue;
 			if corpse.ggg_is_wrapped continue;
 			if corpse.bc_nested continue;
 			// Only corpses with known player killers yield a vial.
 			if corpse.killer_player_entity_id == 0 continue;
-			finder->check(corpse, corpse.entity.world_position);
+			finder.check(corpse, corpse.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -1769,7 +1806,7 @@ DNA_Sample_Ability :: class : Ability_Base {
 		best: GGG_Nest = null;
 		best_dist_sq := 0.0;
 		r_sq := CORONER_DNA_SAMPLE_RANGE * CORONER_DNA_SAMPLE_RANGE;
-		foreach nest: component_iterator(GGG_Nest) {
+		for nest: component_iterator(GGG_Nest) {
 			if nest == null continue;
 			if nest.destroyed continue;
 			if nest.entity == null || !#alive(nest.entity) continue;
@@ -1787,7 +1824,7 @@ DNA_Sample_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.CIVILIAN return false;
 		if player.player_role != Player_Role.CORONER return false;
 		if get_closest_sampleable_corpse(this, player) != null return true;
@@ -1801,9 +1838,9 @@ DNA_Sample_Ability :: class : Ability_Base {
 			corpse := get_closest_sampleable_corpse(this, player);
 			if corpse != null {
 				corpse.has_dna_been_sampled = true;
-				cm := player.entity->get_component(Coroner_Module);
+				cm := player.entity.get_component(Coroner_Module);
 				if cm != null {
-					cm.dna_vials->append(corpse.killer_player_entity_id);
+					cm.dna_vials.append(corpse.killer_player_entity_id);
 				}
 				current_cooldown = 1.0;
 				return;
@@ -1812,11 +1849,11 @@ DNA_Sample_Ability :: class : Ability_Base {
 			// Investigate nest: get DNA from owner + notify body count
 			nest := get_closest_sampleable_nest(this, player);
 			if nest != null {
-				cm := player.entity->get_component(Coroner_Module);
+				cm := player.entity.get_component(Coroner_Module);
 				if cm != null && nest.owner_player_entity_id != 0 {
-					cm.dna_vials->append(nest.owner_player_entity_id);
+					cm.dna_vials.append(nest.owner_player_entity_id);
 				}
-				player->Notify(format_string("Nest has consumed % bodies.", {nest.bodies_consumed}));
+				player.Notify(format_string("Nest has consumed % bodies.", {nest.bodies_consumed}));
 				current_cooldown = 1.0;
 				return;
 			}
@@ -1843,7 +1880,7 @@ DNA_Match_Ability :: class : Ability_Base {
 			if !#alive(target.entity) continue;
 			if target == coroner continue;
 			if target.player_state != Player_State.ALIVE continue;
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -1851,10 +1888,10 @@ DNA_Match_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.CIVILIAN return false;
 		if player.player_role != Player_Role.CORONER return false;
-		cm := player.entity->get_component(Coroner_Module);
+		cm := player.entity.get_component(Coroner_Module);
 		if cm == null return false;
 		if cm.dna_vials.count <= 0 return false;
 		return get_closest_alive_other_player(this, player) != null;
@@ -1865,23 +1902,23 @@ DNA_Match_Ability :: class : Ability_Base {
 			target := get_closest_alive_other_player(this, player);
 			if target == null return;
 
-			cm := player.entity->get_component(Coroner_Module);
+			cm := player.entity.get_component(Coroner_Module);
 			if cm == null return;
-			killer_id := cm.dna_vials->pop();
+			killer_id := cm.dna_vials.pop();
 			is_match := target.entity.id == killer_id;
 
 			// Show vial feedback above the coroner's head.
-			display := player.entity->get_component(Coroner_DNA_Vial_Display);
+			display := player.entity.get_component(Coroner_DNA_Vial_Display);
 			if display == null {
-				display = player.entity->add_component(Coroner_DNA_Vial_Display);
+				display = player.entity.add_component(Coroner_DNA_Vial_Display);
 			}
 
 			if is_match {
-				display->arm(v4.{0.2, 1.0, 0.4, 0.95}); // green
-				player->Notify(format_string("DNA MATCH: %", .{target.entity->get_name()}));
+				display.arm(v4.{0.2, 1.0, 0.4, 0.95}); // green
+				player.Notify(format_string("DNA MATCH: %", .{target.entity.get_name()}));
 			} else {
-				display->arm(v4.{1.0, 0.2, 0.2, 0.95}); // red
-				player->Notify("No match.");
+				display.arm(v4.{1.0, 0.2, 0.2, 0.95}); // red
+				player.Notify("No match.");
 			}
 
 			current_cooldown = 1.0;
@@ -1936,7 +1973,7 @@ Vote_Ability :: class : Ability_Base {
 
 		// Voting has ended, but we keep the game in VOTING briefly to reveal the result.
 		if rr_vote_results_active {
-			if voting_ui_open && player->is_local() {
+			if voting_ui_open && player.is_local() {
 				rr_draw_vote_result_ui(player);
 			}
 			return;
@@ -1947,7 +1984,7 @@ Vote_Ability :: class : Ability_Base {
             voting_ui_open = !voting_ui_open;
         }
 
-        if voting_ui_open && player->is_local_or_server() {
+        if voting_ui_open && player.is_local_or_server() {
             if show_recent_deaths {
 				// Auto-advance after a short recap.
 				if recent_deaths_open_time > 0.0 && (get_time() - recent_deaths_open_time) >= 5.0 {
@@ -1971,9 +2008,9 @@ Vote_Ability :: class : Ability_Base {
 shoot_projectile :: proc(spawn_position: v2, velocity: v2, damage: int, lifetime: float, owner: Entity) -> Entity {
     prefab := get_asset(Prefab_Asset, "prefabs/RR_Projectile.prefab");
     entity := Scene.instantiate(prefab);
-    entity->set_local_position(spawn_position);
+    entity.set_local_position(spawn_position);
 
-    projectile := entity->get_component(RR_Projectile);
+    projectile := entity.get_component(RR_Projectile);
     projectile.velocity = velocity;
     projectile.lifetime = lifetime;
     projectile.damage = damage;
@@ -1991,10 +2028,10 @@ Shoot_Ability :: class : Ability_Base {
     can_use :: method() -> bool {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
-        if player->has_task_in_progress() return false;
+        if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_role == Player_Role.PIRATE {
-			pm := player.entity->get_component(Pirate_Module);
+			pm := player.entity.get_component(Pirate_Module);
 			if pm != null && pm.treasure < PIRATE_SHOOT_UNLOCK_TREASURE_COST return false;
 		}
         return true;
@@ -2024,7 +2061,7 @@ Shoot_Ability :: class : Ability_Base {
         activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
         if params.can_use && activation.activate {
 			sfx := SFX.default_sfx_desc();
-			sfx->set_position(player.entity.local_position);
+			sfx.set_position(player.entity.local_position);
 			sfx.volume = 0.5;
 			sfx.volume_perturb = 0.2;
 			sfx.speed_perturb = 0.1;
@@ -2060,7 +2097,7 @@ PIRATE_TREASURE_DIG_REASON :: "pirate_dig_for_treasure";
 rr_pirate_refresh_unlocks :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.PIRATE return;
-	pm := player.entity->get_component(Pirate_Module);
+	pm := player.entity.get_component(Pirate_Module);
 	if pm == null return;
 
 	// Treasure is NOT consumed on unlock; abilities become usable once you have enough.
@@ -2083,10 +2120,10 @@ Black_Flag :: class : Component {
         switched_to_idle = false;
 
         // Kick off the flag animation (if the entity has a spine animator)
-        spine_anim := entity->get_component(Spine_Animator);
+        spine_anim := entity.get_component(Spine_Animator);
         if spine_anim != null {
             // Start with appear, then we'll switch to idle shortly after.
-            spine_anim.instance->set_animation("appear", false, 0);
+            spine_anim.instance.set_animation("appear", false, 0);
         }
     }
     
@@ -2096,23 +2133,23 @@ Black_Flag :: class : Component {
         // Transition to idle after a short delay (the rig has "appear" and "idle").
         // We don't have a clean way to query animation duration here, so keep it simple.
         if !switched_to_idle && time_alive > 0.75 {
-            spine_anim := entity->get_component(Spine_Animator);
+            spine_anim := entity.get_component(Spine_Animator);
             if spine_anim != null {
-                spine_anim.instance->set_animation("idle", true, 0);
+                spine_anim.instance.set_animation("idle", true, 0);
             }
             switched_to_idle = true;
         }
         
         // Destroy after duration
         if time_alive >= BLACK_FLAG_DURATION {
-            entity->destroy();
+            entity.destroy();
             return;
         }
         
         // Apply fog effect to nearby players (client-side rendering)
-        foreach player: component_iterator(Player) {
+        for player: component_iterator(Player) {
             if player.player_state != Player_State.ALIVE continue;
-            if !player->is_local_or_server() continue;
+            if !player.is_local_or_server() continue;
             
             distance := length(player.entity.world_position - entity.world_position);
             if distance < BLACK_FLAG_RADIUS {
@@ -2151,11 +2188,11 @@ Black_Flag_Ability :: class : Ability_Base {
     can_use :: method() -> bool {
         if game_state != Game_State.INGAME return false;
         if player.player_state != Player_State.ALIVE return false;
-        if player->has_task_in_progress() return false;
+        if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
         if player.player_role != Player_Role.PIRATE return false;
 		// Auto-unlock based on current treasure amount (treasure is not spent).
-		pm := player.entity->get_component(Pirate_Module);
+		pm := player.entity.get_component(Pirate_Module);
 		if pm != null && pm.treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST return false;
         return true;
     }
@@ -2168,9 +2205,9 @@ Black_Flag_Ability :: class : Ability_Base {
 
         // If pressed while locked, explain unlock requirement.
         if params.clicked && !params.can_use {
-			pm := player.entity->get_component(Pirate_Module);
+			pm := player.entity.get_component(Pirate_Module);
             if player != null && player.player_role == Player_Role.PIRATE && pm != null && pm.treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
-                player->Notify(format_string("Black Flag locked: get %/% treasure to unlock.", .{
+                player.Notify(format_string("Black Flag locked: get %/% treasure to unlock.", .{
                     min(pm.treasure, PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST),
                     PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST
                 }));
@@ -2181,17 +2218,17 @@ Black_Flag_Ability :: class : Ability_Base {
             // Spawn prefab (includes the spine setup already)
             prefab := get_asset(Prefab_Asset, "prefabs/black_flag.prefab");
             flag_entity := Scene.instantiate(prefab);
-            flag_entity->set_local_position(player.entity.local_position);
+            flag_entity.set_local_position(player.entity.local_position);
 
-            // Ensure gameplay component exists (drives fog + appear->idle)
+            // Ensure gameplay component exists (drives fog + appear.idle)
             flag: Black_Flag;
-            flag = flag_entity->get_component(Black_Flag);
+            flag = flag_entity.get_component(Black_Flag);
             if flag == null {
-                flag = flag_entity->add_component(Black_Flag);
+                flag = flag_entity.add_component(Black_Flag);
             }
             flag.owner_entity = player.entity;
             
-            player->Notify("Black Flag placed!");
+            player.Notify("Black Flag placed!");
             current_cooldown = 60.0;
         }
     }
@@ -2201,7 +2238,7 @@ Black_Flag_Ability :: class : Ability_Base {
 
 		// Locked overlay (still show button for learnability).
 		p := instance.player;
-		pm := p.entity->get_component(Pirate_Module);
+		pm := p.entity.get_component(Pirate_Module);
 		if p != null && p.player_role == Player_Role.PIRATE && pm != null && pm.treasure < PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST {
 			ts := UI.default_text_settings();
 			ts.size = 18;
@@ -2210,12 +2247,12 @@ Black_Flag_Ability :: class : Ability_Base {
 			ts.do_outline = true;
 			ts.outline_thickness = 2;
 			ts.outline_color = v4.{0, 0, 0, 1};
-			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+			UI.text(rect.inset(2).cut_top(20), ts, "LOCKED");
 
 			ts2 := ts;
 			ts2.size = 14;
 			ts2.valign = .BOTTOM;
-			UI.text(rect->inset(2)->cut_bottom(18), ts2, format_string("Need: %", .{PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST}));
+			UI.text(rect.inset(2).cut_bottom(18), ts2, format_string("Need: %", .{PIRATE_BLACK_FLAG_UNLOCK_TREASURE_COST}));
 		}
 	}
 }
@@ -2225,18 +2262,18 @@ Black_Flag_Ability :: class : Ability_Base {
 rr_pirate_get_closest_unlooted_corpse :: proc(pirate: Player) -> Corpse {
 	if pirate == null return null;
 	finder := make_finder(Corpse, pirate.entity.world_position, PIRATE_TREASURE_MAP_LOOT_RANGE);
-	foreach corpse: component_iterator(Corpse) {
+	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if corpse.has_been_reported continue;
 		if corpse.pirate_map_taken continue;
-		finder->check(corpse, corpse.entity.world_position);
+		finder.check(corpse, corpse.entity.world_position);
 	}
 	return finder.closest;
 }
 
 rr_pirate_pick_dig_spot_position :: proc(origin: v2) -> v2 {
 	// Prefer random points across the whole map; clamp to navmesh for validity.
-	rng := rng_seed_time();
+	rng := rng_seed(rng_root_seed() + get_frame_number() + (abs(origin.x) * 1000.0).(u64) + (abs(origin.y) * 1000.0).(u64) * 7919);
 
 	wmin := rr_get_map_world_min();
 	wmax := rr_get_map_world_max();
@@ -2270,9 +2307,9 @@ rr_pirate_spawn_dig_spot_for_player :: proc(pirate: Player, origin: v2) {
 
 	pos := rr_pirate_pick_dig_spot_position(origin);
 	e := Scene.create_entity();
-	e->set_local_position(pos);
+	e.set_local_position(pos);
 
-	spot := e->add_component(Pirate_Treasure_Dig_Spot);
+	spot := e.add_component(Pirate_Treasure_Dig_Spot);
 	spot.owner_player_entity_id = pirate.entity.id;
 }
 
@@ -2290,17 +2327,17 @@ Pirate_Dig_Lock :: class : Component {
 			spot_entity_id = spot_entity.id;
 		}
 
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
-			p->add_disable_movement_input_reason(PIRATE_TREASURE_DIG_REASON);
+			p.add_disable_movement_input_reason(PIRATE_TREASURE_DIG_REASON);
 			// Visible to everyone (server-driven trigger replicated via player rig).
-			p->set_trigger("pirate_dig_for_treasure");
+			p.set_trigger("pirate_dig_for_treasure");
 		}
 	}
 
 	clear_spot_digging_flag :: proc(using this: Pirate_Dig_Lock) {
 		if spot_entity_id == 0 return;
-		foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+		for spot: component_iterator(Pirate_Treasure_Dig_Spot) {
 			if spot == null continue;
 			if spot.entity == null continue;
 			if spot.entity.id != spot_entity_id continue;
@@ -2311,12 +2348,12 @@ Pirate_Dig_Lock :: class : Component {
 
 	destroy_spot_entity_if_alive :: proc(using this: Pirate_Dig_Lock) {
 		if spot_entity_id == 0 return;
-		foreach spot: component_iterator(Pirate_Treasure_Dig_Spot) {
+		for spot: component_iterator(Pirate_Treasure_Dig_Spot) {
 			if spot == null continue;
 			if spot.entity == null continue;
 			if spot.entity.id != spot_entity_id continue;
 			if #alive(spot.entity) {
-				spot.entity->destroy();
+				spot.entity.destroy();
 			}
 			return;
 		}
@@ -2324,7 +2361,7 @@ Pirate_Dig_Lock :: class : Component {
 
 	ao_update :: proc(using this: Pirate_Dig_Lock, dt: float) {
 		if !active return;
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
@@ -2332,24 +2369,24 @@ Pirate_Dig_Lock :: class : Component {
 
 		// Safety: cancel if gameplay ended or player died.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(PIRATE_TREASURE_DIG_REASON);
-			p->set_trigger("RESET");
-			this->clear_spot_digging_flag();
+			p.remove_disable_movement_input_reason(PIRATE_TREASURE_DIG_REASON);
+			p.set_trigger("RESET");
+			this.clear_spot_digging_flag();
 			active = false;
 			return;
 		}
 
 		if get_time() >= end_time {
-			p->remove_disable_movement_input_reason(PIRATE_TREASURE_DIG_REASON);
-			p->set_trigger("RESET");
+			p.remove_disable_movement_input_reason(PIRATE_TREASURE_DIG_REASON);
+			p.set_trigger("RESET");
 
 			// Award treasure server-side.
 			if Game.is_server() {
-				pm := p.entity->get_component(Pirate_Module);
+				pm := p.entity.get_component(Pirate_Module);
 				if pm != null pm.treasure += 1;
 				rr_pirate_refresh_unlocks(p);
-				p->Notify("Found treasure! (+1)");
-				this->destroy_spot_entity_if_alive();
+				p.Notify("Found treasure! (+1)");
+				this.destroy_spot_entity_if_alive();
 			}
 
 			active = false;
@@ -2363,12 +2400,12 @@ Pirate_Treasure_Dig_Spot :: class : Interactable {
 	is_digging: bool;
 
 	ao_start :: method() {
-		this->set_listener(this);
+		this.set_listener(this);
 		radius = 1.25;
 		prompt_offset = v2.{0, 0.6};
 		required_hold_time = 0.0;
 		priority = 25;
-		this->set_text("Dig");
+		this.set_text("Dig");
 	}
 
 	can_use :: method(player: Player) -> bool {
@@ -2390,11 +2427,11 @@ Pirate_Treasure_Dig_Spot :: class : Interactable {
 
 		is_digging = true;
 
-		lock := player.entity->get_component(Pirate_Dig_Lock);
+		lock := player.entity.get_component(Pirate_Dig_Lock);
 		if lock == null {
-			lock = player.entity->add_component(Pirate_Dig_Lock);
+			lock = player.entity.add_component(Pirate_Dig_Lock);
 		}
-		lock->arm(PIRATE_TREASURE_DIG_SECONDS, entity);
+		lock.arm(PIRATE_TREASURE_DIG_SECONDS, entity);
 	}
 }
 
@@ -2408,7 +2445,7 @@ Pirate_Treasure_Map_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_role != Player_Role.PIRATE return false;
 		return rr_pirate_get_closest_unlooted_corpse(player) != null;
 	}
@@ -2423,7 +2460,7 @@ Pirate_Treasure_Map_Ability :: class : Ability_Base {
 				rr_pirate_spawn_dig_spot_for_player(player, corpse.entity.world_position);
 			}
 
-			player->Notify("Collected a treasure map!");
+			player.Notify("Collected a treasure map!");
 			current_cooldown = 1.0;
 		}
 	}
@@ -2458,9 +2495,9 @@ Powder_Keg_Knockback :: class : Component {
 		active = true;
 		dir = direction;
 
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
-			p->add_disable_movement_input_reason(POWDER_KEG_KNOCKBACK_REASON);
+			p.add_disable_movement_input_reason(POWDER_KEG_KNOCKBACK_REASON);
 			// Initial impulse; movement can resume after the short disable window.
 			p.agent.velocity = dir * speed;
 		}
@@ -2470,7 +2507,7 @@ Powder_Keg_Knockback :: class : Component {
 		if !active {
 			return;
 		}
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
@@ -2478,13 +2515,13 @@ Powder_Keg_Knockback :: class : Component {
 
 		// Safety: exit if gameplay ended or player died.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(POWDER_KEG_KNOCKBACK_REASON);
+			p.remove_disable_movement_input_reason(POWDER_KEG_KNOCKBACK_REASON);
 			active = false;
 			return;
 		}
 
 		if get_time() >= end_time {
-			p->remove_disable_movement_input_reason(POWDER_KEG_KNOCKBACK_REASON);
+			p.remove_disable_movement_input_reason(POWDER_KEG_KNOCKBACK_REASON);
 			active = false;
 			return;
 		}
@@ -2499,11 +2536,11 @@ Powder_Keg_Crater :: class : Component {
 		spawn_time = get_time();
 		switched_to_idle = false;
 
-		spine_anim := entity->add_component(Spine_Animator);
-		spine_anim->awaken();
+		spine_anim := entity.add_component(Spine_Animator);
+		spine_anim.awaken();
 		spine_anim.depth_offset = 10.0;
-		spine_anim.instance->set_skeleton(get_asset(Spine_Asset, "anims/crater/BAT003_meteor_crash_crator.spine"));
-		spine_anim.instance->set_animation("appear", false, 0);
+		spine_anim.instance.set_skeleton(get_asset(Spine_Asset, "anims/crater/BAT003_meteor_crash_crator.spine"));
+		spine_anim.instance.set_animation("appear", false, 0);
 	}
 
 	ao_update :: proc(using this: Powder_Keg_Crater, dt: float) {
@@ -2511,20 +2548,20 @@ Powder_Keg_Crater :: class : Component {
 
 		// Switch to idle after the appear animation.
 		if !switched_to_idle && time_alive > 0.75 {
-			spine_anim := entity->get_component(Spine_Animator);
+			spine_anim := entity.get_component(Spine_Animator);
 			if spine_anim != null {
-				spine_anim.instance->set_animation("idle", true, 0);
+				spine_anim.instance.set_animation("idle", true, 0);
 			}
 			switched_to_idle = true;
 		}
 
 		if time_alive >= POWDER_KEG_CRATER_LIFETIME_SECONDS {
 			// Optional: play disappear briefly before destroying.
-			spine_anim := entity->get_component(Spine_Animator);
+			spine_anim := entity.get_component(Spine_Animator);
 			if spine_anim != null {
-				spine_anim.instance->set_animation("disappear", false, 0);
+				spine_anim.instance.set_animation("disappear", false, 0);
 			}
-			entity->queue_for_destruction(0.6);
+			entity.queue_for_destruction(0.6);
 		}
 	}
 }
@@ -2532,8 +2569,8 @@ Powder_Keg_Crater :: class : Component {
 powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 	// Spawn crater visual
 	crater_e := Scene.create_entity();
-	crater_e->set_local_position(position);
-	crater_e->add_component(Powder_Keg_Crater);
+	crater_e.set_local_position(position);
+	crater_e.add_component(Powder_Keg_Crater);
 
 	// Find all players in range and track nearest.
 	nearest: Player = null;
@@ -2544,7 +2581,7 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 	}
 
 	// First pass: determine the nearest victim in the blast.
-	foreach p: component_iterator(Player) {
+	for p: component_iterator(Player) {
 		if p.player_state != Player_State.ALIVE continue;
 		// Pirate cannot kill themselves with their own keg.
 		if owner_id != 0 && #alive(p.entity) && p.entity.id == owner_id continue;
@@ -2564,10 +2601,10 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 		if #alive(owner) {
 			killer_id = owner.id;
 		}
-		nearest->kill_with_killer(killer_id);
+		nearest.kill_with_killer(killer_id);
 		{
 			sfx := SFX.default_sfx_desc();
-			sfx->set_position(nearest.entity.world_position);
+			sfx.set_position(nearest.entity.world_position);
 			sfx.volume = 0.8;
 			// Explicit death SFX (old `sfx/death.wav` removed).
 			// Note: `traitor_kill_death.wav` is reserved for knife/neck-snap kills.
@@ -2579,7 +2616,7 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 	}
 
 	// Second pass: knock back everyone else in the blast.
-	foreach p: component_iterator(Player) {
+	for p: component_iterator(Player) {
 		if p.player_state != Player_State.ALIVE continue;
 		if nearest != null && p == nearest continue;
 
@@ -2594,11 +2631,11 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 			dir = normalize(dir);
 		}
 
-		knock := p.entity->get_component(Powder_Keg_Knockback);
+		knock := p.entity.get_component(Powder_Keg_Knockback);
 		if knock == null {
-			knock = p.entity->add_component(Powder_Keg_Knockback);
+			knock = p.entity.add_component(Powder_Keg_Knockback);
 		}
-		knock->arm(POWDER_KEG_KNOCKBACK_SECONDS, dir, POWDER_KEG_KNOCKBACK_SPEED);
+		knock.arm(POWDER_KEG_KNOCKBACK_SECONDS, dir, POWDER_KEG_KNOCKBACK_SPEED);
 	}
 }
 
@@ -2617,10 +2654,10 @@ Powder_Keg_Thrown :: class : Component {
 			travel_time = POWDER_KEG_THROW_TRAVEL_TIME;
 		}
 
-		spine_anim := entity->add_component(Spine_Animator);
-		spine_anim->awaken();
-		spine_anim.instance->set_skeleton(get_asset(Spine_Asset, "anims/powder_keg/004RAND_powder_keg.spine"));
-		spine_anim.instance->set_animation("Flying_Through_Air", true, 0);
+		spine_anim := entity.add_component(Spine_Animator);
+		spine_anim.awaken();
+		spine_anim.instance.set_skeleton(get_asset(Spine_Asset, "anims/powder_keg/004RAND_powder_keg.spine"));
+		spine_anim.instance.set_animation("Flying_Through_Air", true, 0);
 	}
 
 	ao_update :: proc(using this: Powder_Keg_Thrown, dt: float) {
@@ -2643,21 +2680,21 @@ Powder_Keg_Thrown :: class : Component {
 		height := 1.0;
 		arc := 4.0 * t * (1.0 - t) * height;
 		pos := lerp(start_pos, clamped_target, t);
-		entity->set_local_position(pos + v2.{0, arc});
+		entity.set_local_position(pos + v2.{0, arc});
 
 		if t >= 1.0 {
 			// Snap to ground at target and explode.
-			entity->set_local_position(clamped_target);
-			spine_anim := entity->get_component(Spine_Animator);
+			entity.set_local_position(clamped_target);
+			spine_anim := entity.get_component(Spine_Animator);
 			if spine_anim != null {
-				spine_anim.instance->set_animation("Explode", false, 0);
+				spine_anim.instance.set_animation("Explode", false, 0);
 			}
 
 			powder_keg_explode_at(owner, clamped_target);
 
 			// Cleanup projectile entity shortly after explode anim starts.
 			exploded = true;
-			entity->queue_for_destruction(0.8);
+			entity.queue_for_destruction(0.8);
 		}
 	}
 }
@@ -2678,11 +2715,11 @@ Powder_Keg_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_role != Player_Role.PIRATE return false;
 		// Auto-unlock based on current treasure amount (treasure is not spent).
-		pm := player.entity->get_component(Pirate_Module);
+		pm := player.entity.get_component(Pirate_Module);
 		if pm != null && pm.treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST return false;
 		return true;
 	}
@@ -2704,7 +2741,7 @@ Powder_Keg_Ability :: class : Ability_Base {
 	}
 
 	cleanup_targeting :: proc(using this: Powder_Keg_Ability) {
-		this->set_camera_zoom(false);
+		this.set_camera_zoom(false);
 		was_targeting = false;
 		activated_this_session = false;
 	}
@@ -2717,9 +2754,9 @@ Powder_Keg_Ability :: class : Ability_Base {
 
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			pm := player.entity->get_component(Pirate_Module);
+			pm := player.entity.get_component(Pirate_Module);
 			if player != null && player.player_role == Player_Role.PIRATE && pm != null && pm.treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
-				player->Notify(format_string("Powder Keg locked: get %/% treasure to unlock.", .{
+				player.Notify(format_string("Powder Keg locked: get %/% treasure to unlock.", .{
 					min(pm.treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST),
 					PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST
 				}));
@@ -2733,7 +2770,7 @@ Powder_Keg_Ability :: class : Ability_Base {
 		// Prevent aiming mode while on cooldown / otherwise unusable.
 		if targeting && !params.can_use {
 			player.active_ability = null;
-			this->cleanup_targeting();
+			this.cleanup_targeting();
 			return;
 		}
 
@@ -2744,17 +2781,17 @@ Powder_Keg_Ability :: class : Ability_Base {
 		}
 		if !targeting {
 			if was_targeting {
-				this->cleanup_targeting();
+				this.cleanup_targeting();
 			}
 			return;
 		}
 
-		this->set_camera_zoom(true);
+		this.set_camera_zoom(true);
 
 		aiming := Ability_Utilities.update_aiming_ability(player, ref params);
 		if aiming.cancel {
 			player.active_ability = null;
-			this->cleanup_targeting();
+			this.cleanup_targeting();
 			return;
 		}
 
@@ -2777,14 +2814,14 @@ Powder_Keg_Ability :: class : Ability_Base {
 		draw_aiming_line(player.entity.world_position, aiming.aim_direction, 1.0 / player.camera.size * 4);
 
 		// Optional: show a subtle circle at the target.
-		if player->is_local() {
+		if player.is_local() {
 			UI.push_world_draw_context();
 			defer UI.pop_draw_context();
 			UI.push_z(target_pos.y);
 			defer UI.pop_z();
 			reticle := get_asset(Texture_Asset, GROUND_RETICLE_TEXTURE_PATH);
-			reticle_rect := Rect{target_pos, target_pos}->grow(0.80, 0.80, 0.80, 0.80);
-			UI.quad(reticle_rect->fit_aspect(reticle->get_aspect()), reticle, v4.{1, 1, 1, 0.95});
+			reticle_rect := Rect{target_pos, target_pos}.grow(0.80, 0.80, 0.80, 0.80);
+			UI.quad(reticle_rect.fit_aspect(reticle.get_aspect()), reticle, v4.{1, 1, 1, 0.95});
 		}
 
 		// Only allow one throw per targeting session (guards against odd input edge cases).
@@ -2800,8 +2837,8 @@ Powder_Keg_Ability :: class : Ability_Base {
 
 			// Throw keg toward clicked point.
 			throw_entity := Scene.create_entity();
-			throw_entity->set_local_position(player.entity.world_position);
-			throw_comp := throw_entity->add_component(Powder_Keg_Thrown);
+			throw_entity.set_local_position(player.entity.world_position);
+			throw_comp := throw_entity.add_component(Powder_Keg_Thrown);
 			throw_comp.owner = player.entity;
 			throw_comp.start_pos = player.entity.world_position;
 			throw_comp.target_pos = target_pos;
@@ -2809,7 +2846,7 @@ Powder_Keg_Ability :: class : Ability_Base {
 
 			// Consume targeting mode.
 			player.active_ability = null;
-			this->cleanup_targeting();
+			this.cleanup_targeting();
 		}
 	}
 
@@ -2818,7 +2855,7 @@ Powder_Keg_Ability :: class : Ability_Base {
 
 		// Locked overlay (still show button for learnability).
 		p := instance.player;
-		pm := p.entity->get_component(Pirate_Module);
+		pm := p.entity.get_component(Pirate_Module);
 		if p != null && p.player_role == Player_Role.PIRATE && pm != null && pm.treasure < PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST {
 			ts := UI.default_text_settings();
 			ts.size = 18;
@@ -2827,12 +2864,12 @@ Powder_Keg_Ability :: class : Ability_Base {
 			ts.do_outline = true;
 			ts.outline_thickness = 2;
 			ts.outline_color = v4.{0, 0, 0, 1};
-			UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+			UI.text(rect.inset(2).cut_top(20), ts, "LOCKED");
 
 			ts2 := ts;
 			ts2.size = 14;
 			ts2.valign = .BOTTOM;
-			UI.text(rect->inset(2)->cut_bottom(18), ts2, format_string("Need: %", .{PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
+			UI.text(rect.inset(2).cut_bottom(18), ts2, format_string("Need: %", .{PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST}));
 		}
 	}
 }
@@ -2851,23 +2888,24 @@ rr_pyro_get_closest_unlit_prop :: proc(player: Player) -> Entity {
 	if player == null return null;
 	if world_references == null return null;
 
-	props: [..]Entity;
-	world_references->find_props_child_entities(ref props, clear_first=true);
-	if props.count <= 0 return null;
+	pyro_mod := player.entity.get_component(Pyro_Module);
+	if pyro_mod == null return null;
+	pyro_mod.ensure_props_cached();
+	if pyro_mod.cached_props.count <= 0 return null;
 
 	best: Entity = null;
 	best_dist_sq := 0.0;
 	r_sq := PYRO_LIGHT_FIRE_RANGE * PYRO_LIGHT_FIRE_RANGE;
 
-	for i: 0..props.count-1 {
-		e := props[i];
+	for i: 0..pyro_mod.cached_props.count-1 {
+		e := pyro_mod.cached_props[i];
 		if e == null continue;
 		if !#alive(e) continue;
 		// Skip non-visual entities like MIN/MAX bound markers.
-		if e->get_component(Sprite_Renderer) == null continue;
+		if e.get_component(Sprite_Renderer) == null continue;
 
 		// Skip already-burning props.
-		existing := e->get_component(RR_Prop_Fire_Target);
+		existing := e.get_component(RR_Prop_Fire_Target);
 		if existing != null && existing.active {
 			continue;
 		}
@@ -2895,7 +2933,7 @@ rr_pyro_get_closest_nest :: proc(player: Player) -> GGG_Nest {
 	best: GGG_Nest = null;
 	best_dist_sq := 0.0;
 	r_sq := PYRO_LIGHT_FIRE_RANGE * PYRO_LIGHT_FIRE_RANGE;
-	foreach nest: component_iterator(GGG_Nest) {
+	for nest: component_iterator(GGG_Nest) {
 		if nest == null continue;
 		if nest.destroyed continue;
 		if nest.entity == null || !#alive(nest.entity) continue;
@@ -2922,7 +2960,7 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if p == null return false;
 		if p.player_state != Player_State.ALIVE return false;
-		if p->has_task_in_progress() return false;
+		if p.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if p.player_type != Player_Type.ANARCHIST return false;
 		if p.player_role != Player_Role.PYROMANIAC return false;
@@ -2939,7 +2977,7 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
 		// Point an arrow toward the nearest burnable prop when the ability is ready.
-		if params.can_use && player->is_local() {
+		if params.can_use && player.is_local() {
 			target := rr_pyro_get_closest_unlit_prop(player);
 			if target != null && #alive(target) {
 				options := Tutorial_Arrow.default_options();
@@ -2964,7 +3002,7 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 		if params.clicked && !params.can_use {
 			if player != null && !player.pyro_on_fire {
 				if rr_pyro_get_closest_unlit_prop(player) == null && rr_pyro_get_closest_nest(player) == null {
-					player->Notify("No nearby props to ignite!");
+					player.Notify("No nearby props to ignite!");
 				}
 			}
 		}
@@ -2975,27 +3013,27 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 				nest := rr_pyro_get_closest_nest(player);
 				if nest != null {
 					// Find the GGG_Module that owns this nest and destroy it
-					foreach ggg_player: component_iterator(Player) {
+					for ggg_player: component_iterator(Player) {
 						if ggg_player == null continue;
 						if ggg_player.player_role != Player_Role.GOO_GOO_GAGA continue;
-						gm := ggg_player.entity->get_component(GGG_Module);
+						gm := ggg_player.entity.get_component(GGG_Module);
 						if gm == null continue;
 						if gm.nest_entity == nest.entity {
 							rr_ggg_destroy_nest(gm);
-							player->Notify("Nest destroyed!");
-							player->set_trigger("pyro_snap_fingers");
+							player.Notify("Nest destroyed!");
+							player.set_trigger("pyro_snap_fingers");
 							break;
 						}
 					}
 				} else {
 					target := rr_pyro_get_closest_unlit_prop(player);
 					if target != null {
-						fire := target->get_component(RR_Prop_Fire_Target);
+						fire := target.get_component(RR_Prop_Fire_Target);
 						if fire == null {
-							fire = target->add_component(RR_Prop_Fire_Target);
+							fire = target.add_component(RR_Prop_Fire_Target);
 						}
-						fire->ignite(player);
-						player->set_trigger("pyro_snap_fingers");
+						fire.ignite(player);
+						player.set_trigger("pyro_snap_fingers");
 						rr_pyro_register_prop_ignited(player);
 					}
 				}
@@ -3021,7 +3059,7 @@ Pyromaniac_Light_Corpse_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if p == null return false;
 		if p.player_state != Player_State.ALIVE return false;
-		if p->has_task_in_progress() return false;
+		if p.has_task_in_progress() return false;
 		if p.player_type != Player_Type.ANARCHIST return false;
 		if p.player_role != Player_Role.PYROMANIAC return false;
 		if p.pyro_on_fire return false;
@@ -3036,11 +3074,11 @@ Pyromaniac_Light_Corpse_Ability :: class : Ability_Base {
 				if corpse != null && #alive(corpse.entity) {
 					corpse.pyro_has_been_burned = true;
 
-					// Spawn 008BED_fire and drive the burn->extinguish->cleanup sequence.
+					// Spawn 008BED_fire and drive the burn.extinguish.cleanup sequence.
 					rr_pyro_start_burning_corpse_visual(corpse.entity);
 
 					rr_pyro_register_corpse_burned(player);
-					player->set_trigger("pyro_snap_fingers");
+					player.set_trigger("pyro_snap_fingers");
 				}
 			}
 			current_cooldown = PYRO_LIGHT_CORPSE_COOLDOWN_SECONDS;
@@ -3062,13 +3100,13 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.ANARCHIST return false;
 		if player.player_role != Player_Role.PYROMANIAC return false;
 		if player.pyro_on_fire return false;
 		// Still allow the button to show while locked (so we can draw LOCKED overlay),
 		// but don't allow activation until unlocked.
-		pyro := player.entity->get_component(Pyro_Module);
+		pyro := player.entity.get_component(Pyro_Module);
 		if pyro == null return false;
 		if pyro.world_fire_unlocked_time <= 0.0 return false;
 		return true;
@@ -3077,9 +3115,9 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 	on_update :: method(params: ref Ability_Update_Params) {
 		// If pressed while locked, explain unlock requirement.
 		if params.clicked && !params.can_use {
-			pyro := player.entity->get_component(Pyro_Module);
+			pyro := player.entity.get_component(Pyro_Module);
 			if player != null && pyro != null && pyro.world_fire_unlocked_time <= 0.0 {
-				player->Notify(format_string("World Fire locked: burn 1 corpse + burn out % rooms (Corpse %/1, Rooms %/%).", .{
+				player.Notify(format_string("World Fire locked: burn 1 corpse + burn out % rooms (Corpse %/1, Rooms %/%).", .{
 					PYRO_ROOMS_BURNOUT_TARGET,
 					min(pyro.corpses_burned, 1),
 					min(pyro.rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
@@ -3093,12 +3131,12 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 			start_pyro_win_cinematic(player);
 
 			// Kick off local-only overlay + bigfire around pyro for the duration.
-			if player->is_local_or_server() {
-				c := player.entity->get_component(RR_Pyro_World_Fire_Cinematic);
+			if player.is_local_or_server() {
+				c := player.entity.get_component(RR_Pyro_World_Fire_Cinematic);
 				if c == null {
-					c = player.entity->add_component(RR_Pyro_World_Fire_Cinematic);
+					c = player.entity.add_component(RR_Pyro_World_Fire_Cinematic);
 				}
-				c->arm();
+				c.arm();
 			}
 
 			current_cooldown = 9999.0;
@@ -3111,7 +3149,7 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 		// Locked overlay + progress
 		p := instance.player;
 		if p == null return;
-		pyro := p.entity->get_component(Pyro_Module);
+		pyro := p.entity.get_component(Pyro_Module);
 		if pyro == null return;
 		if pyro.world_fire_unlocked_time > 0.0 return;
 
@@ -3122,18 +3160,20 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 		ts.do_outline = true;
 		ts.outline_thickness = 2;
 		ts.outline_color = v4.{0, 0, 0, 1};
-		UI.text(rect->inset(2)->cut_top(20), ts, "LOCKED");
+		UI.text(rect.inset(2).cut_top(20), ts, "LOCKED");
 
-		// Show objective progress underneath.
-		prog := format_string("Corpse %/1  Rooms %/%", .{
-			min(pyro.corpses_burned, 1),
-			min(pyro.rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET),
-			PYRO_ROOMS_BURNOUT_TARGET
-		});
+		// Show objective progress underneath (cached to avoid per-frame format_string).
+		c := min(pyro.corpses_burned, 1);
+		r := min(pyro.rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET);
+		if c != pyro.cached_lock_corpses || r != pyro.cached_lock_rooms || pyro.cached_lock_str.count == 0 {
+			pyro.cached_lock_corpses = c;
+			pyro.cached_lock_rooms = r;
+			pyro.cached_lock_str = format_string("Corpse %/1  Rooms %/%", .{c, r, PYRO_ROOMS_BURNOUT_TARGET});
+		}
 		ts2 := ts;
 		ts2.size = 14;
 		ts2.valign = .BOTTOM;
-		UI.text(rect->inset(2)->cut_bottom(18), ts2, prog);
+		UI.text(rect.inset(2).cut_bottom(18), ts2, pyro.cached_lock_str);
 	}
 }
 
@@ -3153,14 +3193,14 @@ Pranked_Effect :: class : Component {
 	}
 
 	ao_update :: method(dt: float) {
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			return;
 		}
 
 		// Safety: if gameplay ended or player is dead, ensure we don't leave them frozen.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(PRANK_STUN_REASON);
+			p.remove_disable_movement_input_reason(PRANK_STUN_REASON);
 			phase = 2;
 			return;
 		}
@@ -3171,9 +3211,9 @@ Pranked_Effect :: class : Component {
 			}
 
 			// Impact moment: notify, play anim (non-looping), and freeze movement for 2 seconds.
-			p->Notify("you've been pranked!");
-			p->set_trigger("prank_slip");
-			p->add_disable_movement_input_reason(PRANK_STUN_REASON);
+			p.Notify("you've been pranked!");
+			p.set_trigger("prank_slip");
+			p.add_disable_movement_input_reason(PRANK_STUN_REASON);
 			stun_end_time = get_time() + PRANK_STUN_SECONDS;
 			phase = 1;
 			return;
@@ -3181,10 +3221,10 @@ Pranked_Effect :: class : Component {
 
 		if phase == 1 {
 			if get_time() >= stun_end_time {
-				p->remove_disable_movement_input_reason(PRANK_STUN_REASON);
+				p.remove_disable_movement_input_reason(PRANK_STUN_REASON);
 				// Return to the normal locomotion tree after the one-shot.
 				// NOTE: This assumes the player's anim state machine has a RESET trigger wired (it already does for revive).
-				p->set_trigger("RESET");
+				p.set_trigger("RESET");
 				phase = 2;
 			}
 			return;
@@ -3208,7 +3248,7 @@ Prank_Ability :: class : Ability_Base {
 			if !#alive(target.entity) continue;
 			if target == player continue;
 			if target.player_state != Player_State.ALIVE continue;
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -3216,9 +3256,9 @@ Prank_Ability :: class : Ability_Base {
 	can_use :: proc(instance: Prank_Ability) -> bool {
 		if game_state != Game_State.INGAME return false;
 		if instance.player.player_state != Player_State.ALIVE return false;
-		if instance.player->has_task_in_progress() return false;
+		if instance.player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
-		return instance->get_closest_prankable_player(instance.player) != null;
+		return instance.get_closest_prankable_player(instance.player) != null;
 	}
 
 	on_update :: proc(instance: Prank_Ability, params: ref Ability_Update_Params) {
@@ -3228,23 +3268,23 @@ Prank_Ability :: class : Ability_Base {
 		instance.current_cooldown = max(instance.current_cooldown, lockout_remaining);
 
 		if params.clicked && params.can_use {
-			target := instance->get_closest_prankable_player(instance.player);
+			target := instance.get_closest_prankable_player(instance.player);
 			if target == null {
 				return;
 			}
 
 			// Count unique pranks toward the win condition
-			prk := instance.player.entity->get_component(Prankster_Module);
+			prk := instance.player.entity.get_component(Prankster_Module);
 			if prk != null { prk.prank_count += 1; }
 
 			// Attach a delayed effect to the target so the message shows on THEIR client after 10s
-			eff := target.entity->get_component(Pranked_Effect);
+			eff := target.entity.get_component(Pranked_Effect);
 			if eff == null {
-				eff = target.entity->add_component(Pranked_Effect);
+				eff = target.entity.add_component(Pranked_Effect);
 			}
-			eff->arm(PRANK_DELAY_SECONDS);
+			eff.arm(PRANK_DELAY_SECONDS);
 
-			instance.player->Notify(format_string("Pranked %!", .{target.entity->get_name()}));
+			instance.player.Notify(format_string("Pranked %!", .{target.entity.get_name()}));
 			instance.current_cooldown = 15.0;
 		}
 	}
@@ -3264,7 +3304,7 @@ Fake_Meeting_Ability :: class : Ability_Base {
 	can_use :: proc(instance: Fake_Meeting_Ability) -> bool {
 		if game_state != Game_State.INGAME return false;
 		if instance.player.player_state != Player_State.ALIVE return false;
-		if instance.player->has_task_in_progress() return false;
+		if instance.player.has_task_in_progress() return false;
 
 		// Respect the shared meeting cooldown AND the prankster's fake-meeting cooldown.
 		// These are server-owned but replicated to clients, so we can safely use them for UI disabling.
@@ -3312,10 +3352,10 @@ Jester_Win_Ability :: class : Ability_Base {
 		// Must be alive in-game
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 
 		// Locked until both objectives are complete (and unlock timer started)
-		prk := player.entity->get_component(Prankster_Module);
+		prk := player.entity.get_component(Prankster_Module);
 		if prk == null return false;
 		if prk.jester_unlocked_time <= 0.0 return false;
 
@@ -3327,10 +3367,10 @@ Jester_Win_Ability :: class : Ability_Base {
 		// If pressed while locked, explain unlock requirement / timing.
 		if params.clicked && !params.can_use {
 			if player != null {
-				prk := player.entity->get_component(Prankster_Module);
+				prk := player.entity.get_component(Prankster_Module);
 				if prk != null {
 					if prk.jester_unlocked_time <= 0.0 {
-						player->Notify(format_string("Jester Win locked: prank %/% and call %/% fake meetings to unlock.", .{
+						player.Notify(format_string("Jester Win locked: prank %/% and call %/% fake meetings to unlock.", .{
 							min(prk.prank_count, 3),
 							3,
 							min(prk.fake_meetings_called, 1),
@@ -3339,7 +3379,7 @@ Jester_Win_Ability :: class : Ability_Base {
 					} else {
 						remaining := (prk.jester_unlocked_time + JESTER_WIN_DELAY_SECONDS) - get_time();
 						if remaining > 0.0 {
-							player->Notify(format_string("Jester Win charging: survive %s more seconds.", .{format_float(remaining, decimals=0)}));
+							player.Notify(format_string("Jester Win charging: survive %s more seconds.", .{format_float(remaining, decimals=0)}));
 						}
 					}
 				}
@@ -3368,7 +3408,7 @@ Jester_Win_Ability :: class : Ability_Base {
 			return;
 		}
 
-		prk := player.entity->get_component(Prankster_Module);
+		prk := player.entity.get_component(Prankster_Module);
 		label := "";
 		if prk == null || prk.jester_unlocked_time <= 0.0 {
 			label = "LOCKED";
@@ -3380,7 +3420,7 @@ Jester_Win_Ability :: class : Ability_Base {
 				label = "READY";
 			}
 		}
-		UI.text(rect->inset(4)->cut_top(24), ts, label);
+		UI.text(rect.inset(4).cut_top(24), ts, label);
 	}
 }
 
@@ -3395,7 +3435,7 @@ Movie_Star_Write_Autograph :: class : Component {
 	done: bool;
 
 	ao_start :: proc(using this: Movie_Star_Write_Autograph) {
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			// Defensive: should never happen on non-player entities.
 			done = true;
@@ -3406,15 +3446,15 @@ Movie_Star_Write_Autograph :: class : Component {
 		end_time = get_time() + MOVIE_STAR_AUTOGRAPH_PLACE_TIME_SECONDS;
 
 		// Lock movement during the signing animation
-		p->add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
-		p->set_trigger("write_place_autograph");
+		p.add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
+		p.set_trigger("write_place_autograph");
 	}
 
 	ao_update :: proc(using this: Movie_Star_Write_Autograph, dt: float) {
 		if done {
 			return;
 		}
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			done = true;
 			return;
@@ -3422,8 +3462,8 @@ Movie_Star_Write_Autograph :: class : Component {
 
 		// Safety: if game left gameplay or player died, stop freezing them.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
-			p->set_trigger("RESET");
+			p.remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
+			p.set_trigger("RESET");
 			done = true;
 			return;
 		}
@@ -3431,8 +3471,8 @@ Movie_Star_Write_Autograph :: class : Component {
 		if !placed && get_time() >= end_time {
 			placed = true;
 			rr_add_autograph_trap(p, p.entity.world_position);
-			p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
-			p->set_trigger("RESET");
+			p.remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
+			p.set_trigger("RESET");
 			done = true;
 		}
 	}
@@ -3450,15 +3490,15 @@ Stunned_By_Autograph_Effect :: class : Component {
 		}
 		stun_end_time = get_time() + seconds;
 
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p != null {
 			// Clean up previous stun state before re-applying
 			if active {
-				p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+				p.remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
 			}
-			p->add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
-			p->set_trigger("RESET");
-			p->set_trigger("stunned_by_autograph_loop");
+			p.add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+			p.set_trigger("RESET");
+			p.set_trigger("stunned_by_autograph_loop");
 		}
 		active = true;
 	}
@@ -3467,7 +3507,7 @@ Stunned_By_Autograph_Effect :: class : Component {
 		if !active {
 			return;
 		}
-		p := entity->get_component(Player);
+		p := entity.get_component(Player);
 		if p == null {
 			active = false;
 			return;
@@ -3475,15 +3515,15 @@ Stunned_By_Autograph_Effect :: class : Component {
 
 		// Safety: exit if gameplay ended or player died.
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
-			p->set_trigger("RESET");
+			p.remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+			p.set_trigger("RESET");
 			active = false;
 			return;
 		}
 
 		if get_time() >= stun_end_time {
-			p->remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
-			p->set_trigger("RESET");
+			p.remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
+			p.set_trigger("RESET");
 			active = false;
 		}
 	}
@@ -3499,7 +3539,7 @@ Autograph_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.CIVILIAN return false;
 		if player.player_role != Player_Role.MOVIE_STAR return false;
@@ -3517,16 +3557,16 @@ Autograph_Ability :: class : Ability_Base {
 			current_cooldown = MOVIE_STAR_AUTOGRAPH_COOLDOWN_SECONDS;
 
 			// Start the signing animation; trap is placed when it ends (~1.8s).
-			writer := player.entity->get_component(Movie_Star_Write_Autograph);
+			writer := player.entity.get_component(Movie_Star_Write_Autograph);
 			if writer == null {
-				writer = player.entity->add_component(Movie_Star_Write_Autograph);
+				writer = player.entity.add_component(Movie_Star_Write_Autograph);
 			} else {
 				// Reset for reuse (ao_start only runs on first add)
 				writer.placed = false;
 				writer.done = false;
 				writer.end_time = get_time() + MOVIE_STAR_AUTOGRAPH_PLACE_TIME_SECONDS;
-				player->add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
-				player->set_trigger("write_place_autograph");
+				player.add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
+				player.set_trigger("write_place_autograph");
 			}
 		}
 	}
@@ -3551,7 +3591,7 @@ Red_Portal_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.CIVILIAN return false;
 		if player.player_role != Player_Role.PORTAL_MAKER return false;
 		return true;
@@ -3583,7 +3623,7 @@ Blue_Portal_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if player.player_type != Player_Type.CIVILIAN return false;
 		if player.player_role != Player_Role.PORTAL_MAKER return false;
 		return true;
@@ -3620,20 +3660,20 @@ BC_Bone_Snap_Ability :: class : Ability_Base {
 	}
 
 	get_closest_target :: proc(instance: BC_Bone_Snap_Ability, player: Player) -> Player {
-		bc := player.entity->get_component(Big_Charlie_Module);
+		bc := player.entity.get_component(Big_Charlie_Module);
 		kill_range := BC_KILL_RANGE;
 		if bc != null && bc.rampage_active {
 			kill_range = BC_STAMPEDE_RAMPAGE_KILL_RANGE;
 		}
 
 		finder := make_finder(Player, player.entity.world_position, kill_range);
-		foreach target: component_iterator(Player) {
+		for target: component_iterator(Player) {
 			if target == null continue;
 			if !#alive(target.entity) continue;
 			if target == player continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if player.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR continue;
-			finder->check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -3641,10 +3681,10 @@ BC_Bone_Snap_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
-		if player->has_task_in_progress() return false;
+		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 
-		bc := player.entity->get_component(Big_Charlie_Module);
+		bc := player.entity.get_component(Big_Charlie_Module);
 		if bc != null && bc.camera_active return false;
 
 		return get_closest_target(this, player) != null;
@@ -3659,14 +3699,14 @@ BC_Bone_Snap_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			target := get_closest_target(this, player);
 			if target != null {
-				player->set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
+				player.set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
 
-				target->kill_with_killer(player.entity.id);
+				target.kill_with_killer(player.entity.id);
 
 				// SFX
 				if Game.is_server() {
 					sfx := SFX.default_sfx_desc();
-					sfx->set_position(target.entity.world_position);
+					sfx.set_position(target.entity.world_position);
 					sfx.volume = 0.35;
 					sfx.volume_perturb = 0.08;
 					sfx.speed_perturb = 0.06;
@@ -3676,7 +3716,7 @@ BC_Bone_Snap_Ability :: class : Ability_Base {
 					rr_play_sfx("sfx/traitor_kill_death.wav", sfx);
 				}
 
-				bc := player.entity->get_component(Big_Charlie_Module);
+				bc := player.entity.get_component(Big_Charlie_Module);
 				if bc != null && bc.rampage_active {
 					current_cooldown = BC_STAMPEDE_RAMPAGE_KILL_CD;
 				} else {
@@ -3705,7 +3745,7 @@ BC_Transform_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.player_role != Player_Role.BIG_CHARLIE return false;
-		bc := player.entity->get_component(Big_Charlie_Module);
+		bc := player.entity.get_component(Big_Charlie_Module);
 		if bc == null return false;
 		if bc.camera_active return false;
 		if bc.skeleton_swap_at > 0.0 return false;
@@ -3714,7 +3754,7 @@ BC_Transform_Ability :: class : Ability_Base {
 
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
-			bc := player.entity->get_component(Big_Charlie_Module);
+			bc := player.entity.get_component(Big_Charlie_Module);
 			if bc == null return;
 
 			if bc.is_monster_form {
@@ -3727,7 +3767,7 @@ BC_Transform_Ability :: class : Ability_Base {
 	}
 
 	on_draw_button :: method(rect: Rect) {
-		bc := player.entity->get_component(Big_Charlie_Module);
+		bc := player.entity.get_component(Big_Charlie_Module);
 		if bc != null && bc.is_monster_form {
 			draw_ability_name_label(rect, "Revert");
 		} else {
@@ -3751,7 +3791,7 @@ BC_Slough_Ability :: class : Ability_Base {
 		if player.player_state != Player_State.ALIVE return false;
 		if player.player_role != Player_Role.BIG_CHARLIE return false;
 
-		bc := player.entity->get_component(Big_Charlie_Module);
+		bc := player.entity.get_component(Big_Charlie_Module);
 		if bc == null return false;
 		if bc.flesh_mass < 1 return false;
 		if bc.camera_active return false;
@@ -3793,11 +3833,11 @@ BC_Marrow_Ability :: class : Ability_Base {
 
 	get_closest_corpse :: proc(instance: BC_Marrow_Ability, p: Player) -> Corpse {
 		finder := make_finder(Corpse, p.entity.world_position, BC_MARROW_RANGE);
-		foreach corpse: component_iterator(Corpse) {
+		for corpse: component_iterator(Corpse) {
 			if corpse == null continue;
 			if !#alive(corpse.entity) continue;
 			if corpse.bc_nested continue;
-			finder->check(corpse, corpse.entity.world_position);
+			finder.check(corpse, corpse.entity.world_position);
 		}
 		return finder.closest;
 	}
@@ -3807,7 +3847,7 @@ BC_Marrow_Ability :: class : Ability_Base {
 		if player.player_state != Player_State.ALIVE return false;
 		if player.player_role != Player_Role.BIG_CHARLIE return false;
 
-		bc := player.entity->get_component(Big_Charlie_Module);
+		bc := player.entity.get_component(Big_Charlie_Module);
 		if bc == null return false;
 		if bc.flesh_mass < 2 return false;
 		if bc.camera_active return false;
@@ -3851,7 +3891,7 @@ BC_Stampede_Ability :: class : Ability_Base {
 		if player.player_state != Player_State.ALIVE return false;
 		if player.player_role != Player_Role.BIG_CHARLIE return false;
 
-		bc := player.entity->get_component(Big_Charlie_Module);
+		bc := player.entity.get_component(Big_Charlie_Module);
 		if bc == null return false;
 		if bc.flesh_mass < 3 return false;
 		if bc.camera_active return false;
@@ -3882,13 +3922,13 @@ BC_SCOUTING_NUGGET_NEAR_RANGE :: 3.0;
 
 // Check if there is a corpse nearby that doesn't already have a nugget next to it.
 rr_bc_find_unmonitored_corpse :: proc(player: Player) -> Corpse {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return null;
 
 	player_pos := player.entity.world_position;
 	finder := make_finder(Corpse, player_pos, BC_SCOUTING_PLACE_RANGE);
 
-	foreach corpse: component_iterator(Corpse) {
+	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
 		if corpse.bc_nested continue;
@@ -3908,7 +3948,7 @@ rr_bc_find_unmonitored_corpse :: proc(player: Player) -> Corpse {
 		}
 		if has_nugget continue;
 
-		finder->check(corpse, corpse_pos);
+		finder.check(corpse, corpse_pos);
 	}
 	return finder.closest;
 }
@@ -3926,7 +3966,7 @@ BC_Camera_Ability :: class : Ability_Base {
 		if player.player_state != Player_State.ALIVE return false;
 		if player.player_role != Player_Role.BIG_CHARLIE return false;
 
-		bc := player.entity->get_component(Big_Charlie_Module);
+		bc := player.entity.get_component(Big_Charlie_Module);
 		if bc == null return false;
 
 		// If already in camera, can always toggle off
@@ -3942,7 +3982,7 @@ BC_Camera_Ability :: class : Ability_Base {
 
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
-			bc := player.entity->get_component(Big_Charlie_Module);
+			bc := player.entity.get_component(Big_Charlie_Module);
 			if bc == null return;
 
 			if bc.camera_active {
@@ -3966,7 +4006,7 @@ BC_Camera_Ability :: class : Ability_Base {
 	}
 
 	on_draw_button :: method(rect: Rect) {
-		bc := player.entity->get_component(Big_Charlie_Module);
+		bc := player.entity.get_component(Big_Charlie_Module);
 		if bc != null && bc.camera_active {
 			draw_ability_name_label(rect, "Exit Camera");
 		} else if rr_bc_find_unmonitored_corpse(player) != null {
@@ -3980,7 +4020,7 @@ BC_Camera_Ability :: class : Ability_Base {
 // --- Big Charlie ability draw helper ---
 
 rr_bc_draw_abilities :: proc(player: Player, index: int) -> int {
-	bc := player.entity->get_component(Big_Charlie_Module);
+	bc := player.entity.get_component(Big_Charlie_Module);
 
 	// Always show: Bone Snap (kill) + Transform
 	draw_ability_button(player, BC_Bone_Snap_Ability, index);

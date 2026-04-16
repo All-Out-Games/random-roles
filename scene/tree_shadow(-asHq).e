@@ -1,0 +1,34 @@
+14
+3929895075841
+1063961066
+{
+  "name": "tree_shadow",
+  "local_enabled": true,
+  "local_position": {
+    "X": -14.9270954132080078,
+    "Y": 14.1164484024047852
+  },
+  "local_rotation": 0,
+  "local_scale": {
+    "X": 0.6301932334899902,
+    "Y": 0.6301932334899902
+  },
+  "previous_sibling": 1109203189,
+  "next_sibling": 830791295,
+  "parent": 4130669315
+},
+{
+  "cid": 1,
+  "aoid": 3816102349,
+  "component_type": "Internal_Component",
+  "internal_component_type": "Sprite_Renderer",
+  "data": {
+    "texture": "sprites/phota/Extras/Foliage/Trees/RoundTree3.png",
+    "depth_offset": -0.0095352977514267,
+    "tint": {
+      "X": 0,
+      "Y": 0.0134026017040014,
+      "Z": 0.6789610981941223
+    }
+  }
+}

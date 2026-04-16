@@ -11,12 +11,14 @@ RR_Rng_State :: class {
 }
 
 rr_rng_state: RR_Rng_State;
+rr_rng_refresh_count: u64;
 
 rr_refresh_rng_state :: proc() {
 	if rr_rng_state == null {
 		rr_rng_state = new(RR_Rng_State);
 	}
-	rr_rng_state.value = rng_seed((get_real_time() * 1000000000).(u64));
+	rr_rng_refresh_count += 1;
+	rr_rng_state.value = rng_seed(rng_root_seed() + rr_rng_refresh_count * 7919);
 }
 
 
@@ -61,11 +63,11 @@ rr_hitman_assign_new_contract :: proc(hitman: Player) {
 	if hitman == null return;
 	if hitman.player_role != Player_Role.HITMAN return;
 	if hitman.player_state != Player_State.ALIVE return;
-	if !hitman->is_local_or_server() return;
+	if !hitman.is_local_or_server() return;
 
 	// Build candidate list (exclude previous contract to reduce repeats when possible).
 	candidates: List(Player);
-	hm := hitman.entity->get_component(Hitman_Module);
+	hm := hitman.entity.get_component(Hitman_Module);
 	prev_target_id : u64 = 0;
 	if hm != null prev_target_id = hm.contract_target_id;
 	for i: 0..players.elements.count-1 {
@@ -112,9 +114,9 @@ rr_hitman_on_player_killed :: proc(killer_player_entity_id: u64, victim_player_e
 	if killer == null return;
 	if killer.player_role != Player_Role.HITMAN return;
 	if killer.player_state != Player_State.ALIVE return;
-	if !killer->is_local_or_server() return;
+	if !killer.is_local_or_server() return;
 
-	hm := killer.entity->get_component(Hitman_Module);
+	hm := killer.entity.get_component(Hitman_Module);
 	if hm == null return;
 
 	is_contract := (hm.contract_target_id != 0 && hm.contract_target_id == victim_player_entity_id);
@@ -144,9 +146,9 @@ rr_werewolf_on_player_killed :: proc(killer_player_entity_id: u64, victim_player
 	if killer.player_role != Player_Role.WEREWOLF return;
 	if killer.player_state != Player_State.ALIVE return;
 	// Track on server + local player only (avoid remote-client double counting).
-	if !killer->is_local_or_server() return;
+	if !killer.is_local_or_server() return;
 
-	wm := killer.entity->get_component(Werewolf_Module);
+	wm := killer.entity.get_component(Werewolf_Module);
 	if wm != null {
 		wm.kills += 1;
 	}
@@ -528,7 +530,7 @@ Hitman_Mine_Visibility :: class : Component {
 	}
 
 	ao_on_state_sync :: method() {
-		entity->set_local_enabled(is_visible_to_local_player());
+		entity.set_local_enabled(is_visible_to_local_player());
 	}
 }
 
@@ -540,7 +542,7 @@ rr_hitman_clear_mines :: proc() {
 		m := hitman_mines.elements[i];
 		if m == null continue;
 		if m.mine_entity != null && #alive(m.mine_entity) {
-			m.mine_entity->destroy();
+			m.mine_entity.destroy();
 		}
 	}
 	hitman_mines = List(Hitman_Mine_Entry).{};
@@ -570,18 +572,18 @@ rr_hitman_place_mine :: proc(owner: Player, pos: v2) {
 
 	// World visual
 	mine_e := Scene.create_entity();
-	mine_e->set_local_position(clamped);
-	mine_e->set_local_rotation(0.0);
-	mine_e->set_local_scale(v2.{HITMAN_MINE_VISUAL_SCALE, HITMAN_MINE_VISUAL_SCALE});
-	sprite := mine_e->add_component(Sprite_Renderer);
+	mine_e.set_local_position(clamped);
+	mine_e.set_local_rotation(0.0);
+	mine_e.set_local_scale(v2.{HITMAN_MINE_VISUAL_SCALE, HITMAN_MINE_VISUAL_SCALE});
+	sprite := mine_e.add_component(Sprite_Renderer);
 	if sprite != null {
-		sprite->set_texture(get_asset(Texture_Asset, "sprites/icons/hitman/land_mine.png"));
+		sprite.set_texture(get_asset(Texture_Asset, "sprites/icons/hitman/land_mine.png"));
 		// Above map, below players (same as portals).
 		sprite.layer = HITMAN_MINE_VISUAL_LAYER;
 		sprite.depth_offset = HITMAN_MINE_VISUAL_DEPTH_OFFSET;
 		sprite.color = v4.{1, 1, 1, 0.95};
 	}
-	visibility := mine_e->add_component(Hitman_Mine_Visibility);
+	visibility := mine_e.add_component(Hitman_Mine_Visibility);
 	if visibility != null {
 		visibility.owner_entity_id = owner.entity.id;
 		visibility.reveal_to_all = false;
@@ -629,7 +631,7 @@ update_hitman_mines :: proc() {
 					m.detonate_at = get_time() + HITMAN_MINE_PRE_EXPLODE_SECONDS;
 
 					if m.mine_entity != null && #alive(m.mine_entity) {
-						visibility := m.mine_entity->get_component(Hitman_Mine_Visibility);
+						visibility := m.mine_entity.get_component(Hitman_Mine_Visibility);
 						if visibility != null {
 							visibility.reveal_to_all = true;
 						}
@@ -661,15 +663,15 @@ update_hitman_mines :: proc() {
 				dir := v2.{cos(angle), sin(angle)};
 				if length_squared(dir) < 0.001 { dir = v2.{1, 0}; }
 
-				fling := target.entity->get_component(Hitman_Mine_Fling);
+				fling := target.entity.get_component(Hitman_Mine_Fling);
 				if fling == null {
-					fling = target.entity->add_component(Hitman_Mine_Fling);
+					fling = target.entity.add_component(Hitman_Mine_Fling);
 				}
-				fling->arm(HITMAN_MINE_MAX_FLING_SECONDS, dir, HITMAN_MINE_FLING_SPEED);
+				fling.arm(HITMAN_MINE_MAX_FLING_SECONDS, dir, HITMAN_MINE_FLING_SPEED);
 			}
 
 			if m.mine_entity != null && #alive(m.mine_entity) {
-				m.mine_entity->destroy();
+				m.mine_entity.destroy();
 			}
 			last := hitman_mines.elements.count - 1;
 			hitman_mines.elements[i] = hitman_mines.elements[last];
@@ -723,11 +725,11 @@ update_autograph_traps :: proc() {
 
 			if in_range(p.entity.world_position - trap.pos, MOVIE_STAR_AUTOGRAPH_TRIGGER_RADIUS) {
 				// Apply stun effect
-				eff := p.entity->get_component(Stunned_By_Autograph_Effect);
+				eff := p.entity.get_component(Stunned_By_Autograph_Effect);
 				if eff == null {
-					eff = p.entity->add_component(Stunned_By_Autograph_Effect);
+					eff = p.entity.add_component(Stunned_By_Autograph_Effect);
 				}
-				eff->arm(MOVIE_STAR_AUTOGRAPH_STUN_SECONDS);
+				eff.arm(MOVIE_STAR_AUTOGRAPH_STUN_SECONDS);
 				triggered = true;
 				break;
 			}
@@ -754,9 +756,8 @@ waiting_for_restart: bool;
 lobby_relaxed_min_players_active: bool;
 lobby_under_min_players_since: float;
 voting_start_time: float;
-rr_server_queue_name: string = "default";
-rr_server_available_initialized: bool;
-rr_last_server_available: bool;
+rr_matchmaking_initialized: bool;
+rr_last_matchmaking_priority: int;
 
 // After voting completes, keep the game in VOTING briefly to reveal the result.
 RR_VOTE_RESULTS_REVEAL_SECONDS :: 6.0;
@@ -812,11 +813,11 @@ rr_vote_eject_player_id: u64;
 rr_vote_eject_anim_started: bool;
 rr_vote_eject_anim_start_time: float;
 
-rr_set_server_available :: proc(available: bool) {
-	if rr_server_available_initialized && rr_last_server_available == available return;
-	Server.queue_set_server_available(rr_server_queue_name, available);
-	rr_last_server_available = available;
-	rr_server_available_initialized = true;
+rr_set_matchmaking :: proc(priority: int) {
+	if rr_matchmaking_initialized && rr_last_matchmaking_priority == priority return;
+	Server.set_matchmaking_priority(priority);
+	rr_last_matchmaking_priority = priority;
+	rr_matchmaking_initialized = true;
 }
 
 rr_is_round_running :: proc() -> bool {
@@ -864,26 +865,28 @@ rr_lobby_seconds_until_round_start :: proc() -> float {
 	return countdown_seconds;
 }
 
-rr_update_server_queue_availability :: proc() {
+rr_update_matchmaking_priority :: proc() {
 	player_count := players.elements.count;
 	running := rr_is_round_running();
-	available := true;
+	priority := 0; // 0 = send me players
 
 	// Explicit busy case from product rules.
 	if player_count > 4 && running {
-		available = false;
+		priority = 1;
 	}
 	// Explicit open case from product rules.
 	else if player_count < 4 {
-		available = true;
+		priority = 0;
 	}
 	// Not currently running: only stay open if the next round is still >10s away.
 	else if !running {
-		available = rr_lobby_seconds_until_round_start() > 10.0;
+		if rr_lobby_seconds_until_round_start() <= 10.0 {
+			priority = 1;
+		}
 	}
 	// Running with exactly 4 players keeps previous "open" behavior unless told otherwise.
 
-	rr_set_server_available(available);
+	rr_set_matchmaking(priority);
 }
 rr_vote_eject_text_sfx_played: bool;
 rr_vote_eject_anim_sfx_played: bool;
@@ -963,19 +966,19 @@ rr_try_start_power_outage :: proc(caller: Player) {
 		if p == null continue;
 		if !#alive(p.entity) continue;
 		if p.player_type == Player_Type.TRAITOR {
-			p->Notify("Lights Out!");
+			p.Notify("Lights Out!");
 		} else {
-			p->Notify("Sabotage: Power Outage!");
+			p.Notify("Sabotage: Power Outage!");
 		}
 	}
 }
 
 rr_find_entity_named :: proc(name: string) -> Entity {
 	if name.count == 0 return null;
-	foreach e: entity_iterator() {
+	for e: entity_iterator() {
 		if e == null continue;
 		if !#alive(e) continue;
-		if e->get_name() == name {
+		if e.compare_name(name) {
 			return e;
 		}
 	}
@@ -990,7 +993,7 @@ rr_update_comms_lever_visuals :: proc() {
 	if e == null return;
 	if !#alive(e) return;
 
-	sprite := e->get_component(Sprite_Renderer);
+	sprite := e.get_component(Sprite_Renderer);
 	if sprite == null return;
 
 	lever_on := get_asset(Texture_Asset, "sprites/lever_on.png");
@@ -999,9 +1002,9 @@ rr_update_comms_lever_visuals :: proc() {
 
 	// Green when comms are functional, off otherwise.
 	if rr_comms_outage_active {
-		sprite->set_texture(lever_off);
+		sprite.set_texture(lever_off);
 	} else {
-		sprite->set_texture(lever_on);
+		sprite.set_texture(lever_on);
 	}
 }
 
@@ -1034,7 +1037,7 @@ rr_try_start_comms_outage :: proc(caller: Player) {
 		if p.is_temporarily_resurrected continue;
 		rr_comms_outage_add_enable_comms_task_to_player(p);
 		// Apply voice routing immediately (server-state will sync to clients).
-		p->apply_voice_chat_masks_for_current_state();
+		p.apply_voice_chat_masks_for_current_state();
 	}
 
 	rr_update_comms_lever_visuals();
@@ -1044,7 +1047,7 @@ rr_try_start_comms_outage :: proc(caller: Player) {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
-		p->Notify("Sabotage: Comms Down!");
+		p.Notify("Sabotage: Comms Down!");
 	}
 }
 
@@ -1075,7 +1078,7 @@ rr_try_start_lockdown :: proc(caller: Player) {
 	// Server-authoritative SFX (play once for everyone).
 	sfx := SFX.default_sfx_desc();
 	if caller != null {
-		sfx->set_position(caller.entity.world_position);
+		sfx.set_position(caller.entity.world_position);
 	}
 	sfx.volume = 0.9;
 	sfx.volume_perturb = 0.05;
@@ -1090,7 +1093,7 @@ rr_try_start_lockdown :: proc(caller: Player) {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
-		p->Notify("Sabotage: Door Lockdown!");
+		p.Notify("Sabotage: Door Lockdown!");
 	}
 }
 
@@ -1119,7 +1122,7 @@ rr_update_lockdown :: proc() {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
-		p->Notify("Door Lockdown ended.");
+		p.Notify("Door Lockdown ended.");
 	}
 }
 
@@ -1139,7 +1142,7 @@ rr_end_comms_outage :: proc(fixer: Player) {
 		if !#alive(p.entity) continue;
 		rr_comms_outage_remove_enable_comms_task_from_player(p);
 		// Restore voice routing.
-		p->apply_voice_chat_masks_for_current_state();
+		p.apply_voice_chat_masks_for_current_state();
 	}
 
 	rr_update_comms_lever_visuals();
@@ -1147,13 +1150,13 @@ rr_end_comms_outage :: proc(fixer: Player) {
 	// Notify everyone
 	msg := "Communications restored!";
 	if fixer != null {
-		msg = format_string("Communications restored by %!", .{fixer.entity->get_name()});
+		msg = format_string("Communications restored by %!", .{fixer.entity.get_name()});
 	}
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
-		p->Notify(msg);
+		p.Notify(msg);
 	}
 }
 
@@ -1168,7 +1171,7 @@ rr_end_power_outage :: proc(fixer: Player) {
 	rr_power_outage_started_at = 0.0;
 
 	if rr_power_outage_generator_entity != null && #alive(rr_power_outage_generator_entity) {
-		rr_power_outage_generator_entity->destroy();
+		rr_power_outage_generator_entity.destroy();
 	}
 	rr_power_outage_generator_entity = null;
 
@@ -1183,13 +1186,13 @@ rr_end_power_outage :: proc(fixer: Player) {
 	// Notify everyone
 	msg := "Power restored!";
 	if fixer != null {
-		msg = format_string("Power restored by %!", .{fixer.entity->get_name()});
+		msg = format_string("Power restored by %!", .{fixer.entity.get_name()});
 	}
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
-		p->Notify(msg);
+		p.Notify(msg);
 	}
 }
 
@@ -1228,11 +1231,11 @@ rr_prankster_assign_target :: proc(prankster: Player) {
 	if prankster == null return;
 	if prankster.player_role != Player_Role.PRANKSTER return;
 	if prankster.player_state != Player_State.ALIVE return;
-	if !prankster->is_local_or_server() return;
+	if !prankster.is_local_or_server() return;
 
 	// Build candidate list (exclude current target to avoid repeats when possible).
 	candidates: List(Player);
-	prk := prankster.entity->get_component(Prankster_Module);
+	prk := prankster.entity.get_component(Prankster_Module);
 	if prk == null return;
 	prev_target_id := prk.fake_meeting_target_id;
 	for i: 0..players.elements.count-1 {
@@ -1276,7 +1279,7 @@ rr_prankster_update_target :: proc(prankster: Player) {
 	if prankster.player_state != Player_State.ALIVE return;
 
 	// If no target yet, assign one.
-	prk := prankster.entity->get_component(Prankster_Module);
+	prk := prankster.entity.get_component(Prankster_Module);
 	if prk == null return;
 	if prk.fake_meeting_target_id == 0 {
 		rr_prankster_assign_target(prankster);
@@ -1293,13 +1296,13 @@ rr_prankster_update_target :: proc(prankster: Player) {
 prankster_check_unlock_jester_win :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.PRANKSTER return;
-	prk := player.entity->get_component(Prankster_Module);
+	prk := player.entity.get_component(Prankster_Module);
 	if prk == null return;
 	// Requires BOTH objectives before unlocking
 	if prk.prank_count >= 3 && prk.fake_meetings_called >= 1 {
 		if prk.jester_unlocked_time <= 0.0 {
 			prk.jester_unlocked_time = get_time();
-			player->Notify("Jester Win unlocked! Survive 15s, then use it to win.");
+			player.Notify("Jester Win unlocked! Survive 15s, then use it to win.");
 		}
 	}
 }
@@ -1335,8 +1338,8 @@ start_jester_win_cinematic :: proc(caller: Player) {
 	close_all_doors();
 
 	// Play the trickster end animation (must be wired into the player's anim state machine)
-	caller->set_facing_right(true);
-	caller->set_trigger("jester_win");
+	caller.set_facing_right(true);
+	caller.set_trigger("jester_win");
 }
 
 start_pyro_win_cinematic :: proc(caller: Player) {
@@ -1357,8 +1360,8 @@ start_pyro_win_cinematic :: proc(caller: Player) {
 	close_all_doors();
 
 	// Play pyromaniac end animation (wired into merged rig state machine).
-	caller->set_facing_right(true);
-	caller->set_trigger("pyro_end_game");
+	caller.set_facing_right(true);
+	caller.set_trigger("pyro_end_game");
 }
 
 on_player_go_dead :: proc(player: Player) {
@@ -1390,55 +1393,55 @@ on_player_go_dead :: proc(player: Player) {
 		player.agent.movement_speed = player.baseline_movement_speed * GHOST_SPEED_MULTIPLIER;
 	}
 
-	player->add_ghost_reason("spectator");
-	player.agent->set_navmesh_to_lock_to(world_references.ghost_navmesh);
-	player->apply_voice_chat_masks_for_current_state();
+	player.add_ghost_reason("spectator");
+	player.agent.set_navmesh_to_lock_to(world_references.ghost_navmesh);
+	player.apply_voice_chat_masks_for_current_state();
 }
 
 on_player_go_passive :: proc(player: Player) {
-	player->revive();
+	player.revive();
 	player.player_state = Player_State.PASSIVE;
 	// Safety: passive/lobby players should never remain in temporary-resurrect state.
 	player.is_temporarily_resurrected = false;
 	player.temporarily_resurrected_until = 0.0;
 	// Immediately restore werewolf visuals (don't defer to next frame — /restart can start
 	// a new round on the same frame, so the deferred cleanup would never run).
-	player->reset_werewolf_visuals();
+	player.reset_werewolf_visuals();
 	player.werewolf_saved_tasks_active = false;
-	world_references->teleport_near_lobby(player);
-	player->remove_ghost_reason("spectator");
+	world_references.teleport_near_lobby(player);
+	player.remove_ghost_reason("spectator");
 	// Hard-reset to canonical baseline speed — prevents any leaked multipliers.
 	if player.baseline_movement_speed_saved {
 		player.agent.movement_speed = player.baseline_movement_speed;
 	}
-	player.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
-	player->apply_voice_chat_masks_for_current_state();
+	player.agent.set_navmesh_to_lock_to(world_references.main_navmesh);
+	player.apply_voice_chat_masks_for_current_state();
 	rr_intro_cleanup_role_spine(player);
 }
 
 on_player_go_alive :: proc(player: Player) {
-	player->revive();
+	player.revive();
 	player.player_state = Player_State.ALIVE;
-	player->remove_ghost_reason("spectator");
+	player.remove_ghost_reason("spectator");
 	// Hard-reset to canonical baseline speed — prevents any leaked multipliers.
 	if player.baseline_movement_speed_saved {
 		player.agent.movement_speed = player.baseline_movement_speed;
 	}
-	player.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
+	player.agent.set_navmesh_to_lock_to(world_references.main_navmesh);
 	rebuild_game_world_navmesh();
-	player->apply_voice_chat_masks_for_current_state();
+	player.apply_voice_chat_masks_for_current_state();
 }
 
 close_all_doors :: proc() {
-	foreach door: component_iterator(Door) {
-		door->close_door();
+	for door: component_iterator(Door) {
+		door.close_door();
 	}
 	rebuild_game_world_navmesh();
 }
 
 open_all_doors :: proc() {
-	foreach door: component_iterator(Door) {
-		door->open_door();
+	for door: component_iterator(Door) {
+		door.open_door();
 	}
 	rebuild_game_world_navmesh();
 }
@@ -1477,7 +1480,7 @@ setup_lobby :: proc() {
 	rr_ggg_clear_nest();
 	rr_pyro_extinguish_all_fires();
 	// Clear all Mimicer Void Pillars
-	foreach p: component_iterator(Player) {
+	for p: component_iterator(Player) {
 		rr_mimicer_clear_void_pillars(p);
 	}
 	// Reset sabotages
@@ -1487,7 +1490,7 @@ setup_lobby :: proc() {
 	rr_power_outage_triggered_by_id = 0;
 	rr_power_outage_cooldown_ends_at = 0.0;
 	if rr_power_outage_generator_entity != null && #alive(rr_power_outage_generator_entity) {
-		rr_power_outage_generator_entity->destroy();
+		rr_power_outage_generator_entity.destroy();
 	}
 	rr_power_outage_generator_entity = null;
 	rr_comms_outage_active = false;
@@ -1501,16 +1504,16 @@ setup_lobby :: proc() {
 	rr_lockdown_ends_at = 0.0;
 	rr_global_sabotage_cooldown_ends_at = 0.0;
 	fake_meeting_cooldown_ends_at = 0.0;
-	foreach player: component_iterator(Player) {
+	for player: component_iterator(Player) {
 		rr_power_outage_remove_generator_task_from_player(player);
 		rr_comms_outage_remove_enable_comms_task_from_player(player);
 		rr_force_reset_hitman_sniper_zoom(player);
 		on_player_go_passive(player);
 		// Lobby reset: everyone can hear & speak to everyone.
-		player->apply_voice_chat_masks_for_current_state();
+		player.apply_voice_chat_masks_for_current_state();
 	}
-	foreach corpse: component_iterator(Corpse) {
-		corpse.entity->destroy();
+	for corpse: component_iterator(Corpse) {
+		corpse.entity.destroy();
 	}
 }
 
@@ -1556,11 +1559,11 @@ setup_ingame :: proc() {
 	rr_power_outage_triggered_by_id = 0;
 	rr_power_outage_cooldown_ends_at = get_time() + INITIAL_ROUND_ATTACK_LOCKOUT_SECONDS;
 	if rr_power_outage_generator_entity != null && #alive(rr_power_outage_generator_entity) {
-		rr_power_outage_generator_entity->destroy();
+		rr_power_outage_generator_entity.destroy();
 	}
 	rr_power_outage_generator_entity = null;
 	// Clear any lingering sabotage tasks from previous round.
-	foreach player: component_iterator(Player) {
+	for player: component_iterator(Player) {
 		rr_power_outage_remove_generator_task_from_player(player);
 		rr_comms_outage_remove_enable_comms_task_from_player(player);
 	}
@@ -1582,10 +1585,10 @@ rr_werewolf_force_revert_for_meeting :: proc(player: Player) {
 	}
 	// Revert actual werewolf transform
 	if player.player_role != Player_Role.WEREWOLF || player.player_type != Player_Type.TRAITOR return;
-	wm := player.entity->get_component(Werewolf_Module);
+	wm := player.entity.get_component(Werewolf_Module);
 	if wm == null return;
 	if wm.is_wolf_form {
-		player->set_trigger("RESET");
+		player.set_trigger("RESET");
 	}
 	wm.is_wolf_form = false;
 	wm.transform_ends_at = 0.0;
@@ -1606,7 +1609,7 @@ setup_voting :: proc() {
 	close_all_doors();
 	
 	// Reset all votes
-	foreach player: component_iterator(Player) {
+	for player: component_iterator(Player) {
 		player.voted_for = null;
 		player.has_voted = false;
 		player.voted_skip = false;
@@ -1620,7 +1623,7 @@ setup_voting :: proc() {
 		rr_lily_force_revert(player);
 		rr_werewolf_force_revert_for_meeting(player);
 
-		world_references->teleport_to_voting(player);
+		world_references.teleport_to_voting(player);
 	}
 }
 
@@ -1671,7 +1674,7 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 	// Can only start meetings during gameplay.
 	if game_state != Game_State.INGAME {
 		if !from_body && caller != null {
-			caller->Notify("Can't call a meeting right now.");
+			caller.Notify("Can't call a meeting right now.");
 		}
 		return false;
 	}
@@ -1700,7 +1703,7 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 		if now < meeting_cooldown_ends_at {
 			if caller != null {
 				remaining := meeting_cooldown_ends_at - now;
-				caller->Notify(format_string("Meeting on cooldown: %s", .{format_float(remaining, decimals=0)}));
+				caller.Notify(format_string("Meeting on cooldown: %s", .{format_float(remaining, decimals=0)}));
 			}
 			return false;
 		}
@@ -1711,7 +1714,7 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 	}
 
 	// Release any carried bodies before the meeting starts.
-	foreach p: component_iterator(Player) {
+	for p: component_iterator(Player) {
 		rr_drag_body_force_drop_for_player(p);
 	}
 
@@ -1724,10 +1727,10 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 
 	// Save every player's ability cooldowns so they can be restored after the meeting.
 	// This effectively pauses cooldowns for the entire meeting duration.
-	foreach p: component_iterator(Player) {
-		p.meeting_saved_cooldowns->clear();
+	for p: component_iterator(Player) {
+		p.meeting_saved_cooldowns.clear();
 		for i: 0..p.abilities.count-1 {
-			p.meeting_saved_cooldowns->append(p.abilities[i].current_cooldown);
+			p.meeting_saved_cooldowns.append(p.abilities[i].current_cooldown);
 		}
 	}
 
@@ -1741,10 +1744,10 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 
 	if from_body {
 		game_state = Game_State.ANIM_BODY_FOUND;
-		body_found_popup->show();
+		body_found_popup.show();
 	} else {
 		game_state = Game_State.ANIM_MEETING_CALLED;
-		meeting_called_popup->show();
+		meeting_called_popup.show();
 	}
 
 	return true;
@@ -1757,23 +1760,23 @@ intro_popup: Intro_Popup;
 victory_popup: Victory_Popup;
 
 ao_start :: proc() {
-	rr_set_server_available(true);
+	rr_set_matchmaking(0);
 	rr_refresh_rng_state();
 	setup_lobby();
 	body_found_popup = new();
-	body_found_popup->init();
+	body_found_popup.init();
 	meeting_called_popup = new();
-	meeting_called_popup->init();
+	meeting_called_popup.init();
 	role_spin_popup = new();
-	role_spin_popup->init();
+	role_spin_popup.init();
 	intro_popup = new();
-	intro_popup->init();
+	intro_popup.init();
 	victory_popup = new();
-	victory_popup->init();
+	victory_popup.init();
   }
 
 ao_update :: proc(dt: float) {
-	rr_update_server_queue_availability();
+	rr_update_matchmaking_priority();
 
 	// Keep timed sabotages progressing regardless of game_state (e.g., lockdown during voting).
 	rr_update_lockdown();
@@ -1801,28 +1804,18 @@ ao_update :: proc(dt: float) {
 	} else if(game_state == Game_State.ANIM_VICTORY) {
 		ao_update_victory(dt);
 	}
-	body_found_popup->update(dt);
-	meeting_called_popup->update(dt);
-	victory_popup->update(dt);
+	body_found_popup.update(dt);
+	meeting_called_popup.update(dt);
+	victory_popup.update(dt);
   }
 
 get_alive_player_count :: proc() -> int {
-	// Clean up null/invalid players by rebuilding the list with only valid players
-	valid_players: List(Player);
-	for i: 0..players.elements.count-1 {
-		player := players.elements[i];
-		// Only keep players that are not null and have alive entities
-		if player != null && #alive(player.entity) {
-			append(ref valid_players, player);
-		}
-	}
-	// Replace the old list with the cleaned list
-	players = valid_players;
-	
-	// Count alive players
 	alive_count := 0;
 	for i: 0..players.elements.count-1 {
-		if players.elements[i].player_state == Player_State.ALIVE {
+		player := players.elements[i];
+		if player == null continue;
+		if !#alive(player.entity) continue;
+		if player.player_state == Player_State.ALIVE {
 			alive_count += 1;
 		}
 	}
@@ -1862,7 +1855,7 @@ all_civilians_completed_tasks :: proc() -> bool {
 
 end_game_with_winners :: proc(victor: Player_Type, winners: List(Player)) {
 	// Show victory popup with winning players
-	victory_popup->show(victor, winners);
+	victory_popup.show(victor, winners);
 	game_state = Game_State.ANIM_VICTORY;
 	
 	// Properly transition all players to passive (removes ghost reasons, restores speed, etc.).
@@ -1913,7 +1906,7 @@ ao_update_lobby :: proc(dt: float) {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
-		p.agent->set_navmesh_to_lock_to(world_references.main_navmesh);
+		p.agent.set_navmesh_to_lock_to(world_references.main_navmesh);
 	}
 	
 	// Check if we're waiting for restart timer (1 minute)
@@ -1932,7 +1925,7 @@ ao_update_lobby :: proc(dt: float) {
 			seconds := remaining_i - minutes * 60;
 			
 			screen := UI.get_safe_screen_rect();
-			rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -150, -25, -150, -25);
+			rect := screen.subrect(0.5, 0.5, 0.5, 0.5, -150, -25, -150, -25);
 			
 			ts := UI.default_text_settings();
 			ts.size = 48;
@@ -1993,7 +1986,7 @@ ao_update_lobby :: proc(dt: float) {
 			seconds := remaining_i - minutes * 60;
 			
 			screen := UI.get_safe_screen_rect();
-			rect := screen->subrect(0.5, 0.5, 0.5, 0.5, -100, -25, -100, -25);
+			rect := screen.subrect(0.5, 0.5, 0.5, 0.5, -100, -25, -100, -25);
 			
 			ts := UI.default_text_settings();
 			ts.size = 48;
@@ -2059,14 +2052,14 @@ rr_remove_movement_reason_all :: proc(player: Player, reason: string) {
 	if player == null return;
 	// Defensive: drain duplicates in case a reason was accidentally stacked.
 	for _i: 0..RR_UNSTUCK_REASON_REMOVE_PASSES-1 {
-		player->remove_disable_movement_input_reason(reason);
+		player.remove_disable_movement_input_reason(reason);
 	}
 }
 
 rr_remove_freeze_reason_all :: proc(player: Player, reason: string) {
 	if player == null return;
 	for _i: 0..RR_UNSTUCK_REASON_REMOVE_PASSES-1 {
-		player->remove_freeze_reason(reason);
+		player.remove_freeze_reason(reason);
 	}
 }
 
@@ -2076,63 +2069,63 @@ rr_unstuck_player :: proc(player: Player) {
 	if !#alive(player.entity) return;
 
 	// Disable active temporary effect components first so they don't re-apply locks next frame.
-	werewolf_stun := player.entity->get_component(Werewolf_Infection_Stun);
+	werewolf_stun := player.entity.get_component(Werewolf_Infection_Stun);
 	if werewolf_stun != null {
 		werewolf_stun.active = false;
 	}
-	werewolf_devour := player.entity->get_component(Werewolf_Devour_Lock);
+	werewolf_devour := player.entity.get_component(Werewolf_Devour_Lock);
 	if werewolf_devour != null {
 		werewolf_devour.active = false;
 	}
-	hitman_mine_stun := player.entity->get_component(Hitman_Mine_Stun);
+	hitman_mine_stun := player.entity.get_component(Hitman_Mine_Stun);
 	if hitman_mine_stun != null {
 		hitman_mine_stun.active = false;
 	}
-	hitman_snap_lock := player.entity->get_component(Hitman_Neck_Snap_Lock);
+	hitman_snap_lock := player.entity.get_component(Hitman_Neck_Snap_Lock);
 	if hitman_snap_lock != null {
 		hitman_snap_lock.active = false;
 	}
-	hitman_fling := player.entity->get_component(Hitman_Mine_Fling);
+	hitman_fling := player.entity.get_component(Hitman_Mine_Fling);
 	if hitman_fling != null {
 		hitman_fling.active = false;
 	}
-	pirate_dig := player.entity->get_component(Pirate_Dig_Lock);
+	pirate_dig := player.entity.get_component(Pirate_Dig_Lock);
 	if pirate_dig != null {
 		pirate_dig.active = false;
-		pirate_dig->clear_spot_digging_flag();
+		pirate_dig.clear_spot_digging_flag();
 	}
-	powder_knockback := player.entity->get_component(Powder_Keg_Knockback);
+	powder_knockback := player.entity.get_component(Powder_Keg_Knockback);
 	if powder_knockback != null {
 		powder_knockback.active = false;
 	}
-	pranked := player.entity->get_component(Pranked_Effect);
+	pranked := player.entity.get_component(Pranked_Effect);
 	if pranked != null {
 		pranked.phase = 2;
 		pranked.stun_end_time = 0.0;
 	}
-	autograph_write := player.entity->get_component(Movie_Star_Write_Autograph);
+	autograph_write := player.entity.get_component(Movie_Star_Write_Autograph);
 	if autograph_write != null {
 		autograph_write.done = true;
 	}
-	autograph_stun := player.entity->get_component(Stunned_By_Autograph_Effect);
+	autograph_stun := player.entity.get_component(Stunned_By_Autograph_Effect);
 	if autograph_stun != null {
 		autograph_stun.active = false;
 	}
-	ggg_transform_lock := player.entity->get_component(GGG_Transform_Lock);
+	ggg_transform_lock := player.entity.get_component(GGG_Transform_Lock);
 	if ggg_transform_lock != null {
 		ggg_transform_lock.active = false;
 	}
-	ggg_trap_root := player.entity->get_component(GGG_Trap_Root_Effect);
+	ggg_trap_root := player.entity.get_component(GGG_Trap_Root_Effect);
 	if ggg_trap_root != null {
-		ggg_trap_root->heal();
+		ggg_trap_root.heal();
 	}
 	// Cancel active GGG live drag.
 	rr_ggg_stop_live_drag(player);
 
 	// Clear pyromaniac fire status through its own cleanup path.
-	fire_status := player.entity->get_component(RR_Player_On_Fire_Status);
+	fire_status := player.entity.get_component(RR_Player_On_Fire_Status);
 	if fire_status != null {
-		fire_status->clear(false);
+		fire_status.clear(false);
 	}
 
 	// Clear werewolf infection state/effects.
@@ -2152,11 +2145,11 @@ rr_unstuck_player :: proc(player: Player) {
 	player.mimicer_blinded = false;
 	player.mimicer_blinded_until = 0.0;
 	player.mimicer_distorted_until = 0.0;
-	player->remove_disable_movement_input_reason(MIMICER_SPEW_LOCK_REASON);
+	player.remove_disable_movement_input_reason(MIMICER_SPEW_LOCK_REASON);
 	rr_mimicer_destroy_halluc_creatures(player);
 
 	// Always reset local animation and velocity.
-	player->set_trigger("RESET");
+	player.set_trigger("RESET");
 	player.agent.velocity = v2.{0, 0};
 	rr_force_reset_hitman_sniper_zoom(player);
 
@@ -2185,11 +2178,11 @@ rr_unstuck_player :: proc(player: Player) {
 	rr_remove_freeze_reason_all(player, BC_CAMERA_LOCK_REASON);
 
 	// Keep visual state coherent after force-clears.
-	player->remove_name_invisibility_reason("werewolf_transform");
-	player->remove_invisibility_reason(MIMICER_INVIS_REASON);
-	player->remove_name_invisibility_reason(MIMICER_NAME_INVIS_REASON);
-	player->remove_invisibility_reason(BC_INVIS_REASON);
-	player->remove_name_invisibility_reason(BC_NAME_INVIS_REASON);
+	player.remove_name_invisibility_reason("werewolf_transform");
+	player.remove_invisibility_reason(MIMICER_INVIS_REASON);
+	player.remove_name_invisibility_reason(MIMICER_NAME_INVIS_REASON);
+	player.remove_invisibility_reason(BC_INVIS_REASON);
+	player.remove_name_invisibility_reason(BC_NAME_INVIS_REASON);
 }
 
 // Chat command: /start
@@ -2310,7 +2303,7 @@ kill :: proc(player: Player, target: Player = null) {
 		Chat.server_send_message("That player is already dead.", player);
 		return;
 	}
-	victim->kill();
+	victim.kill();
 } @chat_command @youtuber
 
 // Chat command: /revive
@@ -2326,7 +2319,7 @@ revive :: proc(player: Player, target: Player = null) {
 		return;
 	}
 	on_player_go_alive(victim);
-	Chat.server_send_message(format_string("% has been revived.", {victim->get_username()}), player);
+	Chat.server_send_message(format_string("% has been revived.", {victim.get_username()}), player);
 } @chat_command @youtuber
 
 // Chat command: /cd
@@ -2345,7 +2338,7 @@ cd :: proc(player: Player) {
 	}
 
 	// Clear deferred per-player cooldown modifiers.
-	hm := player.entity->get_component(Hitman_Module);
+	hm := player.entity.get_component(Hitman_Module);
 	if hm != null hm.kill_cooldown_adjust_seconds = 0.0;
 
 	// These shared timers also gate ability usage (Fake Meeting + post-meeting attack lockout).
@@ -2377,58 +2370,62 @@ unlock :: proc(player: Player) {
 
 	// GGG: nest points
 	if role == Player_Role.GOO_GOO_GAGA {
-		gm := player.entity->get_component(GGG_Module);
+		gm := player.entity.get_component(GGG_Module);
 		if gm != null {
 			gm.nest_points = max(gm.nest_points, GGG_SWARM_UNLOCK_NEST_POINTS);
 		}
 	}
 	// Werewolf: kills
 	if role == Player_Role.WEREWOLF {
-		wm := player.entity->get_component(Werewolf_Module);
+		wm := player.entity.get_component(Werewolf_Module);
 		if wm != null {
 			wm.kills = max(wm.kills, WEREWOLF_CLAW_UNLOCK_KILLS);
 		}
 	}
 	// Hitman: kills
 	if role == Player_Role.HITMAN {
-		hm := player.entity->get_component(Hitman_Module);
+		hm := player.entity.get_component(Hitman_Module);
 		if hm != null {
 			hm.kills = max(hm.kills, HITMAN_SNIPER_UNLOCK_KILLS);
 		}
 	}
 	// Pirate: treasure
 	if role == Player_Role.PIRATE {
-		pm := player.entity->get_component(Pirate_Module);
+		pm := player.entity.get_component(Pirate_Module);
 		if pm != null {
 			pm.treasure = max(pm.treasure, PIRATE_POWDER_KEG_UNLOCK_TREASURE_COST);
 		}
 	}
 	// Mimicer: stolen faces
 	if role == Player_Role.MIMICER {
-		mm := player.entity->get_component(Mimicer_Module);
+		mm := player.entity.get_component(Mimicer_Module);
 		if mm != null {
 			mm.stolen_faces = max(mm.stolen_faces, MIMICER_UNLEASH_UNLOCK_FACES);
 		}
 	}
-	// Lily: braid points
+	// Lily: plant tree if needed, then max out fulfilled requests
 	if role == Player_Role.LILY_LOVEBRAIDS {
-		lm := player.entity->get_component(Lily_Module);
+		lm := player.entity.get_component(Lily_Module);
 		if lm != null {
-			// Max out fulfilled requests on planted tree for Deathbraid testing
+			// Auto-plant tree if not yet planted
+			if !lm.hair_tree_planted {
+				rr_lily_place_hair_tree(player);
+			}
+			// Max out fulfilled requests for Deathbraid testing
 			if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
-				tc := lm.hair_tree_entity->get_component(Lily_Hair_Tree);
+				tc := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 				if tc != null {
 					tc.fulfilled_count = LILY_DEATHBRAID_THRESHOLD;
-					tc->grow();
+					tc.grow();
 					rr_lily_apply_tree_buffs(player);
-					Notifier.notify(player, "Tree fully grown — Deathbraid ready!");
+					Notifier.notify(player, "Tree fully grown — all abilities unlocked!");
 				}
 			}
 		}
 	}
 	// Prankster: jester win unlock
 	if role == Player_Role.PRANKSTER {
-		prk := player.entity->get_component(Prankster_Module);
+		prk := player.entity.get_component(Prankster_Module);
 		if prk != null {
 			prk.prank_count = max(prk.prank_count, 3);
 			prk.fake_meetings_called = max(prk.fake_meetings_called, 1);
@@ -2439,7 +2436,7 @@ unlock :: proc(player: Player) {
 	}
 	// Pyromaniac: world fire unlock
 	if role == Player_Role.PYROMANIAC {
-		pyro := player.entity->get_component(Pyro_Module);
+		pyro := player.entity.get_component(Pyro_Module);
 		if pyro != null {
 			pyro.corpses_burned = max(pyro.corpses_burned, 1);
 			pyro.rooms_burned_out = max(pyro.rooms_burned_out, PYRO_ROOMS_BURNOUT_TARGET);
@@ -2636,13 +2633,13 @@ update_temporary_resurrections :: proc() {
 
 		// Time's up: return them to dead state and spawn a new corpse at their current position.
 		was_reported := p.was_corpse_reported_before_resurrect;
-		p->kill();
+		p.kill();
 
 		// Only pre-mark the new corpse as reported if the original body had already been
 		// reported / a meeting was called about it. If it was never found, the new corpse
 		// should be discoverable and reportable.
 		if was_reported {
-			foreach corpse: component_iterator(Corpse) {
+			for corpse: component_iterator(Corpse) {
 				if corpse == null continue;
 				if !#alive(corpse.entity) continue;
 				if corpse.owner_player_entity_id == p.entity.id {
@@ -2655,41 +2652,41 @@ update_temporary_resurrections :: proc() {
 
 ao_update_body_found :: proc(dt: float) {
 	// Wait for popup animation to finish before starting voting
-	if body_found_popup->is_finished() {
-		body_found_popup->hide();
+	if body_found_popup.is_finished() {
+		body_found_popup.hide();
 		setup_voting();
 	}
 }
 
 ao_update_meeting_called :: proc(dt: float) {
 	// Wait for popup animation to finish before starting voting
-	if meeting_called_popup->is_finished() {
-		meeting_called_popup->hide();
+	if meeting_called_popup.is_finished() {
+		meeting_called_popup.hide();
 		setup_voting();
 	}
 }
 
 ao_update_role_spin :: proc(dt: float) {
 	// Time-based finish, just like other popups
-	if role_spin_popup->is_finished() {
-		role_spin_popup->hide();
-		intro_popup->show();
+	if role_spin_popup.is_finished() {
+		role_spin_popup.hide();
+		intro_popup.show();
 		game_state = Game_State.ANIM_INTRO;
 	}
 }
 
 ao_update_intro :: proc(dt: float) {
 	// Wait for intro popup animation to finish before starting gameplay
-	if intro_popup->is_finished() {
-		intro_popup->hide();
+	if intro_popup.is_finished() {
+		intro_popup.hide();
 		setup_ingame();
 	}
 }
 
 ao_update_victory :: proc(dt: float) {
 	// Wait for victory popup animation to finish before returning to lobby
-	if victory_popup->is_finished() {
-		victory_popup->hide();
+	if victory_popup.is_finished() {
+		victory_popup.hide();
 		setup_lobby();
 	}
 }
@@ -2854,8 +2851,8 @@ ao_update_vote_eject :: proc(dt: float) {
 		if Game.is_server() {
 			p := get_player_by_entity_id(rr_vote_eject_player_id);
 			if p != null && #alive(p.entity) {
-				p->set_facing_right(true);
-				p->set_trigger("death_vote2");
+				p.set_facing_right(true);
+				p.set_trigger("death_vote2");
 			}
 		}
 		if Game.is_server() && !rr_vote_eject_anim_sfx_played {
@@ -2882,7 +2879,7 @@ ao_update_vote_eject :: proc(dt: float) {
 	if Game.is_server() {
 		p := get_player_by_entity_id(rr_vote_eject_player_id);
 		if p != null && #alive(p.entity) {
-			p->set_trigger("RESET");
+			p.set_trigger("RESET");
 			on_player_go_dead(p);
 		}
 
@@ -2958,7 +2955,7 @@ end_voting :: proc() {
 			}
 			// Success: target is the sole top-voted player AND their votes beat skips
 			// (mirrors real meeting ejection rules — skip wins means no credit).
-			prk := caller.entity->get_component(Prankster_Module);
+			prk := caller.entity.get_component(Prankster_Module);
 			if prk != null && fm_max_count == 1 && fm_max_player != null && fm_max_votes > 0 && fm_skip_votes <= fm_max_votes && prk.fake_meeting_target_id != 0 && fm_max_player.entity.id == prk.fake_meeting_target_id {
 				prk.fake_meetings_called += 1;
 				prankster_check_unlock_jester_win(caller);
@@ -2970,11 +2967,11 @@ end_voting :: proc() {
 
 		if rr_last_vote_prankster_got_voted {
 			for i: 0..players.elements.count-1 {
-				players.elements[i]->Notify("Fake meeting! You got played by the prankster!");
+				players.elements[i].Notify("Fake meeting! You got played by the prankster!");
 			}
 		} else {
 			for i: 0..players.elements.count-1 {
-				players.elements[i]->Notify("It was a fake meeting!");
+				players.elements[i].Notify("It was a fake meeting!");
 			}
 		}
 		fake_meeting_active = false;
@@ -3025,19 +3022,19 @@ end_voting :: proc() {
 			rr_last_vote_result_time = get_time();
 			rr_last_vote_ejected_player_id = 0;
 			for i: 0..players.elements.count-1 {
-				players.elements[i]->Notify("Vote skipped. No one was ejected.");
+				players.elements[i].Notify("Vote skipped. No one was ejected.");
 			}
 		} else if max_player_votes <= 0 {
 			rr_last_vote_result_time = get_time();
 			rr_last_vote_ejected_player_id = 0;
 			for i: 0..players.elements.count-1 {
-				players.elements[i]->Notify("No votes were cast. No one was ejected.");
+				players.elements[i].Notify("No votes were cast. No one was ejected.");
 			}
 		} else if max_player_count > 1 || max_player == null {
 			rr_last_vote_result_time = get_time();
 			rr_last_vote_ejected_player_id = 0;
 			for i: 0..players.elements.count-1 {
-				players.elements[i]->Notify("It's a tie! No one was ejected.");
+				players.elements[i].Notify("It's a tie! No one was ejected.");
 			}
 		} else {
 			// Eject the unique top-voted player.
@@ -3064,7 +3061,7 @@ finalize_voting :: proc() {
 				p.abilities[j].current_cooldown = p.meeting_saved_cooldowns[j];
 			}
 		}
-		p.meeting_saved_cooldowns->clear();
+		p.meeting_saved_cooldowns.clear();
 	}
 
 	// Restore saved sabotage cooldowns (paused during the meeting).
@@ -3139,7 +3136,7 @@ assign_players_to_types :: proc() {
 	if rr_started_solo_test_mode {
 		for i: 0..players.elements.count-1 {
 			if players.elements[i] != null {
-				players.elements[i]->Notify("Test mode: game will not end automatically.");
+				players.elements[i].Notify("Test mode: game will not end automatically.");
 			}
 		}
 	}
@@ -3225,13 +3222,13 @@ assign_players_to_types :: proc() {
 	}
 
 	// Build unforced player list and assign types with purchase boosts.
-	rng := rng_seed((get_real_time() * 1000000.0).(u64) + player_count.(u64) + round_number.(u64));
+	rng := rng_seed(rng_root_seed() + player_count.(u64) + round_number.(u64) * 7919);
 	unforced_for_types: [..]Player;
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
 		if p.forced_role_next_round != Player_Role.NONE continue;
-		unforced_for_types->append(p);
+		unforced_for_types.append(p);
 	}
 	rp_assign_player_types(ref unforced_for_types, remaining_civ, remaining_an, remaining_tr, ref rng);
 
@@ -3318,39 +3315,39 @@ assign_players_to_types :: proc() {
 		
 		// Per-round resets
 		if p.player_role == Player_Role.DOCTOR {
-			dm := p.entity->get_component(Doctor_Module);
+			dm := p.entity.get_component(Doctor_Module);
 			if dm == null {
-				dm = p.entity->add_component(Doctor_Module);
+				dm = p.entity.add_component(Doctor_Module);
 			}
 			dm.resurrects_used = 0;
 		}
 		// Sheriff: 1 bullet per round (Shoot ability will disable after firing).
 		if p.player_role == Player_Role.SHERIFF {
-			sm := p.entity->get_component(Sheriff_Module);
+			sm := p.entity.get_component(Sheriff_Module);
 			if sm == null {
-				sm = p.entity->add_component(Sheriff_Module);
+				sm = p.entity.add_component(Sheriff_Module);
 			}
 			sm.gun_ammo = 1;
 		}
 		if p.player_role == Player_Role.CORONER {
-			cm := p.entity->get_component(Coroner_Module);
+			cm := p.entity.get_component(Coroner_Module);
 			if cm == null {
-				cm = p.entity->add_component(Coroner_Module);
+				cm = p.entity.add_component(Coroner_Module);
 			}
-			cm.dna_vials->clear();
+			cm.dna_vials.clear();
 		}
 		if p.player_role == Player_Role.PORTAL_MAKER {
-			portal_mod := p.entity->get_component(Portal_Maker_Module);
+			portal_mod := p.entity.get_component(Portal_Maker_Module);
 			if portal_mod == null {
-				portal_mod = p.entity->add_component(Portal_Maker_Module);
+				portal_mod = p.entity.add_component(Portal_Maker_Module);
 			}
 			portal_mod.red_portal = null;
 			portal_mod.blue_portal = null;
 		}
 		if p.player_role == Player_Role.HITMAN {
-			hm := p.entity->get_component(Hitman_Module);
+			hm := p.entity.get_component(Hitman_Module);
 			if hm == null {
-				hm = p.entity->add_component(Hitman_Module);
+				hm = p.entity.add_component(Hitman_Module);
 			}
 			hm.kills = 0;
 			hm.contract_target_id = 0;
@@ -3359,9 +3356,9 @@ assign_players_to_types :: proc() {
 		}
 		// Pirate — reset or create the module for pirate players.
 		if p.player_role == Player_Role.PIRATE {
-			pm := p.entity->get_component(Pirate_Module);
+			pm := p.entity.get_component(Pirate_Module);
 			if pm == null {
-				pm = p.entity->add_component(Pirate_Module);
+				pm = p.entity.add_component(Pirate_Module);
 			}
 			pm.treasure = 0;
 			pm.black_flag_unlocked = true;
@@ -3370,14 +3367,14 @@ assign_players_to_types :: proc() {
 		// Ensure any leftover dig-spots from prior sessions are cleared.
 		destroy_pirate_dig_spots_for_player(p.entity.id);
 		// Werewolf — full reset including skin state (guards against /restart race).
-		p->reset_werewolf_visuals();
+		p.reset_werewolf_visuals();
 		// Capture round-start cosmetics so werewolf cleanup can always restore baseline look.
-		p->capture_werewolf_round_start_look();
+		p.capture_werewolf_round_start_look();
 		// Werewolf module: only for actual werewolves.
 		if p.player_role == Player_Role.WEREWOLF {
-			wwm := p.entity->get_component(Werewolf_Module);
+			wwm := p.entity.get_component(Werewolf_Module);
 			if wwm == null {
-				wwm = p.entity->add_component(Werewolf_Module);
+				wwm = p.entity.add_component(Werewolf_Module);
 			}
 			wwm.kills = 0;
 			wwm.is_wolf_form = false;
@@ -3389,9 +3386,9 @@ assign_players_to_types :: proc() {
 		// Goo Goo Gaga
 		rr_ggg_destroy_creature_entity(p);
 		if p.player_role == Player_Role.GOO_GOO_GAGA {
-			ggm := p.entity->get_component(GGG_Module);
+			ggm := p.entity.get_component(GGG_Module);
 			if ggm == null {
-				ggm = p.entity->add_component(GGG_Module);
+				ggm = p.entity.add_component(GGG_Module);
 			}
 			ggm.nest_points = 0;
 			ggm.nest_placed = false;
@@ -3411,15 +3408,18 @@ assign_players_to_types :: proc() {
 			ggm.dragging_live_player_id = 0;
 		}
 
-		// Lily no-eyes
+		// Lily no-eyes / crawl
 		p.lily_no_eyes = false;
+		if p.lily_crawling {
+			rr_lily_restore_legs(p);
+		}
 
 		// Pyromaniac
 		p.pyro_on_fire = false;
 		if p.player_role == Player_Role.PYROMANIAC {
-			pyro := p.entity->get_component(Pyro_Module);
+			pyro := p.entity.get_component(Pyro_Module);
 			if pyro == null {
-				pyro = p.entity->add_component(Pyro_Module);
+				pyro = p.entity.add_component(Pyro_Module);
 			}
 			pyro.props_ignited = 0;
 			pyro.corpses_burned = 0;
@@ -3441,8 +3441,8 @@ assign_players_to_types :: proc() {
 			append(ref p.active_tasks, fake_task);
 
 			// Reset prank progress at round start
-			prk := p.entity->get_component(Prankster_Module);
-			if prk == null { prk = p.entity->add_component(Prankster_Module); }
+			prk := p.entity.get_component(Prankster_Module);
+			if prk == null { prk = p.entity.add_component(Prankster_Module); }
 			prk.prank_count = 0;
 			prk.fake_meetings_called = 0;
 			prk.jester_unlocked_time = 0.0;
@@ -3476,27 +3476,26 @@ assign_players_to_types :: proc() {
 			// Collect all eligible rooms (Props entities with MIN & MAX children).
 			candidate_rooms: [..]Entity;
 			candidate_names: [..]string;
-			foreach room_e: entity_iterator() {
+			for room_e: entity_iterator() {
 				if room_e == null continue;
 				if !#alive(room_e) continue;
-				if room_e->get_name() != "Props" continue;
+				if !room_e.compare_name("Props") continue;
 
 				has_min := false;
 				has_max := false;
-				bounds_child := room_e.first_child;
+				bounds_child := room_e.get_first_child();
 				while bounds_child != null {
 					if #alive(bounds_child) {
-						bc_n := bounds_child->get_name();
-						if bc_n == "MIN" { has_min = true; }
-						else if bc_n == "MAX" { has_max = true; }
+						if bounds_child.compare_name("MIN") { has_min = true; }
+						else if bounds_child.compare_name("MAX") { has_max = true; }
 					}
-					bounds_child = bounds_child.next_sibling;
+					bounds_child = bounds_child.get_next_sibling();
 				}
 				if !has_min || !has_max continue;
 
 				room_name := "Room";
-				if room_e.parent != null && #alive(room_e.parent) {
-					pname := room_e.parent->get_name();
+				if room_e.get_parent() != null && #alive(room_e.get_parent()) {
+					pname := room_e.get_parent().get_name();
 					if pname.count > 0 {
 						room_name = pname;
 					}
@@ -3507,7 +3506,7 @@ assign_players_to_types :: proc() {
 			}
 
 			// Partial Fisher-Yates shuffle — pick PYRO_ROOMS_BURNOUT_TARGET rooms at random.
-			rng: u64 = rng_seed_time();
+			rng: u64 = rng_seed(rng_root_seed() + round_number.(u64) + candidate_rooms.count.(u64) * 7919);
 			pick_count := min(PYRO_ROOMS_BURNOUT_TARGET, candidate_rooms.count);
 			for pick_i: 0..pick_count-1 {
 				remaining := candidate_rooms.count - pick_i;
@@ -3559,6 +3558,6 @@ assign_players_to_types :: proc() {
 	}
 
 	// Start the role spin animation (spin will trigger intro popup when done)
-	role_spin_popup->show();
+	role_spin_popup.show();
 	game_state = Game_State.ANIM_ROLE_SPIN;
 }

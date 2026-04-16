@@ -16,22 +16,22 @@ Door :: class : Component {
     spacing_bases_cached: bool;
 
     ao_start :: proc(using this: Door) {
-        collider_entity->set_local_enabled(force_locked);
-        this->setup_spine_animator();
+        collider_entity.set_local_enabled(force_locked);
+        this.setup_spine_animator();
     }
 
     ao_update :: proc(using this: Door, dt: float) {
         // Re-apply spacing offset every frame so Spine animations don't override it.
         if spacing > 0 && spine_animator != null {
-            spine_animator->awaken();
+            spine_animator.awaken();
             if spine_animator.instance != null {
                 if !spacing_bases_cached {
-                    spacing_upper_base = spine_animator.instance->get_bone_local_position("vertical_upper_root");
-                    spacing_lower_base = spine_animator.instance->get_bone_local_position("vertical_lower_root");
+                    spacing_upper_base = spine_animator.instance.get_bone_local_position("vertical_upper_root");
+                    spacing_lower_base = spine_animator.instance.get_bone_local_position("vertical_lower_root");
                     spacing_bases_cached = true;
                 }
-                spine_animator.instance->set_bone_local_position("vertical_upper_root", spacing_upper_base + v2.{0.0, spacing});
-                spine_animator.instance->set_bone_local_position("vertical_lower_root", spacing_lower_base + v2.{0.0, -spacing});
+                spine_animator.instance.set_bone_local_position("vertical_upper_root", spacing_upper_base + v2.{0.0, spacing});
+                spine_animator.instance.set_bone_local_position("vertical_lower_root", spacing_lower_base + v2.{0.0, -spacing});
             }
         }
     }
@@ -49,82 +49,82 @@ Door :: class : Component {
             return;
         }
 
-        spine_animator->awaken();
+        spine_animator.awaken();
         if spine_animator.instance == null {
             return;
         }
 
         // Cache base bone positions for spacing (applied every frame in ao_update).
         if spacing > 0 {
-            spacing_upper_base = spine_animator.instance->get_bone_local_position("vertical_upper_root");
-            spacing_lower_base = spine_animator.instance->get_bone_local_position("vertical_lower_root");
+            spacing_upper_base = spine_animator.instance.get_bone_local_position("vertical_upper_root");
+            spacing_lower_base = spine_animator.instance.get_bone_local_position("vertical_lower_root");
             spacing_bases_cached = true;
-            spine_animator.instance->set_bone_local_position("vertical_upper_root", spacing_upper_base + v2.{0.0, spacing});
-            spine_animator.instance->set_bone_local_position("vertical_lower_root", spacing_lower_base + v2.{0.0, -spacing});
+            spine_animator.instance.set_bone_local_position("vertical_upper_root", spacing_upper_base + v2.{0.0, spacing});
+            spine_animator.instance.set_bone_local_position("vertical_lower_root", spacing_lower_base + v2.{0.0, -spacing});
         }
 
         state_machine := State_Machine.create();
-        open_trigger := state_machine->create_variable("open_door", .TRIGGER);
-        close_trigger := state_machine->create_variable("close_door", .TRIGGER);
+        open_trigger := state_machine.create_variable("open_door", .TRIGGER);
+        close_trigger := state_machine.create_variable("close_door", .TRIGGER);
 
-        layer := state_machine->create_layer("main", 0);
+        layer := state_machine.create_layer("main", 0);
 
-        closed_idle := layer->create_state("closed_idle", true);
-        opening := layer->create_state("opening", false);
-        open_idle := layer->create_state("open_idle", true);
-        closing := layer->create_state("closing", false);
+        closed_idle := layer.create_state("closed_idle", true);
+        opening := layer.create_state("opening", false);
+        open_idle := layer.create_state("open_idle", true);
+        closing := layer.create_state("closing", false);
 
         // Pick initial state based on starting lock state.
         if force_locked {
             is_open = false;
-            layer->set_initial_state(closed_idle);
+            layer.set_initial_state(closed_idle);
         } else {
             is_open = true;
-            layer->set_initial_state(open_idle);
+            layer.set_initial_state(open_idle);
         }
 
         // closed_idle -> opening -> open_idle
-        closed_to_opening := layer->create_transition(closed_idle, opening, false);
-        closed_to_opening->create_trigger_condition(open_trigger);
+        closed_to_opening := layer.create_transition(closed_idle, opening, false);
+        closed_to_opening.create_trigger_condition(open_trigger);
 
-        opening_to_open_idle := layer->create_transition(opening, open_idle, true);
+        opening_to_open_idle := layer.create_transition(opening, open_idle, true);
 
         // open_idle -> closing -> closed_idle
-        open_idle_to_closing := layer->create_transition(open_idle, closing, false);
-        open_idle_to_closing->create_trigger_condition(close_trigger);
+        open_idle_to_closing := layer.create_transition(open_idle, closing, false);
+        open_idle_to_closing.create_trigger_condition(close_trigger);
 
-        closing_to_closed_idle := layer->create_transition(closing, closed_idle, true);
+        closing_to_closed_idle := layer.create_transition(closing, closed_idle, true);
 
         // Attach to spine (transfer ownership to the Spine_Instance).
-        spine_animator.instance->set_state_machine(state_machine, true);
+        spine_animator.instance.set_state_machine(state_machine, true);
     }
 
     open_door :: proc(using this: Door) {
         force_locked = false;
-        collider_entity->set_local_enabled(force_locked);
+        collider_entity.set_local_enabled(force_locked);
         is_open = true;
 
         if spine_animator != null {
-            spine_animator->awaken();
+            spine_animator.awaken();
             if spine_animator.instance != null && spine_animator.instance.state_machine != null {
-                spine_animator.instance.state_machine->set_trigger("open_door");
+                spine_animator.instance.state_machine.set_trigger("open_door");
             } else if spine_animator.instance != null {
-                spine_animator.instance->set_animation("opening", false, 0);
+                spine_animator.instance.set_animation("opening", false, 0);
             }
         }
     }
 
     close_door :: proc(using this: Door) {
         force_locked = true;
-        collider_entity->set_local_enabled(force_locked);
+        collider_entity.set_local_enabled(force_locked);
         is_open = false;
 
         if spine_animator != null {
-            spine_animator->awaken();
+            spine_animator.awaken();
             if spine_animator.instance != null && spine_animator.instance.state_machine != null {
-                spine_animator.instance.state_machine->set_trigger("close_door");
+                spine_animator.instance.state_machine.set_trigger("close_door");
             } else if spine_animator.instance != null {
-                spine_animator.instance->set_animation("closing", false, 0);
+                spine_animator.instance.set_animation("closing", false, 0);
             }
         }
     }
@@ -140,9 +140,9 @@ Door_Unlock_Interactable :: class : Interactable {
 	target_door: Door;
 
 	ao_start :: method() {
-		this->set_listener(this);
-		this->set_text("Open Door");
-		this->set_hold_text("Opening...");
+		this.set_listener(this);
+		this.set_text("Open Door");
+		this.set_hold_text("Opening...");
 		radius = DOOR_UNLOCK_INTERACT_RADIUS;
 		required_hold_time = DOOR_UNLOCK_HOLD_TIME;
 		prompt_offset = v2.{0, 1.5};
@@ -167,7 +167,7 @@ Door_Unlock_Interactable :: class : Interactable {
 		if !#alive(target_door.entity) return;
 		if target_door.is_open return;
 
-		target_door->open_door();
+		target_door.open_door();
 		rebuild_game_world_navmesh();
 	}
 }
@@ -193,7 +193,7 @@ World_References :: class : Component {
     teleport_near_lobby :: proc(using this: World_References, player: Player) {
         rng := rng_seed(player.entity.id);
         random_offset :=  v2.{rng_range_float(ref rng, -2.0, 2.0), rng_range_float(ref rng, -2.0,2.0)};
-        player.entity->set_local_position(lobby_spawn.world_position + random_offset);
+        player.entity.set_local_position(lobby_spawn.world_position + random_offset);
     }
 
     teleport_to_voting :: proc(using this: World_References, player: Player) {
@@ -216,16 +216,16 @@ World_References :: class : Component {
         nav_point: v2;
         triangle_hint: s64;
         try_find_closest_point_on_navmesh(voting_spawn.world_position + offset, ref nav_point, ref triangle_hint);
-        player.entity->set_local_position(voting_spawn.world_position + offset);
+        player.entity.set_local_position(voting_spawn.world_position + offset);
     }
 
     spawn_corpse :: proc(using this: World_References, player: Player, killer_player_entity_id: u64) {
         corpse := Scene.instantiate(corpse_prefab);
-        corpse->set_local_position(player.entity.world_position);
-        corpse->set_local_rotation(player.entity.world_rotation);
-        corpse->set_local_scale(player.entity.world_scale);
+        corpse.set_local_position(player.entity.world_position);
+        corpse.set_local_rotation(player.entity.world_rotation);
+        corpse.set_local_scale(player.entity.world_scale);
 
-        corpse_component := corpse->get_component(Corpse);
+        corpse_component := corpse.get_component(Corpse);
         if corpse_component != null {
             corpse_component.has_been_reported = false;
             corpse_component.owner_player_entity_id = player.entity.id;
@@ -242,29 +242,29 @@ World_References :: class : Component {
         }
 
 		// Reporting is an in-world interactable on the corpse (replaces Report_Ability).
-		corpse->add_component(Report_Corpse_Interactable);
-		corpse->add_component(Unwrap_Corpse_Interactable);
+		corpse.add_component(Report_Corpse_Interactable);
+		corpse.add_component(Unwrap_Corpse_Interactable);
 		// Mimicer can corrupt any corpse into a Void Pillar.
-		corpse->add_component(Mimicer_Corrupt_Interactable);
+		corpse.add_component(Mimicer_Corrupt_Interactable);
 
-        spine_Animator := corpse->get_component(Spine_Animator);
+        spine_Animator := corpse.get_component(Spine_Animator);
         if spine_Animator != null && spine_Animator.instance != null && player.animator != null && player.animator.instance != null {
             death_anim := "Death_No_HP";
 
-            spine_Animator.instance->disable_all_skins();
-            player_skins := player.animator.instance->get_skins();
+            spine_Animator.instance.disable_all_skins();
+            player_skins := player.animator.instance.get_skins();
             for i: 0..player_skins.count-1 {
-                spine_Animator.instance->enable_skin(player_skins[i]);
+                spine_Animator.instance.enable_skin(player_skins[i]);
             }
-            spine_Animator.instance->refresh_skins();
+            spine_Animator.instance.refresh_skins();
 
             // Set color AFTER refresh_skins so the skin rebuild doesn't reset it.
-            spine_Animator.instance->set_color_replace_color(player.avatar_color);
+            spine_Animator.instance.set_color_replace_color(player.avatar_color);
 
 			// Hitman kill-specific corpse deaths (animations are integrated into the player rig).
 			killer := get_player_by_entity_id(killer_player_entity_id);
 			if killer != null && killer.player_role == Player_Role.HITMAN {
-				hm := killer.entity->get_component(Hitman_Module);
+				hm := killer.entity.get_component(Hitman_Module);
 				if hm != null {
 					switch hm.last_kill_style {
 						case .NECK_SNAP: death_anim = "004RAND_hitman/Kill_Neck_Snapped";
@@ -277,7 +277,7 @@ World_References :: class : Component {
 			// GGG kills always wrap the victim in chocolate foil (both forms).
 			killer_gm: GGG_Module = null;
 			if killer != null {
-				killer_gm = killer.entity->get_component(GGG_Module);
+				killer_gm = killer.entity.get_component(GGG_Module);
 			}
 			if killer != null && killer.player_role == Player_Role.GOO_GOO_GAGA && killer_gm != null {
 				if corpse_component != null {
@@ -298,14 +298,14 @@ World_References :: class : Component {
 				death_anim = "004RAND_LILY/Death_Lovebraids";
 			}
 
-            spine_Animator.instance->set_animation(death_anim, false, 0);
+            spine_Animator.instance.set_animation(death_anim, false, 0);
 
 			// If victim had eyes stolen, play the no-eyes overlay on the corpse too (track 1).
 			if player.lily_no_eyes {
-				spine_Animator.instance->set_animation("004RAND_LILY/No_Eyes_AL", true, 1);
+				spine_Animator.instance.set_animation("004RAND_LILY/No_Eyes_AL", true, 1);
 			}
 
-            spine_Animator->awaken();
+            spine_Animator.awaken();
 
 			// Store the chosen animation so we can restore it after drag-drop.
 			if corpse_component != null {
@@ -318,14 +318,14 @@ World_References :: class : Component {
 	// (Does not include Sprite_Renderers on the "Props" entity itself.)
 	find_props_child_entities :: proc(using this: World_References, results: ref [..]Entity, clear_first: bool = true) {
 		if clear_first {
-			results->clear();
+			results.clear();
 		}
-		foreach e: entity_iterator() {
+		for e: entity_iterator() {
 			if e == null continue;
 			if !#alive(e) continue;
-			if e->get_name() != "Props" continue;
+			if !e.compare_name("Props") continue;
 
-			this->append_entities_in_descendants(e, ref results);
+			this.append_entities_in_descendants(e, ref results);
 		}
 	}
 
@@ -337,17 +337,17 @@ World_References :: class : Component {
 		stack: [..]Entity;
 
 		// Seed stack with root's direct children (so we don't include root itself).
-		child := root.first_child;
+		child := root.get_first_child();
 		while child != null {
-			stack->append(child);
-			child = child.next_sibling;
+			stack.append(child);
+			child = child.get_next_sibling();
 		}
 
 		while stack.count > 0 {
-			cur := stack->pop();
+			cur := stack.pop();
 			if cur == null continue;
 			if !#alive(cur) continue;
-			results->append(cur);
+			results.append(cur);
 		}
 	}
 }
