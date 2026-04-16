@@ -14,8 +14,10 @@ rr_lily_get_creature_rig_path :: proc() -> string {
 	return format_string("%Lily_Lovebraids_Art.spine", {LILY_RIG_PREFIX});
 }
 rr_lily_get_tree_rig_path :: proc() -> string {
-	return format_string("%April2nd26 Lily Tree/LilyTreeHair.spine", {LILY_RIG_PREFIX});
+	return format_string("%April14th26_LilyGiantTree/004RAND_LilyGiantTree.spine", {LILY_RIG_PREFIX});
 }
+LILY_TUBE_FRONT_RIG :: "anims/roles/Lily/April14th26_SuctionTube/004Rand_SuctionTube.spine";
+LILY_TUBE_BACK_RIG  :: "anims/roles/Lily/April14th26_SuctionTube/004Rand_SuctionTube_BackLayering.spine";
 rr_lily_get_eyes_rig_path :: proc() -> string {
 	return format_string("%April2nd26 Lily Hovering Eyes/LilyHoveringEyes.spine", {LILY_RIG_PREFIX});
 }
@@ -54,18 +56,18 @@ LILY_STRING_RANGE :: 10.0;
 // Hair Tree (Plant Tree — one-time use)
 LILY_TREE_TELEPORT_COOLDOWN :: 30.0;
 LILY_TREE_INTERACT_RADIUS :: 2.5;
-LILY_TREE_DELIVER_RANGE :: 3.0; // range to deliver items to the tree
-LILY_TREE_VISIBILITY_RANGE :: 8.0; // non-traitors only see tree when this close
+LILY_TREE_DELIVER_RANGE :: 1.5; // range to deliver items to the tree
+LILY_TREE_VISIBILITY_RANGE :: 4.0; // non-traitors only see tree when this close
 
-// Tree growth scale per stage (0=Tiny through 6=Deathbraid)
-// [ART] sapling asset — will be swapped for proper growth stages later
-LILY_TREE_SCALE_STAGE_0 :: 0.4;
-LILY_TREE_SCALE_STAGE_1 :: 0.55;
-LILY_TREE_SCALE_STAGE_2 :: 0.7;
-LILY_TREE_SCALE_STAGE_3 :: 0.85;
-LILY_TREE_SCALE_STAGE_4 :: 1.0;
-LILY_TREE_SCALE_STAGE_5 :: 1.15;
-LILY_TREE_SCALE_STAGE_6 :: 1.3;
+// Growth stage → skin name on 004RAND_LilyGiantTree.spine
+rr_lily_get_tree_skin_for_stage :: proc(fulfilled_count: int) -> string {
+	if fulfilled_count <= 0 return "1.tiny";
+	if fulfilled_count == 1 return "2.small";
+	if fulfilled_count == 2 return "3.medium";
+	if fulfilled_count == 3 return "4.big";
+	if fulfilled_count == 4 return "5.giant";
+	return "6.massive"; // 5+
+}
 
 // Tree buff per fulfilled request
 LILY_TREE_SPEED_BUFF_PER_STAGE :: 0.08;  // +8% movespeed per stage (6 stages)
@@ -90,6 +92,7 @@ LILY_EYE_MACHINE_SPEED :: 8.0;           // camera/machine movement speed
 LILY_EYE_MACHINE_ATTACK_RANGE :: 4.5;    // range to suck eyes
 LILY_EYE_MACHINE_ZOOM_SIZE :: 20.0;      // zoomed out camera size
 LILY_EYE_MACHINE_TUBE_OFFSET_Y :: 5.0;   // suction tube floats above camera center
+LILY_EYE_MACHINE_TUBE_SUCTION_Y :: 1.0;  // tube descends to this height above victim during suction
 LILY_EYE_MACHINE_TUBE_BOB_AMP :: 0.3;    // bob amplitude
 LILY_EYE_MACHINE_TUBE_BOB_SPEED :: 3.0;  // bob frequency
 LILY_EYE_MACHINE_ZOOM_DURATION :: 0.8;   // camera zoom-in time (no FX)
@@ -180,15 +183,27 @@ LILY_CRAWL_REASON :: "lily_leg_steal_crawl";
 LILY_ABILITY_INVIS_REASON :: "lily_ability_invis";
 LILY_ABILITY_INVIS_ALPHA :: 0.35;
 
-// --- SFX paths (placeholder — replace with actual SFX when available) ---
-// [ART] SFX assets needed for Lily
-LILY_SFX_TRANSFORM :: "sfx/mim/TransformIntoMim.wav"; // [ART] Replace with Lily transform SFX
-LILY_SFX_TRANSFORM_BACK :: "sfx/mim/TransformBack.wav"; // [ART] Replace with Lily revert SFX
-LILY_SFX_KILL :: "sfx/traitor_kill_death.wav"; // [ART] Replace with Lily braid kill SFX
-LILY_SFX_STRING :: "sfx/traitor_kill_death.wav"; // [ART] Replace with string attach SFX
-LILY_SFX_TEA_PARTY :: "sfx/traitor_kill_death.wav"; // [ART] Replace with tea party SFX
-LILY_SFX_DOLLHOUSE :: "sfx/traitor_kill_death.wav"; // [ART] Replace with dollhouse SFX
-LILY_SFX_STRING_TRAP :: "sfx/traitor_kill_death.wav"; // [ART] Replace with hair trap erupt SFX
+// --- SFX paths ---
+LILY_SFX_TRANSFORM :: "transform_poof_2da056.wav";          // short magical poof
+LILY_SFX_TRANSFORM_BACK :: "cast_freeze_spell_244d4c.wav";  // quick magical whoosh revert
+LILY_SFX_KILL :: "imposter_knife_stab_18fcdc.wav";          // meaty braid stab
+LILY_SFX_STRING :: "cast_invis_spell_d2e239.wav";           // magical binding string
+LILY_SFX_TEA_PARTY :: "music_box_start_b9d7c9.wav";         // creepy music box
+LILY_SFX_DOLLHOUSE :: "music_box_summon_2d06b6.wav";        // hypnotic mind control
+LILY_SFX_STRING_TRAP :: "emerge_43c728.wav";                // ground eruption
+LILY_SFX_TREE_PLANT :: "plant_seed_end_1ff22e.wav";         // tree planting
+LILY_SFX_TREE_GROW :: "tree_grow_8bc271.wav";               // tree stage grow chime
+LILY_SFX_TEA_DRINK :: "potion_drink_7d3ef8.wav";            // gulp
+LILY_SFX_TEA_SLEEP :: "yawn_d63132.wav";                    // sleepy yawn
+LILY_SFX_TELEPORT :: "warp_a5b988.wav";                     // quick warp
+LILY_SFX_PICKUP :: "pick_up_item_a973cc.wav";               // eye/leg pickup
+LILY_SFX_DEATHBRAID_STINGER :: "jumpscare_01_026eef.wav";   // cinematic horror stinger
+LILY_SFX_DEATHBRAID_ROAR :: "roar_f23931.wav";              // mouth roars to life
+LILY_SFX_DEATHBRAID_TENTACLES :: "emerge_ab8828.wav";       // tentacles erupt
+LILY_SFX_DEATHBRAID_VORTEX :: "black_hole_loop_6dfd48.wav"; // looping vortex suction
+LILY_SFX_EYE_SCREAM :: "scream_d7106e.wav";
+LILY_SFX_EYE_PROPELLER :: "propeller_loop_6abf97.wav";      // tube propeller loop
+LILY_SFX_SPIDER_CRAWL :: "spider_run_loop_526f21.wav";      // spider scurry loop                 // victim scream during eye steal
 
 // =============================================================================
 // Creature Entity Management
@@ -383,20 +398,19 @@ rr_lily_force_revert :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
-	if lm.lily_speed_active {
-		lm.lily_speed_active = false;
-		player.agent.movement_speed = player.agent.movement_speed / LILY_LILY_SPEED_MULTIPLIER;
+	// Hard-reset to canonical baseline — avoids drift from chained multiply/divide
+	// when flags get out of sync with the live movement_speed value.
+	if lm.lily_speed_active || lm.thread_speed_active || lm.tree_speed_buff_active {
+		if player.baseline_movement_speed_saved {
+			player.agent.movement_speed = player.baseline_movement_speed;
+		}
 	}
-
-	// Remove thread count speed bonus
-	if lm.thread_speed_active {
-		player.agent.movement_speed = player.agent.movement_speed / lm.thread_speed_multiplier;
-		lm.thread_speed_active = false;
-		lm.thread_speed_multiplier = 1.0;
-	}
-
-	// Remove tree speed buff
-	rr_lily_remove_tree_buffs(player);
+	lm.lily_speed_active = false;
+	lm.thread_speed_active = false;
+	lm.thread_speed_multiplier = 1.0;
+	lm.tree_speed_buff_active = false;
+	lm.tree_speed_multiplier = 1.0;
+	lm.tree_cd_multiplier = 1.0;
 
 	lm.is_lily_form = false;
 	lm.skeleton_swap_at = 0.0;
@@ -464,6 +478,7 @@ rr_lily_round_start :: proc(p: Player) {
 	llm.dragging_live_player_id = 0;
 	llm.eye_machine_active = false;
 	llm.eye_machine_tube_entity = null;
+	llm.eye_machine_tube_back_entity = null;
 	llm.eye_machine_aoe_entity = null;
 
 	llm.eye_machine_has_target = false;
@@ -630,6 +645,18 @@ rr_lily_remove_all_strings :: proc(player: Player) {
 
 // Remove string when target dies.
 rr_lily_on_player_death :: proc(dead_player_entity_id: u64, killer_entity_id: u64) {
+	dead := get_player_by_entity_id(dead_player_entity_id);
+
+	// If the dying player is themselves a victim of Lily effects, clear the effects
+	// so they don't linger into a later resurrection / new round.
+	if dead != null {
+		if dead.lily_crawling {
+			rr_lily_restore_legs(dead);
+		}
+		dead.lily_no_eyes = false;
+		dead.lily_no_eyes_al_at = 0.0;
+	}
+
 	// Check all players for Lily — a dead player's string dissolves
 	for player: component_iterator(Player) {
 		if player == null continue;
@@ -641,7 +668,24 @@ rr_lily_on_player_death :: proc(dead_player_entity_id: u64, killer_entity_id: u6
 		was_strung := rr_lily_is_player_strung(player, dead_player_entity_id);
 		if was_strung {
 			rr_lily_remove_string(player, dead_player_entity_id);
+		}
 
+		// Destroy any pickups tagged to this victim — they become orphaned on victim death.
+		if lm.eye_pickup_active && lm.eye_pickup_victim_id == dead_player_entity_id {
+			rr_lily_destroy_eye_pickup(player);
+		}
+		if lm.leg_pickup_active && lm.leg_pickup_victim_id == dead_player_entity_id {
+			rr_lily_destroy_leg_pickup(player);
+		}
+
+		// If this Lily is the one that died, drop/destroy her pickups and clear carrying.
+		if player.entity.id == dead_player_entity_id {
+			rr_lily_destroy_eye_pickup(player);
+			rr_lily_destroy_leg_pickup(player);
+			lm.carrying_eyes = false;
+			lm.stolen_eyes_from_id = 0;
+			lm.carrying_legs = false;
+			lm.stolen_legs_from_id = 0;
 		}
 	}
 }
@@ -761,23 +805,22 @@ Lily_Hair_Tree :: class : Component {
 		grow();
 	}
 
-	// Growth: tree scales up per stage
+	// Growth: swap to the next skin and play the Growth animation via trigger.
 	grow :: method() {
-		new_scale := LILY_TREE_SCALE_STAGE_0;
-		if fulfilled_count >= 6 {
-			new_scale = LILY_TREE_SCALE_STAGE_6;
-		} else if fulfilled_count == 5 {
-			new_scale = LILY_TREE_SCALE_STAGE_5;
-		} else if fulfilled_count == 4 {
-			new_scale = LILY_TREE_SCALE_STAGE_4;
-		} else if fulfilled_count == 3 {
-			new_scale = LILY_TREE_SCALE_STAGE_3;
-		} else if fulfilled_count == 2 {
-			new_scale = LILY_TREE_SCALE_STAGE_2;
-		} else if fulfilled_count == 1 {
-			new_scale = LILY_TREE_SCALE_STAGE_1;
+		if tree_animator == null return;
+		if tree_animator.instance == null return;
+		tree_animator.instance.set_skin(rr_lily_get_tree_skin_for_stage(fulfilled_count));
+		sm := tree_animator.instance.state_machine;
+		if sm != null {
+			sm.set_trigger("grow");
 		}
-		entity.set_local_scale(v2.{new_scale, new_scale});
+
+		if Game.is_server() {
+			sfx := SFX.default_sfx_desc();
+			sfx.entity_to_follow = entity.id;
+			sfx.volume = 0.7;
+			rr_play_sfx(LILY_SFX_TREE_GROW, sfx);
+		}
 	}
 }
 
@@ -1208,19 +1251,6 @@ rr_lily_apply_tree_buffs :: proc(player: Player) {
 	}
 }
 
-// Remove tree buffs (called on cleanup/revert)
-rr_lily_remove_tree_buffs :: proc(player: Player) {
-	lm := player.entity.get_component(Lily_Module);
-	if lm == null return;
-
-	if lm.tree_speed_buff_active {
-		player.agent.movement_speed = player.agent.movement_speed / lm.tree_speed_multiplier;
-		lm.tree_speed_buff_active = false;
-		lm.tree_speed_multiplier = 1.0;
-	}
-	lm.tree_cd_multiplier = 1.0;
-}
-
 rr_lily_place_hair_tree :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
@@ -1236,27 +1266,26 @@ rr_lily_place_hair_tree :: proc(player: Player) {
 
 	tree_entity := Scene.create_entity();
 	tree_entity.set_local_position(nav_point);
-	// [ART] Starts as a small hair sapling — swap tree asset later
-	tree_entity.set_local_scale(v2.{LILY_TREE_SCALE_STAGE_0, LILY_TREE_SCALE_STAGE_0});
 
 	tree_anim := tree_entity.add_component(Spine_Animator);
 	tree_anim.awaken();
-	// [ART] Using current tree rig — will be swapped for a proper sapling/growth asset
 	tree_rig := get_asset(Spine_Asset, rr_lily_get_tree_rig_path());
 	if tree_anim.instance != null && tree_rig != null {
 		tree_anim.instance.set_skeleton(tree_rig);
+		tree_anim.instance.set_skin(rr_lily_get_tree_skin_for_stage(0));
 		rr_apply_shadow_mask(tree_anim.instance);
 
-		// Set up state machine: Spawn → Idle, with Destroyed trigger
+		// State machine: Plant (one-shot on spawn) → Idle (loop); Growth trigger plays once then returns to Idle.
 		sm := State_Machine.create();
 		layer := sm.create_layer("main", 0);
-		spawn_state := layer.create_state("Spawn", false, 1.0);
+		plant_state := layer.create_state("Plant", false, 0.0);
 		idle_state := layer.create_state("Idle", true, 0.0);
-		destroyed_trigger := sm.create_variable("destroyed", .TRIGGER);
-		destroyed_state := layer.create_state("Destroyed", false, 1.0);
-		layer.set_initial_state(spawn_state);
-		layer.create_transition(spawn_state, idle_state, true);
-		layer.create_global_transition(destroyed_state, false).create_trigger_condition(destroyed_trigger);
+		growth_state := layer.create_state("Growth", false, 0.0);
+		grow_trigger := sm.create_variable("grow", .TRIGGER);
+		layer.set_initial_state(plant_state);
+		layer.create_transition(plant_state, idle_state, true);
+		layer.create_global_transition(growth_state, false).create_trigger_condition(grow_trigger);
+		layer.create_transition(growth_state, idle_state, true);
 		tree_anim.instance.set_state_machine(sm, true);
 	}
 
@@ -1286,8 +1315,11 @@ rr_lily_place_hair_tree :: proc(player: Player) {
 	lm.hair_tree_entity = tree_entity;
 	lm.hair_tree_planted = true;
 
-	if player.is_local_or_server() {
-		Notifier.notify(player, "Braid Tree planted! This is your permanent base.");
+	if Game.is_server() {
+		sfx := SFX.default_sfx_desc();
+		sfx.set_position(nav_point);
+		sfx.volume = 0.6;
+		rr_play_sfx(LILY_SFX_TREE_PLANT, sfx);
 	}
 }
 
@@ -1303,6 +1335,13 @@ rr_lily_teleport_to_tree :: proc(player: Player) {
 	try_find_closest_point_on_navmesh(lm.hair_tree_entity.world_position, ref nav_point, ref triangle_hint);
 	player.entity.set_local_position(nav_point);
 	lm.tree_teleport_cooldown = LILY_TREE_TELEPORT_COOLDOWN;
+
+	if Game.is_server() {
+		sfx := SFX.default_sfx_desc();
+		sfx.set_position(nav_point);
+		sfx.volume = 0.5;
+		rr_play_sfx(LILY_SFX_TELEPORT, sfx);
+	}
 }
 
 // =============================================================================
@@ -1840,9 +1879,17 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 				victim.set_trigger("lily_tea_hyper");
 			} else {
 				victim.set_trigger("lily_tea_safe");
+				rr_lily_reapply_debuff_anim(victim);
 			}
 			lm.tea_party_drinking = true;
 			lm.tea_party_drink_done_at = now + 2.0; // drink anim duration
+
+			if Game.is_server() {
+				drink_desc := SFX.default_sfx_desc();
+				drink_desc.entity_to_follow = victim.entity.id;
+				drink_desc.volume = 0.6;
+				rr_play_sfx(LILY_SFX_TEA_DRINK, drink_desc);
+			}
 		}
 		return;
 	}
@@ -1988,6 +2035,13 @@ rr_lily_tea_party_resolve :: proc(player: Player, victim: Player, chosen_cup: in
 		// Trigger sleep animation via state machine
 		victim.set_trigger("lily_tea_sleep");
 
+		if Game.is_server() {
+			sleep_desc := SFX.default_sfx_desc();
+			sleep_desc.entity_to_follow = victim.entity.id;
+			sleep_desc.volume = 0.5;
+			rr_play_sfx(LILY_SFX_TEA_SLEEP, sleep_desc);
+		}
+
 		// Spawn timer to wake them up
 		sleep_entity := Scene.create_entity();
 		sleep_timer := sleep_entity.add_component(Lily_Tea_Sleep_Timer);
@@ -2075,6 +2129,8 @@ rr_lily_end_tea_party :: proc(player: Player) {
 	victim := get_player_by_entity_id(lm.tea_party_target_id);
 	if victim != null {
 		victim.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
+		victim.set_trigger("lily_tea_safe");
+		rr_lily_reapply_debuff_anim(victim);
 		// Restore victim camera
 		if victim.is_local_or_server() {
 			victim.camera.follow_player = true;
@@ -2202,6 +2258,7 @@ Lily_Caffeine_Timer :: class : Component {
 	lily_entity_id: u64;      // Lily player who started this (for eye pickup spawning)
 	speed_multiplier: float;
 	steal_eyes_on_end: bool;  // if true, victim's eyes fall off when caffeine ends
+	speed_restored: bool;     // guards against double-restore
 	rng: u64;
 	current_dir: v2;
 	next_direction_change_at: float;
@@ -2211,6 +2268,23 @@ Lily_Caffeine_Timer :: class : Component {
 		angle := rng_range_float(ref rng, 0.0, 6.28);
 		current_dir = v2.{cos(angle), sin(angle)};
 		next_direction_change_at = get_time() + LILY_CAFFEINE_DIRECTION_HOLD_SECONDS;
+	}
+
+	restore_speed :: method() {
+		if speed_restored return;
+		speed_restored = true;
+		p := get_player_by_entity_id(player_entity_id);
+		if p == null return;
+		p.remove_disable_movement_input_reason(LILY_CAFFEINE_REASON);
+		// Reset to canonical baseline — avoids speed drift if the victim was externally
+		// reset (death/respawn) during the caffeine effect.
+		if p.baseline_movement_speed_saved {
+			p.agent.movement_speed = p.baseline_movement_speed;
+		}
+	}
+
+	ao_end :: method() {
+		restore_speed();
 	}
 
 	ao_update :: method(dt: float) {
@@ -2239,11 +2313,11 @@ Lily_Caffeine_Timer :: class : Component {
 		}
 
 		if get_time() >= ends_at {
-			p.remove_disable_movement_input_reason(LILY_CAFFEINE_REASON);
-			p.agent.movement_speed = p.agent.movement_speed / speed_multiplier;
+			restore_speed();
 			p.agent.input_this_frame = v2.{0, 0};
 			p.agent.velocity = v2.{0, 0};
 			p.set_trigger("lily_hyper_end");
+			rr_lily_reapply_debuff_anim(p);
 
 			// Eyes fall off after caffeine rush — spawn pickup for Lily
 			if steal_eyes_on_end && !p.lily_no_eyes {
@@ -2278,6 +2352,7 @@ Lily_Tea_Sleep_Timer :: class : Component {
 		if get_time() >= ends_at || p.player_state != Player_State.ALIVE {
 			p.remove_freeze_reason(LILY_TEA_SLEEP_REASON);
 			p.set_trigger("lily_tea_wake");
+			rr_lily_reapply_debuff_anim(p);
 
 			// Free the drag root so they can move again
 			root := p.entity.get_component(Lily_String_Trap_Root);
@@ -2524,6 +2599,37 @@ Lily_Mind_Control_Puppet :: class : Component {
 		}
 	}
 
+	// Drive Lily's camera + LOS from late_update so we sample the puppet's
+	// position AFTER movement has been applied this frame (avoids 1-frame lag
+	// that manifests as camera jitter).
+	ao_late_update :: method(dt: float) {
+		lily := get_player_by_entity_id(lily_entity_id);
+		if lily == null return;
+		lm := lily.entity.get_component(Lily_Module);
+		if lm == null || !lm.mind_control_active return;
+
+		p := entity.get_component(Player);
+		if p == null return;
+		if p.player_state != Player_State.ALIVE return;
+		if lm.mind_control_target_id != p.entity.id return;
+
+		target_pos := p.entity.world_position;
+
+		// Snap to the puppet — the engine already smooths the target entity's
+		// position via prediction/reconciliation. Any additional lerp here just
+		// adds phase lag and makes frame-to-frame wobble more visible.
+		lily.camera.follow_player = false;
+		lily.camera.position = target_pos;
+
+		// LOS light follows the puppet (local-only cosmetic).
+		if lily.is_local() {
+			if lily.local_light_entity != null && #alive(lily.local_light_entity) {
+				lily.local_light_entity.set_parent(null, true);
+				lily.local_light_entity.set_local_position(target_pos);
+			}
+		}
+	}
+
 	ao_end :: method() {
 		p := entity.get_component(Player);
 		if p != null {
@@ -2640,6 +2746,7 @@ Lily_String_Trap_Root :: class : Component {
 			p.remove_disable_movement_input_reason(LILY_STRING_TRAP_REASON);
 			p.remove_disable_movement_input_reason(LILY_LIVE_DRAG_REASON);
 			p.set_trigger("lily_rooted_end");
+			rr_lily_reapply_debuff_anim(p);
 		}
 	}
 
@@ -2717,18 +2824,20 @@ rr_lily_place_string_trap :: proc(player: Player, world_pos: v2) {
 }
 
 // Live drag helpers (mirrors GGG pattern — used by Drag_Body_Ability)
+// Finds the closest CC'd (stunned/trapped/frozen) player Lily can drag.
 rr_lily_get_closest_draggable_trapped_player :: proc(player: Player) -> Player {
 	if player == null return null;
+	lm := player.entity.get_component(Lily_Module);
 	best_dist := 2.5;
 	best: Player = null;
 	for p: component_iterator(Player) {
 		if p == null continue;
+		if p.entity.id == player.entity.id continue;
 		if p.player_state != Player_State.ALIVE continue;
 		if p.player_type == Player_Type.TRAITOR continue;
-		root := p.entity.get_component(Lily_String_Trap_Root);
-		if root == null continue;
-		if !root.active continue;
-		if root.lily_entity_id != player.entity.id continue;
+		if !rr_lily_is_target_immobile(p) continue;
+		// Skip whoever is already being dragged
+		if lm != null && lm.dragging_live_player_id == p.entity.id continue;
 		dist := length(p.entity.world_position - player.entity.world_position);
 		if dist < best_dist {
 			best_dist = dist;
@@ -2775,9 +2884,11 @@ rr_lily_update_live_drag :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	// Check if trap effect expired — stop drag
-	root := target.entity.get_component(Lily_String_Trap_Root);
-	if root == null || !root.active {
+	// Stop drag if target is no longer CC'd. Check string trap root directly since
+	// rr_lily_is_target_immobile excludes it while being_carried is true.
+	lr := target.entity.get_component(Lily_String_Trap_Root);
+	string_trapped := lr != null && lr.active;
+	if !string_trapped && !rr_lily_is_target_immobile(target) {
 		rr_lily_stop_live_drag(player);
 		return;
 	}
@@ -2901,6 +3012,11 @@ rr_lily_start_mind_control :: proc(player: Player, target: Player) {
 	lm.mind_control_ends_at = get_time() + LILY_MIND_CONTROL_DURATION;
 	lm.mind_control_target_id = target.entity.id;
 
+	// Snap Lily's camera onto the puppet on start so the subsequent lerp
+	// (in Lily_Mind_Control_Puppet.ao_late_update) doesn't slide in from Lily's old position.
+	player.camera.follow_player = false;
+	player.camera.position = target.entity.world_position;
+
 	// Block target's own input — Lily's input is forwarded via the Puppet component
 	target.add_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
 
@@ -2954,19 +3070,7 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 	}
 
 	// Input forwarding handled in Lily_Mind_Control_Puppet.ao_update
-
-	// Lily's camera follows the puppet — runs on both sides so server
-	// doesn't fight the client (avoids jitter from reconciliation).
-	player.camera.follow_player = false;
-	player.camera.position = target.entity.world_position;
-
-	// LOS light follows puppet (local-only cosmetic)
-	if player.is_local() {
-		if player.local_light_entity != null && #alive(player.local_light_entity) {
-			player.local_light_entity.set_parent(null, true);
-			player.local_light_entity.set_local_position(target.entity.world_position);
-		}
-	}
+	// Camera + LOS handled in Lily_Mind_Control_Puppet.ao_late_update (post-movement, smoothed)
 
 	// Check if target is near the tree — auto-deliver for Alive Player request
 	if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
@@ -3232,10 +3336,13 @@ LILY_DEATHBRAID_FREEZE_PHASE :: 1.5;    // freeze + camera zoom to mouth
 LILY_DEATHBRAID_TENTACLE_PHASE :: 2.5;  // tentacles emerge around map
 LILY_DEATHBRAID_VORTEX_PHASE :: 3.5;    // vortex spawns at center, braids appear on players
 LILY_DEATHBRAID_PULL_PHASE :: 4.5;      // staggered pull begins
-LILY_DEATHBRAID_STAGGER_DELAY :: 1.5;   // seconds between each player starting to get pulled
-LILY_DEATHBRAID_PULL_SPEED :: 0.03;     // lerp factor per frame (slow drag)
+LILY_DEATHBRAID_STAGGER_DELAY :: 2.8;   // seconds between each player starting to get pulled
+LILY_DEATHBRAID_PULL_SPEED :: 0.017;    // lerp factor per frame (slow drag)
 LILY_DEATHBRAID_KILL_DIST :: 0.5;        // distance from mouth to kill
-LILY_DEATHBRAID_TIMEOUT :: 20.0;        // hard cap
+LILY_DEATHBRAID_TIMEOUT :: 60.0;        // hard cap
+LILY_DEATHBRAID_KILL_PUNCH_DURATION :: 0.5; // camera zoom-punch + shake boost after each kill
+LILY_DEATHBRAID_KILL_PUNCH_ZOOM :: 0.8;      // amount to subtract from camera size at punch peak
+LILY_DEATHBRAID_KILL_PUNCH_SHAKE :: 0.35;    // extra shake intensity at punch peak
 LILY_DEATHBRAID_TENTACLE_COUNT :: 8;    // tentacles around the map
 LILY_DEATHBRAID_TENTACLE_SPREAD :: 8.0;  // how far tentacles spawn from center
 LILY_DEATHBRAID_TENTACLE_MIN_DIST :: 4.0; // minimum distance from mouth
@@ -3251,8 +3358,18 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	lm.deathbraid_active = true;
 	lm.deathbraid_tree_entity = tree_entity;
 	lm.deathbraid_start_time = get_time();
+	lm.deathbraid_last_kill_time = 0.0;
 	lm.deathbraid_tentacle_entities.clear();
 	lm.deathbraid_pull_order.clear();
+	lm.deathbraid_roar_played = false;
+	lm.deathbraid_vortex_sfx_started = false;
+
+	// Cinematic opener: horror stinger + guttural roar as the mouth spawns
+	if Game.is_server() {
+		stinger := SFX.default_sfx_desc();
+		stinger.volume = 0.7;
+		rr_play_sfx(LILY_SFX_DEATHBRAID_STINGER, stinger);
+	}
 
 	// Mouth spawns at conference room center (voting_spawn), not at the tree
 	center_pos := v2.{0, 0};
@@ -3287,6 +3404,16 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 		rr_apply_shadow_mask(mouth_anim.instance);
 	}
 	lm.deathbraid_mouth_entity = mouth_entity;
+
+	// Cinematic roar positioned at the mouth
+	if Game.is_server() {
+		roar := SFX.default_sfx_desc();
+		roar.entity_to_follow = mouth_entity.id;
+		roar.volume = 0.8;
+		roar.delay = 0.6; // let the stinger hit first
+		rr_play_sfx(LILY_SFX_DEATHBRAID_ROAR, roar);
+		lm.deathbraid_roar_played = true;
+	}
 
 	// Build staggered pull order — sort non-traitor alive players by distance (farthest first for drama)
 	// Store IDs and distances, then sort by distance
@@ -3399,11 +3526,12 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 			lm.deathbraid_tentacle_entities.append(te);
 		}
 
-		// SFX for tentacles emerging
+		// SFX for tentacles emerging — earthy eruption
 		if Game.is_server() {
 			sfx := SFX.default_sfx_desc();
-			sfx.volume = 0.5;
-			SFX.play(get_asset(SFX_Asset, "sfx/lily/spider_death.wav"), sfx);
+			sfx.set_position(focus_pos);
+			sfx.volume = 0.7;
+			rr_play_sfx(LILY_SFX_DEATHBRAID_TENTACLES, sfx);
 		}
 	}
 
@@ -3438,6 +3566,19 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 			if world_references != null && world_references.ghost_navmesh != null {
 				p.agent.set_navmesh_to_lock_to(world_references.ghost_navmesh);
 			}
+		}
+
+		// Start cinematic vortex suction loop (runs for the remainder of the cinematic)
+		if Game.is_server() && !lm.deathbraid_vortex_sfx_started {
+			loop_desc := SFX.default_sfx_desc();
+			loop_desc.entity_to_follow = vortex_entity.id;
+			loop_desc.volume = 0.55;
+			loop_desc.loop = true;
+			vortex_sound := get_asset(SFX_Asset, LILY_SFX_DEATHBRAID_VORTEX);
+			if vortex_sound != null {
+				lm.deathbraid_vortex_sfx_id = SFX.play(vortex_sound, loop_desc);
+			}
+			lm.deathbraid_vortex_sfx_started = true;
 		}
 	}
 
@@ -3482,13 +3623,17 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 				// Close enough — kill
 				p.kill_with_killer(player.entity.id);
 
-				// Zoom punch on kill — felt by all players
-				for vp: component_iterator(Player) {
-					if vp == null continue;
-					if vp.is_local_or_server() {
-						vp.camera.size = vp.camera.size - 0.3;
-					}
+				// Record kill time for camera zoom-punch + shake boost (see deathbraid camera update).
+				lm.deathbraid_last_kill_time = now;
+
+				// Satisfying kill SFX at the mouth.
+				kill_sfx := SFX.default_sfx_desc();
+				if lm.deathbraid_mouth_entity != null && #alive(lm.deathbraid_mouth_entity) {
+					kill_sfx.entity_to_follow = lm.deathbraid_mouth_entity.id;
 				}
+				kill_sfx.volume = 0.7;
+				kill_sfx.speed_perturb = 0.1;
+				rr_play_sfx(LILY_SFX_KILL, kill_sfx);
 			} else {
 				new_pos := lerp(current, focus_pos, LILY_DEATHBRAID_PULL_SPEED);
 				p.entity.set_local_position(new_pos);
@@ -3521,6 +3666,13 @@ rr_lily_end_deathbraid :: proc(player: Player) {
 	if !lm.deathbraid_active return;
 
 	lm.deathbraid_active = false;
+
+	// Stop looping vortex SFX
+	if lm.deathbraid_vortex_sfx_id != 0 {
+		SFX.stop(lm.deathbraid_vortex_sfx_id);
+		lm.deathbraid_vortex_sfx_id = 0;
+	}
+	lm.deathbraid_vortex_sfx_started = false;
 
 	// Unfreeze all players, restore camera, LOS light, and navmesh
 	for p: component_iterator(Player) {
@@ -3589,6 +3741,9 @@ rr_lily_end_deathbraid :: proc(player: Player) {
 rr_lily_update_deathbraid_camera :: proc(player: Player) {
 	if player == null return;
 	if !player.is_local_or_server() return;
+	// Bail if the round is over — the cinematic must not hijack the camera during
+	// ANIM_VICTORY / LOBBY even if the Lily's deathbraid state hasn't cleaned up yet.
+	if game_state != Game_State.INGAME return;
 
 	// Find active deathbraid from any Lily player
 	for lp: component_iterator(Player) {
@@ -3618,6 +3773,18 @@ rr_lily_update_deathbraid_camera :: proc(player: Player) {
 			pull_t := clamp((elapsed - LILY_DEATHBRAID_PULL_PHASE) / 6.0, 0.0, 1.0);
 			shake_str = pull_t * LILY_DEATHBRAID_SHAKE_INTENSITY;
 		}
+
+		// Kill punch: quick zoom-in + shake burst that decays over LILY_DEATHBRAID_KILL_PUNCH_DURATION.
+		if lm.deathbraid_last_kill_time > 0.0 {
+			since_kill := now - lm.deathbraid_last_kill_time;
+			if since_kill >= 0.0 && since_kill < LILY_DEATHBRAID_KILL_PUNCH_DURATION {
+				punch_t := 1.0 - (since_kill / LILY_DEATHBRAID_KILL_PUNCH_DURATION);
+				punch_ease := punch_t * punch_t; // sharp in, soft out
+				target_size = target_size - LILY_DEATHBRAID_KILL_PUNCH_ZOOM * punch_ease;
+				shake_str = shake_str + LILY_DEATHBRAID_KILL_PUNCH_SHAKE * punch_ease;
+			}
+		}
+
 		shake_x := sin(now * LILY_DEATHBRAID_SHAKE_SPEED) * shake_str;
 		shake_y := cos(now * LILY_DEATHBRAID_SHAKE_SPEED * 1.3) * shake_str * 0.7;
 
@@ -4124,6 +4291,16 @@ rr_lily_spawn_spider :: proc(player: Player) {
 	lm.spider_attack_cooldown = 0.0;
 	lm.spider_leg_sprite = null;
 
+	// Start spider scurry loop
+	crawl_asset := get_asset(SFX_Asset, LILY_SFX_SPIDER_CRAWL);
+	if crawl_asset != null {
+		crawl_desc := SFX.default_sfx_desc();
+		crawl_desc.entity_to_follow = se.id;
+		crawl_desc.loop = true;
+		crawl_desc.volume = 0.6;
+		lm.spider_move_sfx_id = SFX.play(crawl_asset, crawl_desc);
+	}
+
 	// Lily's input is forwarded to the spider then zeroed each frame (like mind control).
 	// Don't use add_disable_movement_input_reason — it prevents input from being read.
 
@@ -4140,6 +4317,12 @@ rr_lily_end_spider :: proc(player: Player, delivered: bool) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.spider_active return;
+
+	// Stop spider scurry loop
+	if lm.spider_move_sfx_id != 0 {
+		SFX.stop(lm.spider_move_sfx_id);
+		lm.spider_move_sfx_id = 0;
+	}
 
 	// Destroy spider entity (leg sprite is a child, destroyed with it)
 	if lm.spider_entity != null && #alive(lm.spider_entity) {
@@ -4190,12 +4373,34 @@ rr_lily_apply_crawl :: proc(victim: Player) {
 	victim.lily_crawling = true;
 }
 
+// Re-fire debuff-animation triggers after a disruption (trap root, tea party, caffeine,
+// sleep) so the legless/no-eyes visual state doesn't get lost once the disruption ends.
+// The rising-edge triggers in player.csl only fire when the flag flips, but disruptions
+// override the main-layer anim without flipping the flag.
+rr_lily_reapply_debuff_anim :: proc(p: Player) {
+	if p == null return;
+	if p.animator == null || p.animator.instance == null return;
+	sm := p.animator.instance.state_machine;
+	if sm == null return;
+	if p.lily_crawling {
+		sm.set_trigger("lily_crawl_start");
+	} else if p.lily_no_eyes {
+		sm.set_trigger("lily_no_eyes_start");
+		p.lily_no_eyes_al_at = get_time() + LILY_NO_EYES_START_DURATION;
+	}
+}
+
 // Remove crawl effect, restore speed.
 rr_lily_restore_legs :: proc(victim: Player) {
 	if victim == null return;
 	if !victim.lily_crawling return;
-	victim.agent.movement_speed = victim.lily_crawl_speed_saved;
-	victim.lily_crawl_ends_at = 0.0;
+	// Restore to saved speed, but fall back to canonical baseline if the save is invalid
+	// (e.g., victim died + respawned while crawling so the saved value is stale).
+	if victim.lily_crawl_speed_saved > 0.0 {
+		victim.agent.movement_speed = victim.lily_crawl_speed_saved;
+	} else if victim.baseline_movement_speed_saved {
+		victim.agent.movement_speed = victim.baseline_movement_speed;
+	}
 	victim.lily_crawling = false;
 	victim.lily_crawl_speed_saved = 0.0;
 }
@@ -4345,7 +4550,6 @@ rr_lily_spider_apply_bite :: proc(player: Player, lm: Lily_Module, victim_entity
 	lm.spider_return_deadline = now + LILY_SPIDER_RETURN_TIME;
 
 	rr_lily_apply_crawl(victim);
-	victim.lily_crawl_ends_at = lm.spider_return_deadline;
 
 	// Attach dismembered leg sprite to spider
 	if lm.spider_entity != null && #alive(lm.spider_entity) {
@@ -4562,18 +4766,37 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 	spawn_pos := player.entity.world_position;
 	lm.eye_machine_pos = spawn_pos;
 
-	// Create suction tube entity (visible to ALL players)
+	// Create suction tube: two parented spine entities.
+	// Front renders above players (tall vertical tube); back renders behind players (base/feet portion).
 	tube_e := Scene.create_entity();
 	tube_e.set_local_position(v2.{spawn_pos.x, spawn_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y});
 	tube_e.set_local_scale(v2.{1, 1});
 	tube_e.set_local_rotation(0.0);
-	tube_sprite := tube_e.add_component(Sprite_Renderer);
-	tube_tex := get_asset(Texture_Asset, "sprites/Suction_Tube_With_Propeller_Layout.png");
-	if tube_sprite != null && tube_tex != null {
-		tube_sprite.set_texture(tube_tex);
-		tube_sprite.layer = 50;
+	tube_front := tube_e.add_component(Spine_Animator);
+	tube_front.depth_offset = -5.0; // above players
+	tube_front.awaken();
+	front_rig := get_asset(Spine_Asset, LILY_TUBE_FRONT_RIG);
+	if tube_front.instance != null && front_rig != null {
+		tube_front.instance.set_skeleton(front_rig);
+		tube_front.instance.set_animation("On_Loop", true, 0);
 	}
 	lm.eye_machine_tube_entity = tube_e;
+
+	// Back layer — parented to front so all position/bob/fly-up updates follow automatically.
+	tube_back_e := Scene.create_entity();
+	tube_back_e.set_parent(tube_e, false);
+	tube_back_e.set_local_position(v2.{0, 0});
+	tube_back_e.set_local_scale(v2.{1, 1});
+	tube_back_e.set_local_rotation(0.0);
+	tube_back := tube_back_e.add_component(Spine_Animator);
+	tube_back.depth_offset = 2.0; // behind players
+	tube_back.awaken();
+	back_rig := get_asset(Spine_Asset, LILY_TUBE_BACK_RIG);
+	if tube_back.instance != null && back_rig != null {
+		tube_back.instance.set_skeleton(back_rig);
+		tube_back.instance.set_animation("On_Loop", true, 0);
+	}
+	lm.eye_machine_tube_back_entity = tube_back_e;
 
 	// Create AOE reticle entity (will be hidden for non-Lily via ao_on_state_sync)
 	aoe_e := Scene.create_entity();
@@ -4602,6 +4825,16 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 	lm.eye_machine_lowering = false;
 	lm.eye_machine_lower_done_at = 0.0;
 
+	// Start propeller loop on the tube
+	prop_asset := get_asset(SFX_Asset, LILY_SFX_EYE_PROPELLER);
+	if prop_asset != null {
+		prop_desc := SFX.default_sfx_desc();
+		prop_desc.entity_to_follow = tube_e.id;
+		prop_desc.loop = true;
+		prop_desc.volume = 0.35;
+		lm.eye_machine_propeller_sfx_id = SFX.play(prop_asset, prop_desc);
+	}
+
 	// Lily's input is forwarded to the machine then zeroed each frame (like spider).
 	// Don't use add_freeze_reason or add_disable_movement_input_reason — they prevent
 	// input_this_frame from being populated.
@@ -4626,11 +4859,18 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 	if lm == null return;
 	if !lm.eye_machine_active return;
 
-	// Destroy tube entity
+	// Stop propeller loop
+	if lm.eye_machine_propeller_sfx_id != 0 {
+		SFX.stop(lm.eye_machine_propeller_sfx_id);
+		lm.eye_machine_propeller_sfx_id = 0;
+	}
+
+	// Destroy tube entity (destroys parented back-layer child automatically)
 	if lm.eye_machine_tube_entity != null && #alive(lm.eye_machine_tube_entity) {
 		lm.eye_machine_tube_entity.destroy();
 	}
 	lm.eye_machine_tube_entity = null;
+	lm.eye_machine_tube_back_entity = null;
 
 	// Destroy AOE entity
 	if lm.eye_machine_aoe_entity != null && #alive(lm.eye_machine_aoe_entity) {
@@ -4752,15 +4992,29 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 		drift_t := clamp(elapsed / LILY_EYE_MACHINE_ZOOM_DURATION, 0.0, 1.0);
 		drift_ease := drift_t * drift_t;
 
-		// Tube drifts from machine pos to above victim during zoom
+		// Tube drifts from machine pos to above victim during zoom,
+		// then descends onto the victim during the suction sub-phase.
 		if lm.eye_machine_tube_entity != null && #alive(lm.eye_machine_tube_entity) {
 			tube_x := lerp(lm.eye_machine_pos.x, lm.eye_machine_victim_pos.x, drift_ease);
-			tube_y := lerp(
+			hover_y := lerp(
 				lm.eye_machine_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y,
 				lm.eye_machine_victim_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y,
 				drift_ease
 			);
-			bob := sin(now * LILY_EYE_MACHINE_TUBE_BOB_SPEED) * LILY_EYE_MACHINE_TUBE_BOB_AMP;
+
+			// Descend during the suction sub-phase (after zoom completes).
+			suction_elapsed := elapsed - LILY_EYE_MACHINE_ZOOM_DURATION;
+			descend_t := clamp(suction_elapsed / LILY_EYE_MACHINE_SUCTION_DURATION, 0.0, 1.0);
+			descend_ease := descend_t * descend_t;
+			tube_y := lerp(
+				hover_y,
+				lm.eye_machine_victim_pos.y + LILY_EYE_MACHINE_TUBE_SUCTION_Y,
+				descend_ease
+			);
+
+			// Bob fades out as the tube descends onto the victim.
+			bob_amp := LILY_EYE_MACHINE_TUBE_BOB_AMP * (1.0 - descend_ease);
+			bob := sin(now * LILY_EYE_MACHINE_TUBE_BOB_SPEED) * bob_amp;
 			lm.eye_machine_tube_entity.set_local_position(v2.{tube_x, tube_y + bob});
 		}
 
@@ -4779,19 +5033,25 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 			fly_start := linger_total * 0.7;
 
 			if linger_elapsed < fly_start {
-				// Hold tube above victim with gentle bob
-				bob := sin(now * LILY_EYE_MACHINE_TUBE_BOB_SPEED) * LILY_EYE_MACHINE_TUBE_BOB_AMP;
-				lm.eye_machine_tube_entity.set_local_position(v2.{lm.eye_machine_victim_pos.x, lm.eye_machine_victim_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y + bob});
+				// Hold tube descended on victim (matches end-of-suction position).
+				lm.eye_machine_tube_entity.set_local_position(v2.{lm.eye_machine_victim_pos.x, lm.eye_machine_victim_pos.y + LILY_EYE_MACHINE_TUBE_SUCTION_Y});
 			} else {
-				// Fly up high and fade out
+				// Fly up high and fade out — rise from the descended position.
 				fly_t := clamp((linger_elapsed - fly_start) / (linger_total - fly_start), 0.0, 1.0);
 				fly_ease := fly_t * fly_t; // accelerate upward
-				fly_y := lm.eye_machine_victim_pos.y + LILY_EYE_MACHINE_TUBE_OFFSET_Y + fly_ease * 10.0;
+				fly_y := lm.eye_machine_victim_pos.y + LILY_EYE_MACHINE_TUBE_SUCTION_Y + fly_ease * (LILY_EYE_MACHINE_TUBE_OFFSET_Y - LILY_EYE_MACHINE_TUBE_SUCTION_Y + 10.0);
 				lm.eye_machine_tube_entity.set_local_position(v2.{lm.eye_machine_victim_pos.x, fly_y});
 
-				tube_sr := lm.eye_machine_tube_entity.get_component(Sprite_Renderer);
-				if tube_sr != null {
-					tube_sr.color = v4.{1.0, 1.0, 1.0, 1.0 - fly_t};
+				fade := v4.{1.0, 1.0, 1.0, 1.0 - fly_t};
+				tube_front := lm.eye_machine_tube_entity.get_component(Spine_Animator);
+				if tube_front != null && tube_front.instance != null {
+					tube_front.instance.color_multiplier = fade;
+				}
+				if lm.eye_machine_tube_back_entity != null && #alive(lm.eye_machine_tube_back_entity) {
+					tube_back := lm.eye_machine_tube_back_entity.get_component(Spine_Animator);
+					if tube_back != null && tube_back.instance != null {
+						tube_back.instance.color_multiplier = fade;
+					}
 				}
 			}
 		}
@@ -4918,6 +5178,7 @@ rr_lily_eye_machine_finish_attack :: proc(player: Player) {
 			Notifier.notify(player, format_string("Stole %'s eyes! Pick them up!", {victim.get_username()}));
 		}
 	}
+	victim_entity_id := lm.eye_machine_victim_id;
 	lm.eye_machine_victim_id = 0;
 
 	// Stop suction loop SFX
@@ -4929,10 +5190,21 @@ rr_lily_eye_machine_finish_attack :: proc(player: Player) {
 	// Gore SFX (squelch)
 	desc := SFX.default_sfx_desc();
 	desc.volume = 0.5;
+	if victim_entity_id != 0 {
+		desc.entity_to_follow = victim_entity_id;
+	}
 	gore := get_asset(SFX_Asset, "sfx/gore_explosion_death_66eeb3.wav");
 	if gore != null {
 		SFX.play(gore, desc);
 	}
+
+	// Victim agony scream layered over the gore
+	scream_desc := SFX.default_sfx_desc();
+	scream_desc.volume = 0.55;
+	if victim_entity_id != 0 {
+		scream_desc.entity_to_follow = victim_entity_id;
+	}
+	rr_play_sfx(LILY_SFX_EYE_SCREAM, scream_desc);
 
 	// Begin linger — tube flies up, camera returns to player
 	now := get_time();
@@ -5020,6 +5292,13 @@ Lily_Eyes_Pickup_Interactable :: class : Interactable {
 		lm.carrying_eyes = true;
 		lm.stolen_eyes_from_id = victim_id;
 
+		if Game.is_server() {
+			sfx := SFX.default_sfx_desc();
+			sfx.entity_to_follow = player.entity.id;
+			sfx.volume = 0.5;
+			rr_play_sfx(LILY_SFX_PICKUP, sfx);
+		}
+
 		// Destroy the pickup
 		rr_lily_destroy_eye_pickup(player);
 
@@ -5100,6 +5379,13 @@ Lily_Legs_Pickup_Interactable :: class : Interactable {
 		if lm == null return;
 		lm.carrying_legs = true;
 		lm.stolen_legs_from_id = victim_id;
+
+		if Game.is_server() {
+			sfx := SFX.default_sfx_desc();
+			sfx.entity_to_follow = player.entity.id;
+			sfx.volume = 0.5;
+			rr_play_sfx(LILY_SFX_PICKUP, sfx);
+		}
 
 		// Destroy the pickup
 		rr_lily_destroy_leg_pickup(player);
@@ -5641,14 +5927,14 @@ rr_lily_draw_abilities :: proc(player: Player, idx: int) -> int {
 		abilityIndex += 1;
 		draw_ability_button(player, Lily_Transform_Ability, abilityIndex);
 		abilityIndex += 1;
-		// Mind Control: unlocked at 1+ fulfilled
+		// String Trap: unlocked at 1+ fulfilled
 		if fulfilled >= 1 {
-			draw_ability_button(player, Lily_Mind_Control_Ability, abilityIndex);
+			draw_ability_button(player, Lily_String_Trap_Ability, abilityIndex);
 			abilityIndex += 1;
 		}
-		// String Trap: unlocked at 2+ fulfilled
-		if fulfilled >= 2 {
-			draw_ability_button(player, Lily_String_Trap_Ability, abilityIndex);
+		// Mind Control: unlocked at 3+ fulfilled
+		if fulfilled >= 3 {
+			draw_ability_button(player, Lily_Mind_Control_Ability, abilityIndex);
 			abilityIndex += 1;
 		}
 		// Tea Party: unlocked at 4 fulfilled
@@ -5773,8 +6059,9 @@ rr_lily_draw_tree_request_icon :: proc(player: Player) {
 	UI.push_z(tree_pos.y + 0.01);
 	defer UI.pop_z();
 
-	// Icon above the tree
-	icon_pos := tree_pos + v2.{0, 2.5};
+	// Icon above the tree — raise per growth stage so the label clears the taller skins.
+	text_y := 1.4 + tree_comp.fulfilled_count.(float) * 0.5;
+	icon_pos := tree_pos + v2.{0, text_y};
 	icon_rect := Rect.{icon_pos, icon_pos}.grow(0.15, 0.4, 0.15, 0.4);
 
 	// Pulsing glow
@@ -5787,8 +6074,8 @@ rr_lily_draw_tree_request_icon :: proc(player: Player) {
 	ts.valign = .CENTER;
 	ts.color = v4.{1.0, 0.85, 0.95, pulse};
 	ts.do_outline = true;
-	ts.outline_thickness = 1;
-	ts.outline_color = v4.{0, 0, 0, 0.8};
+	ts.outline_thickness = 4;
+	ts.outline_color = v4.{0, 0, 0, 1.0};
 
 	request_name := rr_lily_get_request_name(tree_comp);
 	UI.text(icon_rect, ts, request_name);
