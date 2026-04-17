@@ -3361,6 +3361,7 @@ LILY_DEATHBRAID_TENTACLE_MIN_DIST :: 4.0; // minimum distance from mouth
 LILY_DEATHBRAID_SHAKE_INTENSITY :: 0.15;
 LILY_DEATHBRAID_SHAKE_SPEED :: 20.0;
 LILY_DEATHBRAID_ZOOM_TARGET :: 7.0;     // camera zoom during cinematic
+LILY_DEATHBRAID_FINALE_HOLD :: 1.5;     // linger on the mouth after the last kill
 
 rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	lm := player.entity.get_component(Lily_Module);
@@ -3375,6 +3376,7 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	lm.deathbraid_pull_order.clear();
 	lm.deathbraid_roar_played = false;
 	lm.deathbraid_vortex_sfx_started = false;
+	lm.deathbraid_finale_ends_at = 0.0;
 
 	// Cinematic opener: horror stinger + guttural roar as the mouth spawns
 	if Game.is_server() {
@@ -3658,9 +3660,15 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 			}
 		}
 
-		// All victims dead — end
+		// All victims dead — linger on the cinematic briefly before ending
+		// so the mouth keeps chomping into the win popup transition.
 		if all_dead {
-			rr_lily_end_deathbraid(player);
+			if lm.deathbraid_finale_ends_at == 0.0 {
+				lm.deathbraid_finale_ends_at = now + LILY_DEATHBRAID_FINALE_HOLD;
+			}
+			if now >= lm.deathbraid_finale_ends_at {
+				rr_lily_end_deathbraid(player);
+			}
 			return;
 		}
 	}
@@ -3678,12 +3686,21 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 	}
 }
 
+// Returns true if any Lily in the scene is mid-deathbraid cinematic.
+rr_lily_any_deathbraid_active :: proc() -> bool {
+	for lm: component_iterator(Lily_Module) {
+		if lm.deathbraid_active return true;
+	}
+	return false;
+}
+
 rr_lily_end_deathbraid :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 	if !lm.deathbraid_active return;
 
 	lm.deathbraid_active = false;
+	lm.deathbraid_finale_ends_at = 0.0;
 
 	// Stop looping vortex SFX
 	if lm.deathbraid_vortex_sfx_id != 0 {
