@@ -3316,19 +3316,31 @@ rr_lily_draw_web_sense :: proc(player: Player) {
 // Deathbraid Grand Finale
 // =============================================================================
 
+// Auto-plays emerge_from_base then transitions to base_idle when complete.
 Lily_Deathbraid_Tentacle_Switcher :: class : Component {
-	switch_at: float;
 	animator: Spine_Animator;
-	switched: bool;
+	initialized: bool;
 
+	// Setup runs on first ao_update — caller assigns `animator` after add_component,
+	// so ao_start would fire before the field is set.
 	ao_update :: method(dt: float) {
-		if switched return;
-		if get_time() >= switch_at {
-			switched = true;
-			if animator != null && animator.instance != null {
-				animator.instance.set_animation("base_idle", true, 0);
-			}
-		}
+		if initialized return;
+		if animator == null return;
+		initialized = true;
+
+		sm := State_Machine.create();
+		layer := sm.create_layer("main", 0);
+
+		emerge_state := layer.create_state("emerge_from_base", false);
+		idle_state := layer.create_state("base_idle", true);
+
+		layer.set_initial_state(emerge_state);
+
+		// Transition as soon as emerge anim completes — no arbitrary delay.
+		to_idle := layer.create_transition(emerge_state, idle_state, true);
+
+		animator.awaken();
+		animator.set_state_machine(sm, true);
 	}
 }
 
@@ -3391,8 +3403,8 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 
 	// Spawn mouth at conference room center
 	mouth_entity := Scene.create_entity();
-	mouth_entity.set_local_position(center_pos);
-	mouth_entity.set_local_scale(v2.{1.5, 1.5});
+	mouth_entity.set_local_position(center_pos + v2.{-0.5, -0.5});
+	mouth_entity.set_local_scale(v2.{1.9, 1.9});
 
 	mouth_anim := mouth_entity.add_component(Spine_Animator);
 	mouth_anim.depth_offset = 1.0;
@@ -3514,13 +3526,11 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 				ta.instance.set_skeleton(tentacle_rig);
 				ta.instance.set_skin("default");
 				ta.instance.refresh_skins();
-				ta.instance.set_animation("emerge_from_base", false, 0, 1.0);
 				rr_apply_shadow_mask(ta.instance);
 			}
 
-			// Component to switch to idle after emerge finishes
+			// State machine plays emerge_from_base then auto-transitions to base_idle on complete.
 			switcher := te.add_component(Lily_Deathbraid_Tentacle_Switcher);
-			switcher.switch_at = now + 1.5; // emerge anim ~1.5s
 			switcher.animator = ta;
 
 			lm.deathbraid_tentacle_entities.append(te);
@@ -3542,7 +3552,7 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 		vortex_entity.set_local_scale(v2.{0.1, 0.1}); // Starts tiny, scales up
 
 		va := vortex_entity.add_component(Spine_Animator);
-		va.depth_offset = 0.5; // Between ground and mouth
+		va.depth_offset = -1.0; // Always render in front of the mouth (mouth is at 1.0)
 		va.awaken();
 		vortex_rig := get_asset(Spine_Asset, "anims/vfx/vortex/skeleton.spine");
 		if va.instance != null && vortex_rig != null {
@@ -3551,8 +3561,8 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 			va.instance.refresh_skins();
 			va.instance.set_animation("animation", true, 0);
 		}
-		// Semi-transparent
-		va.color_multiplier = v4.{1, 1, 1, 0.5};
+		// Subtle overlay
+		va.color_multiplier = v4.{1, 1, 1, 0.25};
 
 		lm.deathbraid_vortex_entity = vortex_entity;
 
@@ -3585,7 +3595,7 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 	// Scale vortex up over time
 	if lm.deathbraid_vortex_entity != null && #alive(lm.deathbraid_vortex_entity) {
 		vortex_t := clamp((elapsed - LILY_DEATHBRAID_VORTEX_PHASE) / 3.0, 0.0, 1.0);
-		vortex_scale := lerp(0.1, 5.0, vortex_t);
+		vortex_scale := lerp(0.1, 3.5, vortex_t);
 		lm.deathbraid_vortex_entity.set_local_scale(v2.{vortex_scale, vortex_scale});
 	}
 
@@ -3625,6 +3635,14 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 
 				// Record kill time for camera zoom-punch + shake boost (see deathbraid camera update).
 				lm.deathbraid_last_kill_time = now;
+
+				// Play chomp on overlay track 1 so idle tentacles keep moving on track 0
+				if lm.deathbraid_mouth_entity != null && #alive(lm.deathbraid_mouth_entity) {
+					mouth_anim := lm.deathbraid_mouth_entity.get_component(Spine_Animator);
+					if mouth_anim != null && mouth_anim.instance != null {
+						mouth_anim.instance.set_animation("chomp_player", false, 1);
+					}
+				}
 
 				// Satisfying kill SFX at the mouth.
 				kill_sfx := SFX.default_sfx_desc();
