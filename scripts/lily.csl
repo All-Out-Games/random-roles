@@ -513,15 +513,28 @@ rr_lily_round_start :: proc(p: Player) {
 rr_lily_cleanup :: proc(player: Player) {
 	rr_lily_force_revert(player);
 
+	// Global sweeps run regardless of whether this player has a Lily_Module — covers
+	// orphan trees/AOEs left behind by a Lily who left the game or whose module was
+	// removed before cleanup ran. Idempotent across the per-player round-start loop.
+	for tree: component_iterator(Lily_Hair_Tree) {
+		if tree == null continue;
+		if #alive(tree.entity) {
+			tree.entity.destroy();
+		}
+	}
+	for dd: component_iterator(Lily_Delayed_Destroy) {
+		if dd == null continue;
+		if #alive(dd.entity) {
+			dd.entity.destroy();
+		}
+	}
+
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
 	rr_lily_destroy_creature_entity(player);
 
-	// Destroy hair tree
-	if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
-		lm.hair_tree_entity.destroy();
-	}
+	// Per-Lily references — entity already destroyed by global sweep above; just clear refs.
 	lm.hair_tree_entity = null;
 	lm.hair_tree_planted = false;
 
@@ -571,6 +584,50 @@ rr_lily_cleanup :: proc(player: Player) {
 			dd.entity.destroy();
 		}
 	}
+}
+
+// Per-player unstuck for Lily-related state. Called from rr_unstuck_player.
+// Handles both sides: this player as a victim of any Lily, and as the Lily user themselves.
+rr_lily_unstuck_player :: proc(player: Player) {
+	if player == null return;
+	if player.entity == null return;
+	if !#alive(player.entity) return;
+
+	// Victim side: reuse the doctor-heal path to reverse any Lily effects targeting this player
+	// (mind control, string trap, tea sleep, stolen eyes/legs, pull, live drag).
+	rr_lily_on_doctor_heal(player);
+
+	// Lily side: end any active abilities the player is using as Lily.
+	if player.player_role == Player_Role.LILY_LOVEBRAIDS {
+		lm := player.entity.get_component(Lily_Module);
+		if lm != null {
+			if lm.tea_party_active      rr_lily_end_tea_party(player);
+			if lm.mind_control_active   rr_lily_end_mind_control(player);
+			if lm.eye_machine_active    rr_lily_end_eye_machine(player);
+			if lm.spider_active         rr_lily_end_spider(player, false);
+			if lm.deathbraid_active     rr_lily_end_deathbraid(player);
+			if lm.pull_active           rr_lily_end_pull(player);
+			if lm.dragging_live_player_id != 0 rr_lily_stop_live_drag(player);
+		}
+		rr_lily_force_revert(player);
+	}
+
+	// Defensive: drain any Lily-applied freeze/movement/invisibility reasons on this player.
+	rr_remove_freeze_reason_all(player, LILY_TEA_PARTY_SIT_REASON);
+	rr_remove_freeze_reason_all(player, LILY_TEA_SLEEP_REASON);
+	rr_remove_freeze_reason_all(player, LILY_PULL_REASON);
+	rr_remove_freeze_reason_all(player, LILY_DEATHBRAID_REASON);
+	rr_remove_freeze_reason_all(player, LILY_EYE_MACHINE_FREEZE_REASON);
+	rr_remove_freeze_reason_all(player, LILY_MIND_CONTROL_FREEZE_REASON);
+	rr_remove_freeze_reason_all(player, LILY_SPIDER_FREEZE_REASON);
+	rr_remove_movement_reason_all(player, LILY_MIND_CONTROL_PUPPET_REASON);
+	rr_remove_movement_reason_all(player, LILY_CAFFEINE_REASON);
+	rr_remove_movement_reason_all(player, LILY_STRING_TRAP_REASON);
+	rr_remove_movement_reason_all(player, LILY_LIVE_DRAG_REASON);
+	rr_remove_movement_reason_all(player, LILY_TRANSFORM_LOCK_REASON);
+	player.remove_invisibility_reason(LILY_INVIS_REASON);
+	player.remove_name_invisibility_reason(LILY_NAME_INVIS_REASON);
+	player.remove_invisibility_reason(LILY_ABILITY_INVIS_REASON);
 }
 
 // =============================================================================
@@ -3358,9 +3415,10 @@ LILY_DEATHBRAID_KILL_PUNCH_SHAKE :: 0.35;    // extra shake intensity at punch p
 LILY_DEATHBRAID_TENTACLE_COUNT :: 8;    // tentacles around the map
 LILY_DEATHBRAID_TENTACLE_SPREAD :: 8.0;  // how far tentacles spawn from center
 LILY_DEATHBRAID_TENTACLE_MIN_DIST :: 4.0; // minimum distance from mouth
+LILY_DEATHBRAID_MIN_VICTIM_DIST :: 5.0;   // teleport victims at least this far from mouth at start
 LILY_DEATHBRAID_SHAKE_INTENSITY :: 0.15;
 LILY_DEATHBRAID_SHAKE_SPEED :: 20.0;
-LILY_DEATHBRAID_ZOOM_TARGET :: 7.0;     // camera zoom during cinematic
+LILY_DEATHBRAID_ZOOM_TARGET :: 9.0;     // camera zoom during cinematic
 LILY_DEATHBRAID_FINALE_HOLD :: 1.5;     // linger on the mouth after the last kill
 
 rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
@@ -3427,6 +3485,29 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 		roar.delay = 0.6; // let the stinger hit first
 		rr_play_sfx(LILY_SFX_DEATHBRAID_ROAR, roar);
 		lm.deathbraid_roar_played = true;
+	}
+
+	// Push any victim standing too close to the mouth outward so the slow pull-in has
+	// time to read as a proper absorption instead of an instant snap.
+	for p: component_iterator(Player) {
+		if p == null continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if p.player_type == Player_Type.TRAITOR continue;
+		to_p := p.entity.world_position - center_pos;
+		d := length(to_p);
+		if d >= LILY_DEATHBRAID_MIN_VICTIM_DIST continue;
+		dir: v2 = v2.{1, 0};
+		if d > 0.01 {
+			dir = normalize(to_p);
+		}
+		raw_pos := center_pos + dir * LILY_DEATHBRAID_MIN_VICTIM_DIST;
+		nav_point: v2;
+		nav_hint: s64;
+		if try_find_closest_point_on_navmesh(raw_pos, ref nav_point, ref nav_hint) {
+			p.entity.set_local_position(nav_point);
+		} else {
+			p.entity.set_local_position(raw_pos);
+		}
 	}
 
 	// Build staggered pull order — sort non-traitor alive players by distance (farthest first for drama)

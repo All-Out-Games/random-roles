@@ -1406,6 +1406,13 @@ on_player_go_passive :: proc(player: Player) {
 		rr_lily_end_deathbraid(player);
 	}
 
+	// Drop any corpse / live drag so the drag anim flags clear before the lobby loop —
+	// otherwise the player can spawn back into the lobby still playing the drag idle.
+	rr_drag_body_force_drop_for_player(player);
+	rr_ggg_stop_live_drag(player);
+	rr_lily_stop_live_drag(player);
+	player.set_trigger("RESET");
+
 	player.revive();
 	player.player_state = Player_State.PASSIVE;
 	// Safety: passive/lobby players should never remain in temporary-resurrect state.
@@ -2183,6 +2190,9 @@ rr_unstuck_player :: proc(player: Player) {
 
 	rr_remove_movement_reason_all(player, BC_TRANSFORM_LOCK_REASON);
 	rr_remove_freeze_reason_all(player, BC_CAMERA_LOCK_REASON);
+
+	// Lily: clear victim-side effects and end any active Lily abilities owned by this player.
+	rr_lily_unstuck_player(player);
 
 	// Keep visual state coherent after force-clears.
 	player.remove_name_invisibility_reason("werewolf_transform");
