@@ -3082,6 +3082,20 @@ rr_lily_cleanup_string_traps :: proc(player: Player) {
 
 MAX_MIND_CONTROL_PICKER_TARGETS :: 16;
 
+// Called from Player.ao_late_update — UI must be issued in the late phase so
+// the engine's input hit-test pass sees a consistent draw stack.
+rr_lily_late_update_ui :: proc(player: Player) {
+	if player == null return;
+	if player.player_role != Player_Role.LILY_LOVEBRAIDS || player.player_type != Player_Type.TRAITOR return;
+
+	lm := player.entity.get_component(Lily_Module);
+	if lm == null return;
+
+	if lm.mind_control_picking {
+		rr_lily_draw_mind_control_picker(player);
+	}
+}
+
 rr_lily_draw_mind_control_picker :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
@@ -4217,10 +4231,8 @@ rr_lily_update :: proc(player: Player, dt: float) {
 	// Braid locomotion sync on all strung players
 	rr_lily_update_all_braids(player);
 
-	// Mind control player picker (local only UI)
-	if lm.mind_control_picking && player.is_local_or_server() {
-		rr_lily_draw_mind_control_picker(player);
-	}
+	// Mind control picker is drawn in ao_late_update (see rr_lily_late_update_ui)
+	// per the engine rule that UI must be issued in late_update.
 
 	// Web sense arrows (local only UI)
 	rr_lily_draw_web_sense(player);
