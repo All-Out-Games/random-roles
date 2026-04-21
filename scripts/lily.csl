@@ -2719,10 +2719,6 @@ Lily_Mind_Control_Puppet :: class : Component {
 		target_immobile := rr_lily_is_target_immobile(p) && !p.lily_crawling;
 		if !target_immobile {
 			p.input_override = lily.input_this_frame;
-			// Rotation not handled by input override - Do it manually
-			if length_squared(p.input_override) > 0.01 {
-				p.set_facing_right(p.input_override.x >= 0.0);
-			}
 		}
 
 		// Lily stays put — only the puppet moves
@@ -3172,6 +3168,10 @@ rr_lily_start_mind_control :: proc(player: Player, target: Player) {
 	// Block target's own input — Lily's input is forwarded via the Puppet component
 	target.add_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
 
+	// Route the puppet's prediction through Lily (the caster) so input_override
+	// forwarded from Lily reconciles cleanly. Cleared in rr_lily_end_mind_control.
+	target.player_for_prediction = player;
+
 	// Add input forwarding component
 	existing := target.entity.get_component(Lily_Mind_Control_Puppet);
 	if existing == null {
@@ -3321,6 +3321,7 @@ rr_lily_end_mind_control :: proc(player: Player) {
 	if target != null {
 		target.remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
 		target.input_override = v2.{0, 0};
+		target.player_for_prediction = null;
 
 		// Remove braid visual — component lives on a child entity
 		child := target.entity.get_first_child();
