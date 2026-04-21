@@ -59,6 +59,8 @@ Find assets with the MCP:
 asset_local_search (query: "tree")
 When referencing assets use <path>.<ext>, omit /res from the path. 
 
+Do not use the $AO/ui/kit/Icons/sparks/spark_small.png asset as it is our platform wide currency and will be confusing. 
+
 ### Asset Types
 ```csl
 texture := get_asset(Texture_Asset, "ui/button.png");

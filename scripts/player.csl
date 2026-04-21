@@ -99,6 +99,7 @@ Player :: class : Player_Base {
 	lily_crawling: bool;
 	lily_crawling_prev: bool;   // edge detection for start trigger
 	lily_crawl_speed_saved: float;
+	lily_stun_was_active: bool; // tracks whether any stun was active last frame (re-fire debuff anim on stun-end)
 
 	// --- Pyromaniac (cross-player: any player can be on fire) ---
 	pyro_on_fire: bool;
@@ -212,8 +213,19 @@ Player :: class : Player_Base {
 		// While on fire, you can only move.
 		if pyro_on_fire return false;
 		// Trapped or being dragged by GGG — no abilities.
-		root := entity.get_component(GGG_Trap_Root_Effect);
-		if root != null && root.active return false;
+		ggg_root := entity.get_component(GGG_Trap_Root_Effect);
+		if ggg_root != null && ggg_root.active return false;
+		// Trapped or being dragged by Lily — no abilities.
+		lily_root := entity.get_component(Lily_String_Trap_Root);
+		if lily_root != null && lily_root.active return false;
+		// While dragging (corpse or live player), only Drag_Body_Ability is usable so you can drop.
+		if ability.type != Drag_Body_Ability {
+			if dragging_corpse_entity_id != 0 return false;
+			gm := entity.get_component(GGG_Module);
+			if gm != null && gm.dragging_live_player_id != 0 return false;
+			lm := entity.get_component(Lily_Module);
+			if lm != null && lm.dragging_live_player_id != 0 return false;
+		}
 		return true;
 	}
 
@@ -511,6 +523,15 @@ Player :: class : Player_Base {
 
 			this.lily_no_eyes_prev = this.lily_no_eyes;
 			this.lily_crawling_prev = this.lily_crawling;
+
+			// Stuns (autograph, mine, prank, infection bite, etc.) override the main layer
+			// and transition back to plain idle, dropping legless/no-eyes anims. Re-fire
+			// the debuff trigger on the stun's falling edge so the visual state restores.
+			stun_active := rr_get_stun_remaining(this) > 0.0;
+			if !stun_active && this.lily_stun_was_active {
+				rr_lily_reapply_debuff_anim(this);
+			}
+			this.lily_stun_was_active = stun_active;
 		}
 
 		// Tea party victim cup choice UI.
@@ -3217,6 +3238,8 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		// --- No-eyes (main layer) — only plays when NOT also legless ---
 		// When both are active, legless takes priority on main layer; No_Eyes_AL overlay still hides eyes.
 		lily_no_eyes_start_var := sm.create_variable("lily_no_eyes_start", State_Machine_Variable.Kind.TRIGGER);
+		// Resume jumps straight to idle (used after a stun ends — eyes are already gone).
+		lily_no_eyes_resume_var := sm.create_variable("lily_no_eyes_resume", State_Machine_Variable.Kind.TRIGGER);
 
 		no_eyes_start_state := layer.create_state("004RAND_LILY/No_Eyes_Start", false, 0.0);
 		no_eyes_idle_state := layer.create_state("004RAND_LILY/No_Eyes_Idle", true, 0.0);
@@ -3226,6 +3249,10 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		// Any state → Start (trigger, only when not crawling)
 		ne_global := layer.create_global_transition(no_eyes_start_state, false);
 		ne_global.create_trigger_condition(lily_no_eyes_start_var);
+
+		// Any state → Idle (resume trigger — skips the losing-eyes intro)
+		ne_resume := layer.create_global_transition(no_eyes_idle_state, false);
+		ne_resume.create_trigger_condition(lily_no_eyes_resume_var);
 
 		// Start → Idle (after start anim completes)
 		layer.create_transition(no_eyes_start_state, no_eyes_idle_state, true);
@@ -3267,6 +3294,8 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 
 		// --- Legless (main layer) — takes priority over no-eyes ---
 		lily_crawl_start_var := sm.create_variable("lily_crawl_start", State_Machine_Variable.Kind.TRIGGER);
+		// Resume jumps straight to idle (used after a stun ends — legs are already gone).
+		lily_crawl_resume_var := sm.create_variable("lily_crawl_resume", State_Machine_Variable.Kind.TRIGGER);
 
 		legless_start_state := layer.create_state("004RAND_LILY/Legless_Start", false, 0.0);
 		legless_idle_state := layer.create_state("004RAND_LILY/Legless_Idle", true, 0.0);
@@ -3275,6 +3304,9 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 
 		// Any state → Start (trigger — overrides no-eyes anims via global transition)
 		layer.create_global_transition(legless_start_state, false).create_trigger_condition(lily_crawl_start_var);
+
+		// Any state → Idle (resume — skips the losing-legs intro)
+		layer.create_global_transition(legless_idle_state, false).create_trigger_condition(lily_crawl_resume_var);
 
 		// Start → Idle (after start anim completes)
 		layer.create_transition(legless_start_state, legless_idle_state, true);
@@ -3641,6 +3673,8 @@ Call_Meeting_Interactable :: class : Component {
 		if player.werewolf_infected return false;
 		// Disable when any sabotage is active.
 		if rr_power_outage_active || rr_comms_outage_active || rr_lockdown_active return false;
+		// Disable during Lily's Deathbraid cinematic.
+		if rr_lily_any_deathbraid_active() return false;
         // Always show the interactable; cooldown text + on_interact guard handle the rest.
         return true;
     }
@@ -3673,6 +3707,8 @@ Report_Corpse_Interactable :: class : Interactable {
 		if player.werewolf_infected return false;
 		// Brief lockout after an unwrap so report doesn't fire in the same gesture.
 		if get_time() < cooldown_ends_at return false;
+		// Disable during Lily's Deathbraid cinematic.
+		if rr_lily_any_deathbraid_active() return false;
 
 		corpse := entity.get_component(Corpse);
 		if corpse == null return false;
