@@ -496,9 +496,62 @@ Autograph_Trap_Entry :: class {
 	pos: v2;
 	owner_entity_id: u64;
 	expires_at: float;
+	trap_entity: Entity;
 }
 
 autograph_traps: List(Autograph_Trap_Entry);
+
+// Match portal/mine ground decal conventions.
+MOVIE_STAR_AUTOGRAPH_VISUAL_SCALE :: 1.1;
+MOVIE_STAR_AUTOGRAPH_VISUAL_LAYER :: 0;
+MOVIE_STAR_AUTOGRAPH_VISUAL_DEPTH_OFFSET :: 1.0;
+MOVIE_STAR_AUTOGRAPH_FADE_IN_SECONDS :: 0.45;
+
+Autograph_Trap_Visibility :: class : Component {
+	owner_entity_id: u64;
+
+	is_visible_to_local_player :: method() -> bool {
+		local_player, ok := Game.get_local_player();
+		if !ok return false;
+		return local_player.entity.id == owner_entity_id;
+	}
+
+	ao_on_state_sync :: method() {
+		entity.set_local_enabled(is_visible_to_local_player());
+	}
+}
+
+Autograph_Trap_Fade_In :: class : Component {
+	start_time: float;
+	done: bool;
+
+	ao_start :: method() {
+		start_time = get_time();
+	}
+
+	ao_update :: method(dt: float) {
+		if done return;
+		t := get_time() - start_time;
+		k := t / MOVIE_STAR_AUTOGRAPH_FADE_IN_SECONDS;
+		if k >= 1.0 {
+			entity.set_local_scale(v2.{MOVIE_STAR_AUTOGRAPH_VISUAL_SCALE, MOVIE_STAR_AUTOGRAPH_VISUAL_SCALE});
+			sr := entity.get_component(Sprite_Renderer);
+			if sr != null {
+				sr.color = v4.{1, 1, 1, 1};
+			}
+			done = true;
+			return;
+		}
+		// Ease-out cubic for a gentle settle.
+		ease := 1.0 - pow(1.0 - k, 3.0);
+		s := lerp(MOVIE_STAR_AUTOGRAPH_VISUAL_SCALE * 0.6, MOVIE_STAR_AUTOGRAPH_VISUAL_SCALE, ease);
+		entity.set_local_scale(v2.{s, s});
+		sr := entity.get_component(Sprite_Renderer);
+		if sr != null {
+			sr.color = v4.{1, 1, 1, ease};
+		}
+	}
+}
 
 // --- Hitman: Mines ---
 Hitman_Mine_Entry :: class {
@@ -689,7 +742,45 @@ rr_add_autograph_trap :: proc(owner: Player, pos: v2) {
 	entry.pos = pos;
 	entry.owner_entity_id = owner.entity.id;
 	entry.expires_at = get_time() + MOVIE_STAR_AUTOGRAPH_TRAP_LIFETIME_SECONDS;
+
+	if Game.is_server() {
+		trap_e := Scene.create_entity();
+		trap_e.set_local_position(pos);
+		trap_e.set_local_rotation(0.0);
+		trap_e.set_local_scale(v2.{MOVIE_STAR_AUTOGRAPH_VISUAL_SCALE * 0.6, MOVIE_STAR_AUTOGRAPH_VISUAL_SCALE * 0.6});
+		sprite := trap_e.add_component(Sprite_Renderer);
+		if sprite != null {
+			sprite.set_texture(get_asset(Texture_Asset, "sprites/autograph_item.png"));
+			sprite.layer = MOVIE_STAR_AUTOGRAPH_VISUAL_LAYER;
+			sprite.depth_offset = MOVIE_STAR_AUTOGRAPH_VISUAL_DEPTH_OFFSET;
+			sprite.color = v4.{1, 1, 1, 0};
+		}
+		vis := trap_e.add_component(Autograph_Trap_Visibility);
+		if vis != null {
+			vis.owner_entity_id = owner.entity.id;
+		}
+		trap_e.add_component(Autograph_Trap_Fade_In);
+		entry.trap_entity = trap_e;
+	}
+
 	append(ref autograph_traps, entry);
+}
+
+rr_autograph_destroy_trap_entity :: proc(trap: Autograph_Trap_Entry) {
+	if trap == null return;
+	if trap.trap_entity == null return;
+	if !#alive(trap.trap_entity) return;
+	trap.trap_entity.destroy();
+}
+
+rr_autograph_clear_traps :: proc() {
+	if !Game.is_server() return;
+	for i: 0..autograph_traps.elements.count-1 {
+		t := autograph_traps.elements[i];
+		if t == null continue;
+		rr_autograph_destroy_trap_entity(t);
+	}
+	autograph_traps = List(Autograph_Trap_Entry).{};
 }
 
 update_autograph_traps :: proc() {
@@ -708,6 +799,7 @@ update_autograph_traps :: proc() {
 
 		// Expire
 		if now >= trap.expires_at {
+			rr_autograph_destroy_trap_entity(trap);
 			last := autograph_traps.elements.count - 1;
 			autograph_traps.elements[i] = autograph_traps.elements[last];
 			pop(ref autograph_traps);
@@ -736,6 +828,7 @@ update_autograph_traps :: proc() {
 		}
 
 		if triggered {
+			rr_autograph_destroy_trap_entity(trap);
 			last := autograph_traps.elements.count - 1;
 			autograph_traps.elements[i] = autograph_traps.elements[last];
 			pop(ref autograph_traps);
@@ -1489,6 +1582,7 @@ setup_lobby :: proc() {
 	close_all_doors();
 	rr_destroy_all_portals();
 	rr_hitman_clear_mines();
+	rr_autograph_clear_traps();
 	rr_ggg_clear_traps();
 	rr_ggg_clear_decoys();
 	rr_ggg_clear_nest();

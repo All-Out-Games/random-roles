@@ -3482,9 +3482,79 @@ Movie_Star_Write_Autograph :: class : Component {
 
 MOVIE_STAR_AUTOGRAPH_STUN_REASON :: "movie_star_autograph_stun";
 
+// Local-only "wowie you're looking at an autograph!" reveal for the stunned player.
+// Start time is stored on the Player (synced field) because CSL globals get clobbered
+// by client-side prediction resimulation.
+AUTOGRAPH_STUN_VISUAL_DURATION :: 2.2;
+AUTOGRAPH_STUN_VISUAL_SPIN_IN :: 0.55;
+AUTOGRAPH_STUN_VISUAL_FADE_OUT :: 0.5;
+
+rr_trigger_autograph_stun_visual :: proc(p: Player) {
+	if p == null return;
+	p.autograph_stun_visual_start_time = get_time();
+}
+
+rr_draw_autograph_stun_visual :: proc(viewer: Player) {
+	if viewer == null return;
+	if viewer.autograph_stun_visual_start_time <= 0.0 return;
+
+	now := get_time();
+	t := now - viewer.autograph_stun_visual_start_time;
+	if t < 0.0 || t >= AUTOGRAPH_STUN_VISUAL_DURATION {
+		return;
+	}
+
+	scale: float = 1.0;
+	rot: float = 0.0;
+	alpha: float = 1.0;
+
+	if t < AUTOGRAPH_STUN_VISUAL_SPIN_IN {
+		// Magazine spin-in: overshoot ease_out_back + multiple rotations settling to 0.
+		k := t / AUTOGRAPH_STUN_VISUAL_SPIN_IN;
+		ease := Ease.out_back(k);
+		scale = lerp(0.0, 1.0, ease);
+		rot = lerp(-12.566, 0.0, ease); // ~2 full rotations
+		alpha = clamp(k * 2.0, 0.0, 1.0);
+	} else {
+		fade_start := AUTOGRAPH_STUN_VISUAL_DURATION - AUTOGRAPH_STUN_VISUAL_FADE_OUT;
+		if t < fade_start {
+			// Subtle idle pulse.
+			pulse_t := t - AUTOGRAPH_STUN_VISUAL_SPIN_IN;
+			scale = 1.0 + sin(pulse_t * 6.0) * 0.03;
+			rot = sin(pulse_t * 3.0) * 0.04;
+			alpha = 1.0;
+		} else {
+			k := (t - fade_start) / AUTOGRAPH_STUN_VISUAL_FADE_OUT;
+			if k > 1.0 { k = 1.0; }
+			scale = lerp(1.0, 1.15, k);
+			alpha = 1.0 - k;
+		}
+	}
+
+	tex := get_asset(Texture_Asset, "sprites/autograph.png");
+	if tex == null return;
+
+	// Screen-centered reveal so it's always clearly visible to the stunned player.
+	screen := UI.get_screen_rect();
+	base_half := min(screen.width(), screen.height()) * 0.22;
+	half := base_half * scale;
+	center := screen.center();
+
+	rect := Rect{center, center}.grow(half, half, half, half).fit_aspect(tex.get_aspect());
+
+	UI.push_matrix(Matrix4.rotate_about_point(rect.center(), to_degrees(rot)));
+	defer UI.pop_matrix();
+
+	UI.push_color_multiplier({1, 1, 1, alpha});
+	defer UI.pop_color_multiplier();
+
+	UI.quad(rect, tex, v4.{1, 1, 1, 1});
+}
+
 Stunned_By_Autograph_Effect :: class : Component {
 	stun_end_time: float;
 	active: bool;
+	last_visual_spawn_time: float;
 
 	arm :: proc(using this: Stunned_By_Autograph_Effect, seconds: float) {
 		if seconds <= 0.0 {
@@ -3501,6 +3571,15 @@ Stunned_By_Autograph_Effect :: class : Component {
 			p.add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
 			p.set_trigger("RESET");
 			p.set_trigger("stunned_by_autograph_loop");
+
+			// Set the visual start time on BOTH client and server so state sync
+			// doesn't stomp the client's local-only write back to 0.
+			// The draw itself is gated to the local client in player.csl.
+			now := get_time();
+			if now - last_visual_spawn_time > 0.25 {
+				rr_trigger_autograph_stun_visual(p);
+				last_visual_spawn_time = now;
+			}
 		}
 		active = true;
 	}
