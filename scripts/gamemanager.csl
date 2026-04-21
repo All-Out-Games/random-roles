@@ -2324,17 +2324,42 @@ kill :: proc(player: Player, target: Player = null) {
 } @chat_command @youtuber
 
 // Chat command: /revive
-// /revive — revive yourself. /revive <player> — revive a specific player.
-revive :: proc(player: Player, target: Player = null) {
+// /revive — revive yourself. /revive <username> — revive a specific player by username.
+revive :: proc(player: Player, target_username: string = "") {
 	if game_state != Game_State.INGAME {
 		Chat.server_send_message("You can only use /revive during a round.", player);
 		return;
 	}
-	victim := target != null ? target : player;
+	victim: Player = null;
+	if target_username.count == 0 {
+		victim = player;
+	} else {
+		needle := to_lower(target_username);
+		exact: Player = null;
+		prefix: Player = null;
+		for p: component_iterator(Player) {
+			if p == null continue;
+			if !#alive(p.entity) continue;
+			name_lower := to_lower(p.get_username());
+			if name_lower == needle {
+				exact = p;
+				break;
+			}
+			if prefix == null && name_lower.count >= needle.count && string_substring(name_lower, 0, needle.count) == needle {
+				prefix = p;
+			}
+		}
+		victim = exact != null ? exact : prefix;
+		if victim == null {
+			Chat.server_send_message(format_string("No player found matching '%'.", {target_username}), player);
+			return;
+		}
+	}
 	if victim.player_state != Player_State.DEAD {
 		Chat.server_send_message("That player is not dead.", player);
 		return;
 	}
+	destroy_corpses_for_player(victim.entity.id);
 	on_player_go_alive(victim);
 	Chat.server_send_message(format_string("% has been revived.", {victim.get_username()}), player);
 } @chat_command @youtuber

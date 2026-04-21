@@ -3428,11 +3428,13 @@ Jester_Win_Ability :: class : Ability_Base {
 MOVIE_STAR_AUTOGRAPH_PLACE_TIME_SECONDS :: 2.2;
 MOVIE_STAR_AUTOGRAPH_COOLDOWN_SECONDS :: 30.0;
 MOVIE_STAR_AUTOGRAPH_WRITE_REASON :: "movie_star_autograph_write";
+MOVIE_STAR_AUTOGRAPH_PLACE_DISTANCE :: 4.0;
 
 Movie_Star_Write_Autograph :: class : Component {
 	end_time: float;
 	placed: bool;
 	done: bool;
+	target_pos: v2;
 
 	ao_start :: proc(using this: Movie_Star_Write_Autograph) {
 		p := entity.get_component(Player);
@@ -3470,7 +3472,7 @@ Movie_Star_Write_Autograph :: class : Component {
 
 		if !placed && get_time() >= end_time {
 			placed = true;
-			rr_add_autograph_trap(p, p.entity.world_position);
+			rr_add_autograph_trap(p, target_pos);
 			p.remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
 			p.set_trigger("RESET");
 			done = true;
@@ -3532,8 +3534,12 @@ Stunned_By_Autograph_Effect :: class : Component {
 Autograph_Ability :: class : Ability_Base {
 	NAME :: "Autograph";
 
+	was_targeting: bool;
+	activated_this_session: bool;
+
 	on_init :: proc(instance: Autograph_Ability) {
 		instance.icon = get_asset(Texture_Asset, "sprites/icons/movie_star/write_signature.png");
+		instance.is_aimed_ability = true;
 	}
 
 	can_use :: method() -> bool {
@@ -3546,28 +3552,94 @@ Autograph_Ability :: class : Ability_Base {
 		return true;
 	}
 
+	cleanup_targeting :: method() {
+		was_targeting = false;
+		activated_this_session = false;
+	}
+
 	on_update :: method(params: ref Ability_Update_Params) {
 		// Keep cooldown overlay in sync with post-meeting / round-start lockout.
 		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
-		if params.clicked && params.can_use {
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		targeting := targeted.targeting;
+
+		if targeting && !params.can_use {
+			player.active_ability = null;
+			cleanup_targeting();
+			return;
+		}
+
+		if targeting && !was_targeting {
+			activated_this_session = false;
+			was_targeting = true;
+		}
+		if !targeting {
+			if was_targeting {
+				cleanup_targeting();
+			}
+			return;
+		}
+
+		aiming := Ability_Utilities.update_aiming_ability(player, ref params);
+		if aiming.cancel {
+			player.active_ability = null;
+			cleanup_targeting();
+			return;
+		}
+
+		target_pos := get_mouse_world_position();
+		{
+			origin := player.entity.world_position;
+			delta := target_pos - origin;
+			max_r := MOVIE_STAR_AUTOGRAPH_PLACE_DISTANCE;
+			if length_squared(delta) > max_r * max_r {
+				if length_squared(delta) < 0.001 {
+					delta = v2.{1, 0};
+				} else {
+					delta = normalize(delta);
+				}
+				target_pos = origin + delta * max_r;
+			}
+		}
+
+		// Draw placement reticle
+		if player.is_local() {
+			UI.push_world_draw_context();
+			defer UI.pop_draw_context();
+			UI.push_z(target_pos.y);
+			defer UI.pop_z();
+			reticle := get_asset(Texture_Asset, GROUND_RETICLE_TEXTURE_PATH);
+			reticle_rect := Rect{target_pos, target_pos}.grow(0.80, 0.80, 0.80, 0.80);
+			UI.quad(reticle_rect.fit_aspect(reticle.get_aspect()), reticle, v4.{1.0, 0.9, 0.3, 0.8});
+		}
+
+		if activated_this_session return;
+
+		if aiming.activate && params.can_use {
+			activated_this_session = true;
 			// Prevent double-clicks from stacking multiple writers/traps.
 			current_cooldown = MOVIE_STAR_AUTOGRAPH_COOLDOWN_SECONDS;
 
-			// Start the signing animation; trap is placed when it ends (~1.8s).
+			// Start the signing animation; trap is placed at target_pos when it ends.
 			writer := player.entity.get_component(Movie_Star_Write_Autograph);
 			if writer == null {
 				writer = player.entity.add_component(Movie_Star_Write_Autograph);
+				writer.target_pos = target_pos;
 			} else {
 				// Reset for reuse (ao_start only runs on first add)
 				writer.placed = false;
 				writer.done = false;
+				writer.target_pos = target_pos;
 				writer.end_time = get_time() + MOVIE_STAR_AUTOGRAPH_PLACE_TIME_SECONDS;
 				player.add_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_WRITE_REASON);
 				player.set_trigger("write_place_autograph");
 			}
+
+			player.active_ability = null;
+			cleanup_targeting();
 		}
 	}
 
