@@ -280,6 +280,74 @@ rr_lily_swap_to_player :: proc(player: Player) {
 	player.remove_name_invisibility_reason(LILY_NAME_INVIS_REASON);
 }
 
+// Detach Lily's creature rig so it stays at `origin` as a semi-transparent ghost while
+// Lily's player entity teleports to follow a remote body (spider / eye-machine tube).
+// The player is hidden to everyone via invisibility_reason; her animator is disabled to
+// silence footsteps. The creature rig (forced visible even if she wasn't in Lily form)
+// stays at origin at reduced alpha as the ghost marker.
+rr_lily_detach_body_to_origin :: proc(player: Player, origin: v2) {
+	lm := player.entity.get_component(Lily_Module);
+	if lm == null return;
+	if lm.ability_body_detached return;
+	lm.ability_origin_pos = origin;
+	lm.ability_body_detached = true;
+	lm.ability_creature_was_visible = lm.creature_visible;
+
+	// Ensure creature rig exists (these abilities can fire in Schleem form).
+	rr_lily_ensure_creature_entity(player);
+	if lm.creature_entity != null && #alive(lm.creature_entity) {
+		lm.creature_entity.set_local_enabled(true);
+		lm.creature_visible = true;
+		// Unparent so player teleports don't drag the ghost along.
+		// Reset scale/rotation so inherited flips from the player don't carry over.
+		lm.creature_entity.set_parent(null, true);
+		lm.creature_entity.set_local_position(origin);
+		lm.creature_entity.set_local_scale(v2.{1, 1});
+		lm.creature_entity.set_local_rotation(0.0);
+		if lm.creature_animator != null && lm.creature_animator.instance != null {
+			lm.creature_animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
+		}
+	}
+
+	// Hide player from all observers, fade to 0 locally so Lily doesn't see her own body.
+	player.add_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+	if player.animator != null && player.animator.instance != null {
+		player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 0.0};
+	}
+}
+
+// Restore the creature rig to its normal parented state on the player entity, and
+// teleport the player back to the saved origin.
+rr_lily_reattach_body_from_origin :: proc(player: Player) {
+	lm := player.entity.get_component(Lily_Module);
+	if lm == null return;
+	if !lm.ability_body_detached return;
+
+	// Return player to origin before reparenting to avoid a snap.
+	player.entity.set_local_position(lm.ability_origin_pos);
+
+	if lm.creature_entity != null && #alive(lm.creature_entity) {
+		lm.creature_entity.set_parent(player.entity, false);
+		lm.creature_entity.set_local_position(v2.{0, 0});
+		if lm.creature_animator != null && lm.creature_animator.instance != null {
+			lm.creature_animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 1.0};
+		}
+		// If she wasn't in Lily form when the ability started, hide the rig again.
+		if !lm.ability_creature_was_visible {
+			lm.creature_entity.set_local_enabled(false);
+			lm.creature_visible = false;
+		}
+	}
+
+	player.remove_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+	if player.animator != null && player.animator.instance != null {
+		player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 1.0};
+	}
+
+	lm.ability_body_detached = false;
+	lm.ability_creature_was_visible = false;
+}
+
 // Toggle ability invisibility: invisible to non-traitors, semi-transparent to Lily herself.
 rr_lily_set_ability_invis :: proc(player: Player, active: bool) {
 	lm := player.entity.get_component(Lily_Module);
@@ -386,7 +454,9 @@ rr_lily_update_creature_anims :: proc(player: Player, dt: float) {
 	if lm.creature_animator.instance == null return;
 	if lm.creature_animator.instance.state_machine == null return;
 
-	moving := length_squared(player.agent.velocity) > 0.01;
+	// When body is detached (spider/tube ghost), keep the ghost rig idle — the player
+	// entity is teleporting each frame so agent.velocity would read as running.
+	moving := !lm.ability_body_detached && length_squared(player.agent.velocity) > 0.01;
 	lm.creature_animator.instance.state_machine.set_bool("is_moving", moving);
 }
 
@@ -491,6 +561,9 @@ rr_lily_round_start :: proc(p: Player) {
 	llm.leg_pickup_entity = null;
 	llm.leg_pickup_active = false;
 	llm.leg_pickup_victim_id = 0;
+	llm.ability_body_detached = false;
+	llm.ability_origin_pos = v2.{0, 0};
+	llm.ability_creature_was_visible = false;
 	llm.spider_active = false;
 	llm.spider_entity = null;
 	llm.spider_animator = null;
@@ -3981,10 +4054,13 @@ rr_lily_update :: proc(player: Player, dt: float) {
 
 	// Re-apply ability invis alpha every frame (server sync resets color_multiplier)
 	if player.is_local() {
-		ability_invis := lm.mind_control_active || lm.spider_active;
+		ability_invis := lm.mind_control_active || lm.spider_active || lm.eye_machine_active;
 		if ability_invis {
+			// When body is detached (spider/tube), Lily herself is fully hidden locally
+			// (invisibility_reason hides her for others). Otherwise she's semi-transparent.
+			player_alpha := lm.ability_body_detached ? 0.0 : LILY_ABILITY_INVIS_ALPHA;
 			if player.animator != null && player.animator.instance != null {
-				player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
+				player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, player_alpha};
 			}
 			if lm.creature_animator != null && lm.creature_animator.instance != null {
 				lm.creature_animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
@@ -4420,6 +4496,10 @@ rr_lily_spawn_spider :: proc(player: Player) {
 	// Make Lily semi-transparent to herself, invisible to others
 	rr_lily_set_ability_invis(player, true);
 
+	// Leave creature rig at origin as a semi-transparent ghost; player entity
+	// will teleport to follow the spider (so voice/SFX emit from the spider).
+	rr_lily_detach_body_to_origin(player, spawn_pos);
+
 	if player.is_local_or_server() {
 		Notifier.notify(player, "Spider deployed! Find a victim...");
 	}
@@ -4472,6 +4552,9 @@ rr_lily_end_spider :: proc(player: Player, delivered: bool) {
 	lm.spider_has_legs = false;
 	lm.spider_victim_id = 0;
 	lm.spider_return_deadline = 0.0;
+
+	// Reattach creature rig and teleport player back to origin.
+	rr_lily_reattach_body_from_origin(player);
 
 	// Restore visibility
 	rr_lily_set_ability_invis(player, false);
@@ -4530,15 +4613,21 @@ rr_lily_update_spider :: proc(player: Player, dt: float) {
 
 	now := get_time();
 
+	// Teleport Lily's player entity to the spider every frame so voice/SFX emit from
+	// there. Server sync reconciles on its own. The detached creature rig stays put
+	// at lm.ability_origin_pos and acts as the ghost marker.
+	spider_pos := lm.spider_entity.world_position;
+	player.entity.set_local_position(spider_pos);
+
 	// Camera and LOS follow the spider (every frame, server sync overwrites)
 	if player.is_local() {
 		player.camera.follow_player = false;
-		player.camera.position = lm.spider_entity.world_position;
+		player.camera.position = spider_pos;
 
 		// Unparent light and set world position directly (avoids parent scale flip issues)
 		if player.local_light_entity != null && #alive(player.local_light_entity) {
 			player.local_light_entity.set_parent(null, true);
-			player.local_light_entity.set_local_position(lm.spider_entity.world_position);
+			player.local_light_entity.set_local_position(spider_pos);
 		}
 	}
 
@@ -4629,9 +4718,10 @@ Lily_Spider :: class : Component {
 
 		spider_pos := entity.world_position;
 
-		// If spider has legs, check if near Lily (player) to deliver
+		// If spider has legs, check if near Lily's ghost (origin) to deliver.
+		// Lily's player entity tracks the spider so we can't use it for this distance.
 		if lm.spider_has_legs {
-			lily_pos := lily.entity.world_position;
+			lily_pos := lm.ability_origin_pos;
 			dist := length(spider_pos - lily_pos);
 			if dist <= LILY_SPIDER_PLAYER_RETURN_RANGE {
 				// Spider reached Lily — hand off legs to carry
@@ -4961,6 +5051,11 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 		player.camera.position = spawn_pos;
 	}
 
+	// Leave Lily's creature rig at origin as a ghost; player entity teleports to the
+	// tube each frame so voice/SFX emit from the tube.
+	rr_lily_set_ability_invis(player, true);
+	rr_lily_detach_body_to_origin(player, spawn_pos);
+
 	if player.is_local_or_server() {
 		Notifier.notify(player, "Eye Machine deployed! Move to a target...");
 	}
@@ -5006,6 +5101,10 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 		lm.eye_machine_suction_sfx_id = 0;
 	}
 
+	// Reattach creature rig and teleport player back to origin before restoring camera.
+	rr_lily_reattach_body_from_origin(player);
+	rr_lily_set_ability_invis(player, false);
+
 	// Restore camera — set position before re-enabling follow to avoid a black frame
 	if player.is_local() {
 		player.camera.position = player.entity.world_position;
@@ -5038,6 +5137,12 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 	}
 
 	now := get_time();
+
+	// Teleport Lily's player entity to follow the tube every frame (voice/SFX anchor).
+	// Detached creature rig stays at lm.ability_origin_pos as the ghost marker.
+	if lm.eye_machine_tube_entity != null && #alive(lm.eye_machine_tube_entity) {
+		player.entity.set_local_position(lm.eye_machine_tube_entity.world_position);
+	}
 
 	// ---- CAMERA (runs every frame, all phases — server sync overwrites) ----
 	// ---- CAMERA + VFX (every frame, all phases) ----
