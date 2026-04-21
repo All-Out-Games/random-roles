@@ -3080,13 +3080,29 @@ rr_lily_cleanup_string_traps :: proc(player: Player) {
 	}
 }
 
-MAX_MIND_CONTROL_PICKER_TARGETS :: 8;
+MAX_MIND_CONTROL_PICKER_TARGETS :: 16;
 
 rr_lily_draw_mind_control_picker :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
-	// Collect valid targets
+	// Auto-close if the player is no longer in a valid state to be picking
+	// (died, transformed out of Lily form, round ended, mind control already active, etc.).
+	// Without this, a stranded mind_control_picking flag leaves the modal stuck on layer 15,
+	// blocking all other input.
+	invalid := game_state != Game_State.INGAME
+		|| player.player_state != Player_State.ALIVE
+		|| player.player_type != Player_Type.TRAITOR
+		|| player.player_role != Player_Role.LILY_LOVEBRAIDS
+		|| !lm.is_lily_form
+		|| lm.mind_control_active
+		|| lm.tea_party_active;
+	if invalid {
+		lm.mind_control_picking = false;
+		return;
+	}
+
+	// Collect valid targets.
 	target_players: [MAX_MIND_CONTROL_PICKER_TARGETS]Player;
 	target_count: s64 = 0;
 	for target: component_iterator(Player) {
@@ -3104,50 +3120,153 @@ rr_lily_draw_mind_control_picker :: proc(player: Player) {
 		return;
 	}
 
-	UIK.begin(UIK.modal(UIK.rect_window_small(), 15));
+	screen := UI.get_safe_screen_rect();
+	white := get_asset(Texture_Asset, "$AO/white.png");
 
-	shell := UIK.panel_modal(.BLUE_WITH_FOOTER);
-	UIK.panel_begin(shell);
+	UI.push_layer(20000);
+	defer UI.pop_layer();
 
-	title_desc := UIK.title_area_desc("Mind Control");
-	title_desc.style = .NONE;
-	exit_handle := UIK.title_area(title_desc);
-
-	UIK.spacer(UIK.pixels(1), UIK.pixels(4));
-	UIK.text("Choose a player to control:", UIK.text_body());
-	UIK.spacer(UIK.pixels(1), UIK.pixels(8));
-
-	list_panel := UIK.layout_column();
-	list_panel.width = UIK.flex(1);
-	list_panel.height = UIK.flex(1);
-	list_panel.gap = 6;
-	UIK.list_begin("mc_pick_list", list_panel);
-
-	handles: [MAX_MIND_CONTROL_PICKER_TARGETS]UIK.Interact_Handle;
-	for i: 0..target_count - 1 {
-		desc := UIK.widget_desc_button_auto_default(.BUTTON_BASIC_GREY);
-		desc.panel.width = UIK.flex(1);
-		desc.panel.height = UIK.pixels(70);
-		handles[i] = UIK.button(format_string("mc_pick_%", {i}), target_players[i].get_username(), desc);
+	// Full-screen click blocker underneath the panel — ensures clicks outside the
+	// modal don't leak through to the game/HUD beneath it.
+	{
+		backdrop_bs := UI.default_button_settings();
+		backdrop_bs.sprite = white;
+		backdrop_bs.press_scaling = 1.0;
+		backdrop_bs.color = v4.{0, 0, 0, 0.82};
+		backdrop_bs.hovered_color = backdrop_bs.color;
+		backdrop_bs.pressed_color = backdrop_bs.color;
+		backdrop_bs.disabled_color = backdrop_bs.color;
+		UI.push_id("mc_pick_backdrop");
+		defer UI.pop_id();
+		UI.begin_button(screen, backdrop_bs, {}, ""); { defer UI.end_button(); }
 	}
 
-	UIK.list_end();
-	UIK.panel_end();
-	UIK.end();
+	// Modal panel
+	panel_rect := screen.center_rect().grow(340, 280, 340, 280);
+	rr_ui_draw_modal_panel(panel_rect);
 
-	if UIK.clicked(exit_handle) {
-		lm.mind_control_picking = false;
-		return;
-	}
+	content := panel_rect.inset(30);
+	header := content.cut_top(70);
 
-	for i: 0..target_count - 1 {
-		if UIK.clicked(handles[i]) {
+	title_ts := UI.default_text_settings();
+	title_ts.size = 40;
+	title_ts.color = v4.{0.95, 0.97, 1.0, 1};
+	title_ts.halign = .CENTER;
+	title_ts.valign = .CENTER;
+	title_ts.do_outline = true;
+	title_ts.outline_thickness = 3;
+	title_ts.outline_color = v4.{0, 0, 0, 1};
+	UI.text(header, title_ts, "Mind Control");
+
+	// Exit X button (top right of the panel)
+	exit_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/exit_button_large.png");
+	if exit_tex != null {
+		exit_rect := panel_rect.top_right_rect().offset(-36, -36).grow(26);
+		exit_bs := UI.default_button_settings();
+		exit_bs.sprite = exit_tex;
+		exit_bs.press_scaling = 0.92;
+		rr_ui_apply_button_click_sound(ref exit_bs);
+		UI.push_id("mc_pick_exit");
+		defer UI.pop_id();
+		if UI.button(exit_rect, exit_bs, {}, "").clicked {
 			lm.mind_control_picking = false;
-			rr_lily_start_mind_control(player, target_players[i]);
-			cd_mult := lm.tree_cd_multiplier;
-			// Cooldown is applied via the ability — just start it here
 			return;
 		}
+	}
+
+	subtitle := content.cut_top(44);
+	sub_ts := UI.default_text_settings();
+	sub_ts.size = 24;
+	sub_ts.color = v4.{0.85, 0.90, 0.98, 1};
+	sub_ts.halign = .CENTER;
+	sub_ts.valign = .CENTER;
+	UI.text(subtitle, sub_ts, "Choose a player to control:");
+
+	content.cut_top(6);
+
+	ui_scale := UI.get_current_scale_factor();
+	if ui_scale <= 0.001 { ui_scale = 1.0; }
+
+	// Scrollable list of target rows.
+	scroll_area := content;
+	scroll_bar_area := scroll_area.cut_right(10).inset(2);
+
+	svs: Scroll_View_Settings;
+	svs.vertical = true;
+	svs.horizontal = false;
+	svs.clip_padding = v4.{6, 6, 6, 6};
+
+	btn_ts := UI.default_text_settings();
+	btn_ts.size = 30;
+	btn_ts.color = v4.{1, 1, 1, 1};
+	btn_ts.halign = .LEFT;
+	btn_ts.valign = .CENTER;
+	btn_ts.do_outline = true;
+	btn_ts.outline_thickness = 2;
+	btn_ts.outline_color = v4.{0, 0, 0, 1};
+
+	btn_sprite := get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png");
+	row_h := 88.0;
+	row_gap := 8.0;
+
+	clicked_target: Player = null;
+
+	sv := UI.push_scroll_view(scroll_area, "mc_pick_scroll", svs); {
+		defer UI.pop_scroll_view();
+
+		list_rect := sv.content_rect;
+
+		// Player rows — stable per-entity IDs so click events bind to the same
+		// player regardless of iteration order across client/server frames.
+		for i: 0..target_count - 1 {
+			t := target_players[i];
+			row_rect := list_rect.cut_top(row_h);
+			list_rect.cut_top(row_gap);
+
+			bs := UI.default_button_settings();
+			bs.sprite = btn_sprite;
+			bs.press_scaling = 0.94;
+			rr_ui_apply_button_click_sound(ref bs);
+
+			UI.push_id("mc_pick_%", .{t.entity.id});
+			defer UI.pop_id();
+
+			btn := UI.begin_button(row_rect, bs, {}, ""); {
+				defer UI.end_button();
+
+				// Spine rig on the left — scaled to fit inside the row so it doesn't
+				// overflow into the subtitle above or the next row below.
+				rig_area := btn.rect.subrect(0.02, 0.0, 0.26, 1.0);
+				if t.animator != null && t.animator.instance != null {
+					UI.push_player_material(t);
+					defer UI.pop_material();
+
+					s := (rig_area.height() * 0.75) / ui_scale;
+					s = clamp(s, 50.0, 90.0);
+					pos := v2.{rig_area.center().x, rig_area.min.y + 8};
+					UI.spine(pos, t.animator.instance, v2.{s, s}, 0.0);
+				}
+
+				// Name to the right of the rig
+				name_area := btn.rect.subrect(0.28, 0.0, 1.0, 1.0).inset(8, 14, 8, 14);
+				UI.text(name_area, btn_ts, t.get_username());
+			}
+
+			if btn.clicked {
+				clicked_target = t;
+			}
+		}
+	}
+
+	// Scroll bar visual
+	scroll_bar_rect := sv.compute_scroll_bar_rect(scroll_bar_area);
+	UI.quad(scroll_bar_area, white, v4.{0.025, 0.025, 0.025, 1});
+	UI.quad(scroll_bar_rect, white, v4.{0.12, 0.12, 0.12, 1});
+
+	if clicked_target != null {
+		lm.mind_control_picking = false;
+		rr_lily_start_mind_control(player, clicked_target);
+		return;
 	}
 }
 
