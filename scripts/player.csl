@@ -88,6 +88,12 @@ Player :: class : Player_Base {
 	// Local-only camera zoom so dead players can see more of the map.
 	ghost_camera_zoom_active: bool;
 	ghost_camera_original_size: float;
+	// Deathbraid cinematic: overriding is true while the deathbraid camera is
+	// hijacking this client's camera. restore_until is a grace window (wall-clock
+	// time in seconds) during which ghost-zoom is suppressed so the camera reset
+	// isn't immediately undone by the ghost QoL zoom kicking in mid-cinematic-exit.
+	lily_deathbraid_cam_overriding: bool;
+	lily_deathbraid_cam_restore_until: float;
 	// Canonical baseline speed captured once at join — used to hard-reset every round.
 	baseline_movement_speed: float;
 	baseline_movement_speed_saved: bool;
@@ -100,6 +106,7 @@ Player :: class : Player_Base {
 	lily_crawling_prev: bool;   // edge detection for start trigger
 	lily_crawl_speed_saved: float;
 	lily_stun_was_active: bool; // tracks whether any stun was active last frame (re-fire debuff anim on stun-end)
+	lily_reapply_debuff_anim_at: float; // scheduled time to re-fire the crawl/no-eyes anim (e.g. after a mind-control traitor_kill anim plays); 0 = none
 
 	// --- Pyromaniac (cross-player: any player can be on fire) ---
 	pyro_on_fire: bool;
@@ -235,6 +242,9 @@ Player :: class : Player_Base {
 		if pyro_on_fire return false;
 		// Basic sanity: passive players can't use interactables.
 		if player_state == Player_State.PASSIVE return false;
+		// Lily can't interact while controlling spider or eye-machine tube (her body is detached).
+		lm := entity.get_component(Lily_Module);
+		if lm != null && (lm.spider_active || lm.eye_machine_active) return false;
 		// Ghost tasks: dead civilians are allowed to interact (Task_Interactable.can_use does the task gating).
 		if player_state != Player_State.ALIVE {
 			return player_state == Player_State.DEAD && player_type == Player_Type.CIVILIAN && !werewolf_infected && !is_temporarily_resurrected;
@@ -287,10 +297,17 @@ Player :: class : Player_Base {
     }
     
     //Server Only!
-    ao_start :: proc(using this: Player) {
+	ao_start :: proc(using this: Player) {
 		// Restart ambience so late-joiners hear it (single loop).
 		rr_restart_ambience();
         append(ref players, this);
+
+		// Capture the engine-default camera size exactly once on both the local
+		// client and the server copy, since camera state is synced in CSL.
+		if this.is_local_or_server() && !camera_default_size_saved {
+			camera_default_size = this.camera.size;
+			camera_default_size_saved = true;
+		}
 
 		// Capture the engine-default movement speed exactly once.
 		if !baseline_movement_speed_saved {
@@ -535,6 +552,13 @@ Player :: class : Player_Base {
 				rr_lily_reapply_debuff_anim(this);
 			}
 			this.lily_stun_was_active = stun_active;
+
+			// Scheduled debuff-anim reapply (e.g. after a Lily mind-control puppet
+			// played traitor_kill, which interrupts the crawl/no-eyes main-layer anim).
+			if this.lily_reapply_debuff_anim_at > 0.0 && get_time() >= this.lily_reapply_debuff_anim_at {
+				rr_lily_reapply_debuff_anim(this);
+				this.lily_reapply_debuff_anim_at = 0.0;
+			}
 		}
 
 		// Tea party victim cup choice UI.
@@ -627,19 +651,23 @@ Player :: class : Player_Base {
 			return v2.{999.0, 999.0};
 		}
 
+		// Blind-induced LOS shrink is suppressed during the Lily deathbraid
+		// cinematic so the blinded victim can actually see what's happening.
+		deathbraid_active := rr_lily_any_deathbraid_active();
+
 		// GGG trap blind: super tiny LOS
 		root := this.entity.get_component(GGG_Trap_Root_Effect);
-		if root != null && root.active && root.is_blinded {
+		if root != null && root.active && root.is_blinded && !deathbraid_active {
 			return v2.{GGG_TRAP_BLIND_LOS_INNER, GGG_TRAP_BLIND_LOS_OUTER};
 		}
 
 		// Mimicer spew blind: same LOS reduction
-		if this.mimicer_blinded {
+		if this.mimicer_blinded && !deathbraid_active {
 			return v2.{MIMICER_SPEW_BLIND_LOS_INNER, MIMICER_SPEW_BLIND_LOS_OUTER};
 		}
 
-		// Lily eye steal: permanent blindness until Doctor heals
-		if this.lily_no_eyes {
+		// Lily eye steal: permanent blindness until Doctor heals.
+		if this.lily_no_eyes && !deathbraid_active {
 			return v2.{LILY_BLIND_LOS_INNER, LILY_BLIND_LOS_OUTER};
 		}
 
@@ -738,6 +766,12 @@ Player :: class : Player_Base {
 			rr_lily_draw_carried_icons(this);
 			rr_lily_late_update_ui(this);
 
+			if game_state == Game_State.ANIM_INTRO ||
+			   game_state == Game_State.LOBBY ||
+			   game_state == Game_State.ANIM_VICTORY {
+				rr_player_restore_default_camera(this, false);
+			}
+
 			// Ghost QoL: zoom the local dead player's camera out a bit so they can
 			// see more of the map while spectating.
 			//
@@ -745,14 +779,18 @@ Player :: class : Player_Base {
 			// - Only the local player has a camera.
 			// - Avoid fighting win cinematics (handled by the early return below).
 			if this.is_local() {
-				// Save the engine-default camera size once so we can restore it each round.
 				if !camera_default_size_saved {
 					camera_default_size = this.camera.size;
 					camera_default_size_saved = true;
 				}
 
-				// Reset camera zoom to default at the start of each round (intro or lobby).
-				if game_state == Game_State.ANIM_INTRO || game_state == Game_State.LOBBY {
+				// Reset ghost/override flags at round boundaries and on the victory
+				// screen. The camera itself is reset by rr_player_restore_default_camera
+				// above; this block clears the local-only overrides that don't live on
+				// the synced Player.
+				if game_state == Game_State.ANIM_INTRO ||
+				   game_state == Game_State.LOBBY ||
+				   game_state == Game_State.ANIM_VICTORY {
 					if ghost_camera_zoom_active {
 						ghost_camera_zoom_active = false;
 					}
@@ -762,8 +800,6 @@ Player :: class : Player_Base {
 					if jester_win_camera_override_active {
 						jester_win_camera_override_active = false;
 					}
-					this.camera.follow_player = true;
-					this.camera.size = camera_default_size;
 				}
 
 				in_cinematic :=
@@ -772,11 +808,19 @@ Player :: class : Player_Base {
 				should_ghost_zoom :=
 					!in_cinematic &&
 					this.player_state == Player_State.DEAD &&
+					get_time() >= this.lily_deathbraid_cam_restore_until &&
 					(game_state == Game_State.INGAME || game_state == Game_State.VOTING);
 
 				if should_ghost_zoom {
 					if !ghost_camera_zoom_active {
-						ghost_camera_original_size = this.camera.size;
+						// Prefer the saved engine default: capturing camera.size here
+						// risks snapshotting a cinematic zoom and then "restoring" to
+						// that zoomed value on ghost-zoom exit.
+						if camera_default_size_saved {
+							ghost_camera_original_size = camera_default_size;
+						} else {
+							ghost_camera_original_size = this.camera.size;
+						}
 						ghost_camera_zoom_active = true;
 					}
 					this.camera.size = GHOST_CAMERA_ZOOMED_OUT_SIZE;
@@ -864,6 +908,11 @@ Player :: class : Player_Base {
 
 					// Legless victims (lily leg steal) cannot use any abilities.
 					if this.lily_crawling {
+						return;
+					}
+
+					// Hide all abilities during the Lily deathbraid cinematic.
+					if rr_lily_any_deathbraid_active() {
 						return;
 					}
 
@@ -2275,7 +2324,7 @@ draw_lily_role_hud :: proc(player: Player) {
 			} else {
 				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{0.6, 0.6, 0.6, 0.6});
 				row_ts.color = v4.{0.6, 0.6, 0.6, 0.6};
-				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "1 request: String Trap & Eyes");
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("%/1 Requests: String Trap & Eyes", .{fulfilled}));
 			}
 		}
 		// 2 requests: Leg Steal, Mind Control
@@ -2293,7 +2342,7 @@ draw_lily_role_hud :: proc(player: Player) {
 			} else {
 				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{0.6, 0.6, 0.6, 0.6});
 				row_ts.color = v4.{0.6, 0.6, 0.6, 0.6};
-				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "2 requests: Legs");
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("%/2 Requests: Legs", .{fulfilled}));
 			}
 		}
 		// 3 requests: Mind Control
@@ -2311,7 +2360,7 @@ draw_lily_role_hud :: proc(player: Player) {
 			} else {
 				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{0.6, 0.6, 0.6, 0.6});
 				row_ts.color = v4.{0.6, 0.6, 0.6, 0.6};
-				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "3 requests: Mind Control");
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("%/3 Requests: Mind Control", .{fulfilled}));
 			}
 		}
 		// 4 requests: Tea Party
@@ -2329,7 +2378,7 @@ draw_lily_role_hud :: proc(player: Player) {
 			} else {
 				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{0.6, 0.6, 0.6, 0.6});
 				row_ts.color = v4.{0.6, 0.6, 0.6, 0.6};
-				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "4 requests: Tea Party");
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("%/4 Requests: Tea Party", .{fulfilled}));
 			}
 		}
 		// 6 requests: Deathbraid
@@ -2347,7 +2396,7 @@ draw_lily_role_hud :: proc(player: Player) {
 			} else {
 				UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{0.6, 0.6, 0.6, 0.6});
 				row_ts.color = v4.{0.6, 0.6, 0.6, 0.6};
-				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("% requests: Deathbraid", .{LILY_DEATHBRAID_THRESHOLD}));
+				UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("%/% Requests: Deathbraid", .{fulfilled, LILY_DEATHBRAID_THRESHOLD}));
 			}
 		}
 	}

@@ -1506,6 +1506,14 @@ on_player_go_passive :: proc(player: Player) {
 	rr_lily_stop_live_drag(player);
 	player.set_trigger("RESET");
 
+	// Clear Lily no-eyes / crawl so eyes/legs reappear for the victory screen and lobby
+	// (the round-start reset in assign_players_to_types happens too late and only
+	// runs when a new round begins).
+	player.lily_no_eyes = false;
+	if player.lily_crawling {
+		rr_lily_restore_legs(player);
+	}
+
 	player.revive();
 	player.player_state = Player_State.PASSIVE;
 	// Safety: passive/lobby players should never remain in temporary-resurrect state.
@@ -1521,6 +1529,7 @@ on_player_go_passive :: proc(player: Player) {
 	if player.baseline_movement_speed_saved {
 		player.agent.movement_speed = player.baseline_movement_speed;
 	}
+	rr_player_restore_default_camera(player, false);
 	player.agent.set_navmesh_to_lock_to(world_references.main_navmesh);
 	player.apply_voice_chat_masks_for_current_state();
 	rr_intro_cleanup_role_spine(player);
@@ -1534,6 +1543,7 @@ on_player_go_alive :: proc(player: Player) {
 	if player.baseline_movement_speed_saved {
 		player.agent.movement_speed = player.baseline_movement_speed;
 	}
+	rr_player_restore_default_camera(player, false);
 	player.agent.set_navmesh_to_lock_to(world_references.main_navmesh);
 	rebuild_game_world_navmesh();
 	player.apply_voice_chat_masks_for_current_state();
@@ -1623,6 +1633,7 @@ setup_lobby :: proc() {
 	for corpse: component_iterator(Corpse) {
 		corpse.entity.destroy();
 	}
+	rr_destroy_world_lily_pickups();
 }
 
 setup_ingame :: proc() {

@@ -3535,12 +3535,14 @@ rr_draw_autograph_stun_visual :: proc(viewer: Player) {
 	if tex == null return;
 
 	// Screen-centered reveal so it's always clearly visible to the stunned player.
+	// Screen dimensions here are already unscaled; use grow_unscaled so the
+	// display size derived from screen space stays consistent across UI scaling.
 	screen := UI.get_screen_rect();
-	base_half := min(screen.width(), screen.height()) * 0.55;
+	base_half := min(screen.width(), screen.height()) * 0.4;
 	half := base_half * scale;
 	center := screen.center();
 
-	rect := Rect{center, center}.grow(half, half, half, half).fit_aspect(tex.get_aspect());
+	rect := Rect{center, center}.grow_unscaled(half, half, half, half).fit_aspect(tex.get_aspect());
 
 	UI.push_matrix(Matrix4.rotate_about_point(rect.center(), to_degrees(rot)));
 	defer UI.pop_matrix();
@@ -3579,6 +3581,22 @@ Stunned_By_Autograph_Effect :: class : Component {
 			if now - last_visual_spawn_time > 0.25 {
 				rr_trigger_autograph_stun_visual(p);
 				last_visual_spawn_time = now;
+
+				// Only the trapped player hears this swooning cue.
+				// Use is_local_or_server() so the play runs on both sides and
+				// reconciliation doesn't cut the SFX short.
+				if p.is_local_or_server() {
+					sfx := get_asset(SFX_Asset, "sfx/fall_in_love.wav");
+					if sfx != null {
+						desc := SFX.default_sfx_desc();
+						desc.volume = 0.35;
+						// Follow the trapped player and tighten the audible range so
+						// it's an intimate cue rather than audible to nearby players.
+						desc.entity_to_follow = p.entity.id;
+						desc.range_multiplier = 0.35;
+						SFX.play(sfx, desc);
+					}
+				}
 			}
 		}
 		active = true;
@@ -3598,6 +3616,7 @@ Stunned_By_Autograph_Effect :: class : Component {
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
 			p.remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
 			p.set_trigger("RESET");
+			rr_lily_reapply_debuff_anim(p);
 			active = false;
 			return;
 		}
@@ -3605,6 +3624,7 @@ Stunned_By_Autograph_Effect :: class : Component {
 		if get_time() >= stun_end_time {
 			p.remove_disable_movement_input_reason(MOVIE_STAR_AUTOGRAPH_STUN_REASON);
 			p.set_trigger("RESET");
+			rr_lily_reapply_debuff_anim(p);
 			active = false;
 		}
 	}

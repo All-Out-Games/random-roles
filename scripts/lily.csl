@@ -89,7 +89,7 @@ LILY_STEAL_COOLDOWN :: 20.0;
 // Eye Steal (machine)
 LILY_EYE_STEAL_COOLDOWN :: 60.0;
 LILY_EYE_MACHINE_SPEED :: 8.0;           // camera/machine movement speed
-LILY_EYE_MACHINE_ATTACK_RANGE :: 4.5;    // range to suck eyes
+LILY_EYE_MACHINE_ATTACK_RANGE :: 6.5;    // range to suck eyes
 LILY_EYE_MACHINE_ZOOM_SIZE :: 20.0;      // zoomed out camera size
 LILY_EYE_MACHINE_TUBE_OFFSET_Y :: 5.0;   // suction tube floats above camera center
 LILY_EYE_MACHINE_TUBE_SUCTION_Y :: 1.0;  // tube descends to this height above victim during suction
@@ -311,6 +311,7 @@ rr_lily_detach_body_to_origin :: proc(player: Player, origin: v2) {
 
 	// Hide player from all observers, fade to 0 locally so Lily doesn't see her own body.
 	player.add_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+	player.add_name_invisibility_reason(LILY_ABILITY_INVIS_REASON);
 	if player.animator != null && player.animator.instance != null {
 		player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 0.0};
 	}
@@ -340,6 +341,7 @@ rr_lily_reattach_body_from_origin :: proc(player: Player) {
 	}
 
 	player.remove_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+	player.remove_name_invisibility_reason(LILY_ABILITY_INVIS_REASON);
 	if player.animator != null && player.animator.instance != null {
 		player.animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 1.0};
 	}
@@ -586,6 +588,20 @@ rr_lily_round_start :: proc(p: Player) {
 rr_lily_cleanup :: proc(player: Player) {
 	rr_lily_force_revert(player);
 
+	// Victim-side cleanup runs for every player (not just the Lily) so stolen
+	// legs/eyes don't persist into the next round if the Lily leaves or dies
+	// before a doctor heal.
+	if player.lily_crawling {
+		rr_lily_restore_legs(player);
+	}
+	player.lily_no_eyes = false;
+	player.lily_no_eyes_prev = false;
+	player.lily_no_eyes_al_at = 0.0;
+
+	if player.lily_deathbraid_cam_overriding {
+		rr_player_restore_default_camera(player, true);
+	}
+
 	// Global sweeps run regardless of whether this player has a Lily_Module — covers
 	// orphan trees/AOEs left behind by a Lily who left the game or whose module was
 	// removed before cleanup ran. Idempotent across the per-player round-start loop.
@@ -595,6 +611,7 @@ rr_lily_cleanup :: proc(player: Player) {
 			tree.entity.destroy();
 		}
 	}
+	rr_destroy_world_lily_pickups();
 	for dd: component_iterator(Lily_Delayed_Destroy) {
 		if dd == null continue;
 		if #alive(dd.entity) {
@@ -632,6 +649,11 @@ rr_lily_cleanup :: proc(player: Player) {
 	// Destroy pickups
 	rr_lily_destroy_eye_pickup(player);
 	rr_lily_destroy_leg_pickup(player);
+	rr_lily_destroy_carried_icons(lm);
+	lm.carrying_eyes = false;
+	lm.carrying_legs = false;
+	lm.stolen_eyes_from_id = 0;
+	lm.stolen_legs_from_id = 0;
 
 	// End spider if active
 	if lm.spider_active {
@@ -700,6 +722,7 @@ rr_lily_unstuck_player :: proc(player: Player) {
 	rr_remove_freeze_reason_all(player, LILY_PULL_REASON);
 	rr_remove_freeze_reason_all(player, LILY_DEATHBRAID_REASON);
 	rr_remove_freeze_reason_all(player, LILY_EYE_MACHINE_FREEZE_REASON);
+	rr_remove_movement_reason_all(player, LILY_EYE_MACHINE_FREEZE_REASON);
 	rr_remove_freeze_reason_all(player, LILY_MIND_CONTROL_FREEZE_REASON);
 	rr_remove_freeze_reason_all(player, LILY_SPIDER_FREEZE_REASON);
 	rr_remove_movement_reason_all(player, LILY_MIND_CONTROL_PUPPET_REASON);
@@ -710,6 +733,7 @@ rr_lily_unstuck_player :: proc(player: Player) {
 	player.remove_invisibility_reason(LILY_INVIS_REASON);
 	player.remove_name_invisibility_reason(LILY_NAME_INVIS_REASON);
 	player.remove_invisibility_reason(LILY_ABILITY_INVIS_REASON);
+	player.remove_name_invisibility_reason(LILY_ABILITY_INVIS_REASON);
 }
 
 // =============================================================================
@@ -1376,13 +1400,16 @@ rr_lily_apply_tree_buffs :: proc(player: Player) {
 	// Remove old speed buff if active
 	if lm.tree_speed_buff_active {
 		player.agent.movement_speed = player.agent.movement_speed / lm.tree_speed_multiplier;
+		lm.tree_speed_buff_active = false;
 	}
 
-	// Apply new speed buff
+	// Cache new multiplier; only actually apply it while transformed.
 	new_speed_mult := 1.0 + stage * LILY_TREE_SPEED_BUFF_PER_STAGE;
 	lm.tree_speed_multiplier = new_speed_mult;
-	lm.tree_speed_buff_active = true;
-	player.agent.movement_speed = player.agent.movement_speed * new_speed_mult;
+	if lm.is_lily_form {
+		lm.tree_speed_buff_active = true;
+		player.agent.movement_speed = player.agent.movement_speed * new_speed_mult;
+	}
 
 	// Cooldown multiplier (lower = faster cooldowns)
 	lm.tree_cd_multiplier = 1.0 - stage * LILY_TREE_CD_REDUCTION_PER_STAGE;
@@ -1919,10 +1946,6 @@ rr_lily_start_tea_party :: proc(player: Player, target: Player) {
 	target.add_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
 	target.set_trigger("lily_tea_start");
 
-	// Camera focus for both players
-	lm.tea_party_camera_saved_size = player.camera.size;
-	lm.tea_party_camera_saved_follow = player.camera.follow_player;
-
 	// Add victim choice component
 	existing_choice := target.entity.get_component(Lily_Tea_Party_Victim_Choice);
 	if existing_choice == null {
@@ -1970,13 +1993,9 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 	victim.set_facing_right(table_pos.x > seat_world.x);
 
 	// Camera focus (must set every frame due to server sync)
-	if player.is_local_or_server() {
-		table_pos := lm.tea_table_entity.world_position;
-		player.camera.follow_player = false;
-		player.camera.position = table_pos;
-		player.camera.size = LILY_TEA_PARTY_CAMERA_SIZE;
-	}
-	// Focus victim's camera too
+	// NOTE: Lily's own camera is intentionally NOT locked to the table — she
+	// should stay on her regular follow camera during the tea party.
+	// Focus victim's camera on the table
 	if victim.is_local_or_server() {
 		table_pos := lm.tea_table_entity.world_position;
 		victim.camera.follow_player = false;
@@ -2271,11 +2290,7 @@ rr_lily_end_tea_party_ex :: proc(player: Player, reset_victim_anim: bool) {
 	lm.tea_party_chosen_cup = 0;
 	lm.tea_party_choice_deadline = 0.0;
 
-	// Restore camera
-	if player.is_local_or_server() {
-		player.camera.follow_player = lm.tea_party_camera_saved_follow;
-		player.camera.size = lm.tea_party_camera_saved_size;
-	}
+	// Lily's camera was never attached to the table, so nothing to restore here.
 
 	// Restore victim camera and free them
 	victim := get_player_by_entity_id(lm.tea_party_target_id);
@@ -4026,7 +4041,7 @@ rr_lily_end_deathbraid :: proc(player: Player) {
 			p.agent.set_navmesh_to_lock_to(world_references.main_navmesh);
 		}
 		if p.is_local_or_server() {
-			p.camera.follow_player = true;
+			rr_player_restore_default_camera(p, true);
 		}
 		if p.local_light_entity != null && #alive(p.local_light_entity) {
 			p.local_light_entity.set_parent(p.entity, false);
@@ -4070,6 +4085,11 @@ rr_lily_end_deathbraid :: proc(player: Player) {
 		delayed := lm.hair_tree_entity.add_component(Lily_Delayed_Destroy);
 		delayed.destroy_at = get_time() + 2.0;
 	}
+	rr_lily_destroy_carried_icons(lm);
+	lm.carrying_eyes = false;
+	lm.carrying_legs = false;
+	lm.stolen_eyes_from_id = 0;
+	lm.stolen_legs_from_id = 0;
 	lm.hair_tree_entity = null;
 	lm.hair_tree_planted = false;
 
@@ -4084,9 +4104,15 @@ rr_lily_end_deathbraid :: proc(player: Player) {
 rr_lily_update_deathbraid_camera :: proc(player: Player) {
 	if player == null return;
 	if !player.is_local_or_server() return;
-	// Bail if the round is over — the cinematic must not hijack the camera during
-	// ANIM_VICTORY / LOBBY even if the Lily's deathbraid state hasn't cleaned up yet.
-	if game_state != Game_State.INGAME return;
+
+	// Cinematic must not hijack the camera during ANIM_VICTORY / LOBBY even if
+	// the Lily's deathbraid state hasn't cleaned up yet.
+	if game_state != Game_State.INGAME {
+		if player.lily_deathbraid_cam_overriding {
+			rr_player_restore_default_camera(player, true);
+		}
+		return;
+	}
 
 	// Find active deathbraid from any Lily player
 	for lp: component_iterator(Player) {
@@ -4134,6 +4160,7 @@ rr_lily_update_deathbraid_camera :: proc(player: Player) {
 		player.camera.follow_player = false;
 		player.camera.size = target_size;
 		player.camera.position = v2.{focus_pos.x + shake_x, focus_pos.y + shake_y};
+		player.lily_deathbraid_cam_overriding = true;
 
 		if player.local_light_entity != null && #alive(player.local_light_entity) {
 			player.local_light_entity.set_parent(null, true);
@@ -4142,6 +4169,10 @@ rr_lily_update_deathbraid_camera :: proc(player: Player) {
 
 		player.draw_letterbox_bars();
 		return; // found active deathbraid, done
+	}
+
+	if player.lily_deathbraid_cam_overriding {
+		rr_player_restore_default_camera(player, true);
 	}
 }
 
@@ -4210,8 +4241,8 @@ rr_lily_update :: proc(player: Player, dt: float) {
 	rr_lily_update_passives(player, dt);
 
 	// Re-apply ability invis alpha every frame (server sync resets color_multiplier)
+	ability_invis := lm.mind_control_active || lm.spider_active || lm.eye_machine_active;
 	if player.is_local() {
-		ability_invis := lm.mind_control_active || lm.spider_active || lm.eye_machine_active;
 		if ability_invis {
 			// When body is detached (spider/tube), Lily herself is fully hidden locally
 			// (invisibility_reason hides her for others). Otherwise she's semi-transparent.
@@ -4222,6 +4253,12 @@ rr_lily_update :: proc(player: Player, dt: float) {
 			if lm.creature_animator != null && lm.creature_animator.instance != null {
 				lm.creature_animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, LILY_ABILITY_INVIS_ALPHA};
 			}
+		}
+	} else if ability_invis && lm.ability_body_detached {
+		// Remote observers: hide the ghost creature rig entirely (Lily keeps it visible
+		// locally as a return marker, but other players shouldn't see it).
+		if lm.creature_animator != null && lm.creature_animator.instance != null {
+			lm.creature_animator.instance.color_multiplier = v4.{1.0, 1.0, 1.0, 0.0};
 		}
 	}
 
@@ -4318,6 +4355,12 @@ Lily_Kill_Ability :: class : Ability_Base {
 					if puppet != null {
 						puppet.set_facing_right(closest.entity.world_position.x > puppet.entity.world_position.x);
 						puppet.set_trigger("traitor_kill");
+						// If the puppet is legless/blinded, the kill anim interrupts the
+						// crawl/no-eyes main-layer anim. Schedule a reapply once the kill
+						// anim finishes so the debuff anim resumes cleanly.
+						if puppet.lily_crawling || puppet.lily_no_eyes {
+							puppet.lily_reapply_debuff_anim_at = get_time() + 1.05;
+						}
 					}
 				} else if lm != null && lm.is_lily_form {
 					player.set_facing_right(closest.entity.world_position.x > player.entity.world_position.x);
@@ -4389,6 +4432,10 @@ Lily_Transform_Ability :: class : Ability_Base {
 				if lm.lily_speed_active {
 					lm.lily_speed_active = false;
 					player.agent.movement_speed = player.agent.movement_speed / LILY_LILY_SPEED_MULTIPLIER;
+				}
+				if lm.tree_speed_buff_active {
+					lm.tree_speed_buff_active = false;
+					player.agent.movement_speed = player.agent.movement_speed / lm.tree_speed_multiplier;
 				}
 				rr_lily_swap_to_player(player);
 				player.set_trigger("lily_revert");
@@ -4465,6 +4512,11 @@ Lily_Transform_Lock :: class : Component {
 				if lm != null && lm.is_lily_form && !lm.lily_speed_active {
 					lm.lily_speed_active = true;
 					p.agent.movement_speed = p.agent.movement_speed * LILY_LILY_SPEED_MULTIPLIER;
+				}
+				// Apply tree growth speed buff (only while transformed)
+				if lm != null && lm.is_lily_form && !lm.tree_speed_buff_active && lm.tree_speed_multiplier > 1.0 {
+					lm.tree_speed_buff_active = true;
+					p.agent.movement_speed = p.agent.movement_speed * lm.tree_speed_multiplier;
 				}
 			}
 		}
@@ -5160,7 +5212,7 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 	// Create AOE reticle entity (will be hidden for non-Lily via ao_on_state_sync)
 	aoe_e := Scene.create_entity();
 	aoe_e.set_local_position(spawn_pos);
-	aoe_e.set_local_scale(v2.{1.5, 1.5});
+	aoe_e.set_local_scale(v2.{2.2, 2.2});
 	aoe_e.set_local_rotation(0.0);
 	aoe_sr := aoe_e.add_component(Sprite_Renderer);
 	aoe_tex := get_asset(Texture_Asset, "sprites/ground_reticle_white.png");
@@ -5247,6 +5299,7 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 		victim := get_player_by_entity_id(lm.eye_machine_victim_id);
 		if victim != null {
 			victim.remove_freeze_reason(LILY_EYE_MACHINE_FREEZE_REASON);
+			victim.remove_disable_movement_input_reason(LILY_EYE_MACHINE_FREEZE_REASON);
 		}
 		lm.eye_machine_victim_id = 0;
 	}
@@ -5504,8 +5557,10 @@ rr_lily_eye_machine_start_attack :: proc(player: Player) {
 	lm.eye_machine_victim_pos = closest.entity.world_position;
 	lm.eye_machine_victim_id = closest.entity.id;
 
-	// Freeze the victim in place
+	// Freeze the victim in place — freeze blocks physics/agent work but not input,
+	// so also disable movement input so the victim can't walk during the suction.
 	closest.add_freeze_reason(LILY_EYE_MACHINE_FREEZE_REASON);
+	closest.add_disable_movement_input_reason(LILY_EYE_MACHINE_FREEZE_REASON);
 
 	// Hide AOE reticle during cinematic
 	if lm.eye_machine_aoe_entity != null && #alive(lm.eye_machine_aoe_entity) {
@@ -5543,6 +5598,7 @@ rr_lily_eye_machine_finish_attack :: proc(player: Player) {
 
 		// Unfreeze victim
 		victim.remove_freeze_reason(LILY_EYE_MACHINE_FREEZE_REASON);
+		victim.remove_disable_movement_input_reason(LILY_EYE_MACHINE_FREEZE_REASON);
 
 		// Spawn eye pickup slightly in front of the victim
 		drop_pos := victim.entity.world_position + v2.{0.0, -0.3};
@@ -5602,6 +5658,7 @@ rr_lily_spawn_eye_pickup :: proc(player: Player, victim_id: u64, pos: v2) {
 
 	sa := e.add_component(Spine_Animator);
 	sa.awaken();
+	sa.mask_in_shadow = true;
 	eyes_rig := get_asset(Spine_Asset, rr_lily_get_eyes_rig_path());
 	if sa.instance != null && eyes_rig != null {
 		sa.instance.set_skeleton(eyes_rig);
@@ -5699,6 +5756,7 @@ rr_lily_spawn_leg_pickup :: proc(player: Player, victim_id: u64, pos: v2) {
 	if leg_tex != null {
 		sprite.set_texture(leg_tex);
 	}
+	sprite.mask_in_shadow = true;
 
 	pickup := e.add_component(Lily_Legs_Pickup_Interactable);
 	pickup.lily_entity_id = player.entity.id;
@@ -6412,7 +6470,7 @@ rr_lily_draw_hud :: proc(player: Player) {
 	}
 }
 
-// Draw request icon above the tree in world space (visible only to Lily)
+// Draw request label in a speech bubble above the tree (visible only to Lily).
 rr_lily_draw_tree_request_icon :: proc(player: Player) {
 	if !player.is_local() return;
 	lm := player.entity.get_component(Lily_Module);
@@ -6424,6 +6482,10 @@ rr_lily_draw_tree_request_icon :: proc(player: Player) {
 	if tree_comp == null return;
 	if tree_comp.fulfilled_count >= LILY_TREE_TOTAL_REQUESTS return;
 
+	bubble_tex := get_asset(Texture_Asset, "ui/speak bubble/square_nubless_bubble_white.png");
+	nub_tex := get_asset(Texture_Asset, "ui/speak bubble/bubble_nub_white.png");
+	if bubble_tex == null || nub_tex == null return;
+
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
 
@@ -6431,26 +6493,52 @@ rr_lily_draw_tree_request_icon :: proc(player: Player) {
 	UI.push_z(tree_pos.y + 0.01);
 	defer UI.pop_z();
 
-	// Icon above the tree — raise per growth stage so the label clears the taller skins.
+	// Raise bubble per growth stage so it clears the taller tree skins.
 	text_y := 1.4 + tree_comp.fulfilled_count.(float) * 0.5;
-	icon_pos := tree_pos + v2.{0, text_y};
-	icon_rect := Rect.{icon_pos, icon_pos}.grow(0.15, 0.4, 0.15, 0.4);
+	text_anchor := tree_pos + v2.{0, text_y};
 
-	// Pulsing glow
-	pulse := sin(get_time() * 2.0) * 0.15 + 0.85;
-
-	// Request label
 	ts := UI.default_text_settings();
-	ts.size = 0.30;
+	ts.size = 0.28;
 	ts.halign = .CENTER;
 	ts.valign = .CENTER;
-	ts.color = v4.{1.0, 0.85, 0.95, pulse};
-	ts.do_outline = true;
-	ts.outline_thickness = 4;
-	ts.outline_color = v4.{0, 0, 0, 1.0};
+	ts.color = v4.{0.1, 0.02, 0.06, 1.0};
 
 	request_name := rr_lily_get_request_name(tree_comp);
-	UI.text(icon_rect, ts, request_name);
+
+	// Measure text so the bubble wraps it with consistent padding.
+	seed_rect := Rect.{text_anchor, text_anchor}.grow(0.0, 0.8, 0.0, 0.8);
+	text_rect := UI.text_sync(seed_rect, ts, request_name);
+
+	pad_x := 0.22;
+	pad_y := 0.14;
+	bubble_rect := text_rect.grow(pad_y, pad_x, pad_y, pad_x);
+
+	// Nub pointing down from the bubble toward the tree.
+	nub_aspect := 93.0 / 45.0;
+	nub_h := 0.25;
+	nub_w := nub_h * nub_aspect;
+	nub_top_y := bubble_rect.min.y + 0.1; // overlap slightly to hide seam
+	nub_center := v2.{bubble_rect.center().x, nub_top_y - nub_h * 0.5};
+	nub_rect := Rect.{nub_center, nub_center}.grow(nub_h * 0.5, nub_w * 0.5, nub_h * 0.5, nub_w * 0.5);
+
+	// Nine-sliced bubble body. slice_scale is world-units-per-source-pixel, so
+	// keep it small so corner art doesn't dominate the bubble in world space.
+	bs := UI.default_button_settings();
+	bs.sprite = bubble_tex;
+	bs.press_scaling = 1.0;
+	bs.color = v4.{1, 1, 1, 1};
+	bs.hovered_color = bs.color;
+	bs.pressed_color = bs.color;
+	bs.disabled_color = bs.color;
+	bs.background_color_multiplier = v4.{1, 1, 1, 1};
+	bs.nine_slice_data.slice = v4.{40.0, 40.0, 40.0, 40.0};
+	bs.nine_slice_data.slice_scale = 3;
+	UI.push_disabled(true);
+	UI.begin_button(bubble_rect, bs, {}, ""); { defer UI.end_button(); }
+	UI.pop_disabled();
+	UI.quad(nub_rect, nub_tex, v4.{1, 1, 1, 1});
+
+	UI.text(text_rect, ts, request_name);
 }
 
 // Visibility gate: carried icons render only for the carrying Lily player herself.
@@ -6485,6 +6573,47 @@ rr_lily_ensure_carried_icon :: proc(icon_entity: ref Entity, player_entity: Enti
 
 	icon_entity = e;
 	return e;
+}
+
+rr_lily_destroy_carried_icons :: proc(lm: Lily_Module) {
+	if lm == null return;
+
+	if lm.carried_eye_icon != null && #alive(lm.carried_eye_icon) {
+		lm.carried_eye_icon.destroy();
+	}
+	lm.carried_eye_icon = null;
+
+	if lm.carried_leg_icon != null && #alive(lm.carried_leg_icon) {
+		lm.carried_leg_icon.destroy();
+	}
+	lm.carried_leg_icon = null;
+}
+
+// Destroy every world-placed stolen-eye / stolen-leg pickup in the scene.
+// Used at round boundaries so pickups don't leak between rounds.
+rr_destroy_world_lily_pickups :: proc() {
+	for c: component_iterator(Lily_Eyes_Pickup_Interactable) {
+		if c == null continue;
+		if #alive(c.entity) c.entity.destroy();
+	}
+	for c: component_iterator(Lily_Legs_Pickup_Interactable) {
+		if c == null continue;
+		if #alive(c.entity) c.entity.destroy();
+	}
+}
+
+// Restore camera + deathbraid override state to engine defaults. Idempotent.
+// with_grace=true starts a 1-second window that suppresses ghost-zoom so this
+// reset isn't immediately undone when called mid-cinematic-exit.
+rr_player_restore_default_camera :: proc(p: Player, with_grace: bool) {
+	if p == null return;
+	p.lily_deathbraid_cam_overriding = false;
+	p.lily_deathbraid_cam_restore_until = with_grace ? get_time() + 1.0 : 0.0;
+	if !p.camera_default_size_saved return;
+	p.camera.follow_player = true;
+	p.camera.size = p.camera_default_size;
+	p.ghost_camera_original_size = p.camera_default_size;
+	p.ghost_camera_zoom_active = false;
 }
 
 // Update carried-item icon entities above Lily's head (shadow-maskable).
