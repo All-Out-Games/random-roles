@@ -1,0 +1,700 @@
+// =============================================================================
+// Dev backup / restore (testing aid)
+//
+// `/backup` toggles auto-snapshot. Polls during INGAME and recaptures whenever
+// any tracked field changes. Each capture is JSON-serialized to a game-level
+// save string so the snapshot survives a full process restart.
+//
+// `/restore` applies the latest snapshot to connected players (keyed by
+// user_id). Must be run during INGAME (the target round must exist).
+//
+// Auto-snapshot is NOT persisted across reboots — after a restart you must
+// re-run `/backup` to resume polling. The snapshot itself is persisted.
+//
+// Snapshot contents (per-player, keyed by user_id):
+//   - role / type / alive state / completed task ids
+//   - traitor scalar counters: Werewolf+Hitman+Mimicer kills, Pirate treasure
+//   - Lily: tree planted/pos/fulfilled_count, carrying eyes+legs
+//   - Big Charlie: flesh_mass, current+target scale
+//   - GGG: nest placed/pos/points
+//   - Portal Maker: red+blue portal positions
+//   - Hitman: placed-mine positions
+// =============================================================================
+
+BACKUP_POLL_INTERVAL :: 0.5;
+RR_BACKUP_SAVE_KEY :: "rr_backup_snapshot";
+RR_BACKUP_SCHEMA_VERSION :: 4;
+
+// Enums serialized as ints — JSON support for enums is unspecified, ints are
+// portable. Schema version bump guards against enum reordering.
+Backup_Player_Entry :: class {
+	user_id: string @ao_serialize;
+	role_i: int @ao_serialize;
+	type_i: int @ao_serialize;
+	state_i: int @ao_serialize;
+	completed_task_ids: [..]string @ao_serialize;
+
+	werewolf_kills: int @ao_serialize;
+	hitman_kills: int @ao_serialize;
+	pirate_treasure: int @ao_serialize;
+	mimicer_kills: int @ao_serialize;
+
+	// Lily Lovebraids
+	lily_tree_planted: bool @ao_serialize;
+	lily_tree_pos: v2 @ao_serialize;
+	lily_tree_fulfilled: int @ao_serialize;
+	lily_carrying_eyes: bool @ao_serialize;
+	lily_carrying_legs: bool @ao_serialize;
+
+	// Big Charlie (scales stored ×1000 as int to avoid float-string parser issues)
+	bc_flesh_mass: int @ao_serialize;
+	bc_current_scale_x1000: int @ao_serialize;
+	bc_target_scale_x1000: int @ao_serialize;
+
+	// Goo Goo Gaga
+	ggg_nest_placed: bool @ao_serialize;
+	ggg_nest_pos: v2 @ao_serialize;
+	ggg_nest_points: int @ao_serialize;
+
+	// Portal Maker (zero pos = not placed)
+	portal_red_placed: bool @ao_serialize;
+	portal_red_pos: v2 @ao_serialize;
+	portal_blue_placed: bool @ao_serialize;
+	portal_blue_pos: v2 @ao_serialize;
+
+	// Hitman
+	hitman_mine_positions: [..]v2 @ao_serialize;
+}
+
+Backup_Corpse_Entry :: class {
+	owner_user_id: string @ao_serialize;
+	world_pos: v2 @ao_serialize;
+	death_anim: string @ao_serialize;
+	has_been_reported: bool @ao_serialize;
+	has_dna_been_sampled: bool @ao_serialize;
+	pyro_has_been_burned: bool @ao_serialize;
+	pirate_map_taken: bool @ao_serialize;
+	ggg_is_wrapped: bool @ao_serialize;
+	mimicer_disguised_kill: bool @ao_serialize;
+	bc_nested: bool @ao_serialize;
+}
+
+Backup_Snapshot :: class {
+	version: int @ao_serialize;
+	// Monotonic seconds-since-boot at capture, rounded down. Stored as int to
+	// avoid CSL's f32 → string conversion emitting precision-junk digits that
+	// trip strict JSON parsers ("9.0666999816894531" instead of "9.067").
+	captured_at_s: int @ao_serialize;
+	entries: [..]Backup_Player_Entry @ao_serialize;
+	corpses: [..]Backup_Corpse_Entry @ao_serialize;
+}
+
+rr_backup_enabled: bool;
+rr_backup_snapshot: Backup_Snapshot;
+rr_backup_last_poll_at: float;
+rr_backup_boot_loaded: bool;
+
+// --- Scalar accessors (null-safe) ------------------------------------------
+
+rr_backup_get_werewolf_kills :: proc(p: Player) -> int {
+	m := p.entity.get_component(Werewolf_Module);
+	if m == null return 0;
+	return m.kills;
+}
+
+rr_backup_get_hitman_kills :: proc(p: Player) -> int {
+	m := p.entity.get_component(Hitman_Module);
+	if m == null return 0;
+	return m.kills;
+}
+
+rr_backup_get_pirate_treasure :: proc(p: Player) -> int {
+	m := p.entity.get_component(Pirate_Module);
+	if m == null return 0;
+	return m.treasure;
+}
+
+rr_backup_get_mimicer_kills :: proc(p: Player) -> int {
+	m := p.entity.get_component(Mimicer_Module);
+	if m == null return 0;
+	return m.kills;
+}
+
+rr_backup_count_completed_tasks :: proc(p: Player) -> int {
+	completed := 0;
+	for j: 0..p.active_tasks.elements.count-1 {
+		t := p.active_tasks.elements[j];
+		if t == null continue;
+		if t.completed completed += 1;
+	}
+	return completed;
+}
+
+// --- Persistence (game-level save string, JSON-encoded) --------------------
+
+rr_backup_last_saved_bytes: int;
+
+
+// JSON.serialize emits pretty-printed output. Strip structural whitespace AND
+// replace all `"` with `'` — the save backend validates strings it stores and
+// rejects raw JSON-like values. Apostrophes are rare in our data (user_ids,
+// task ids), and we swap them back before deserializing on load.
+RR_BACKUP_QUOTE_SENTINEL :: "'";
+
+rr_backup_encode_for_save :: proc(s: string) -> string {
+	// First pass: strip newlines/tabs via split+join.
+	no_ws := s;
+	parts := string_split(no_ws, "\n");
+	no_ws = "";
+	for i: 0..parts.count-1 {
+		no_ws = format_string("%0%", .{no_ws, parts[i]});
+	}
+	parts = string_split(no_ws, "\r");
+	no_ws = "";
+	for i: 0..parts.count-1 {
+		no_ws = format_string("%0%", .{no_ws, parts[i]});
+	}
+	parts = string_split(no_ws, "\t");
+	no_ws = "";
+	for i: 0..parts.count-1 {
+		no_ws = format_string("%0%", .{no_ws, parts[i]});
+	}
+
+	// Second pass: replace `"` with sentinel so the backend doesn't try to
+	// parse our value as JSON.
+	q_parts := string_split(no_ws, "\"");
+	result := "";
+	for i: 0..q_parts.count-1 {
+		if i == 0 {
+			result = q_parts[i];
+		} else {
+			result = format_string("%0%0%", .{result, RR_BACKUP_QUOTE_SENTINEL, q_parts[i]});
+		}
+	}
+	return result;
+}
+
+rr_backup_decode_from_save :: proc(s: string) -> string {
+	parts := string_split(s, RR_BACKUP_QUOTE_SENTINEL);
+	result := "";
+	for i: 0..parts.count-1 {
+		if i == 0 {
+			result = parts[i];
+		} else {
+			result = format_string("%0\"%", .{result, parts[i]});
+		}
+	}
+	return result;
+}
+
+rr_backup_save_to_disk :: proc() {
+	if rr_backup_snapshot == null return;
+	rr_backup_snapshot.version = RR_BACKUP_SCHEMA_VERSION;
+	json := JSON.serialize(ref rr_backup_snapshot);
+	payload := rr_backup_encode_for_save(json);
+	rr_backup_last_saved_bytes = payload.count;
+	Save.set_game_string(RR_BACKUP_SAVE_KEY, payload);
+}
+
+rr_backup_load_from_disk :: proc() -> bool {
+	payload := Save.get_game_string(RR_BACKUP_SAVE_KEY, "");
+	if payload.count == 0 return false;
+
+	json := rr_backup_decode_from_save(payload);
+	loaded: Backup_Snapshot;
+	if !JSON.try_deserialize(json, ref loaded) return false;
+	if loaded == null return false;
+	if loaded.version != RR_BACKUP_SCHEMA_VERSION return false;
+	rr_backup_snapshot = loaded;
+	return true;
+}
+
+// Load persisted snapshot once per process boot. Enabled flag is NOT persisted.
+rr_backup_ensure_loaded :: proc() {
+	if rr_backup_boot_loaded return;
+	rr_backup_boot_loaded = true;
+	rr_backup_load_from_disk();
+}
+
+// --- Capture ----------------------------------------------------------------
+
+rr_backup_fill_entry :: proc(e: Backup_Player_Entry, p: Player) {
+	e.user_id = p.get_user_id();
+	e.role_i = p.player_role.(int);
+	e.type_i = p.player_type.(int);
+	e.state_i = p.player_state.(int);
+	e.werewolf_kills = rr_backup_get_werewolf_kills(p);
+	e.hitman_kills = rr_backup_get_hitman_kills(p);
+	e.pirate_treasure = rr_backup_get_pirate_treasure(p);
+	e.mimicer_kills = rr_backup_get_mimicer_kills(p);
+
+	e.completed_task_ids.clear();
+	for j: 0..p.active_tasks.elements.count-1 {
+		t := p.active_tasks.elements[j];
+		if t == null continue;
+		if !t.completed continue;
+		append(ref e.completed_task_ids, t.id);
+	}
+
+	// Lily
+	lm := p.entity.get_component(Lily_Module);
+	if lm != null {
+		e.lily_tree_planted = lm.hair_tree_planted;
+		if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
+			e.lily_tree_pos = lm.hair_tree_entity.world_position;
+			tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
+			if tree_comp != null {
+				e.lily_tree_fulfilled = tree_comp.fulfilled_count;
+			}
+		}
+		e.lily_carrying_eyes = lm.carrying_eyes;
+		e.lily_carrying_legs = lm.carrying_legs;
+	}
+
+	// Big Charlie
+	bcm := p.entity.get_component(Big_Charlie_Module);
+	if bcm != null {
+		e.bc_flesh_mass = bcm.flesh_mass;
+		e.bc_current_scale_x1000 = (bcm.current_scale * 1000.0).(int);
+		e.bc_target_scale_x1000 = (bcm.target_scale * 1000.0).(int);
+	}
+
+	// GGG
+	gm := p.entity.get_component(GGG_Module);
+	if gm != null {
+		e.ggg_nest_placed = gm.nest_placed;
+		e.ggg_nest_pos = gm.nest_world_pos;
+		e.ggg_nest_points = gm.nest_points;
+	}
+
+	// Portal Maker
+	pmm := p.entity.get_component(Portal_Maker_Module);
+	if pmm != null {
+		if pmm.red_portal != null && #alive(pmm.red_portal) {
+			e.portal_red_placed = true;
+			e.portal_red_pos = pmm.red_portal.world_position;
+		}
+		if pmm.blue_portal != null && #alive(pmm.blue_portal) {
+			e.portal_blue_placed = true;
+			e.portal_blue_pos = pmm.blue_portal.world_position;
+		}
+	}
+
+	// Hitman mines — filter global list by owner.
+	e.hitman_mine_positions.clear();
+	if p.player_role == Player_Role.HITMAN {
+		for i: 0..hitman_mines.elements.count-1 {
+			m := hitman_mines.elements[i];
+			if m == null continue;
+			if m.owner_entity_id != p.entity.id continue;
+			if m.mine_entity == null || !#alive(m.mine_entity) continue;
+			append(ref e.hitman_mine_positions, m.pos);
+		}
+	}
+}
+
+// Map a live entity_id to a player's user_id. Returns "" if not a player.
+rr_backup_user_id_for_entity_id :: proc(entity_id: u64) -> string {
+	if entity_id == 0 return "";
+	for p: component_iterator(Player) {
+		if p == null continue;
+		if p.entity.id == entity_id return p.get_user_id();
+	}
+	return "";
+}
+
+rr_backup_capture :: proc() {
+	if rr_backup_snapshot == null {
+		rr_backup_snapshot = new(Backup_Snapshot);
+	}
+	snap := rr_backup_snapshot;
+	snap.version = RR_BACKUP_SCHEMA_VERSION;
+	snap.captured_at_s = get_time().(int);
+	snap.entries.clear();
+	snap.corpses.clear();
+
+	for p: component_iterator(Player) {
+		if p == null continue;
+		e := new(Backup_Player_Entry);
+		rr_backup_fill_entry(e, p);
+		append(ref snap.entries, e);
+	}
+
+	for c: component_iterator(Corpse) {
+		if c == null continue;
+		if !#alive(c.entity) continue;
+		ce := new(Backup_Corpse_Entry);
+		ce.owner_user_id = rr_backup_user_id_for_entity_id(c.owner_player_entity_id);
+		ce.world_pos = c.entity.world_position;
+		ce.death_anim = c.death_anim;
+		ce.has_been_reported = c.has_been_reported;
+		ce.has_dna_been_sampled = c.has_dna_been_sampled;
+		ce.pyro_has_been_burned = c.pyro_has_been_burned;
+		ce.pirate_map_taken = c.pirate_map_taken;
+		ce.ggg_is_wrapped = c.ggg_is_wrapped;
+		ce.mimicer_disguised_kill = c.mimicer_disguised_kill;
+		ce.bc_nested = c.bc_nested;
+		append(ref snap.corpses, ce);
+	}
+
+	rr_backup_save_to_disk();
+}
+
+// Cheap surrogate digest per player — if any of these shift we recapture the
+// full snapshot. Not a rigorous diff; intentionally misses some world-state
+// changes (e.g. mine repositioning) that the next poll will pick up anyway.
+rr_backup_state_changed :: proc() -> bool {
+	if rr_backup_snapshot == null return true;
+	snap := rr_backup_snapshot;
+
+	live_count := 0;
+	for p: component_iterator(Player) {
+		if p == null continue;
+		live_count += 1;
+	}
+	if live_count != snap.entries.count return true;
+
+	live_corpses := 0;
+	for c: component_iterator(Corpse) {
+		if c == null continue;
+		if !#alive(c.entity) continue;
+		live_corpses += 1;
+	}
+	if live_corpses != snap.corpses.count return true;
+
+	for p: component_iterator(Player) {
+		if p == null continue;
+		uid := p.get_user_id();
+		found := false;
+		for i: 0..snap.entries.count-1 {
+			e := snap.entries[i];
+			if e == null continue;
+			if e.user_id != uid continue;
+			found = true;
+			if e.role_i != p.player_role.(int) return true;
+			if e.type_i != p.player_type.(int) return true;
+			if e.state_i != p.player_state.(int) return true;
+			if e.werewolf_kills != rr_backup_get_werewolf_kills(p) return true;
+			if e.hitman_kills != rr_backup_get_hitman_kills(p) return true;
+			if e.pirate_treasure != rr_backup_get_pirate_treasure(p) return true;
+			if e.mimicer_kills != rr_backup_get_mimicer_kills(p) return true;
+			if e.completed_task_ids.count != rr_backup_count_completed_tasks(p) return true;
+
+			lm := p.entity.get_component(Lily_Module);
+			if lm != null {
+				if e.lily_tree_planted != lm.hair_tree_planted return true;
+				if e.lily_carrying_eyes != lm.carrying_eyes return true;
+				if e.lily_carrying_legs != lm.carrying_legs return true;
+				if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
+					tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
+					if tree_comp != null && e.lily_tree_fulfilled != tree_comp.fulfilled_count return true;
+				}
+			}
+
+			bcm := p.entity.get_component(Big_Charlie_Module);
+			if bcm != null {
+				if e.bc_flesh_mass != bcm.flesh_mass return true;
+			}
+
+			gm := p.entity.get_component(GGG_Module);
+			if gm != null {
+				if e.ggg_nest_placed != gm.nest_placed return true;
+				if e.ggg_nest_points != gm.nest_points return true;
+			}
+
+			pmm := p.entity.get_component(Portal_Maker_Module);
+			if pmm != null {
+				red_alive := pmm.red_portal != null && #alive(pmm.red_portal);
+				blue_alive := pmm.blue_portal != null && #alive(pmm.blue_portal);
+				if e.portal_red_placed != red_alive return true;
+				if e.portal_blue_placed != blue_alive return true;
+			}
+
+			if p.player_role == Player_Role.HITMAN {
+				live_mines := 0;
+				for mi: 0..hitman_mines.elements.count-1 {
+					m := hitman_mines.elements[mi];
+					if m == null continue;
+					if m.owner_entity_id != p.entity.id continue;
+					if m.mine_entity == null || !#alive(m.mine_entity) continue;
+					live_mines += 1;
+				}
+				if e.hitman_mine_positions.count != live_mines return true;
+			}
+
+			break;
+		}
+		if !found return true;
+	}
+	return false;
+}
+
+rr_backup_maybe_auto :: proc() {
+	rr_backup_ensure_loaded();
+	if !rr_backup_enabled return;
+	if game_state != Game_State.INGAME return;
+
+	now := get_time();
+	if now - rr_backup_last_poll_at < BACKUP_POLL_INTERVAL return;
+	rr_backup_last_poll_at = now;
+
+	if rr_backup_snapshot == null {
+		rr_backup_capture();
+		return;
+	}
+	if rr_backup_state_changed() {
+		rr_backup_capture();
+	}
+}
+
+// --- Restore ----------------------------------------------------------------
+
+rr_backup_find_entry :: proc(uid: string) -> Backup_Player_Entry {
+	if rr_backup_snapshot == null return null;
+	for i: 0..rr_backup_snapshot.entries.count-1 {
+		e := rr_backup_snapshot.entries[i];
+		if e == null continue;
+		if e.user_id == uid return e;
+	}
+	return null;
+}
+
+rr_backup_restore_lily :: proc(p: Player, e: Backup_Player_Entry) {
+	lm := p.entity.get_component(Lily_Module);
+	if lm == null return;
+
+	lm.carrying_eyes = e.lily_carrying_eyes;
+	lm.carrying_legs = e.lily_carrying_legs;
+
+	if !e.lily_tree_planted return;
+
+	// Plant if not already, then move to saved position and stamp fulfilled_count.
+	if !lm.hair_tree_planted {
+		rr_lily_place_hair_tree(p);
+	}
+	if lm.hair_tree_entity == null || !#alive(lm.hair_tree_entity) return;
+	lm.hair_tree_entity.set_local_position(e.lily_tree_pos);
+
+	tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
+	if tree_comp == null return;
+	tree_comp.fulfilled_count = e.lily_tree_fulfilled;
+
+	// Visual: set correct growth-stage skin.
+	if tree_comp.tree_animator != null && tree_comp.tree_animator.instance != null {
+		tree_comp.tree_animator.instance.set_skin(rr_lily_get_tree_skin_for_stage(e.lily_tree_fulfilled));
+	}
+
+	// Re-apply tree buffs so speed/cooldown multipliers match the stage.
+	rr_lily_apply_tree_buffs(p);
+}
+
+rr_backup_restore_bc :: proc(p: Player, e: Backup_Player_Entry) {
+	bcm := p.entity.get_component(Big_Charlie_Module);
+	if bcm == null bcm = p.entity.add_component(Big_Charlie_Module);
+	bcm.flesh_mass = e.bc_flesh_mass;
+	bcm.current_scale = e.bc_current_scale_x1000.(float) / 1000.0;
+	bcm.target_scale = e.bc_target_scale_x1000.(float) / 1000.0;
+}
+
+rr_backup_restore_ggg :: proc(p: Player, e: Backup_Player_Entry) {
+	gm := p.entity.get_component(GGG_Module);
+	if gm == null return;
+
+	// Clean any existing nest so we don't double-up.
+	if gm.nest_entity != null && #alive(gm.nest_entity) {
+		gm.nest_entity.destroy();
+	}
+	gm.nest_entity = null;
+	gm.nest_placed = false;
+
+	if !e.ggg_nest_placed return;
+	rr_ggg_place_nest(p, e.ggg_nest_pos);
+	gm.nest_points = e.ggg_nest_points;
+}
+
+rr_backup_restore_portals :: proc(p: Player, e: Backup_Player_Entry) {
+	if e.portal_red_placed {
+		rr_portal_maker_place_portal(p, true, e.portal_red_pos, v2.{1, 0});
+	}
+	if e.portal_blue_placed {
+		rr_portal_maker_place_portal(p, false, e.portal_blue_pos, v2.{1, 0});
+	}
+}
+
+rr_backup_restore_mines :: proc(p: Player, e: Backup_Player_Entry) {
+	if p.player_role != Player_Role.HITMAN return;
+	for i: 0..e.hitman_mine_positions.count-1 {
+		rr_hitman_place_mine(p, e.hitman_mine_positions[i]);
+	}
+}
+
+rr_backup_find_player_by_user_id :: proc(uid: string) -> Player {
+	if uid.count == 0 return null;
+	for p: component_iterator(Player) {
+		if p == null continue;
+		if p.get_user_id() == uid return p;
+	}
+	return null;
+}
+
+rr_backup_restore_corpses :: proc() {
+	if rr_backup_snapshot == null return;
+
+	// Destroy any existing corpses first so we can rebuild from the snapshot.
+	for c: component_iterator(Corpse) {
+		if c == null continue;
+		if #alive(c.entity) c.entity.destroy();
+	}
+
+	for i: 0..rr_backup_snapshot.corpses.count-1 {
+		ce := rr_backup_snapshot.corpses[i];
+		if ce == null continue;
+		owner := rr_backup_find_player_by_user_id(ce.owner_user_id);
+		if owner == null continue; // owner not present this session — skip
+
+		// spawn_corpse uses the player's current world_position; we override after.
+		world_references.spawn_corpse(owner, 0);
+	}
+
+	// Second pass: the just-spawned corpses are the most recently added Corpse
+	// components. Walk them in order and stamp the saved state onto each. We
+	// pair by index because spawn order matches the snapshot iteration order.
+	idx := 0;
+	for c: component_iterator(Corpse) {
+		if c == null continue;
+		if !#alive(c.entity) continue;
+		if idx >= rr_backup_snapshot.corpses.count break;
+		ce := rr_backup_snapshot.corpses[idx];
+		idx += 1;
+		if ce == null continue;
+		if rr_backup_find_player_by_user_id(ce.owner_user_id) == null continue;
+
+		c.entity.set_local_position(ce.world_pos);
+		c.has_been_reported = ce.has_been_reported;
+		c.has_dna_been_sampled = ce.has_dna_been_sampled;
+		c.pyro_has_been_burned = ce.pyro_has_been_burned;
+		c.pirate_map_taken = ce.pirate_map_taken;
+		c.ggg_is_wrapped = ce.ggg_is_wrapped;
+		c.mimicer_disguised_kill = ce.mimicer_disguised_kill;
+		c.bc_nested = ce.bc_nested;
+		if ce.death_anim.count > 0 c.death_anim = ce.death_anim;
+	}
+}
+
+rr_backup_apply_to_player :: proc(p: Player, e: Backup_Player_Entry) {
+	role := e.role_i.(Player_Role);
+	p.player_role = role;
+	p.player_type = e.type_i.(Player_Type);
+
+	// Ensure per-role module exists, then stamp scalar counters.
+	if role == Player_Role.WEREWOLF {
+		wm := p.entity.get_component(Werewolf_Module);
+		if wm == null wm = p.entity.add_component(Werewolf_Module);
+		wm.kills = e.werewolf_kills;
+	}
+	if role == Player_Role.HITMAN {
+		hm := p.entity.get_component(Hitman_Module);
+		if hm == null hm = p.entity.add_component(Hitman_Module);
+		hm.kills = e.hitman_kills;
+	}
+	if role == Player_Role.PIRATE {
+		pm := p.entity.get_component(Pirate_Module);
+		if pm == null pm = p.entity.add_component(Pirate_Module);
+		pm.treasure = e.pirate_treasure;
+	}
+	if role == Player_Role.MIMICER {
+		mm := p.entity.get_component(Mimicer_Module);
+		if mm == null mm = p.entity.add_component(Mimicer_Module);
+		mm.kills = e.mimicer_kills;
+	}
+
+	// World entities — restore before state transition so the new state sees
+	// the rebuilt world.
+	if role == Player_Role.LILY_LOVEBRAIDS rr_backup_restore_lily(p, e);
+	if role == Player_Role.BIG_CHARLIE rr_backup_restore_bc(p, e);
+	if role == Player_Role.GOO_GOO_GAGA rr_backup_restore_ggg(p, e);
+	if role == Player_Role.PORTAL_MAKER rr_backup_restore_portals(p, e);
+	if role == Player_Role.HITMAN rr_backup_restore_mines(p, e);
+
+	// Use existing handlers so side effects (ghost nav, voice masks, speed
+	// reset) stay consistent with a normal state transition.
+	target_state := e.state_i.(Player_State);
+	if target_state == Player_State.ALIVE && p.player_state != Player_State.ALIVE {
+		on_player_go_alive(p);
+	} else if target_state == Player_State.DEAD && p.player_state != Player_State.DEAD {
+		on_player_go_dead(p);
+	} else if target_state == Player_State.PASSIVE && p.player_state != Player_State.PASSIVE {
+		on_player_go_passive(p);
+	}
+
+	// Apply task completion flags to existing tasks (by id match).
+	for j: 0..p.active_tasks.elements.count-1 {
+		t := p.active_tasks.elements[j];
+		if t == null continue;
+		should_complete := false;
+		for k: 0..e.completed_task_ids.count-1 {
+			if t.id == e.completed_task_ids[k] {
+				should_complete = true;
+				break;
+			}
+		}
+		t.completed = should_complete;
+	}
+}
+
+// --- Chat commands ----------------------------------------------------------
+
+// /backup — toggles auto-snapshot. Captures once immediately on enable.
+backup :: proc(player: Player) {
+	rr_backup_ensure_loaded();
+	rr_backup_enabled = !rr_backup_enabled;
+
+	if rr_backup_enabled {
+		rr_backup_last_poll_at = 0.0;
+		rr_backup_capture();
+		// Read back from Save to confirm the write round-tripped.
+		readback := Save.get_game_string(RR_BACKUP_SAVE_KEY, "");
+		Chat.server_send_message(
+			format_string("Backup ENABLED. Captured % players + % corpses. JSON=%b, readback=%b.",
+				.{rr_backup_snapshot.entries.count, rr_backup_snapshot.corpses.count,
+				  rr_backup_last_saved_bytes, readback.count}),
+			player);
+		return;
+	}
+	Chat.server_send_message("Backup DISABLED. Last snapshot retained on disk; /restore still works.", player);
+} @chat_command @youtuber
+
+// /restore — applies the latest snapshot to connected players by user_id.
+// Requires INGAME so the task list and modules already exist for this round.
+restore :: proc(player: Player) {
+	rr_backup_ensure_loaded();
+	if rr_backup_snapshot == null || rr_backup_snapshot.entries.count == 0 {
+		Chat.server_send_message("No backup snapshot. Run /backup first (during a round).", player);
+		return;
+	}
+	if game_state != Game_State.INGAME {
+		Chat.server_send_message("/restore only works during INGAME. Start a round first, then /restore.", player);
+		return;
+	}
+
+	// Clear globally-owned world state so restore can rebuild it from scratch.
+	rr_hitman_clear_mines();
+	rr_backup_restore_corpses();
+
+	restored := 0;
+	skipped := 0;
+	for p: component_iterator(Player) {
+		if p == null continue;
+		uid := p.get_user_id();
+		e := rr_backup_find_entry(uid);
+		if e == null { skipped += 1; continue; }
+		rr_backup_apply_to_player(p, e);
+		restored += 1;
+	}
+
+	age := get_time().(int) - rr_backup_snapshot.captured_at_s;
+	Chat.server_send_message(
+		format_string("Restored % players + % corpses from snapshot (% skipped, %s old).",
+			.{restored, rr_backup_snapshot.corpses.count, skipped, age}),
+		player);
+} @chat_command @youtuber
