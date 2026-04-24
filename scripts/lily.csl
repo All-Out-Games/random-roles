@@ -2032,11 +2032,12 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 
 			// Play the correct drink animation based on outcome
 			cup_effect := lm.tea_party_cup_effects[lm.tea_party_chosen_cup - 1];
-			if cup_effect == LILY_TEA_CUP_POISON {
-				victim.set_trigger("lily_tea_death");
-			} else if cup_effect == LILY_TEA_CUP_CAFFEINE {
+			if cup_effect == LILY_TEA_CUP_CAFFEINE {
 				victim.set_trigger("lily_tea_hyper");
 			} else {
+				// Poison and safe both use the neutral drink animation.
+				// Poison's leg-loss visual comes from the Legless_Start anim
+				// that fires when rr_lily_apply_crawl flips lily_crawling on.
 				victim.set_trigger("lily_tea_safe");
 				rr_lily_reapply_debuff_anim(victim);
 			}
@@ -2275,9 +2276,9 @@ rr_lily_end_tea_party :: proc(player: Player) {
 // reset_victim_anim: when true, fires `lily_tea_safe` on the victim to reset
 // their animation to idle. Cancellation paths (timeouts, unstuck, round end)
 // want this; the post-resolve path does NOT — the outcome trigger
-// (lily_tea_death / lily_tea_hyper / lily_tea_sleep) has already been set
-// during drink and fires its own loop + effect, so a second safe trigger
-// would overwrite the caffeine/sleep anim with the safe drink anim.
+// (lily_tea_hyper / lily_tea_sleep, or the legless_start from crawl) has
+// already been set during drink/resolve and fires its own loop + effect, so
+// a second safe trigger would overwrite it with the safe drink anim.
 rr_lily_end_tea_party_ex :: proc(player: Player, reset_victim_anim: bool) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
