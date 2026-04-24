@@ -5250,8 +5250,8 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 	// Don't use add_freeze_reason or add_disable_movement_input_reason — they prevent
 	// input_this_frame from being populated.
 
-	// Save camera state and zoom out
-	if player.is_local() {
+	// Save camera state and zoom out (run on both server & client so reconciliation matches)
+	if player.is_local_or_server() {
 		lm.eye_machine_camera_saved_size = player.camera.size;
 		lm.eye_machine_camera_saved_follow = player.camera.follow_player;
 		player.camera.follow_player = false;
@@ -5314,8 +5314,10 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 	rr_lily_reattach_body_from_origin(player);
 	rr_lily_set_ability_invis(player, false);
 
-	// Restore camera — set position before re-enabling follow to avoid a black frame
-	if player.is_local() {
+	// Restore camera — set position before re-enabling follow to avoid a black frame.
+	// Must run on both server & client so sync reconciliation doesn't overwrite the
+	// restored state on subsequent frames.
+	if player.is_local_or_server() {
 		player.camera.position = player.entity.world_position;
 		player.camera.size = lm.eye_machine_camera_saved_size;
 		player.camera.follow_player = lm.eye_machine_camera_saved_follow;
@@ -5329,14 +5331,22 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 	lm.eye_machine_linger_start = 0.0;
 }
 
-// Per-frame eye machine update: move camera with input, position entities, check targets.
-rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
+// Apply eye-machine camera state for the current frame. Extracted so it can run
+// in BOTH ao_update and ao_late_update — the late-update pass ensures the camera
+// reflects state that was changed by ability clicks fired this same frame (e.g.
+// the spawn frame), avoiding a 1-frame artifact where the camera/LOS hasn't
+// taken effect yet. Runs on server + local client so reconciliation matches.
+rr_lily_apply_eye_machine_camera :: proc(player: Player) {
+	if player == null return;
+	if !player.is_local_or_server() return;
+
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
+
 	if !lm.eye_machine_active {
 		// Guard: if server sync cleared eye_machine_active without end proc running,
-		// restore camera and clear post-processing to avoid black flash / lingering FX.
-		if player.is_local() && lm.eye_machine_camera_saved_size > 0.0 {
+		// restore camera to avoid black flash / stale zoom.
+		if lm.eye_machine_camera_saved_size > 0.0 {
 			player.camera.position = player.entity.world_position;
 			player.camera.size = lm.eye_machine_camera_saved_size;
 			player.camera.follow_player = lm.eye_machine_camera_saved_follow;
@@ -5346,6 +5356,62 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 	}
 
 	now := get_time();
+	player.camera.follow_player = false;
+
+	if lm.eye_machine_lowering {
+		elapsed := now - lm.eye_machine_lower_start_at;
+
+		total_duration := LILY_EYE_MACHINE_ZOOM_DURATION + LILY_EYE_MACHINE_SUCTION_DURATION;
+		zoom_t := clamp(elapsed / LILY_EYE_MACHINE_ZOOM_DURATION, 0.0, 1.0);
+		zoom_ease := zoom_t * zoom_t;
+
+		player.camera.size = lerp(LILY_EYE_MACHINE_ZOOM_SIZE, LILY_EYE_MACHINE_ZOOM_ATTACK, zoom_ease);
+
+		cam_x := lerp(lm.eye_machine_pos.x, lm.eye_machine_victim_pos.x, zoom_ease);
+		cam_y := lerp(lm.eye_machine_pos.y, lm.eye_machine_victim_pos.y, zoom_ease);
+
+		if zoom_ease >= 0.95 {
+			suction_elapsed := elapsed - LILY_EYE_MACHINE_ZOOM_DURATION * 0.95;
+			suction_total := total_duration - LILY_EYE_MACHINE_ZOOM_DURATION * 0.95;
+			shake_t := clamp(suction_elapsed / suction_total, 0.0, 1.0);
+			shake_str := shake_t * LILY_EYE_MACHINE_SHAKE_INTENSITY;
+			cam_x = cam_x + sin(now * LILY_EYE_MACHINE_SHAKE_SPEED) * shake_str;
+			cam_y = cam_y + cos(now * LILY_EYE_MACHINE_SHAKE_SPEED * 1.3) * shake_str * 0.7;
+		}
+
+		player.camera.position = v2.{cam_x, cam_y};
+
+	} else if lm.eye_machine_linger_until > 0.0 {
+		linger_elapsed := now - lm.eye_machine_linger_start;
+		linger_total := LILY_EYE_MACHINE_LINGER_TIME;
+		t := clamp(linger_elapsed / linger_total, 0.0, 1.0);
+
+		decay := 1.0 - t;
+		shake_str := decay * LILY_EYE_MACHINE_SHAKE_INTENSITY;
+		shake_x := sin(now * LILY_EYE_MACHINE_SHAKE_SPEED) * shake_str;
+		shake_y := cos(now * LILY_EYE_MACHINE_SHAKE_SPEED * 1.3) * shake_str * 0.7;
+
+		player.camera.size = LILY_EYE_MACHINE_ZOOM_ATTACK;
+		player.camera.position = v2.{
+			lm.eye_machine_victim_pos.x + shake_x,
+			lm.eye_machine_victim_pos.y + shake_y
+		};
+
+	} else {
+		// Phase: IDLE/MOVING — normal overview
+		player.camera.size = LILY_EYE_MACHINE_ZOOM_SIZE;
+		player.camera.position = lm.eye_machine_pos;
+	}
+}
+
+// Per-frame eye machine update: move camera with input, position entities, check targets.
+// Camera state is applied in ao_late_update via rr_lily_apply_eye_machine_camera.
+rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
+	lm := player.entity.get_component(Lily_Module);
+	if lm == null return;
+	if !lm.eye_machine_active return;
+
+	now := get_time();
 
 	// Teleport Lily's player entity to follow the tube every frame (voice/SFX anchor).
 	// Detached creature rig stays at lm.ability_origin_pos as the ghost marker.
@@ -5353,62 +5419,10 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 		player.entity.set_local_position(lm.eye_machine_tube_entity.world_position);
 	}
 
-	// ---- CAMERA (runs every frame, all phases — server sync overwrites) ----
-	// ---- CAMERA + VFX (every frame, all phases) ----
+	// Letterbox bars (UI render — local-only) for the cinematic phases.
 	if player.is_local() {
-		player.camera.follow_player = false;
-
-		if lm.eye_machine_lowering {
-			elapsed := now - lm.eye_machine_lower_start_at;
-
-			// Zoom progress (capped at 1.0 even during suction sub-phase)
-			total_duration := LILY_EYE_MACHINE_ZOOM_DURATION + LILY_EYE_MACHINE_SUCTION_DURATION;
-			zoom_t := clamp(elapsed / LILY_EYE_MACHINE_ZOOM_DURATION, 0.0, 1.0);
-			zoom_ease := zoom_t * zoom_t;
-
-			player.camera.size = lerp(LILY_EYE_MACHINE_ZOOM_SIZE, LILY_EYE_MACHINE_ZOOM_ATTACK, zoom_ease);
-
-			// Camera position lerps to victim
-			cam_x := lerp(lm.eye_machine_pos.x, lm.eye_machine_victim_pos.x, zoom_ease);
-			cam_y := lerp(lm.eye_machine_pos.y, lm.eye_machine_victim_pos.y, zoom_ease);
-
-			// Shake starts when zoom is 95% done, builds through suction
-			if zoom_ease >= 0.95 {
-				suction_elapsed := elapsed - LILY_EYE_MACHINE_ZOOM_DURATION * 0.95;
-				suction_total := total_duration - LILY_EYE_MACHINE_ZOOM_DURATION * 0.95;
-				shake_t := clamp(suction_elapsed / suction_total, 0.0, 1.0);
-				shake_str := shake_t * LILY_EYE_MACHINE_SHAKE_INTENSITY;
-				cam_x = cam_x + sin(now * LILY_EYE_MACHINE_SHAKE_SPEED) * shake_str;
-				cam_y = cam_y + cos(now * LILY_EYE_MACHINE_SHAKE_SPEED * 1.3) * shake_str * 0.7;
-			}
-
-			player.camera.position = v2.{cam_x, cam_y};
+		if lm.eye_machine_lowering || lm.eye_machine_linger_until > 0.0 {
 			player.draw_letterbox_bars();
-
-		} else if lm.eye_machine_linger_until > 0.0 {
-			// Phase: LINGER — hold on victim, shake decays, tube flies away
-			linger_elapsed := now - lm.eye_machine_linger_start;
-			linger_total := LILY_EYE_MACHINE_LINGER_TIME;
-			t := clamp(linger_elapsed / linger_total, 0.0, 1.0);
-
-			// Camera on victim with decaying shake
-			decay := 1.0 - t;
-			shake_str := decay * LILY_EYE_MACHINE_SHAKE_INTENSITY;
-			shake_x := sin(now * LILY_EYE_MACHINE_SHAKE_SPEED) * shake_str;
-			shake_y := cos(now * LILY_EYE_MACHINE_SHAKE_SPEED * 1.3) * shake_str * 0.7;
-
-			player.camera.size = LILY_EYE_MACHINE_ZOOM_ATTACK;
-			player.camera.position = v2.{
-				lm.eye_machine_victim_pos.x + shake_x,
-				lm.eye_machine_victim_pos.y + shake_y
-			};
-
-			player.draw_letterbox_bars();
-
-		} else {
-			// Phase: IDLE/MOVING — normal overview
-			player.camera.size = LILY_EYE_MACHINE_ZOOM_SIZE;
-			player.camera.position = lm.eye_machine_pos;
 		}
 	}
 
