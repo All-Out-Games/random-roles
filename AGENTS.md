@@ -59,6 +59,8 @@ Find assets with the MCP:
 asset_local_search (query: "tree")
 When referencing assets use <path>.<ext>, omit /res from the path. 
 
+Do not use the $AO/ui/kit/Icons/sparks/spark_small.png asset as it is our platform wide currency and will be confusing. 
+
 ### Asset Types
 ```csl
 texture := get_asset(Texture_Asset, "ui/button.png");
@@ -238,7 +240,7 @@ if Economy.can_withdraw_currency(player, "Coins", COST) {
 
 Any time players receive item or currencies you MUST play a sick animation of the item/coins going up or lerping over and have tactile sfx. 
 
-Round based games should reset economy on ao_start with economy_delete_save_data()
+Round based games should reset economy on ao_start with Economy.delete_save_data
 ```
 
 ## UI

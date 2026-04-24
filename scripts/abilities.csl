@@ -1,6 +1,6 @@
 import "core:ao"
 
-DOCTOR_RESURRECT_DURATION_SECONDS :: 10.0;
+DOCTOR_RESURRECT_COOLDOWN_SECONDS :: 200.0;
 DOCTOR_RESURRECTS_PER_ROUND :: 2;
 
 KILL_COOLDOWN_SECONDS :: 30.0;
@@ -1653,26 +1653,21 @@ Resurrect_Ability :: class : Ability_Base {
                 corpse.entity.destroy();
             }
 
-            // Revive at the corpse position.
+            // Revive at the corpse position — permanent revive.
             target.entity.set_local_position(revive_pos);
             on_player_go_alive(target);
-
-            target.is_temporarily_resurrected = true;
-            target.temporarily_resurrected_until = get_time() + DOCTOR_RESURRECT_DURATION_SECONDS;
 
             // Feedback
             dm_uses := 0;
             if dm != null { dm_uses = dm.resurrects_used; }
-            instance.player.Notify(format_string("Resurrected % for %s (%/% used)", .{
+            instance.player.Notify(format_string("Resurrected %! (%/% used)", .{
                 target.entity.get_name(),
-                format_float(DOCTOR_RESURRECT_DURATION_SECONDS, decimals=0),
                 dm_uses,
                 DOCTOR_RESURRECTS_PER_ROUND
             }));
-            target.Notify(format_string("You were resurrected for %s (no tasks).", .{format_float(DOCTOR_RESURRECT_DURATION_SECONDS, decimals=0)}));
+            target.Notify("The Doctor resurrected you!");
 
-            // Small cooldown to prevent double-click spamming; uses-per-round is the main limiter.
-            instance.current_cooldown = 1.0;
+            instance.current_cooldown = DOCTOR_RESURRECT_COOLDOWN_SECONDS;
         }
     }
 
