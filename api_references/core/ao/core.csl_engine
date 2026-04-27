@@ -320,7 +320,7 @@ component_iterator :: proc($T: typeid, include_disabled := false) -> Component_I
     return (&component_iterator_raw(T, include_disabled)).(*Component_Iterator(T)).*;
 }
 
-List :: struct($T: typeid) {
+List :: struct(T: typeid) {
     elements: []T;
     capacity: s64;
 }
@@ -1176,8 +1176,16 @@ Inventory :: class : Inventory_Base {
 }
 
 Item_Definition :: class : Item_Definition_Base {
-    get_name       :: method() -> string #foreign "item_definition_get_name";
-    get_id         :: method() -> string #foreign "item_definition_get_id";
+    #deprecate_soft "Use the `name` field instead of this getter."
+    get_name :: method() -> string {
+        return name;
+    }
+
+    #deprecate_soft "Use the `id` field instead of this getter."
+    get_id :: method() -> string {
+        return id;
+    }
+
     get_icon       :: method() -> Texture_Asset #foreign "item_definition_get_icon";
 }
 
@@ -1327,6 +1335,9 @@ Spine_Instance :: class : Spine_Instance_Base {
     update            :: method(dt: float)                                                   #foreign "spine_instance_update";
     set_skeleton      :: method(asset: Spine_Asset)                                          #foreign "spine_instance_set_skeleton";
     get_skeleton      :: method() -> Spine_Asset                                             #foreign "spine_instance_get_skeleton";
+    add_skeleton      :: method(asset: Spine_Asset) -> bool                                  #foreign "spine_instance_add_skeleton";
+    remove_skeleton   :: method(asset: Spine_Asset)                                          #foreign "spine_instance_remove_skeleton";
+    set_main_skeleton :: method(asset: Spine_Asset)                                          #foreign "spine_instance_set_main_skeleton";
     set_animation     :: method(animation: string, loop: bool, track: s64, speed: float = 1) #foreign "spine_instance_set_animation";
     set_skin          :: method(skin: string)                                                #foreign "spine_instance_set_skin";
     enable_skin       :: method(skin: string)                                                #foreign "spine_instance_enable_skin";
@@ -1335,6 +1346,12 @@ Spine_Instance :: class : Spine_Instance_Base {
     refresh_skins     :: method()                                                            #foreign "spine_instance_refresh_skins";
     set_to_setup_pose :: method()                                                            #foreign "spine_instance_set_to_setup_pose";
     get_skins         :: method() -> []string                                                #foreign "spine_instance_get_skins";
+
+    override_slot_sprite             :: method(slot_name: string, texture: Texture_Asset) #foreign "spine_instance_override_slot_sprite";
+    clear_slot_sprite_override       :: method(slot_name: string)                         #foreign "spine_instance_clear_slot_sprite_override";
+    clear_all_slot_sprite_overrides  :: method()                                          #foreign "spine_instance_clear_all_slot_sprite_overrides";
+
+    apply_cosmetic :: method(cosmetic: Cosmetic_Asset) #foreign "spine_instance_apply_cosmetic";
 }
 
 //
@@ -1363,11 +1380,17 @@ Player_Base :: class : AO_Player {
     add_name_invisibility_reason    :: method(reason: string) #foreign "player_add_name_invisibility_reason";
     remove_name_invisibility_reason :: method(reason: string) #foreign "player_remove_name_invisibility_reason";
 
+    add_name_offset_reason    :: method(reason: string, offset: float) #foreign "player_add_name_offset_reason";
+    remove_name_offset_reason :: method(reason: string) #foreign "player_remove_name_offset_reason";
+
     add_ghost_reason    :: method(reason: string) #foreign "player_add_ghost_reason";
     remove_ghost_reason :: method(reason: string) #foreign "player_remove_ghost_reason";
 
     add_disable_movement_input_reason    :: method(reason: string) #foreign "player_add_disable_movement_input_reason";
     remove_disable_movement_input_reason :: method(reason: string) #foreign "player_remove_disable_movement_input_reason";
+
+    add_joystick_disable_reason    :: method(reason: string) #foreign "player_add_joystick_disable_reason";
+    remove_joystick_disable_reason :: method(reason: string) #foreign "player_remove_joystick_disable_reason";
 
     is_local_or_server :: method() -> bool #foreign "player_is_local_or_server";
     is_local           :: method() -> bool #foreign "player_is_local";
@@ -3311,6 +3334,6 @@ UIK :: struct {
     }
 
     rect_dialog :: proc() -> Rect {
-        return UI.get_safe_screen_rect().top_rect().grow_bottom(275).inset(0, 800, 0, 800).offset(0, 165);
+        return UI.get_safe_screen_rect().top_rect().grow_bottom(275).inset(0, 800, 0, 800).offset(0, 0);
     }
 }
