@@ -487,6 +487,11 @@ rr_lily_force_revert :: proc(player: Player) {
 	lm.is_lily_form = false;
 	lm.skeleton_swap_at = 0.0;
 	rr_lily_swap_to_player(player);
+	// Snap the player skeleton out of any in-progress lily_transform / lily_revert
+	// animation so nearby players don't see the transform-out play through the teleport.
+	player.set_trigger("RESET");
+	lock := player.entity.get_component(Lily_Transform_Lock);
+	if lock != null lock.active = false;
 	player.remove_disable_movement_input_reason(LILY_TRANSFORM_LOCK_REASON);
 
 	// End active abilities
@@ -597,6 +602,7 @@ rr_lily_cleanup :: proc(player: Player) {
 	player.lily_no_eyes = false;
 	player.lily_no_eyes_prev = false;
 	player.lily_no_eyes_al_at = 0.0;
+	player.lily_no_eyes_unlock_at = 0.0;
 
 	if player.lily_deathbraid_cam_overriding {
 		rr_player_restore_default_camera(player, true);
@@ -819,6 +825,7 @@ rr_lily_on_player_death :: proc(dead_player_entity_id: u64, killer_entity_id: u6
 		}
 		dead.lily_no_eyes = false;
 		dead.lily_no_eyes_al_at = 0.0;
+		dead.lily_no_eyes_unlock_at = 0.0;
 	}
 
 	// Check all players for Lily — a dead player's string dissolves
@@ -898,6 +905,9 @@ rr_lily_on_doctor_heal :: proc(healed_player: Player) {
 		// Restore stolen eyes if this player is the victim
 		if healed_player.lily_no_eyes {
 			healed_player.lily_no_eyes = false;
+			healed_player.lily_no_eyes_unlock_at = 0.0;
+			rr_remove_freeze_reason_all(healed_player, LILY_EYE_MACHINE_FREEZE_REASON);
+			rr_remove_movement_reason_all(healed_player, LILY_EYE_MACHINE_FREEZE_REASON);
 			// If eyes are on the ground as pickup, destroy the pickup
 			if lm.eye_pickup_active && lm.eye_pickup_victim_id == healed_player.entity.id {
 				rr_lily_destroy_eye_pickup(player);
@@ -5429,6 +5439,11 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 
 	// ---- PHASE: SUCTION (lowering) ----
 	if lm.eye_machine_lowering {
+		victim := get_player_by_entity_id(lm.eye_machine_victim_id);
+		if victim != null {
+			rr_lily_eye_machine_pin_victim(victim, lm.eye_machine_victim_pos);
+		}
+
 		elapsed := now - lm.eye_machine_lower_start_at;
 		total_duration := LILY_EYE_MACHINE_ZOOM_DURATION + LILY_EYE_MACHINE_SUCTION_DURATION;
 		drift_t := clamp(elapsed / LILY_EYE_MACHINE_ZOOM_DURATION, 0.0, 1.0);
@@ -5555,6 +5570,18 @@ rr_lily_eye_machine_find_target :: proc(player: Player) -> Player {
 	return finder.closest;
 }
 
+// Keep the eye-machine victim hard-locked in place during the suction cinematic.
+rr_lily_eye_machine_pin_victim :: proc(victim: Player, pinned_pos: v2) {
+	if victim == null return;
+	if victim.entity == null return;
+	if !#alive(victim.entity) return;
+
+	// Hard-stop residual velocity and local prediction drift for the suction cinematic.
+	victim.agent.input_this_frame = v2.{0, 0};
+	victim.agent.velocity = v2.{0, 0};
+	victim.entity.set_local_position(pinned_pos);
+}
+
 // Start the attack — freeze victim, zoom camera, begin suction.
 rr_lily_eye_machine_start_attack :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
@@ -5576,6 +5603,7 @@ rr_lily_eye_machine_start_attack :: proc(player: Player) {
 	// so also disable movement input so the victim can't walk during the suction.
 	closest.add_freeze_reason(LILY_EYE_MACHINE_FREEZE_REASON);
 	closest.add_disable_movement_input_reason(LILY_EYE_MACHINE_FREEZE_REASON);
+	rr_lily_eye_machine_pin_victim(closest, lm.eye_machine_victim_pos);
 
 	// Hide AOE reticle during cinematic
 	if lm.eye_machine_aoe_entity != null && #alive(lm.eye_machine_aoe_entity) {
@@ -5610,10 +5638,9 @@ rr_lily_eye_machine_finish_attack :: proc(player: Player) {
 	if victim != null {
 		// Blind the victim
 		victim.lily_no_eyes = true;
+		victim.lily_no_eyes_unlock_at = get_time() + LILY_NO_EYES_START_DURATION;
 
-		// Unfreeze victim
-		victim.remove_freeze_reason(LILY_EYE_MACHINE_FREEZE_REASON);
-		victim.remove_disable_movement_input_reason(LILY_EYE_MACHINE_FREEZE_REASON);
+		// Keep the victim locked until the No_Eyes_Start intro animation is done.
 
 		// Spawn eye pickup slightly in front of the victim
 		drop_pos := victim.entity.world_position + v2.{0.0, -0.3};

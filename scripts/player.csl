@@ -102,6 +102,7 @@ Player :: class : Player_Base {
 	lily_no_eyes: bool;
 	lily_no_eyes_prev: bool;    // edge detection for start trigger
 	lily_no_eyes_al_at: float;  // time at which to enable AL overlay (0 = not pending)
+	lily_no_eyes_unlock_at: float; // when the eye-steal intro anim is done and movement can resume
 	lily_crawling: bool;
 	lily_crawling_prev: bool;   // edge detection for start trigger
 	lily_crawl_speed_saved: float;
@@ -408,6 +409,13 @@ Player :: class : Player_Base {
     }
 
     ao_update :: proc(using this: Player, delta_time: float) {
+		now := get_time();
+		if this.lily_no_eyes_unlock_at > 0.0 && now >= this.lily_no_eyes_unlock_at {
+			rr_remove_freeze_reason_all(this, LILY_EYE_MACHINE_FREEZE_REASON);
+			rr_remove_movement_reason_all(this, LILY_EYE_MACHINE_FREEZE_REASON);
+			this.lily_no_eyes_unlock_at = 0.0;
+		}
+
         if this.is_local_or_server() {
             this.update_freeze_reasons();
 			// Cosmetic-only: name coloring is per-viewer. Do this only on the local client.
@@ -539,6 +547,7 @@ Player :: class : Player_Base {
 			// Clear AL delay when eyes are restored
 			if !this.lily_no_eyes {
 				this.lily_no_eyes_al_at = 0.0;
+				this.lily_no_eyes_unlock_at = 0.0;
 			}
 
 			this.lily_no_eyes_prev = this.lily_no_eyes;
@@ -3775,6 +3784,8 @@ Report_Corpse_Interactable :: class : Interactable {
 
 		// Already-reported bodies should not show the report prompt at all.
 		if corpse.has_been_reported return false;
+		// A body being actively dragged must be dropped before it can be reported.
+		if corpse.dragged_by_player_entity_id != 0 return false;
 
 		// If only 1 player is alive, don't allow reporting — the game should end naturally.
 		alive_count := 0;
@@ -3792,10 +3803,16 @@ Report_Corpse_Interactable :: class : Interactable {
 	}
 
 	on_interact :: method(player: Player) {
-		// If already reported, just notify the player and don't start a meeting.
 		corpse := entity.get_component(Corpse);
-		if corpse != null && corpse.has_been_reported {
+		if corpse == null return;
+
+		// If already reported, just notify the player and don't start a meeting.
+		if corpse.has_been_reported {
 			player.Notify("This body has already been reported.");
+			return;
+		}
+		if corpse.dragged_by_player_entity_id != 0 {
+			player.Notify("Drop the body before reporting it.");
 			return;
 		}
 

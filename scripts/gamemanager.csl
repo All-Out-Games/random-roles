@@ -1510,6 +1510,7 @@ on_player_go_passive :: proc(player: Player) {
 	// (the round-start reset in assign_players_to_types happens too late and only
 	// runs when a new round begins).
 	player.lily_no_eyes = false;
+	player.lily_no_eyes_unlock_at = 0.0;
 	if player.lily_crawling {
 		rr_lily_restore_legs(player);
 	}
@@ -1720,6 +1721,15 @@ rr_werewolf_force_revert_for_meeting :: proc(player: Player) {
 	player.werewolf_skin_disable_at = now;
 }
 
+// Run immediately after teleport so transform-reverts are masked by the jump
+// and never visible during the meeting animation in the original room.
+rr_force_revert_all_roles_for_meeting :: proc(player: Player) {
+	rr_ggg_force_revert(player);
+	rr_mimicer_force_revert(player);
+	rr_lily_force_revert(player);
+	rr_werewolf_force_revert_for_meeting(player);
+}
+
 setup_voting :: proc() {
 	game_state = Game_State.VOTING;
 	voting_start_time = get_time();
@@ -1735,15 +1745,8 @@ setup_voting :: proc() {
 		player.voted_skip = false;
 		player.votes_received = 0;
 
-		// Force-revert all transforming roles at teleport time (same frame)
-		// so nearby players never see the revert animation.
-		rr_ggg_force_revert(player);
-		rr_ggg_stop_live_drag(player);
-		rr_mimicer_force_revert(player);
-		rr_lily_force_revert(player);
-		rr_werewolf_force_revert_for_meeting(player);
-
 		world_references.teleport_to_voting(player);
+		rr_force_revert_all_roles_for_meeting(player);
 	}
 }
 
@@ -1833,9 +1836,13 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 		rr_play_call_meeting_sound(caller);
 	}
 
-	// Release any carried bodies before the meeting starts.
+	// Release any carried bodies / live drags before the meeting starts.
+	// Transform-reverts are deferred to teleport time (see setup_voting) so they
+	// aren't visible mid-room.
 	for p: component_iterator(Player) {
 		rr_drag_body_force_drop_for_player(p);
+		rr_ggg_stop_live_drag(p);
+		rr_lily_stop_live_drag(p);
 	}
 
 	// Clear active light sabotage (power outage) when entering a meeting/cutscene.
@@ -3562,6 +3569,7 @@ assign_players_to_types :: proc() {
 
 		// Lily no-eyes / crawl
 		p.lily_no_eyes = false;
+		p.lily_no_eyes_unlock_at = 0.0;
 		if p.lily_crawling {
 			rr_lily_restore_legs(p);
 		}

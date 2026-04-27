@@ -217,7 +217,6 @@ rr_drag_body_get_closest_draggable_corpse :: proc(player: Player) -> Corpse {
 	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
-		if corpse.has_been_reported continue;
 
 		// Only allow dragging corpses for players that are currently dead.
 		owner := get_player_by_entity_id(corpse.owner_player_entity_id);
@@ -378,8 +377,8 @@ Drag_Body_Ability :: class : Ability_Base {
 		// Follow update while dragging.
 		if dragging {
 			corpse := rr_drag_body_find_corpse_by_entity_id(player.dragging_corpse_entity_id);
-			if corpse == null {
-				// Corpse got deleted (reported / destroyed) while dragging.
+			if corpse == null || corpse.dragged_by_player_entity_id != player.entity.id {
+				// Corpse got deleted or otherwise lost while dragging.
 				if Game.is_server() {
 					player.dragging_corpse_entity_id = 0;
 					if player.drag_body_sfx_id != 0 {
