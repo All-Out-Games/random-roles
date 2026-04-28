@@ -55,9 +55,10 @@ import "core:ao"
 import "ui" // add folder imports here if needed
 ```
 
-Find assets with the MCP: 
-asset_local_search (query: "tree")
+Find assets with the MCP asset_local_search (query: "tree")
 When referencing assets use <path>.<ext>, omit /res from the path. 
+
+Do not use $AO/ui/kit/Icons/sparks/spark_small.png
 
 ### Asset Types
 ```csl
@@ -67,7 +68,7 @@ spine := get_asset(Spine_Asset, "anims/dog/dog.spine");
 ```
 
 ## Entities
-Place entities with the mcp tools, except for dynamically spawned entities:
+Runtime spawned entities:
 ```csl
 e := Scene.create_entity();
 e.set_local_position({10, 20});
@@ -99,7 +100,6 @@ visit :: proc(entity: Entity) {
 }
 
 ## Components
-### Out-of-the-box components
 #### Sprite_Renderer
 ```csl
 sprite := entity.get_component(Sprite_Renderer);
@@ -110,22 +110,21 @@ sprite.layer = -5;
 
 #### Prefab_Asset
 ```csl
-prefab := get_asset(Prefab_Asset, "MyPrefab.prefab");
-entity := instantiate(prefab);
+p := get_asset(Prefab_Asset, "MyPrefab.prefab");
+entity := instantiate(p);
 ```
 
 #### Spine_Animator
-Reference the Spine skill. If you are asked to make an NPC, shop vendor, or other character, you must use the $AO/streamed_character rig which has a ton of skins and animations! If adding through code, note that all streamed_characters will need at least the base/crewchsia skin added. 
+Reference the Spine skill. If you are asked to make an NPC, shop vendor, or other character, you must use the $AO/streamed_character rig which has useful skins and animations! All streamed_characters need the base/crewchsia skin. 
 
 ### Creating Custom Components
-> Make new components in dedicated files. You do not need to import them unless they're in a separate folder. 
+> One file per component. You do not need to import them unless they're in a separate folder. 
 
-Can override these lifecycle methods:
-
-- ao_start
-- ao_update
-- ao_late_update
-- ao_end - when destroyed
+Lifecycle methods
+ao_start
+ao_update
+ao_late_update
+ao_end - when destroyed
 
 ```csl
 // orbiter.csl
@@ -193,9 +192,8 @@ hp := 67;
 // %0 as alias for % when you want either multiple args next to eachother ("%0%") or an arg then a percent literal ("%0%%")
 format_string("health: %0%%", {hp}); // health: 67%
 
-// Use Format_Float wrapper struct for decimal rounding
-value := 3.14159;
-format_string("pi: %", {format_float(value, decimals=2)}); // "pi: 3.14"
+// Decimal rounding
+format_string("pi: %", {format_float(PI, decimals=2)}); // "pi: 3.14"
 ```
 
 my_str.count gets length 
@@ -238,11 +236,11 @@ if Economy.can_withdraw_currency(player, "Coins", COST) {
 
 Any time players receive item or currencies you MUST play a sick animation of the item/coins going up or lerping over and have tactile sfx. 
 
-Round based games should reset economy on ao_start with economy_delete_save_data()
+Round based games should reset economy on ao_start with Economy.delete_save_data
 ```
 
 ## UI
-- Reference the `UIK` skill if the user's request requires game UI. Do not mix UIK and UI APIs. 
+- Reference the `UIK` skill for any game UI. Do not mix UIK and UI APIs. 
 
 ## Inventory & Items
 - When players acquire items (e.g. from a shop or interacting with the world), you MUST use the All Out inventory system documented in the `inventory` skill.
@@ -252,8 +250,8 @@ Round based games should reset economy on ao_start with economy_delete_save_data
 `sin`, `cos`, `pow`, `sqrt`, `lerp`, `clamp`, `abs`, `min`, `max`, `length`, `length_squared`, `normalize` there are no other math functions. 
 
 ### Player_Base Reference
-- p.is_local_or_server() -> bool  // true on the local client and on the server; must be used for UI. 
-- p.is_local() -> bool            // true only on the local client; use for purely cosmetic effects (not UI)
+- p.is_local_or_server() -> bool // true on the local client and on the server; must be used for UI. 
+- p.is_local() -> bool  // true only on the local client; use for purely cosmetic effects (not UI)
 - p.get_username()
 - p.get_user_id() -> string
 - p.avatar_color -> Color_Replace_Color 
@@ -262,13 +260,12 @@ Round based games should reset economy on ao_start with economy_delete_save_data
 - p.add_invisibility_reason(reason: string)
 
 ## Best Practices
-- CSL does not have closures, instead use `userdata: Object` passed to callbacks. Class instances can be stored in an `Object` variable and cast back to its original type.
-- Do not write your own input. Movement is handled by default. If you need to consume it, use player.agent.inputs_this_frame and ability buttons. 
-- When unsure about an API signature, find the appropriate skill. If no results are found, you may grep api_references/core/ao/[core/generated].csl_engine which is a massive file with ALL engine APIs. 
+- Do not write your own input. Movement is handled by default. If you need to consume it, use player.agent.inputs_this_frame and ability buttons. Default player movement speed is 300. 
+- When unsure about an API signature find the appropriate skill. If no results are found you may grep api_references/core/ao/[core/generated].csl_engine.
 
-After you make script changes, run the All Out MCP compile tool.
-When the prompt requires building a game world, do so using the allout MCP scene editing tools instead of scripts. 
+After you make script changes run the All Out MCP compile tool.
+When the prompt requires building a game world do so using the allout MCP scene editing tools instead of scripts. 
 
-To add weapons to your game clone the https://github.com/All-Out-Games/reusable-weapons-csl.git repo with curl and follow its README. 
+Any games involving weapons MUST clone https://github.com/All-Out-Games/reusable-weapons-csl.git repo with curl and follow its README. 
 
 Start with the scene_summary tool. Do exactly what the users asks for and nothing more. 

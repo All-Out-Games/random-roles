@@ -1,0 +1,923 @@
+// Loadout: per-player selection of which specific roles to be eligible for in each team.
+// For now this is a purely visual/selection UI in the hub. Once the game side reads these
+// values at role assignment time, the min/max + save scaffolding here will already be ready.
+
+LOADOUT_SAVE_KEY :: "loadout_v1";
+LOADOUT_DATA_VERSION :: 1;
+
+LOADOUT_EXTRA_TRAITOR_PRODUCT_ID   :: "69f0deeaf910103de110f1cb";
+LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID  :: "69f0deecf910103de110f1cc";
+LOADOUT_EXTRA_ANARCHIST_PRODUCT_ID :: "69f0deed456b3b0665690c24";
+
+LOADOUT_EXTRA_SLOT_PRICE :: "99";
+
+loadout_min_slots :: proc(tab: int) -> int {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   return 3;
+        case LOADOUT_TAB_CIVILIAN:  return 4;
+        case LOADOUT_TAB_ANARCHIST: return 2;
+    }
+    return 1;
+}
+
+loadout_max_slots_base :: proc(tab: int) -> int {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   return 4;
+        case LOADOUT_TAB_CIVILIAN:  return 8;
+        case LOADOUT_TAB_ANARCHIST: return 2;
+    }
+    return 1;
+}
+
+loadout_max_slots :: proc(player: Player, tab: int) -> int {
+    base := loadout_max_slots_base(tab);
+    if loadout_extra_unlocked(player, tab) base += 1;
+    return base;
+}
+
+loadout_extra_save_key :: proc(tab: int) -> string {
+    return format_string("loadout_extra_%", {tab});
+}
+
+loadout_extra_product_id :: proc(tab: int) -> string {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   return LOADOUT_EXTRA_TRAITOR_PRODUCT_ID;
+        case LOADOUT_TAB_CIVILIAN:  return LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID;
+        case LOADOUT_TAB_ANARCHIST: return LOADOUT_EXTRA_ANARCHIST_PRODUCT_ID;
+    }
+    return "";
+}
+
+loadout_extra_unlocked :: proc(player: Player, tab: int) -> bool {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   if player.loadout_extra_traitor_owned   return true;
+        case LOADOUT_TAB_CIVILIAN:  if player.loadout_extra_civilian_owned  return true;
+        case LOADOUT_TAB_ANARCHIST: if player.loadout_extra_anarchist_owned return true;
+    }
+    pid := loadout_extra_product_id(tab);
+    if pid != "" && Purchasing.owns_product(player, pid) return true;
+    return false;
+}
+
+loadout_set_extra_unlocked :: proc(player: Player, tab: int) {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   player.loadout_extra_traitor_owned   = true;
+        case LOADOUT_TAB_CIVILIAN:  player.loadout_extra_civilian_owned  = true;
+        case LOADOUT_TAB_ANARCHIST: player.loadout_extra_anarchist_owned = true;
+    }
+}
+
+loadout_purchase_handler :: proc(player: Player, id: string) -> bool {
+    if id == LOADOUT_EXTRA_TRAITOR_PRODUCT_ID {
+        loadout_set_extra_unlocked(player, LOADOUT_TAB_TRAITOR);
+        Notifier.notify(player, "Extra Traitor slot unlocked!");
+        return true;
+    }
+    if id == LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID {
+        loadout_set_extra_unlocked(player, LOADOUT_TAB_CIVILIAN);
+        Notifier.notify(player, "Extra Civilian slot unlocked!");
+        return true;
+    }
+    if id == LOADOUT_EXTRA_ANARCHIST_PRODUCT_ID {
+        loadout_set_extra_unlocked(player, LOADOUT_TAB_ANARCHIST);
+        Notifier.notify(player, "Extra Anarchist slot unlocked!");
+        return true;
+    }
+    return false;
+}
+
+LOADOUT_TAB_TRAITOR   :: 0;
+LOADOUT_TAB_CIVILIAN  :: 1;
+LOADOUT_TAB_ANARCHIST :: 2;
+LOADOUT_NUM_TABS      :: 3;
+
+Loadout_Data :: class {
+    version:    int     @ao_serialize;
+    traitors:   [..]int @ao_serialize;
+    civilians:  [..]int @ao_serialize;
+    anarchists: [..]int @ao_serialize;
+}
+
+// ---- Team / role metadata helpers ----
+
+loadout_team_label :: proc(tab: int) -> string {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   return "Traitor";
+        case LOADOUT_TAB_CIVILIAN:  return "Civilian";
+        case LOADOUT_TAB_ANARCHIST: return "Anarchist";
+    }
+    return "";
+}
+
+loadout_tab_role_color :: proc(tab: int) -> v4 {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   return v4.{0.95, 0.20, 0.20, 1.0};
+        case LOADOUT_TAB_CIVILIAN:  return v4.{0.10, 0.90, 0.30, 1.0};
+        case LOADOUT_TAB_ANARCHIST: return v4.{0.95, 0.70, 0.20, 1.0};
+    }
+    return v4.{1, 1, 1, 1};
+}
+
+loadout_tab_active_bg :: proc(tab: int) -> UIK.Panel_Background_Kind {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   return .BUTTON_BASIC_RED;
+        case LOADOUT_TAB_CIVILIAN:  return .BUTTON_BASIC_GREEN;
+        case LOADOUT_TAB_ANARCHIST: return .BUTTON_BASIC_YELLOW1;
+    }
+    return .BUTTON_BASIC_GREY;
+}
+
+loadout_get_role_detail_icon :: proc(role_idx: int) -> string {
+    switch role_idx {
+        case 14: return "ui/roles/mimicer_icon.png";
+        case 16: return "ui/roles/lily_icon.png";
+    }
+    return rg_get_role_detail_icon(role_idx);
+}
+
+loadout_get_role_small_icon :: proc(role_idx: int) -> string {
+    switch role_idx {
+        case 1:  return "ui/roles_small/sheriff_icon.png";
+        case 2:  return "ui/roles_small/doctor_icon.png";
+        case 3:  return "ui/roles_small/president_icon.png";
+        case 4:  return "ui/roles_small/moviestar_icon.png";
+        case 5:  return "ui/roles_small/coroner_icon.png";
+        case 6:  return "ui/roles_small/portalmaker_icon.png";
+        case 7:  return "ui/roles_small/trickster_icon.png";
+        case 8:  return "ui/roles_small/pyromaniac_icon.png";
+        case 10: return "ui/roles_small/pirate_icon.png";
+        case 11: return "ui/roles_small/hitman_icon.png";
+        case 12: return "ui/roles_small/werewolf_icon.png";
+        case 13: return "ui/roles_small/goo_goo_icon.png";
+        case 14: return "ui/roles_small/mimicer_icon.png";
+        case 16: return "ui/roles_small/lily_icon (1).png";
+    }
+    return loadout_get_role_detail_icon(role_idx);
+}
+
+loadout_get_role_name :: proc(role_idx: int) -> string {
+    if role_idx == 16 return "LILY LOVEBRAIDS";
+    return rg_get_role_name(role_idx);
+}
+
+loadout_get_role_difficulty_stars :: proc(role_idx: int) -> int {
+    if role_idx == 16 return 3;
+    return rg_get_role_difficulty_stars(role_idx);
+}
+
+// Roles selectable per team. Skips the generic base roles (CREW idx 0, TRAITOR idx 9).
+loadout_get_team_roles :: proc(tab: int, results: ref [..]int) {
+    switch tab {
+        case LOADOUT_TAB_CIVILIAN: {
+            for i: 1..6 append(ref results, i);
+        }
+        case LOADOUT_TAB_ANARCHIST: {
+            append(ref results, 7);
+            append(ref results, 8);
+        }
+        case LOADOUT_TAB_TRAITOR: {
+            append(ref results, 10);
+            append(ref results, 11);
+            append(ref results, 12);
+            append(ref results, 13);
+            append(ref results, 14);
+            append(ref results, 16);
+        }
+    }
+}
+
+// ---- Equipped state queries ----
+
+loadout_equipped_count :: proc(player: Player, tab: int) -> int {
+    if player.loadout == null return 0;
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   return player.loadout.traitors.count;
+        case LOADOUT_TAB_CIVILIAN:  return player.loadout.civilians.count;
+        case LOADOUT_TAB_ANARCHIST: return player.loadout.anarchists.count;
+    }
+    return 0;
+}
+
+loadout_equipped_at :: proc(player: Player, tab: int, slot: int) -> int {
+    if player.loadout == null return -1;
+    switch tab {
+        case LOADOUT_TAB_TRAITOR: {
+            if slot < 0 || slot >= player.loadout.traitors.count return -1;
+            return player.loadout.traitors[slot];
+        }
+        case LOADOUT_TAB_CIVILIAN: {
+            if slot < 0 || slot >= player.loadout.civilians.count return -1;
+            return player.loadout.civilians[slot];
+        }
+        case LOADOUT_TAB_ANARCHIST: {
+            if slot < 0 || slot >= player.loadout.anarchists.count return -1;
+            return player.loadout.anarchists[slot];
+        }
+    }
+    return -1;
+}
+
+loadout_is_equipped :: proc(player: Player, tab: int, role_idx: int) -> bool {
+    if player.loadout == null return false;
+    if tab == LOADOUT_TAB_TRAITOR {
+        for i: 0..player.loadout.traitors.count - 1 {
+            if player.loadout.traitors[i] == role_idx return true;
+        }
+    } else if tab == LOADOUT_TAB_CIVILIAN {
+        for i: 0..player.loadout.civilians.count - 1 {
+            if player.loadout.civilians[i] == role_idx return true;
+        }
+    } else if tab == LOADOUT_TAB_ANARCHIST {
+        for i: 0..player.loadout.anarchists.count - 1 {
+            if player.loadout.anarchists[i] == role_idx return true;
+        }
+    }
+    return false;
+}
+
+// Toggle equip state, enforcing min/max. No-op if blocked by constraints or role is locked.
+// Runs on both client (prediction) and server (authoritative); Save is gated server-only.
+loadout_toggle :: proc(player: Player, tab: int, role_idx: int) {
+    if !player.is_local_or_server() return;
+    if player.loadout == null return;
+    if rg_is_role_locked(player, role_idx) return;
+
+    is_eq := loadout_is_equipped(player, tab, role_idx);
+    count := loadout_equipped_count(player, tab);
+
+    if is_eq {
+        if count <= loadout_min_slots(tab) return;
+        switch tab {
+            case LOADOUT_TAB_TRAITOR:   unordered_remove_by_value(ref player.loadout.traitors,   role_idx);
+            case LOADOUT_TAB_CIVILIAN:  unordered_remove_by_value(ref player.loadout.civilians,  role_idx);
+            case LOADOUT_TAB_ANARCHIST: unordered_remove_by_value(ref player.loadout.anarchists, role_idx);
+        }
+    } else {
+        if count >= loadout_max_slots(player, tab) return;
+        switch tab {
+            case LOADOUT_TAB_TRAITOR:   append(ref player.loadout.traitors,   role_idx);
+            case LOADOUT_TAB_CIVILIAN:  append(ref player.loadout.civilians,  role_idx);
+            case LOADOUT_TAB_ANARCHIST: append(ref player.loadout.anarchists, role_idx);
+        }
+    }
+
+    loadout_save(player);
+}
+
+// ---- Save / load / validate ----
+
+loadout_load :: proc(player: Player) {
+    // Server-only: per-player Save data isn't visible to the client. If we
+    // ran this on the client, try_get_json would return false, we'd assign a
+    // fresh empty Loadout_Data, validate would auto-fill default minimums, and
+    // that empty/default state would race-overwrite the data the server is
+    // replicating. Client gets player.loadout via auto-sync from the server.
+    if !Game.is_server() return;
+
+    // JSON skill pattern: pass an uninitialized class pointer; try_get_json
+    // allocates and fills it. Pre-allocating the target before the call leaves
+    // a stale instance behind on success and confuses the engine's writeback.
+    fresh: Loadout_Data;
+    Save.try_get_json(player, LOADOUT_SAVE_KEY, ref fresh);
+    if fresh == null {
+        fresh = new(Loadout_Data);
+    }
+    player.loadout = fresh;
+    loadout_validate(player);
+}
+
+loadout_save :: proc(player: Player) {
+    if player.loadout == null return;
+    player.loadout.version = LOADOUT_DATA_VERSION;
+    if !Game.is_server() return;
+    Save.set_json(player, LOADOUT_SAVE_KEY, ref player.loadout);
+}
+
+// Explicit serialize/deserialize. Useful for transferring loadouts between
+// systems (e.g. handing the picked roles to the game module).
+loadout_serialize :: proc(player: Player) -> string {
+    if player.loadout == null return "";
+    player.loadout.version = LOADOUT_DATA_VERSION;
+    return JSON.serialize(ref player.loadout);
+}
+
+loadout_deserialize :: proc(player: Player, json: string) -> bool {
+    fresh: Loadout_Data;
+    if !JSON.try_deserialize(json, ref fresh) return false;
+    if fresh == null fresh = new(Loadout_Data);
+    player.loadout = fresh;
+    loadout_validate(player);
+    loadout_save(player);
+    return true;
+}
+
+// Ensure each team has at least loadout_min_slots(tab) unlocked roles equipped.
+// Also strips roles that became invalid (locked/unknown) since last save.
+loadout_validate :: proc(player: Player) {
+    if player.loadout == null {
+        player.loadout = new(Loadout_Data);
+    }
+
+    _loadout_strip_invalid(player, LOADOUT_TAB_TRAITOR,   ref player.loadout.traitors);
+    _loadout_strip_invalid(player, LOADOUT_TAB_CIVILIAN,  ref player.loadout.civilians);
+    _loadout_strip_invalid(player, LOADOUT_TAB_ANARCHIST, ref player.loadout.anarchists);
+
+    for tab: 0..LOADOUT_NUM_TABS - 1 {
+        team_roles: [..]int;
+        loadout_get_team_roles(tab, ref team_roles);
+
+        while loadout_equipped_count(player, tab) < loadout_min_slots(tab) {
+            added := false;
+            for ri: 0..team_roles.count - 1 {
+                role_idx := team_roles[ri];
+                if rg_is_role_locked(player, role_idx)           continue;
+                if loadout_is_equipped(player, tab, role_idx)    continue;
+
+                switch tab {
+                    case LOADOUT_TAB_TRAITOR:   append(ref player.loadout.traitors,   role_idx);
+                    case LOADOUT_TAB_CIVILIAN:  append(ref player.loadout.civilians,  role_idx);
+                    case LOADOUT_TAB_ANARCHIST: append(ref player.loadout.anarchists, role_idx);
+                }
+                added = true;
+                break;
+            }
+            // No unlocked role available for this team - leave as-is rather than loop forever.
+            if !added break;
+        }
+    }
+}
+
+_loadout_strip_invalid :: proc(player: Player, tab: int, arr: ref [..]int) {
+    // Strip only roles that are *structurally* invalid (don't belong to this
+    // team, or duplicates). Don't strip on lock state or max-slot cap: those
+    // are runtime gates (UI, role assignment) and `Purchasing.owns_product`
+    // / extra-slot ownership may not be synced yet at ao_start, which would
+    // otherwise wipe the user's saved picks.
+    valid: [..]int;
+    team_roles: [..]int;
+    loadout_get_team_roles(tab, ref team_roles);
+
+    for i: 0..arr.count - 1 {
+        role_idx := arr[i];
+
+        // Make sure the role actually belongs to this team
+        belongs := false;
+        for ri: 0..team_roles.count - 1 {
+            if team_roles[ri] == role_idx { belongs = true; break; }
+        }
+        if !belongs continue;
+
+        // Deduplicate
+        already := false;
+        for vi: 0..valid.count - 1 {
+            if valid[vi] == role_idx { already = true; break; }
+        }
+        if already continue;
+
+        append(ref valid, role_idx);
+    }
+
+    clear(ref arr);
+    for i: 0..valid.count - 1 {
+        append(ref arr, valid[i]);
+    }
+}
+
+// ---- Collection counts (for header text) ----
+
+loadout_total_roles :: proc() -> int {
+    total := 0;
+    for tab: 0..LOADOUT_NUM_TABS - 1 {
+        team_roles: [..]int;
+        loadout_get_team_roles(tab, ref team_roles);
+        total += team_roles.count;
+    }
+    return total;
+}
+
+loadout_total_unlocked_roles :: proc(player: Player) -> int {
+    total := 0;
+    for tab: 0..LOADOUT_NUM_TABS - 1 {
+        team_roles: [..]int;
+        loadout_get_team_roles(tab, ref team_roles);
+        for i: 0..team_roles.count - 1 {
+            if !rg_is_role_locked(player, team_roles[i]) total += 1;
+        }
+    }
+    return total;
+}
+
+// ---- Drawing: open button (HUD, matches guide button style) ----
+
+draw_loadout_open_button :: proc(player: Player) {
+    UI.push_id("lo_open_btn");
+    defer UI.pop_id();
+
+    BTN_HALF :: 60.0;
+    BTN_GAP  :: 24.0;
+
+    safe := UI.get_safe_screen_rect();
+    guide_center   := safe.right_center_rect().offset(-(BTN_HALF + 16.0), 0);
+    loadout_center := guide_center.offset(0, 2.0 * BTN_HALF + BTN_GAP);
+    btn_rect       := loadout_center.grow(BTN_HALF);
+
+    bs := UI.default_button_settings();
+    bs.sprite        = get_asset(Texture_Asset, "$AO/ui/kit/Icons/backpacks/backpack_open_med.png");
+    bs.press_scaling = 0.35;
+    bs.color         = v4.{1, 1, 1, 1};
+    bs.hovered_color = v4.{1, 1, 1, 1};
+    bs.pressed_color = v4.{0.6, 0.6, 0.6, 1};
+
+    if UI.button(btn_rect, bs, UI.default_text_settings(), "").clicked {
+        player.loadout_open = !player.loadout_open;
+    }
+
+    label_ts := UI.default_text_settings();
+    label_ts.size              = 28;
+    label_ts.color             = v4.{1, 1, 1, 0.9};
+    label_ts.halign            = .CENTER;
+    label_ts.valign            = .TOP;
+    label_ts.do_outline        = true;
+    label_ts.outline_thickness = 4;
+    label_ts.outline_color     = v4.{0, 0, 0, 1};
+    label_rect := btn_rect.bottom_rect().offset(0, -10).grow_unscaled(18, 70, 0, 70);
+    UI.text(label_rect, label_ts, "Loadout");
+}
+
+// ---- Drawing: UIK modal ----
+
+draw_loadout :: proc(player: Player) {
+    if !player.loadout_open return;
+    // loadout is server-loaded then auto-synced to the client. If sync hasn't
+    // arrived yet, skip the frame rather than allocating a blank locally
+    // (which would race-overwrite the server's data).
+    if player.loadout == null return;
+
+    // Full-screen dim behind the modal (covers HUD too)
+    UI.push_layer(999);
+    UI.quad(UI.get_screen_rect(), core_globals.white_sprite, v4.{0, 0, 0, 0.92});
+    UI.pop_layer();
+
+    UIK.begin(UIK.modal(UIK.rect_window_large(), 1000, v4.{0, 0, 0, 0}));
+
+    shell := UIK.panel_modal(.BLACK);
+    shell.padding = v4.{12, 14, 12, 14};
+    shell.gap = 8;
+    UIK.panel_begin(shell);
+
+    exit_handle := UIK.title_area(UIK.title_area_desc("LOADOUT"));
+
+    // ---- Header row: tabs + collection count ----
+    tab_handles: [..]UIK.Interact_Handle;
+
+    header := UIK.layout_row();
+    header.width        = UIK.flex(1);
+    header.height       = UIK.fit();
+    header.gap          = 8;
+    header.cross_align  = .CENTER;
+    header.show_background = false;
+    UIK.panel_begin(header);
+
+    for t: 0..LOADOUT_NUM_TABS - 1 {
+        is_active := player.loadout_tab == t;
+
+        bg: UIK.Panel_Background_Kind = .BUTTON_BASIC_GREY;
+        if is_active bg = loadout_tab_active_bg(t);
+
+        btn_desc := UIK.widget_desc_button_default(bg);
+        btn_desc.panel.height = UIK.pixels(64);
+        btn_desc.panel.padding = v4.{12, 22, 12, 22};
+        UIK.text_set_halign(&btn_desc.label_text, .CENTER);
+        UIK.text_set_valign(&btn_desc.label_text, .CENTER);
+        UIK.text_set_word_wrap(&btn_desc.label_text, false);
+
+        h := UIK.button(format_string("lo_tab_%", {t}), loadout_team_label(t), btn_desc);
+        append(ref tab_handles, h);
+    }
+
+    UIK.spacer(UIK.flex(1), UIK.pixels(1));
+
+    un  := loadout_total_unlocked_roles(player);
+    tot := loadout_total_roles();
+    coll_ts := UIK.text_body();
+    UIK.text_set_color(&coll_ts, v4.{0.85, 0.85, 0.85, 1});
+    UIK.text(format_string("Collection (%0/%)", {un, tot}), coll_ts);
+
+    UIK.panel_end(); // header
+
+    // ---- Body row: left sidebar + right grid ----
+    card_handles: [..]UIK.Interact_Handle;
+    card_role_ids: [..]int;
+
+    body := UIK.layout_row();
+    body.width  = UIK.flex(1);
+    body.height = UIK.flex(1);
+    body.gap    = 12;
+    body.show_background = false;
+    UIK.panel_begin(body);
+
+    // Left sidebar
+    left := UIK.panel_interior(.INSET);
+    left.width   = UIK.pixels(440);
+    left.height  = UIK.flex(1);
+    left.padding = v4.{10, 12, 10, 12};
+    left.gap     = 6;
+    UIK.panel_begin(left);
+    extra_unlock_present: bool;
+    extra_unlock_handle:  UIK.Interact_Handle;
+    loadout_draw_equipped_list(player, ref extra_unlock_present, ref extra_unlock_handle);
+    UIK.panel_end();
+
+    // Right grid
+    right := UIK.panel_interior(.INSET);
+    right.width   = UIK.flex(1);
+    right.height  = UIK.flex(1);
+    right.padding = v4.{12, 12, 12, 12};
+    UIK.panel_begin(right);
+    loadout_draw_collection(player, ref card_handles, ref card_role_ids);
+    UIK.panel_end();
+
+    UIK.panel_end(); // body
+    UIK.panel_end(); // shell
+    UIK.end();
+
+    // ---- Resolve handles ----
+    if UIK.clicked(exit_handle) {
+        player.loadout_open = false;
+    }
+    for t: 0..tab_handles.count - 1 {
+        if UIK.clicked(tab_handles[t]) {
+            player.loadout_tab = t;
+        }
+    }
+    for i: 0..card_handles.count - 1 {
+        if UIK.clicked(card_handles[i]) {
+            loadout_toggle(player, player.loadout_tab, card_role_ids[i]);
+        }
+    }
+    if extra_unlock_present && UIK.clicked(extra_unlock_handle) {
+        Purchasing.prompt_purchase(player, loadout_extra_product_id(player.loadout_tab));
+    }
+}
+
+// ---- Left sidebar: equipped list ----
+
+loadout_draw_equipped_list :: proc(player: Player, unlock_present: ref bool, unlock_handle: ref UIK.Interact_Handle) {
+    tab := player.loadout_tab;
+
+    // Header line: "Equipped Roles   X/Y"
+    hdr := UIK.layout_row();
+    hdr.width   = UIK.flex(1);
+    hdr.height  = UIK.fit();
+    hdr.cross_align = .CENTER;
+    hdr.show_background = false;
+    UIK.panel_begin(hdr);
+
+    title_ts := UIK.text_body();
+    UIK.text_set_color(&title_ts, v4.{1, 1, 1, 1});
+    UIK.text_set_halign(&title_ts, .LEFT);
+    UIK.text("Equipped Roles", title_ts);
+
+    UIK.spacer(UIK.flex(1), UIK.pixels(1));
+
+    count := loadout_equipped_count(player, tab);
+    count_ts := UIK.text_body();
+    UIK.text_set_color(&count_ts, v4.{0.7, 0.7, 0.7, 1});
+    UIK.text(format_string("%0/%", {count, loadout_max_slots(player, tab)}), count_ts);
+
+    UIK.panel_end();
+
+    UIK.spacer(UIK.pixels(1), UIK.pixels(4));
+
+    // Scrollable slot rows
+    max_slots := loadout_max_slots(player, tab);
+    min_slots := loadout_min_slots(tab);
+    extra_unlocked := loadout_extra_unlocked(player, tab);
+
+    list := UIK.layout_column();
+    list.width  = UIK.flex(1);
+    list.height = UIK.flex(1);
+    list.gap    = 6;
+    list.show_background = false;
+    UIK.list_begin("lo_equipped_list", list);
+
+    for slot: 0..max_slots - 1 {
+        slot_row := UIK.layout_row();
+        slot_row.width       = UIK.flex(1);
+        slot_row.height      = UIK.pixels(72);
+        slot_row.gap         = 10;
+        slot_row.padding     = v4.{8, 10, 8, 10};
+        slot_row.cross_align = .CENTER;
+
+        role_idx := loadout_equipped_at(player, tab, slot);
+        if role_idx >= 0 {
+            slot_row.background      = .BUTTON_BASIC_BLACK;
+            slot_row.show_background = true;
+            UIK.panel_begin(slot_row);
+            loadout_draw_slot_filled(player, role_idx);
+            UIK.panel_end();
+        } else {
+            slot_row.background      = .INTERIOR_INSET;
+            slot_row.show_background = true;
+            UIK.panel_begin(slot_row);
+            loadout_draw_slot_empty();
+            UIK.panel_end();
+        }
+    }
+
+    // Extra unlockable slot (priced in sparks)
+    if !extra_unlocked {
+        unlock_row := UIK.layout_row();
+        unlock_row.width       = UIK.flex(1);
+        unlock_row.height      = UIK.pixels(72);
+        unlock_row.gap         = 10;
+        unlock_row.padding     = v4.{8, 10, 8, 10};
+        unlock_row.cross_align = .CENTER;
+        unlock_row.background      = .BUTTON_BASIC_BROWN;
+        unlock_row.show_background = true;
+        h := UIK.panel_begin_interactive("lo_extra_unlock", unlock_row);
+        unlock_present = true;
+        unlock_handle  = h;
+
+        // Sparks icon
+        sparks_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/sparks/spark_small.png");
+        spark_box := UIK.layout_column();
+        spark_box.width  = UIK.pixels(52);
+        spark_box.height = UIK.pixels(52);
+        spark_box.show_background = false;
+        UIK.panel_begin(spark_box);
+        if sparks_tex != null {
+            UIK.image_fitted(sparks_tex, UIK.image_desc(.CONTAIN), v4.{1.0, 0.9, 0.3, 1});
+        }
+        UIK.panel_end();
+
+        info := UIK.layout_column();
+        info.width  = UIK.flex(1);
+        info.height = UIK.flex(1);
+        info.main_align = .CENTER;
+        info.gap = 2;
+        info.show_background = false;
+        UIK.panel_begin(info);
+
+        unlock_ts := UIK.text_body();
+        UIK.text_set_color(&unlock_ts, v4.{1, 1, 1, 1});
+        UIK.text_set_halign(&unlock_ts, .LEFT);
+        UIK.text("Unlock Extra Slot", unlock_ts);
+
+        price_ts := UIK.text_body();
+        UIK.text_set_color(&price_ts, v4.{1.0, 0.9, 0.4, 1});
+        UIK.text_set_halign(&price_ts, .LEFT);
+        UIK.text_set_size_mult(&price_ts, 0.85);
+        UIK.text(format_string("% Sparks", {LOADOUT_EXTRA_SLOT_PRICE}), price_ts);
+
+        UIK.panel_end(); // info
+
+        UIK.panel_end(); // unlock_row
+    }
+
+    UIK.list_end();
+
+    // Footer: minimum requirement
+    UIK.spacer(UIK.pixels(1), UIK.pixels(6));
+
+    footer := UIK.layout_row();
+    footer.width  = UIK.flex(1);
+    footer.height = UIK.fit();
+    footer.cross_align = .CENTER;
+    footer.show_background = false;
+    UIK.panel_begin(footer);
+
+    min_ts := UIK.text_body();
+    cur_count := loadout_equipped_count(player, tab);
+    if cur_count < min_slots {
+        UIK.text_set_color(&min_ts, v4.{1.0, 0.45, 0.35, 1});
+    } else {
+        UIK.text_set_color(&min_ts, v4.{0.65, 0.65, 0.65, 1});
+    }
+    UIK.text_set_halign(&min_ts, .LEFT);
+    UIK.text_set_word_wrap(&min_ts, false);
+    UIK.text(format_string("Minimum: %0", {min_slots}), min_ts);
+
+    UIK.panel_end();
+}
+
+loadout_draw_slot_filled :: proc(player: Player, role_idx: int) {
+    // Role icon
+    icon_tex := get_asset(Texture_Asset, loadout_get_role_small_icon(role_idx));
+    icon_box := UIK.layout_column();
+    icon_box.width  = UIK.pixels(52);
+    icon_box.height = UIK.pixels(52);
+    icon_box.show_background = false;
+    UIK.panel_begin(icon_box);
+    if icon_tex != null {
+        UIK.image_fitted(icon_tex, UIK.image_desc(.CONTAIN));
+    }
+    UIK.panel_end();
+
+    // Small icon + name + stars
+    info := UIK.layout_column();
+    info.width  = UIK.flex(1);
+    info.height = UIK.flex(1);
+    info.main_align = .CENTER;
+    info.gap = 4;
+    info.show_background = false;
+    UIK.panel_begin(info);
+
+    name_ts := UIK.text_body();
+    UIK.text_set_color(&name_ts, v4.{1, 1, 1, 1});
+    UIK.text_set_halign(&name_ts, .LEFT);
+    UIK.text(loadout_get_role_name(role_idx), name_ts);
+
+    loadout_draw_stars_row(loadout_get_role_difficulty_stars(role_idx), 3, 18.0, false);
+
+    UIK.panel_end();
+}
+
+loadout_draw_slot_empty :: proc() {
+    ts := UIK.text_body();
+    UIK.text_set_color(&ts, v4.{0.55, 0.55, 0.55, 1});
+    UIK.text_set_halign(&ts, .CENTER);
+    UIK.text("Empty Slot", ts);
+}
+
+loadout_draw_slot_locked :: proc() {
+    lock_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_1/lock_closed.png");
+    lock_box := UIK.layout_column();
+    lock_box.width  = UIK.flex(1);
+    lock_box.height = UIK.flex(1);
+    lock_box.main_align  = .CENTER;
+    lock_box.cross_align = .CENTER;
+    lock_box.show_background = false;
+    UIK.panel_begin(lock_box);
+    if lock_tex != null {
+        inner := UIK.layout_column();
+        inner.width  = UIK.pixels(28);
+        inner.height = UIK.pixels(28);
+        inner.show_background = false;
+        UIK.panel_begin(inner);
+        UIK.image_fitted(lock_tex, UIK.image_desc(.CONTAIN), v4.{0.7, 0.7, 0.7, 1});
+        UIK.panel_end();
+    }
+    UIK.panel_end();
+}
+
+// ---- Right grid: collection ----
+
+LOADOUT_GRID_COLS :: 3;
+LOADOUT_CARD_H    :: 200.0;
+LOADOUT_CARD_GAP  :: 12.0;
+
+loadout_draw_collection :: proc(player: Player, handles: ref [..]UIK.Interact_Handle, role_ids: ref [..]int) {
+    team_roles: [..]int;
+    loadout_get_team_roles(player.loadout_tab, ref team_roles);
+
+    list := UIK.layout_column();
+    list.width  = UIK.flex(1);
+    list.height = UIK.flex(1);
+    list.gap    = LOADOUT_CARD_GAP;
+    list.show_background = false;
+    UIK.list_begin("lo_collection", list);
+
+    i := 0;
+    while i < team_roles.count {
+        row := UIK.layout_row();
+        row.width  = UIK.flex(1);
+        row.height = UIK.pixels(LOADOUT_CARD_H);
+        row.gap    = LOADOUT_CARD_GAP;
+        row.show_background = false;
+        UIK.panel_begin(row);
+
+        for c: 0..LOADOUT_GRID_COLS - 1 {
+            slot_idx := i + c;
+            if slot_idx < team_roles.count {
+                loadout_draw_collection_card(player, team_roles[slot_idx], ref handles, ref role_ids);
+            } else {
+                // Empty trailing cell so the row stays aligned on the last partial row
+                pad := UIK.layout_column();
+                pad.width  = UIK.flex(1);
+                pad.height = UIK.flex(1);
+                pad.show_background = false;
+                UIK.panel_begin(pad);
+                UIK.panel_end();
+            }
+        }
+
+        UIK.panel_end(); // row
+        i += LOADOUT_GRID_COLS;
+    }
+
+    UIK.list_end();
+}
+
+loadout_draw_collection_card :: proc(player: Player, role_idx: int, handles: ref [..]UIK.Interact_Handle, role_ids: ref [..]int) {
+    is_locked   := rg_is_role_locked(player, role_idx);
+    is_equipped := loadout_is_equipped(player, player.loadout_tab, role_idx);
+
+    dim_alpha: float = 1.0;
+    if is_equipped dim_alpha = 0.22;
+    if is_locked   dim_alpha = 0.30;
+
+    cell := UIK.layout_column();
+    cell.background      = .BUTTON_BASIC_BLACK;
+    cell.show_background = true;
+    cell.padding         = v4.{10, 10, 10, 10};
+    cell.gap             = 6;
+    cell.cross_align     = .CENTER;
+    cell.width           = UIK.flex(1);
+    cell.height          = UIK.flex(1);
+
+    h := UIK.panel_begin_interactive(format_string("lo_card_%", {role_idx}), cell, is_locked);
+    append(ref handles,  h);
+    append(ref role_ids, role_idx);
+
+    // Icon
+    icon_box := UIK.layout_column();
+    icon_box.width  = UIK.flex(1);
+    icon_box.height = UIK.flex(1);
+    icon_box.show_background = false;
+    UIK.panel_begin(icon_box);
+    icon_tex := get_asset(Texture_Asset, loadout_get_role_detail_icon(role_idx));
+    if icon_tex != null {
+        tint := v4.{dim_alpha, dim_alpha, dim_alpha, 1};
+        UIK.image_fitted(icon_tex, UIK.image_desc(.CONTAIN), tint);
+    }
+    UIK.panel_end();
+
+    // Stars
+    loadout_draw_stars_row(loadout_get_role_difficulty_stars(role_idx), 3, 24.0, true);
+
+    // Overlays
+    if is_equipped {
+        UIK.overlay_begin(.CENTER, v2.{0, 0});
+        banner := UIK.layout_column();
+        banner.background      = .MODAL_TRANSP_BLACK;
+        banner.show_background = true;
+        banner.padding         = v4.{8, 18, 8, 18};
+        banner.width           = UIK.fit();
+        banner.height          = UIK.fit();
+        banner.main_align      = .CENTER;
+        banner.cross_align     = .CENTER;
+        UIK.panel_begin(banner);
+        eq_ts := UIK.text_body();
+        UIK.text_set_color(&eq_ts, v4.{1, 1, 1, 1});
+        UIK.text_set_halign(&eq_ts, .CENTER);
+        UIK.text_set_valign(&eq_ts, .CENTER);
+        UIK.text("Equipped", eq_ts);
+        UIK.panel_end();
+        UIK.overlay_end();
+    }
+
+    if is_locked {
+        UIK.overlay_begin(.CENTER, v2.{0, 0});
+        lock_box := UIK.layout_column();
+        lock_box.width  = UIK.pixels(104);
+        lock_box.height = UIK.pixels(104);
+        lock_box.background = .MODAL_TRANSP_BLACK;
+        lock_box.show_background = true;
+        lock_box.padding = v4.{16, 16, 16, 16};
+        lock_box.main_align  = .CENTER;
+        lock_box.cross_align = .CENTER;
+        UIK.panel_begin(lock_box);
+        lock_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_1/lock_closed.png");
+        if lock_tex != null {
+            UIK.image_fitted(lock_tex, UIK.image_desc(.CONTAIN), v4.{1, 0.85, 0.3, 1});
+        }
+        UIK.panel_end();
+        UIK.overlay_end();
+    }
+
+    UIK.panel_end(); // cell
+}
+
+// ---- Shared: horizontal stars row ----
+
+loadout_draw_stars_row :: proc(filled: int, total: int, px: float, centered: bool) {
+    star_gold  := get_asset(Texture_Asset, "ui/star_gold 2.png");
+    star_empty := get_asset(Texture_Asset, "ui/star_empty2 2.png");
+
+    row := UIK.layout_row();
+    row.width  = UIK.flex(1);
+    row.height = UIK.pixels(px);
+    row.gap    = 2;
+    row.show_background = false;
+    row.main_align = .START;
+    if centered row.main_align = .CENTER;
+    UIK.panel_begin(row);
+
+    for si: 0..total - 1 {
+        tex := star_empty;
+        if si < filled tex = star_gold;
+
+        slot := UIK.layout_column();
+        slot.width  = UIK.pixels(px);
+        slot.height = UIK.pixels(px);
+        slot.show_background = false;
+        UIK.panel_begin(slot);
+        if tex != null {
+            UIK.image_fitted(tex, UIK.image_desc(.CONTAIN));
+        }
+        UIK.panel_end();
+    }
+
+    UIK.panel_end();
+}
