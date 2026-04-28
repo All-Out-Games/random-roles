@@ -266,6 +266,45 @@ loadout_is_equipped :: proc(player: Player, tab: int, role_idx: int) -> bool {
     return false;
 }
 
+loadout_team_for_role :: proc(role_idx: int) -> int {
+    for tab: 0..LOADOUT_NUM_TABS - 1 {
+        team_roles: [..]int;
+        loadout_get_team_roles(tab, ref team_roles);
+        for i: 0..team_roles.count - 1 {
+            if team_roles[i] == role_idx return tab;
+        }
+    }
+    return -1;
+}
+
+// Auto-equip a freshly-unlocked role. Bails (returns false) if the team is at
+// max capacity, the role is unknown, or loadout isn't ready. Caller is
+// responsible for only invoking this for roles the player actually owns —
+// `rg_is_role_locked` is intentionally not checked because purchase ownership
+// state may not be observable yet at the moment the purchase handler fires.
+loadout_try_auto_equip :: proc(player: Player, role_idx: int) -> bool {
+    if !player.is_local_or_server() return false;
+    if player.loadout == null return false;
+
+    id := loadout_role_id_for_idx(role_idx);
+    if id == "" return false;
+
+    tab := loadout_team_for_role(role_idx);
+    if tab < 0 return false;
+
+    if loadout_is_equipped(player, tab, role_idx) return true;
+    if loadout_equipped_count(player, tab) >= loadout_max_slots(player, tab) return false;
+
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   append(ref player.loadout.traitors,   id);
+        case LOADOUT_TAB_CIVILIAN:  append(ref player.loadout.civilians,  id);
+        case LOADOUT_TAB_ANARCHIST: append(ref player.loadout.anarchists, id);
+    }
+
+    loadout_save(player);
+    return true;
+}
+
 // Toggle equip state, enforcing min/max. No-op if blocked by constraints or role is locked.
 // Runs on both client (prediction) and server (authoritative); Save is gated server-only.
 loadout_toggle :: proc(player: Player, tab: int, role_idx: int) {
@@ -347,7 +386,11 @@ loadout_deserialize :: proc(player: Player, json: string) -> bool {
 }
 
 // Ensure each team has at least loadout_min_slots(tab) unlocked roles equipped.
+// On a fresh save (all tabs empty), default to every unlocked role for the team
+// so new players start with all free roles enabled.
 _loadout_validate_data :: proc(player: Player, data: Loadout_Data) {
+    is_fresh := data.traitors.count == 0 && data.civilians.count == 0 && data.anarchists.count == 0;
+
     _loadout_strip_invalid_data(LOADOUT_TAB_TRAITOR,   ref data.traitors);
     _loadout_strip_invalid_data(LOADOUT_TAB_CIVILIAN,  ref data.civilians);
     _loadout_strip_invalid_data(LOADOUT_TAB_ANARCHIST, ref data.anarchists);
@@ -356,7 +399,16 @@ _loadout_validate_data :: proc(player: Player, data: Loadout_Data) {
         team_roles: [..]int;
         loadout_get_team_roles(tab, ref team_roles);
 
-        while _loadout_data_count(data, tab) < loadout_min_slots(tab) {
+        target := loadout_min_slots(tab);
+        if is_fresh {
+            // Fill up to base max; the inner loop skips locked (paid) roles, so
+            // the result is "every free role for this team" (capped by team size).
+            cap := loadout_max_slots_base(tab);
+            if cap > team_roles.count cap = team_roles.count;
+            target = cap;
+        }
+
+        while _loadout_data_count(data, tab) < target {
             added := false;
             for ri: 0..team_roles.count - 1 {
                 role_idx := team_roles[ri];

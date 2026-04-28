@@ -19,16 +19,25 @@ ao_purchase_handler :: proc(player: Player, id: string) -> bool {
         stamp_product_purchase(player, GGG_PRODUCT_ID, "purchase");
         player.ggg_bought = true;
         Notifier.notify(player, "Goo Goo Ga Ga unlocked!");
+        loadout_open_after_purchase(player, 13);
         return true;
     }
     if id == MIMICER_PRODUCT_ID {
         stamp_product_purchase(player, MIMICER_PRODUCT_ID, "purchase");
         player.mimicer_bought = true;
         Notifier.notify(player, "Mimicer unlocked!");
+        loadout_open_after_purchase(player, 14);
         return true;
     }
     if loadout_purchase_handler(player, id) return true;
     return false;
+}
+
+loadout_open_after_purchase :: proc(player: Player, role_idx: int) {
+    loadout_try_auto_equip(player, role_idx);
+    tab := loadout_team_for_role(role_idx);
+    if tab >= 0 player.loadout_tab = tab;
+    player.loadout_open = true;
 }
 
 check_owned_products :: proc(player: Player) {
