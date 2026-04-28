@@ -2,8 +2,8 @@
 // For now this is a purely visual/selection UI in the hub. Once the game side reads these
 // values at role assignment time, the min/max + save scaffolding here will already be ready.
 
-LOADOUT_SAVE_KEY :: "loadout_v1";
-LOADOUT_DATA_VERSION :: 1;
+LOADOUT_SAVE_KEY :: "loadout_v2";
+LOADOUT_DATA_VERSION :: 2;
 
 LOADOUT_EXTRA_TRAITOR_PRODUCT_ID   :: "69f0deeaf910103de110f1cb";
 LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID  :: "69f0deecf910103de110f1cc";
@@ -92,10 +92,60 @@ LOADOUT_TAB_ANARCHIST :: 2;
 LOADOUT_NUM_TABS      :: 3;
 
 Loadout_Data :: class {
-    version:    int     @ao_serialize;
-    traitors:   [..]int @ao_serialize;
-    civilians:  [..]int @ao_serialize;
-    anarchists: [..]int @ao_serialize;
+    version:    int        @ao_serialize;
+    traitors:   [..]string @ao_serialize;
+    civilians:  [..]string @ao_serialize;
+    anarchists: [..]string @ao_serialize;
+}
+
+loadout_role_id_for_idx :: proc(role_idx: int) -> string {
+    switch role_idx {
+        case 1:  return "sheriff";
+        case 2:  return "doctor";
+        case 3:  return "president";
+        case 4:  return "movie_star";
+        case 5:  return "coroner";
+        case 6:  return "portal_maker";
+        case 7:  return "prankster";
+        case 8:  return "pyromaniac";
+        case 10: return "pirate";
+        case 11: return "hitman";
+        case 12: return "werewolf";
+        case 13: return "goo_goo_gaga";
+        case 14: return "mimicer";
+        case 16: return "lily_lovebraids";
+    }
+    return "";
+}
+
+loadout_idx_for_role_id :: proc(id: string) -> int {
+    if id == "sheriff"        return 1;
+    if id == "doctor"         return 2;
+    if id == "president"      return 3;
+    if id == "movie_star"     return 4;
+    if id == "coroner"        return 5;
+    if id == "portal_maker"   return 6;
+    if id == "prankster"      return 7;
+    if id == "pyromaniac"     return 8;
+    if id == "pirate"         return 10;
+    if id == "hitman"         return 11;
+    if id == "werewolf"       return 12;
+    if id == "goo_goo_gaga"   return 13;
+    if id == "mimicer"        return 14;
+    if id == "lily_lovebraids" return 16;
+    return -1;
+}
+
+loadout_tab_array :: proc(player: Player, tab: int) -> ref [..]string {
+    if tab == LOADOUT_TAB_TRAITOR   return ref player.loadout.traitors;
+    if tab == LOADOUT_TAB_CIVILIAN  return ref player.loadout.civilians;
+    return ref player.loadout.anarchists;
+}
+
+_loadout_data_array :: proc(data: Loadout_Data, tab: int) -> ref [..]string {
+    if tab == LOADOUT_TAB_TRAITOR   return ref data.traitors;
+    if tab == LOADOUT_TAB_CIVILIAN  return ref data.civilians;
+    return ref data.anarchists;
 }
 
 // ---- Team / role metadata helpers ----
@@ -200,37 +250,18 @@ loadout_equipped_count :: proc(player: Player, tab: int) -> int {
 
 loadout_equipped_at :: proc(player: Player, tab: int, slot: int) -> int {
     if player.loadout == null return -1;
-    switch tab {
-        case LOADOUT_TAB_TRAITOR: {
-            if slot < 0 || slot >= player.loadout.traitors.count return -1;
-            return player.loadout.traitors[slot];
-        }
-        case LOADOUT_TAB_CIVILIAN: {
-            if slot < 0 || slot >= player.loadout.civilians.count return -1;
-            return player.loadout.civilians[slot];
-        }
-        case LOADOUT_TAB_ANARCHIST: {
-            if slot < 0 || slot >= player.loadout.anarchists.count return -1;
-            return player.loadout.anarchists[slot];
-        }
-    }
-    return -1;
+    arr := loadout_tab_array(player, tab);
+    if slot < 0 || slot >= arr.count return -1;
+    return loadout_idx_for_role_id(arr[slot]);
 }
 
 loadout_is_equipped :: proc(player: Player, tab: int, role_idx: int) -> bool {
     if player.loadout == null return false;
-    if tab == LOADOUT_TAB_TRAITOR {
-        for i: 0..player.loadout.traitors.count - 1 {
-            if player.loadout.traitors[i] == role_idx return true;
-        }
-    } else if tab == LOADOUT_TAB_CIVILIAN {
-        for i: 0..player.loadout.civilians.count - 1 {
-            if player.loadout.civilians[i] == role_idx return true;
-        }
-    } else if tab == LOADOUT_TAB_ANARCHIST {
-        for i: 0..player.loadout.anarchists.count - 1 {
-            if player.loadout.anarchists[i] == role_idx return true;
-        }
+    id := loadout_role_id_for_idx(role_idx);
+    if id == "" return false;
+    arr := loadout_tab_array(player, tab);
+    for i: 0..arr.count - 1 {
+        if arr[i] == id return true;
     }
     return false;
 }
@@ -242,22 +273,25 @@ loadout_toggle :: proc(player: Player, tab: int, role_idx: int) {
     if player.loadout == null return;
     if rg_is_role_locked(player, role_idx) return;
 
+    id := loadout_role_id_for_idx(role_idx);
+    if id == "" return;
+
     is_eq := loadout_is_equipped(player, tab, role_idx);
     count := loadout_equipped_count(player, tab);
 
     if is_eq {
         if count <= loadout_min_slots(tab) return;
         switch tab {
-            case LOADOUT_TAB_TRAITOR:   unordered_remove_by_value(ref player.loadout.traitors,   role_idx);
-            case LOADOUT_TAB_CIVILIAN:  unordered_remove_by_value(ref player.loadout.civilians,  role_idx);
-            case LOADOUT_TAB_ANARCHIST: unordered_remove_by_value(ref player.loadout.anarchists, role_idx);
+            case LOADOUT_TAB_TRAITOR:   unordered_remove_by_value(ref player.loadout.traitors,   id);
+            case LOADOUT_TAB_CIVILIAN:  unordered_remove_by_value(ref player.loadout.civilians,  id);
+            case LOADOUT_TAB_ANARCHIST: unordered_remove_by_value(ref player.loadout.anarchists, id);
         }
     } else {
         if count >= loadout_max_slots(player, tab) return;
         switch tab {
-            case LOADOUT_TAB_TRAITOR:   append(ref player.loadout.traitors,   role_idx);
-            case LOADOUT_TAB_CIVILIAN:  append(ref player.loadout.civilians,  role_idx);
-            case LOADOUT_TAB_ANARCHIST: append(ref player.loadout.anarchists, role_idx);
+            case LOADOUT_TAB_TRAITOR:   append(ref player.loadout.traitors,   id);
+            case LOADOUT_TAB_CIVILIAN:  append(ref player.loadout.civilians,  id);
+            case LOADOUT_TAB_ANARCHIST: append(ref player.loadout.anarchists, id);
         }
     }
 
@@ -282,8 +316,9 @@ loadout_load :: proc(player: Player) {
     if fresh == null {
         fresh = new(Loadout_Data);
     }
+
+    _loadout_validate_data(player, fresh);
     player.loadout = fresh;
-    loadout_validate(player);
 }
 
 loadout_save :: proc(player: Player) {
@@ -305,38 +340,39 @@ loadout_deserialize :: proc(player: Player, json: string) -> bool {
     fresh: Loadout_Data;
     if !JSON.try_deserialize(json, ref fresh) return false;
     if fresh == null fresh = new(Loadout_Data);
+    _loadout_validate_data(player, fresh);
     player.loadout = fresh;
-    loadout_validate(player);
     loadout_save(player);
     return true;
 }
 
 // Ensure each team has at least loadout_min_slots(tab) unlocked roles equipped.
-// Also strips roles that became invalid (locked/unknown) since last save.
-loadout_validate :: proc(player: Player) {
-    if player.loadout == null {
-        player.loadout = new(Loadout_Data);
-    }
-
-    _loadout_strip_invalid(player, LOADOUT_TAB_TRAITOR,   ref player.loadout.traitors);
-    _loadout_strip_invalid(player, LOADOUT_TAB_CIVILIAN,  ref player.loadout.civilians);
-    _loadout_strip_invalid(player, LOADOUT_TAB_ANARCHIST, ref player.loadout.anarchists);
+_loadout_validate_data :: proc(player: Player, data: Loadout_Data) {
+    _loadout_strip_invalid_data(LOADOUT_TAB_TRAITOR,   ref data.traitors);
+    _loadout_strip_invalid_data(LOADOUT_TAB_CIVILIAN,  ref data.civilians);
+    _loadout_strip_invalid_data(LOADOUT_TAB_ANARCHIST, ref data.anarchists);
 
     for tab: 0..LOADOUT_NUM_TABS - 1 {
         team_roles: [..]int;
         loadout_get_team_roles(tab, ref team_roles);
 
-        while loadout_equipped_count(player, tab) < loadout_min_slots(tab) {
+        while _loadout_data_count(data, tab) < loadout_min_slots(tab) {
             added := false;
             for ri: 0..team_roles.count - 1 {
                 role_idx := team_roles[ri];
-                if rg_is_role_locked(player, role_idx)           continue;
-                if loadout_is_equipped(player, tab, role_idx)    continue;
+                if rg_is_role_locked(player, role_idx) continue;
 
+                id := loadout_role_id_for_idx(role_idx);
+                if id == "" continue;
+
+                if _loadout_data_contains(data, tab, id) continue;
+
+                // Direct field append — see toggle comment about ref-from-helper
+                // not sharing storage with the underlying array.
                 switch tab {
-                    case LOADOUT_TAB_TRAITOR:   append(ref player.loadout.traitors,   role_idx);
-                    case LOADOUT_TAB_CIVILIAN:  append(ref player.loadout.civilians,  role_idx);
-                    case LOADOUT_TAB_ANARCHIST: append(ref player.loadout.anarchists, role_idx);
+                    case LOADOUT_TAB_TRAITOR:   append(ref data.traitors,   id);
+                    case LOADOUT_TAB_CIVILIAN:  append(ref data.civilians,  id);
+                    case LOADOUT_TAB_ANARCHIST: append(ref data.anarchists, id);
                 }
                 added = true;
                 break;
@@ -347,18 +383,39 @@ loadout_validate :: proc(player: Player) {
     }
 }
 
-_loadout_strip_invalid :: proc(player: Player, tab: int, arr: ref [..]int) {
-    // Strip only roles that are *structurally* invalid (don't belong to this
-    // team, or duplicates). Don't strip on lock state or max-slot cap: those
+_loadout_data_count :: proc(data: Loadout_Data, tab: int) -> int {
+    if tab == LOADOUT_TAB_TRAITOR   return data.traitors.count;
+    if tab == LOADOUT_TAB_CIVILIAN  return data.civilians.count;
+    return data.anarchists.count;
+}
+
+_loadout_data_contains :: proc(data: Loadout_Data, tab: int, id: string) -> bool {
+    if tab == LOADOUT_TAB_TRAITOR {
+        for i: 0..data.traitors.count - 1   if data.traitors[i] == id   return true;
+        return false;
+    }
+    if tab == LOADOUT_TAB_CIVILIAN {
+        for i: 0..data.civilians.count - 1  if data.civilians[i] == id  return true;
+        return false;
+    }
+    for i: 0..data.anarchists.count - 1     if data.anarchists[i] == id return true;
+    return false;
+}
+
+_loadout_strip_invalid_data :: proc(tab: int, arr: ref [..]string) {
+    // Strip only roles that are *structurally* invalid (unknown id, wrong
+    // team, duplicates). Don't strip on lock state or max-slot cap: those
     // are runtime gates (UI, role assignment) and `Purchasing.owns_product`
     // / extra-slot ownership may not be synced yet at ao_start, which would
     // otherwise wipe the user's saved picks.
-    valid: [..]int;
+    valid: [..]string;
     team_roles: [..]int;
     loadout_get_team_roles(tab, ref team_roles);
 
     for i: 0..arr.count - 1 {
-        role_idx := arr[i];
+        id := arr[i];
+        role_idx := loadout_idx_for_role_id(id);
+        if role_idx < 0 continue;
 
         // Make sure the role actually belongs to this team
         belongs := false;
@@ -370,11 +427,11 @@ _loadout_strip_invalid :: proc(player: Player, tab: int, arr: ref [..]int) {
         // Deduplicate
         already := false;
         for vi: 0..valid.count - 1 {
-            if valid[vi] == role_idx { already = true; break; }
+            if valid[vi] == id { already = true; break; }
         }
         if already continue;
 
-        append(ref valid, role_idx);
+        append(ref valid, id);
     }
 
     clear(ref arr);
