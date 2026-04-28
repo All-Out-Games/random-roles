@@ -3510,6 +3510,36 @@ rr_lily_end_mind_control :: proc(player: Player) {
 	rr_lily_creature_trigger(player, "control_end");
 }
 
+rr_lily_should_intercept_remote_body_kill :: proc(player: Player) -> bool {
+	if player == null return false;
+	if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
+	lm := player.entity.get_component(Lily_Module);
+	if lm == null return false;
+
+	if lm.spider_active {
+		rr_lily_end_spider(player, false);
+		if player.is_local_or_server() {
+			Notifier.notify(player, "Spider was killed!");
+		}
+		return true;
+	}
+	if lm.eye_machine_active {
+		rr_lily_end_eye_machine(player);
+		if player.is_local_or_server() {
+			Notifier.notify(player, "Eye machine was destroyed!");
+		}
+		return true;
+	}
+	if lm.mind_control_active {
+		rr_lily_end_mind_control(player);
+		if player.is_local_or_server() {
+			Notifier.notify(player, "Mind control broken!");
+		}
+		return true;
+	}
+	return false;
+}
+
 // Called when Lily is killed — break mind control
 rr_lily_on_lily_killed :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
