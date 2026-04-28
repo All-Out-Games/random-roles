@@ -221,7 +221,17 @@ rp_assign_roles_for_type :: proc(
     // Shuffle for base randomness.
     shuffle_player_list(ref type_players);
 
+    // ── Loadout cache ───────────────────────────────────────────────
+    // One Save.try_get_json per player, reused across both passes below.
+    // null entries mean "no saved loadout" → loadout_player_allows_role
+    // treats that as allow-all.
+    loadouts: [..]Loadout_Data;
+    for i: 0..count - 1 {
+        loadouts.append(loadout_load_for_player(type_players.elements[i]));
+    }
+
     // ── Boost pass ──────────────────────────────────────────────────
+    // Boost > loadout: a boost win bypasses the loadout filter entirely.
     boost_won:  [..]bool;
     boost_role: [..]Player_Role;
     for i: 0..count - 1 {
@@ -308,19 +318,23 @@ rp_assign_roles_for_type :: proc(
     }
 
     // Pass 1: assign purchase-gated roles to eligible owners only.
+    // Eligibility now also requires the player's loadout to permit the role
+    // (boost wins above already bypassed loadout). If no eligible owner
+    // exists the role is discarded and replaced with a fresh draw from
+    // ungated_master, which pass 2 then tries to place.
     for d: 0..drawn.elements.count - 1 {
         role := drawn.elements[d];
         if !rp_is_purchase_gated(role) continue; // free role, handle in pass 2
         found_owner := false;
         for i: 0..count - 1 {
             if assigned[i] continue;
-            if !rp_is_role_locked(type_players.elements[i], role) {
-                type_players.elements[i].player_role = role;
-                assigned[i] = true;
-                drawn_used[d] = true;
-                found_owner = true;
-                break;
-            }
+            if rp_is_role_locked(type_players.elements[i], role) continue;
+            if !loadout_player_allows_role(loadouts[i], role) continue;
+            type_players.elements[i].player_role = role;
+            assigned[i] = true;
+            drawn_used[d] = true;
+            found_owner = true;
+            break;
         }
         if !found_owner {
             // No eligible owner — discard and redraw a free role as replacement.
@@ -333,17 +347,57 @@ rp_assign_roles_for_type :: proc(
         }
     }
 
-    // Pass 2: assign remaining roles to remaining players.
-    draw_idx := 0;
+    // Pass 2: assign remaining drawn roles to remaining players, respecting
+    // each player's loadout allow-list. For each unused drawn role, find
+    // any unassigned player whose loadout permits it. If nobody allows it,
+    // discard and redraw from ungated_master (capped to avoid pathological
+    // loops when no combination satisfies any loadout).
+    LOADOUT_REDRAW_BUDGET :: 8;
+    redraws_left := LOADOUT_REDRAW_BUDGET;
+    d := 0;
+    while d < drawn.elements.count {
+        if drawn_used[d] { d += 1; continue; }
+        role := drawn.elements[d];
+        placed := false;
+        for i: 0..count - 1 {
+            if assigned[i] continue;
+            if rp_is_role_locked(type_players.elements[i], role) continue;
+            if !loadout_player_allows_role(loadouts[i], role) continue;
+            type_players.elements[i].player_role = role;
+            assigned[i] = true;
+            drawn_used[d] = true;
+            placed = true;
+            break;
+        }
+        if !placed {
+            drawn_used[d] = true;
+            if redraws_left > 0 {
+                replacement := draw_roles_from_bag(ref bag, ungated_master, 1, allow_duplicates);
+                if replacement.elements.count > 0 {
+                    append(ref drawn, replacement.elements[0]);
+                    drawn_used.append(false);
+                    redraws_left -= 1;
+                }
+            }
+        }
+        d += 1;
+    }
+
+    // Pass 3 (fallback): any player still unassigned (e.g. their loadout
+    // excluded every drawn role and the redraw budget ran out) gets the
+    // next leftover drawn role regardless of loadout. Better to break the
+    // loadout filter than to ship a player with Player_Role.NONE.
+    leftover_idx := 0;
     for i: 0..count - 1 {
         if assigned[i] continue;
-        while draw_idx < drawn.elements.count && drawn_used[draw_idx] {
-            draw_idx += 1;
+        while leftover_idx < drawn.elements.count && drawn_used[leftover_idx] {
+            leftover_idx += 1;
         }
-        if draw_idx < drawn.elements.count {
-            type_players.elements[i].player_role = drawn.elements[draw_idx];
-            drawn_used[draw_idx] = true;
-            draw_idx += 1;
+        if leftover_idx < drawn.elements.count {
+            type_players.elements[i].player_role = drawn.elements[leftover_idx];
+            assigned[i] = true;
+            drawn_used[leftover_idx] = true;
+            leftover_idx += 1;
         }
     }
 
