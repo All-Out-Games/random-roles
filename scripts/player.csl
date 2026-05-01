@@ -103,8 +103,10 @@ Player :: class : Player_Base {
 	lily_no_eyes_prev: bool;    // edge detection for start trigger
 	lily_no_eyes_al_at: float;  // time at which to enable AL overlay (0 = not pending)
 	lily_no_eyes_unlock_at: float; // when the eye-steal intro anim is done and movement can resume
+	lily_no_eyes_until: float;  // when temporary eye-steal blindness expires
 	lily_crawling: bool;
 	lily_crawling_prev: bool;   // edge detection for start trigger
+	lily_crawling_until: float; // when temporary leg-steal crawling expires
 	lily_crawl_speed_saved: float;
 	lily_stun_was_active: bool; // tracks whether any stun was active last frame (re-fire debuff anim on stun-end)
 	lily_reapply_debuff_anim_at: float; // scheduled time to re-fire the crawl/no-eyes anim (e.g. after a mind-control traitor_kill anim plays); 0 = none
@@ -117,11 +119,6 @@ Player :: class : Player_Base {
 	jester_win_camera_override_active: bool;
 	vote_eject_camera_override_active: bool;
 	vote_eject_camera_original_size: float;
-
-	// --- Doctor (cross-player: any player can be resurrected) ---
-	is_temporarily_resurrected: bool;
-	temporarily_resurrected_until: float;
-	was_corpse_reported_before_resurrect: bool;
 
 	// --- Mimicer (cross-player: any player can be blinded/distorted) ---
 	mimicer_blinded: bool;
@@ -248,7 +245,7 @@ Player :: class : Player_Base {
 		if lm != null && (lm.spider_active || lm.eye_machine_active) return false;
 		// Ghost tasks: dead civilians are allowed to interact (Task_Interactable.can_use does the task gating).
 		if player_state != Player_State.ALIVE {
-			return player_state == Player_State.DEAD && player_type == Player_Type.CIVILIAN && !werewolf_infected && !is_temporarily_resurrected;
+			return player_state == Player_State.DEAD && player_type == Player_Type.CIVILIAN && !werewolf_infected;
 		}
 		return true;
 	}
@@ -268,7 +265,6 @@ Player :: class : Player_Base {
             game_state == Game_State.INGAME &&
             this.player_type == Player_Type.CIVILIAN &&
 			!this.werewolf_infected &&
-			!this.is_temporarily_resurrected &&
 			(this.player_state == Player_State.ALIVE || this.player_state == Player_State.DEAD);
 
         has_task_in_progress := false;
@@ -408,12 +404,27 @@ Player :: class : Player_Base {
 		}
     }
 
-    ao_update :: proc(using this: Player, delta_time: float) {
+	ao_update :: proc(using this: Player, delta_time: float) {
 		now := get_time();
 		if this.lily_no_eyes_unlock_at > 0.0 && now >= this.lily_no_eyes_unlock_at {
 			rr_remove_freeze_reason_all(this, LILY_EYE_MACHINE_FREEZE_REASON);
 			rr_remove_movement_reason_all(this, LILY_EYE_MACHINE_FREEZE_REASON);
 			this.lily_no_eyes_unlock_at = 0.0;
+		}
+		if this.lily_no_eyes && this.lily_no_eyes_until > 0.0 && now >= this.lily_no_eyes_until {
+			this.lily_no_eyes = false;
+			this.lily_no_eyes_al_at = 0.0;
+			this.lily_no_eyes_unlock_at = 0.0;
+			this.lily_no_eyes_until = 0.0;
+			if this.is_local_or_server() {
+				Notifier.notify(this, "Your vision returned.");
+			}
+		}
+		if this.lily_crawling && this.lily_crawling_until > 0.0 && now >= this.lily_crawling_until {
+			rr_lily_restore_legs(this);
+			if this.is_local_or_server() {
+				Notifier.notify(this, "Your legs recovered.");
+			}
 		}
 
         if this.is_local_or_server() {
@@ -437,11 +448,11 @@ Player :: class : Player_Base {
 			rr_draw_pirate_treasure_guidance_if_needed(this);
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			draw_player_role_hud(this);
-			// Draw resurrection timer above any temporarily resurrected players' heads.
 			if this.is_local() {
-				rr_draw_temp_resurrect_timers();
 				// Draw fiery-room exposure countdown above the local player's head.
 				rr_pyro_draw_room_exposure_timer(this);
+				// Draw Lily eyes/legs recovery timers above affected players' heads.
+				rr_draw_lily_debuff_timers(this);
 				// Draw stun countdown timers above stunned players' heads.
 				rr_draw_stun_timers(this);
 				// Draw the "wowie you're looking at it!" autograph reveal if active.
@@ -506,7 +517,7 @@ Player :: class : Player_Base {
 		// Big Charlie trampled status update.
 		rr_bc_update_trampled(this, delta_time);
 
-		// Lily Lovebraids per-frame update (transform, strings, RLGL, tea party, dollhouse).
+		// Lily per-frame update (transform, strings, RLGL, tea party, dollhouse).
 		rr_lily_update(this, delta_time);
 
 		// Deathbraid camera — runs for ALL players so everyone sees the cinematic.
@@ -520,11 +531,16 @@ Player :: class : Player_Base {
 			is_moving := length_squared(this.agent.velocity) > 0.01;
 			sm_ref.set_bool("lily_debuff_moving", is_moving);
 
-			// Fire start triggers on rising edge only (so start anim plays once)
-			// No-eyes main layer anim only fires when NOT also crawling (legless takes priority)
-			if this.lily_no_eyes && !this.lily_no_eyes_prev && !this.lily_crawling {
-				sm_ref.set_trigger("lily_no_eyes_start");
-				// Schedule AL overlay to activate after No_Eyes_Start anim finishes
+			// Fire start triggers on rising edge only (so start anim plays once).
+			// The no-eyes overlay timer must still arm even when already crawling,
+			// otherwise the track-1 eye-hiding layer never turns on for legless victims.
+			if this.lily_no_eyes && !this.lily_no_eyes_prev {
+				// No-eyes main layer anim only fires when NOT also crawling
+				// (legless takes priority on the main layer).
+				if !this.lily_crawling {
+					sm_ref.set_trigger("lily_no_eyes_start");
+				}
+				// Schedule AL overlay to activate after the no-eyes intro timing.
 				this.lily_no_eyes_al_at = get_time() + LILY_NO_EYES_START_DURATION;
 			}
 
@@ -535,8 +551,7 @@ Player :: class : Player_Base {
 
 			// If legs healed while still eyeless, resume no-eyes anims on main layer
 			if !this.lily_crawling && this.lily_crawling_prev && this.lily_no_eyes {
-				sm_ref.set_trigger("lily_no_eyes_start");
-				this.lily_no_eyes_al_at = get_time() + LILY_NO_EYES_START_DURATION;
+				sm_ref.set_trigger("lily_no_eyes_resume");
 			}
 
 			// AL overlay: only enable after No_Eyes_Start anim has finished playing
@@ -548,6 +563,7 @@ Player :: class : Player_Base {
 			if !this.lily_no_eyes {
 				this.lily_no_eyes_al_at = 0.0;
 				this.lily_no_eyes_unlock_at = 0.0;
+				this.lily_no_eyes_until = 0.0;
 			}
 
 			this.lily_no_eyes_prev = this.lily_no_eyes;
@@ -675,7 +691,7 @@ Player :: class : Player_Base {
 			return v2.{MIMICER_SPEW_BLIND_LOS_INNER, MIMICER_SPEW_BLIND_LOS_OUTER};
 		}
 
-		// Lily eye steal: permanent blindness until Doctor heals.
+		// Lily eye steal: temporary blindness until the timer ends or Doctor heals.
 		if this.lily_no_eyes && !deathbraid_active {
 			return v2.{LILY_BLIND_LOS_INNER, LILY_BLIND_LOS_OUTER};
 		}
@@ -1141,9 +1157,6 @@ Player :: class : Player_Base {
 		}
 		// If we were dragging a body, drop it immediately.
 		rr_drag_body_force_drop_for_player(this);
-		// If this player was temporarily resurrected, clear the flag so tasks/UI don't get stuck.
-		this.is_temporarily_resurrected = false;
-		this.temporarily_resurrected_until = 0.0;
 		// Werewolf infection should never persist through death.
 		// Restore original tasks before clearing infection state.
 		rr_werewolf_clear_infected_task_override(this);
@@ -1187,56 +1200,11 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .GOO_GOO_GAGA:  return "GOO GOO GAGA";
 		case .MIMICER:       return "MIMICER";
 		case .BIG_CHARLIE:   return "BIG CHARLIE";
-		case .LILY_LOVEBRAIDS: return "LILY LOVEBRAIDS";
+		case .LILY_LOVEBRAIDS: return "LILY";
 	}
 	return "CREW";
 }
 
-
-// Draw a countdown timer above every temporarily resurrected player's head.
-// Called once per frame from the local player's ao_update.
-rr_draw_temp_resurrect_timers :: proc() {
-	if game_state != Game_State.INGAME return;
-
-	UI.push_world_draw_context();
-	defer UI.pop_draw_context();
-
-	for p: component_iterator(Player) {
-		if p == null continue;
-		if !#alive(p.entity) continue;
-		if !p.is_temporarily_resurrected continue;
-		if p.player_state != Player_State.ALIVE continue;
-		if p.temporarily_resurrected_until <= 0.0 continue;
-
-		remaining := p.temporarily_resurrected_until - get_time();
-		if remaining < 0.0 { remaining = 0.0; }
-		remaining_i := (remaining + 0.999).(int);
-		if remaining_i < 0 { remaining_i = 0; }
-
-		text_pos := p.entity.world_position + v2.{0, 1.8};
-
-		UI.push_z(text_pos.y);
-		defer UI.pop_z();
-
-		text_rect := Rect{text_pos, text_pos}.grow(0.15, 1.5, 0.15, 1.5);
-
-		ts := UI.default_text_settings();
-		ts.size = 0.30;
-		ts.halign = .CENTER;
-		ts.valign = .CENTER;
-		ts.do_outline = true;
-		ts.outline_thickness = 3;
-		ts.outline_color = v4.{0, 0, 0, 1};
-		// Pulsing red when running low.
-		if remaining < 3.0 {
-			ts.color = v4.{1.0, 0.3, 0.3, 1.0};
-		} else {
-			ts.color = v4.{0.3, 1.0, 0.5, 1.0};
-		}
-
-		UI.text(text_rect, ts, format_string("%s", .{remaining_i}));
-	}
-}
 
 // Returns the longest remaining stun time for a player, or 0 if not stunned.
 rr_get_stun_remaining :: proc(p: Player) -> float {
@@ -1354,6 +1322,78 @@ rr_draw_stun_timers :: proc(viewer: Player) {
 		text_rect := Rect{label_pos, label_pos}.grow(0.16, 0.43, 0.16, 0.43);
 		UI.text(text_rect, ts, format_string("%s", .{secs_i}));
 	}
+}
+
+rr_draw_lily_debuff_timers :: proc(viewer: Player) {
+	if game_state != Game_State.INGAME return;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+
+	now := get_time();
+
+	for p: component_iterator(Player) {
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if p.player_state != Player_State.ALIVE continue;
+
+		eyes_remaining := 0.0;
+		legs_remaining := 0.0;
+		if p.lily_no_eyes && p.lily_no_eyes_until > 0.0 {
+			eyes_remaining = p.lily_no_eyes_until - now;
+		}
+		if p.lily_crawling && p.lily_crawling_until > 0.0 {
+			legs_remaining = p.lily_crawling_until - now;
+		}
+		if eyes_remaining <= 0.0 && legs_remaining <= 0.0 continue;
+
+		// Skip players hidden in shadow / outside the viewer's LOS.
+		if viewer != null {
+			radii := viewer.get_local_light_radii();
+			dist := length(p.entity.world_position - viewer.entity.world_position);
+			if dist > radii.y continue;
+		}
+
+		pos := p.entity.world_position;
+
+		UI.push_z(pos.y);
+		defer UI.pop_z();
+
+		row_index := 0;
+		if eyes_remaining > 0.0 {
+			rr_draw_lily_debuff_timer_row(pos + v2.{0.0, 2.15}, "EYES", eyes_remaining, v4.{0.55, 0.95, 1.0, 1.0});
+			row_index += 1;
+		}
+		if legs_remaining > 0.0 {
+			rr_draw_lily_debuff_timer_row(pos + v2.{0.0, 2.15 + row_index.(float) * 0.35}, "LEGS", legs_remaining, v4.{1.0, 0.84, 0.38, 1.0});
+		}
+	}
+}
+
+rr_draw_lily_debuff_timer_row :: proc(label_pos: v2, label: string, remaining: float, color: v4) {
+	secs_i := remaining.(int);
+	frac := remaining - secs_i.(float);
+	if frac > 0.001 { secs_i += 1; }
+	if secs_i < 1 { secs_i = 1; }
+
+	bg_rect := Rect{label_pos, label_pos}.grow(0.16, 0.70, 0.16, 0.70);
+	UI.quad(bg_rect, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.60});
+
+	if remaining < 3.0 {
+		color = v4.{1.0, 0.34, 0.34, 1.0};
+	}
+
+	ts := UI.default_text_settings();
+	ts.size = 0.30;
+	ts.color = color;
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 0.05;
+	ts.outline_color = v4.{0.0, 0.0, 0.0, 1.0};
+
+	text_rect := Rect{label_pos, label_pos}.grow(0.14, 0.68, 0.14, 0.68);
+	UI.text(text_rect, ts, format_string("% %s", .{label, secs_i}));
 }
 
 draw_player_role_hud :: proc(player: Player) {
@@ -2195,7 +2235,7 @@ draw_bc_role_hud :: proc(player: Player) {
 	} // end task_list_open
 }
 
-// --- Lily Lovebraids Braid Point progress: left side ---
+// --- Lily Braid Point progress: left side ---
 draw_lily_role_hud :: proc(player: Player) {
 	if player == null return;
 	if player.player_role != Player_Role.LILY_LOVEBRAIDS return;
@@ -3208,7 +3248,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer.create_transition(bc_cocoon_success_state, idle_state, true);
 	}
 
-	// Lily Lovebraids player-rig state machine states.
+	// Lily player-rig state machine states.
 	rr_sm_setup_lily :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		// Transform to Lily (one-shot) -> back to Idle.
 		lily_transform_var := sm.create_variable("lily_transform", State_Machine_Variable.Kind.TRIGGER);
@@ -3657,9 +3697,6 @@ Task_Interactable :: class : Component {
 			if player.player_state != Player_State.ALIVE return false;
 			// Traitors should not be able to fix sabotages.
 			if player.player_type == Player_Type.TRAITOR return false;
-			// Temporarily resurrected players can move/talk, but cannot do tasks.
-			if player.is_temporarily_resurrected return false;
-
 			for i: 0..player.active_tasks.elements.count-1 {
 				task := player.active_tasks.elements[i];
 				if task.id == task_id && !task.started && !task.completed {
@@ -3677,9 +3714,6 @@ Task_Interactable :: class : Component {
 			if player.player_state != Player_State.ALIVE return false;
 			// Traitors should not be able to fix sabotages.
 			if player.player_type == Player_Type.TRAITOR return false;
-			// Temporarily resurrected players can move/talk, but cannot do tasks.
-			if player.is_temporarily_resurrected return false;
-
 			for i: 0..player.active_tasks.elements.count-1 {
 				task := player.active_tasks.elements[i];
 				if task.id == task_id && !task.started && !task.completed {
@@ -3694,10 +3728,6 @@ Task_Interactable :: class : Component {
         if !can_use_base {
             return false;
         }
-		// Temporarily resurrected players can move/talk, but cannot do tasks.
-		if player.is_temporarily_resurrected {
-			return false;
-		}
         for i: 0..player.active_tasks.elements.count-1 {
             task := player.active_tasks.elements[i];
             if task.id == task_id && !task.started && !task.completed {
@@ -3736,10 +3766,8 @@ Call_Meeting_Interactable :: class : Component {
         start_meeting(false, player);
     }
 
-    can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
+	can_use :: proc(using this: Call_Meeting_Interactable, player: Player) -> bool {
         if player.player_state != Player_State.ALIVE return false;
-		// Temporarily resurrected players should not be able to call meetings.
-		if player.is_temporarily_resurrected return false;
 		// Infected players should not be able to call meetings.
 		if player.werewolf_infected return false;
 		// Disable when any sabotage is active.
@@ -4279,16 +4307,14 @@ update_minimap_ui :: proc(player: Player) {
 			should_show_task_panel = true;
 		} else {
 			// Normal tasks/objectives.
-			if !player.is_temporarily_resurrected {
-				is_civilian_like := player.player_type == Player_Type.CIVILIAN ||
-					player.player_role == Player_Role.PRANKSTER ||
-					player.player_role == Player_Role.PYROMANIAC ||
-					player.werewolf_infected;
-				if is_civilian_like && player.active_tasks.elements.count > 0 {
-					// Dead non-civilians don't get the task panel.
-					if player.player_state == Player_State.ALIVE || player.player_type == Player_Type.CIVILIAN {
-						should_show_task_panel = true;
-					}
+			is_civilian_like := player.player_type == Player_Type.CIVILIAN ||
+				player.player_role == Player_Role.PRANKSTER ||
+				player.player_role == Player_Role.PYROMANIAC ||
+				player.werewolf_infected;
+			if is_civilian_like && player.active_tasks.elements.count > 0 {
+				// Dead non-civilians don't get the task panel.
+				if player.player_state == Player_State.ALIVE || player.player_type == Player_Type.CIVILIAN {
+					should_show_task_panel = true;
 				}
 			}
 		}

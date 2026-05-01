@@ -274,7 +274,7 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 update_tasks :: proc(player: Player) {
 	// Close any in-progress task UI when leaving gameplay (meeting/voting/etc).
 	// (Ghost civilians are allowed to keep doing tasks while dead.)
-	if game_state != Game_State.INGAME || player.is_temporarily_resurrected {
+	if game_state != Game_State.INGAME {
 		if player.is_local_or_server() {
 			for i: 0..player.active_tasks.elements.count-1 {
 				task := player.active_tasks.elements[i];
@@ -653,7 +653,7 @@ rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player
 				case .GOO_GOO_GAGA: { role_name = "GOOGOO GAGA"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/goo_goo_icon.png"); }
 				case .MIMICER:      { role_name = "MIMICER";     role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/mimicer_icon.png"); }
 				case .BIG_CHARLIE:  { role_name = "BIG CHARLIE"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/charlie_icon (1).png"); }
-				case .LILY_LOVEBRAIDS: { role_name = "LOVEBRAIDS"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/lily_icon (1).png"); }
+				case .LILY_LOVEBRAIDS: { role_name = "LILY"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/lily_icon (1).png"); }
 			}
 		}
 
@@ -855,8 +855,8 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Hair_Tree_Icon.png", "Plant Tree", "One-time. Plant your Hair Tree — your permanent base. Fulfill its requests to grow it and unlock new powers."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Hair_Tree_Icon.png", "Tree Requests", "Offer in order: Corpse, Eyes, Legs, Alive Player, Legs & Eyes, Eyeless-Legless Player. Each grows the tree and buffs you."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Braid_Trap_Icon.png", "String Trap", "1 request. Lay a trap — players who walk over it get strung and can be dragged to the tree alive."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Suction_Tube_Icon.png", "Steal Eyes", "Deploy a machine that extracts a target's eyes. Pick up the dropped eyes to offer them to the tree."});
-				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Braid_Point_Icon.png", "Steal Legs", "Send a spider to chomp a target's legs. Pick up the dropped legs to offer them to the tree."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Suction_Tube_Icon.png", "Steal Eyes", "Deploy a machine that temporarily extracts a target's eyes. Pick up the dropped eyes to offer them to the tree."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Braid_Point_Icon.png", "Steal Legs", "Send a spider to temporarily chomp a target's legs. Pick up the dropped legs to offer them to the tree."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Dollhouse_Icon.png", "Mind Control", "3 requests. Possess a player and puppet their body. Release to return."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Tea_Party_Icon.png", "Tea Party", "4 requests. Invite a strung player to tea. They pick 1 of 3 cups — caffeine, poison, or empty."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/lily/Hair_Tree_Icon.png", "Deathbraid", "6 requests. Summon a vortex that pulls in and devours every living player. Ultimate win button."});
@@ -1094,6 +1094,25 @@ rr_draw_role_help_panel :: proc(player: Player) {
 		}
 		icon_rect := header_strip.center_rect().offset(0, 51.0).grow(ICON_HALF);
 		UI.quad(icon_rect.fit_aspect(role_icon.get_aspect(), .KEEP_HEIGHT), role_icon, v4.{1, 1, 1, 1});
+		if player.player_role != Player_Role.NONE {
+			name_rect := Rect.{
+				v2.{icon_rect.min.x - 40.0, icon_rect.min.y + 6.0},
+				v2.{icon_rect.max.x + 40.0, icon_rect.min.y + 34.0}
+			};
+			name_ts := UI.default_text_settings();
+			name_ts.size = 28;
+			name_ts.color = get_type_color(player.player_type);
+			name_ts.halign = .CENTER;
+			name_ts.valign = .CENTER;
+			name_ts.do_outline = true;
+			name_ts.outline_thickness = 4;
+			name_ts.outline_color = v4.{0, 0, 0, 1};
+			name_ts.do_autofit = true;
+			name_ts.autofit_min_size = 18;
+			name_ts.autofit_max_size = 28;
+			name_ts.autofit_iters = 4;
+			UI.text(name_rect, name_ts, get_role_name(player.player_role));
+		}
 	}
 
 	// Pre-compute all 4 tab rects from left_side / right_side.
@@ -1287,10 +1306,6 @@ update_tasks_ui :: proc(player: Player) {
 			rr_cancel_all_task_attempts(player);
 		}
 	}
-	if player.is_temporarily_resurrected {
-		rr_cancel_all_task_attempts(player);
-	}
-
 	// Draw tasks UI at a low layer so it sits behind popups/modals.
 	UI.push_layer(100);
 	defer UI.pop_layer();
@@ -1307,9 +1322,6 @@ update_tasks_ui :: proc(player: Player) {
 	}
 
 	if player.player_state != Player_State.ALIVE && player.player_type != Player_Type.CIVILIAN {
-		return;
-	}
-	if player.is_temporarily_resurrected {
 		return;
 	}
 	if player.active_tasks.elements.count == 0 {

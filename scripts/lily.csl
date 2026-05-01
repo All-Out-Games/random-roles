@@ -1,7 +1,7 @@
 import "core:ao"
 
 // =============================================================================
-// Lily Lovebraids — Traitor Role (String Puppeteer)
+// Lily — Traitor Role (String Puppeteer)
 // =============================================================================
 
 rr_lily_role_enabled: bool;
@@ -98,11 +98,12 @@ LILY_EYE_MACHINE_TUBE_BOB_SPEED :: 3.0;  // bob frequency
 LILY_EYE_MACHINE_ZOOM_DURATION :: 0.8;   // camera zoom-in time (no FX)
 LILY_EYE_MACHINE_SUCTION_DURATION :: 1.0; // suction phase (shake + CA)
 LILY_EYE_MACHINE_LINGER_TIME :: 2.0;     // tube fly-up + camera return
-LILY_EYE_MACHINE_ZOOM_ATTACK :: 8.0;     // close-up camera size
+LILY_EYE_MACHINE_ZOOM_ATTACK :: 7.0;     // close-up camera size
 LILY_EYE_MACHINE_SHAKE_INTENSITY :: 0.2;  // camera shake strength
 LILY_EYE_MACHINE_SHAKE_SPEED :: 25.0;    // camera shake frequency
 LILY_BLIND_LOS_INNER :: 0.5;
 LILY_BLIND_LOS_OUTER :: 1.5;
+LILY_BLIND_DURATION :: 20.0;
 LILY_EYE_MACHINE_FREEZE_REASON :: "lily_eye_machine";
 LILY_EYES_PICKUP_RANGE :: 2.0;
 LILY_LEGS_PICKUP_RANGE :: 2.0;
@@ -115,6 +116,7 @@ LILY_SPIDER_ATTACK_RANGE :: 1.5; // range to chomp a player
 LILY_SPIDER_SPEED :: 5.0;
 LILY_SPIDER_PLAYER_RETURN_RANGE :: 2.0; // spider must get this close to player to deliver legs
 LILY_CRAWL_SPEED_MULTIPLIER :: 0.40; // 40% of normal speed
+LILY_LEGLESS_DURATION :: 20.0;
 
 // Tree Request types
 Tree_Request :: enum {
@@ -151,8 +153,8 @@ LILY_TEA_SLEEP_DURATION :: 15.0;
 LILY_TEA_SLEEP_REASON :: "lily_tea_sleep";
 
 // Mind Control
-LILY_MIND_CONTROL_COOLDOWN :: 60.0;
-LILY_MIND_CONTROL_DURATION :: 10.0;
+LILY_MIND_CONTROL_COOLDOWN :: 20.0;
+LILY_MIND_CONTROL_DURATION :: 15.0;
 LILY_MIND_CONTROL_RANGE :: 3.0;     // melee range
 
 // String Trap
@@ -552,6 +554,7 @@ rr_lily_round_start :: proc(p: Player) {
 	llm.mind_control_active = false;
 	llm.mind_control_target_id = 0;
 	llm.mind_control_picking = false;
+	llm.mind_control_unlock_cd_applied = false;
 	llm.dragging_live_player_id = 0;
 	llm.eye_machine_active = false;
 	llm.eye_machine_tube_entity = null;
@@ -603,6 +606,7 @@ rr_lily_cleanup :: proc(player: Player) {
 	player.lily_no_eyes_prev = false;
 	player.lily_no_eyes_al_at = 0.0;
 	player.lily_no_eyes_unlock_at = 0.0;
+	player.lily_no_eyes_until = 0.0;
 
 	if player.lily_deathbraid_cam_overriding {
 		rr_player_restore_default_camera(player, true);
@@ -826,6 +830,7 @@ rr_lily_on_player_death :: proc(dead_player_entity_id: u64, killer_entity_id: u6
 		dead.lily_no_eyes = false;
 		dead.lily_no_eyes_al_at = 0.0;
 		dead.lily_no_eyes_unlock_at = 0.0;
+		dead.lily_no_eyes_until = 0.0;
 	}
 
 	// Check all players for Lily — a dead player's string dissolves
@@ -906,6 +911,7 @@ rr_lily_on_doctor_heal :: proc(healed_player: Player) {
 		if healed_player.lily_no_eyes {
 			healed_player.lily_no_eyes = false;
 			healed_player.lily_no_eyes_unlock_at = 0.0;
+			healed_player.lily_no_eyes_until = 0.0;
 			rr_remove_freeze_reason_all(healed_player, LILY_EYE_MACHINE_FREEZE_REASON);
 			rr_remove_movement_reason_all(healed_player, LILY_EYE_MACHINE_FREEZE_REASON);
 			// If eyes are on the ground as pickup, destroy the pickup
@@ -2502,6 +2508,7 @@ Lily_Caffeine_Timer :: class : Component {
 			// Eyes fall off after caffeine rush — spawn pickup for Lily
 			if steal_eyes_on_end && !p.lily_no_eyes {
 				p.lily_no_eyes = true;
+				p.lily_no_eyes_until = get_time() + LILY_BLIND_DURATION;
 				lily_player := get_player_by_entity_id(lily_entity_id);
 				if lily_player != null {
 					drop_pos := p.entity.world_position + v2.{0.0, -0.3};
@@ -3508,6 +3515,15 @@ rr_lily_end_mind_control :: proc(player: Player) {
 	rr_lily_set_ability_invis(player, false);
 
 	rr_lily_creature_trigger(player, "control_end");
+
+	// Apply cooldown now that mind control has ended (fairness — full CD post-release).
+	for i: 0..player.abilities.count-1 {
+		ab := player.abilities[i];
+		if ab.type == Lily_Mind_Control_Ability {
+			ab.current_cooldown = LILY_MIND_CONTROL_COOLDOWN * lm.tree_cd_multiplier;
+			break;
+		}
+	}
 }
 
 rr_lily_should_intercept_remote_body_kill :: proc(player: Player) -> bool {
@@ -3685,12 +3701,12 @@ Lily_Deathbraid_Tentacle_Switcher :: class : Component {
 	}
 }
 
-LILY_DEATHBRAID_FREEZE_PHASE :: 1.5;    // freeze + camera zoom to mouth
-LILY_DEATHBRAID_TENTACLE_PHASE :: 2.5;  // tentacles emerge around map
-LILY_DEATHBRAID_VORTEX_PHASE :: 3.5;    // vortex spawns at center, braids appear on players
-LILY_DEATHBRAID_PULL_PHASE :: 4.5;      // staggered pull begins
-LILY_DEATHBRAID_STAGGER_DELAY :: 2.8;   // seconds between each player starting to get pulled
-LILY_DEATHBRAID_PULL_SPEED :: 0.017;    // lerp factor per frame (slow drag)
+LILY_DEATHBRAID_FREEZE_PHASE :: 1.0;    // freeze + camera zoom to mouth
+LILY_DEATHBRAID_TENTACLE_PHASE :: 1.75; // tentacles emerge around map
+LILY_DEATHBRAID_VORTEX_PHASE :: 2.5;    // vortex spawns at center, braids appear on players
+LILY_DEATHBRAID_PULL_PHASE :: 3.25;     // staggered pull begins
+LILY_DEATHBRAID_STAGGER_DELAY :: 2.0;   // seconds between each player starting to get pulled
+LILY_DEATHBRAID_PULL_SPEED :: 0.024;    // lerp factor per frame (slow drag)
 LILY_DEATHBRAID_KILL_DIST :: 0.5;        // distance from mouth to kill
 LILY_DEATHBRAID_TIMEOUT :: 60.0;        // hard cap
 LILY_DEATHBRAID_KILL_PUNCH_DURATION :: 0.5; // camera zoom-punch + shake boost after each kill
@@ -3703,7 +3719,7 @@ LILY_DEATHBRAID_MIN_VICTIM_DIST :: 8.0;   // teleport victims at least this far 
 LILY_DEATHBRAID_SHAKE_INTENSITY :: 0.15;
 LILY_DEATHBRAID_SHAKE_SPEED :: 20.0;
 LILY_DEATHBRAID_ZOOM_TARGET :: 9.0;     // camera zoom during cinematic
-LILY_DEATHBRAID_FINALE_HOLD :: 1.5;     // linger on the mouth after the last kill
+LILY_DEATHBRAID_FINALE_HOLD :: 0.4;     // linger on the mouth after the last kill
 
 rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	lm := player.entity.get_component(Lily_Module);
@@ -3960,7 +3976,7 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 
 	// Scale vortex up over time
 	if lm.deathbraid_vortex_entity != null && #alive(lm.deathbraid_vortex_entity) {
-		vortex_t := clamp((elapsed - LILY_DEATHBRAID_VORTEX_PHASE) / 3.0, 0.0, 1.0);
+		vortex_t := clamp((elapsed - LILY_DEATHBRAID_VORTEX_PHASE) / 2.0, 0.0, 1.0);
 		vortex_scale := lerp(0.1, 3.5, vortex_t);
 		lm.deathbraid_vortex_entity.set_local_scale(v2.{vortex_scale, vortex_scale});
 	}
@@ -4180,7 +4196,7 @@ rr_lily_update_deathbraid_camera :: proc(player: Player) {
 
 		shake_str := 0.0;
 		if elapsed >= LILY_DEATHBRAID_PULL_PHASE {
-			pull_t := clamp((elapsed - LILY_DEATHBRAID_PULL_PHASE) / 6.0, 0.0, 1.0);
+			pull_t := clamp((elapsed - LILY_DEATHBRAID_PULL_PHASE) / 4.0, 0.0, 1.0);
 			shake_str = pull_t * LILY_DEATHBRAID_SHAKE_INTENSITY;
 		}
 
@@ -4277,6 +4293,21 @@ rr_lily_update :: proc(player: Player, dt: float) {
 	rr_lily_update_deathbraid(player, dt);
 	rr_lily_update_spider(player, dt);
 	rr_lily_update_eye_machine(player, dt);
+
+	// Mind Control: apply initial 20s CD the first time the ability unlocks (fulfilled >= 3).
+	if !lm.mind_control_unlock_cd_applied && lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
+		tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
+		if tree_comp != null && tree_comp.fulfilled_count >= 3 {
+			for i: 0..player.abilities.count-1 {
+				ab := player.abilities[i];
+				if ab.type == Lily_Mind_Control_Ability {
+					ab.current_cooldown = LILY_MIND_CONTROL_COOLDOWN * lm.tree_cd_multiplier;
+					break;
+				}
+			}
+			lm.mind_control_unlock_cd_applied = true;
+		}
+	}
 
 	// Passives
 	rr_lily_update_passives(player, dt);
@@ -4815,6 +4846,7 @@ rr_lily_apply_crawl :: proc(victim: Player) {
 	victim.lily_crawl_speed_saved = victim.agent.movement_speed;
 	victim.agent.movement_speed = victim.lily_crawl_speed_saved * LILY_CRAWL_SPEED_MULTIPLIER;
 	victim.lily_crawling = true;
+	victim.lily_crawling_until = get_time() + LILY_LEGLESS_DURATION;
 }
 
 // Re-fire debuff-animation triggers after a disruption (trap root, tea party, caffeine,
@@ -4847,6 +4879,7 @@ rr_lily_restore_legs :: proc(victim: Player) {
 		victim.agent.movement_speed = victim.baseline_movement_speed;
 	}
 	victim.lily_crawling = false;
+	victim.lily_crawling_until = 0.0;
 	victim.lily_crawl_speed_saved = 0.0;
 }
 
@@ -5669,6 +5702,7 @@ rr_lily_eye_machine_finish_attack :: proc(player: Player) {
 		// Blind the victim
 		victim.lily_no_eyes = true;
 		victim.lily_no_eyes_unlock_at = get_time() + LILY_NO_EYES_START_DURATION;
+		victim.lily_no_eyes_until = get_time() + LILY_BLIND_DURATION;
 
 		// Keep the victim locked until the No_Eyes_Start intro animation is done.
 
@@ -6177,13 +6211,7 @@ Lily_Mind_Control_Ability :: class : Ability_Base {
 				lm.mind_control_picking = true;
 			}
 		}
-
-		// Apply cooldown once mind control actually starts (from picker)
-		lm := player.entity.get_component(Lily_Module);
-		if lm != null && lm.mind_control_active && current_cooldown <= 0.0 {
-			cd_mult := lm.tree_cd_multiplier;
-			current_cooldown = LILY_MIND_CONTROL_COOLDOWN * cd_mult;
-		}
+		// Cooldown is applied in rr_lily_end_mind_control (post-release) for fairness.
 	}
 
 	on_draw_button :: method(rect: Rect) {

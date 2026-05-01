@@ -448,7 +448,7 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .GOO_GOO_GAGA:  return "goo_goo_gaga";
 		case .MIMICER:       return "mimicer";
 		case .BIG_CHARLIE:   return "big_charlie";
-		case .LILY_LOVEBRAIDS: return "lily_lovebraids";
+		case .LILY_LOVEBRAIDS: return "lily";
 		case .NONE:          return "none";
 	}
 	return "none";
@@ -483,7 +483,7 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	if name == "ggg" || name == "goo_goo_gaga" || name == "googoo" return Player_Role.GOO_GOO_GAGA, true;
 	if name == "mimicer" || name == "mim"                        return Player_Role.MIMICER, true;
 	if name == "big_charlie" || name == "bigcharlie" || name == "charlie" return Player_Role.BIG_CHARLIE, true;
-	if name == "lily" || name == "lily_lovebraids" || name == "lovebraids" return Player_Role.LILY_LOVEBRAIDS, true;
+	if name == "lily" return Player_Role.LILY_LOVEBRAIDS, true;
 	return Player_Role.NONE, false;
 }
 
@@ -1049,7 +1049,6 @@ rr_try_start_power_outage :: proc(caller: Player) {
 		if p == null continue;
 		if !#alive(p.entity) continue;
 		if p.player_state != Player_State.ALIVE continue;
-		if p.is_temporarily_resurrected continue;
 		rr_power_outage_add_generator_task_to_player(p);
 	}
 
@@ -1127,7 +1126,6 @@ rr_try_start_comms_outage :: proc(caller: Player) {
 		if p == null continue;
 		if !#alive(p.entity) continue;
 		if p.player_state != Player_State.ALIVE continue;
-		if p.is_temporarily_resurrected continue;
 		rr_comms_outage_add_enable_comms_task_to_player(p);
 		// Apply voice routing immediately (server-state will sync to clients).
 		p.apply_voice_chat_masks_for_current_state();
@@ -1477,9 +1475,6 @@ on_player_go_dead :: proc(player: Player) {
 	rr_lily_on_player_death(player.entity.id, 0);
 
 	player.player_state = Player_State.DEAD;
-	// Safety: temporary resurrection should always end when dead.
-	player.is_temporarily_resurrected = false;
-	player.temporarily_resurrected_until = 0.0;
 
 	// Ghost QoL: apply a movement speed boost while spectating.
 	if player.baseline_movement_speed_saved {
@@ -1511,15 +1506,13 @@ on_player_go_passive :: proc(player: Player) {
 	// runs when a new round begins).
 	player.lily_no_eyes = false;
 	player.lily_no_eyes_unlock_at = 0.0;
+	player.lily_no_eyes_until = 0.0;
 	if player.lily_crawling {
 		rr_lily_restore_legs(player);
 	}
 
 	player.revive();
 	player.player_state = Player_State.PASSIVE;
-	// Safety: passive/lobby players should never remain in temporary-resurrect state.
-	player.is_temporarily_resurrected = false;
-	player.temporarily_resurrected_until = 0.0;
 	// Immediately restore werewolf visuals (don't defer to next frame — /restart can start
 	// a new round on the same frame, so the deferred cleanup would never run).
 	player.reset_werewolf_visuals();
@@ -1804,11 +1797,6 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 
 	// Only alive players can start meetings.
 	if caller != null && caller.player_state != Player_State.ALIVE {
-		return false;
-	}
-
-	// Temporarily resurrected players cannot start meetings.
-	if caller != null && caller.is_temporarily_resurrected {
 		return false;
 	}
 
@@ -2265,10 +2253,6 @@ rr_unstuck_player :: proc(player: Player) {
 	}
 	player.werewolf_infected_transform_trigger_at = 0.0;
 
-	// Clear temp resurrection state.
-	player.is_temporarily_resurrected = false;
-	player.temporarily_resurrected_until = 0.0;
-
 	// Clear mimicer blind/distort state.
 	player.mimicer_blinded = false;
 	player.mimicer_blinded_until = 0.0;
@@ -2656,7 +2640,6 @@ task_progress :: proc(player: Player, percent: int = 100) {
 
 ao_update_ingame :: proc(dt: float) {
 	rr_backup_maybe_auto();
-	update_temporary_resurrections();
 	update_autograph_traps();
 	update_hitman_mines();
 	update_ggg_traps();
@@ -2776,36 +2759,6 @@ ao_update_ingame :: proc(dt: float) {
 	if civilian_count > 0 && all_civilians_completed_tasks() {
 		end_game_with_victor(Player_Type.CIVILIAN);
 		return;
-	}
-}
-
-update_temporary_resurrections :: proc() {
-	now := get_time();
-	for i: 0..players.elements.count-1 {
-		p := players.elements[i];
-		if p == null continue;
-		if !#alive(p.entity) continue;
-		if !p.is_temporarily_resurrected continue;
-		if p.player_state != Player_State.ALIVE continue;
-		if p.temporarily_resurrected_until <= 0.0 continue;
-		if now < p.temporarily_resurrected_until continue;
-
-		// Time's up: return them to dead state and spawn a new corpse at their current position.
-		was_reported := p.was_corpse_reported_before_resurrect;
-		p.kill();
-
-		// Only pre-mark the new corpse as reported if the original body had already been
-		// reported / a meeting was called about it. If it was never found, the new corpse
-		// should be discoverable and reportable.
-		if was_reported {
-			for corpse: component_iterator(Corpse) {
-				if corpse == null continue;
-				if !#alive(corpse.entity) continue;
-				if corpse.owner_player_entity_id == p.entity.id {
-					corpse.has_been_reported = true;
-				}
-			}
-		}
 	}
 }
 
@@ -3570,6 +3523,7 @@ assign_players_to_types :: proc() {
 		// Lily no-eyes / crawl
 		p.lily_no_eyes = false;
 		p.lily_no_eyes_unlock_at = 0.0;
+		p.lily_no_eyes_until = 0.0;
 		if p.lily_crawling {
 			rr_lily_restore_legs(p);
 		}
@@ -3620,7 +3574,7 @@ assign_players_to_types :: proc() {
 		// Big Charlie
 		rr_bc_round_start(p);
 
-		// Lily Lovebraids
+		// Lily
 		rr_lily_round_start(p);
 
 		if p.player_role == Player_Role.PYROMANIAC {
