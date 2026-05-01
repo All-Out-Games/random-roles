@@ -1,0 +1,141 @@
+// loadout.csl
+// ────────────────────────────────────────────────────────────────────
+// Game-side reader for the per-player loadout chosen in the hub.
+//
+// Source of truth lives in the hub project (`random-roles - hub`) under
+// `scripts/hub/loadout.csl`. The hub writes a JSON blob keyed by
+// LOADOUT_SAVE_KEY into per-player Save data; we read it here and use
+// it as a filter during role assignment.
+//
+// Behavior summary (see ../LOADOUT_INTEGRATION.md):
+//   - Empty loadout / no save  → allow every role (legacy default).
+//   - Boost wins always override loadout (boost > loadout).
+//   - Roles not present in the hub's selector (BIG_CHARLIE) are
+//     treated as always-eligible.
+//   - Unknown role IDs from a forward/older hub build → skip silently.
+//
+// Loadout_Data MUST mirror the hub's class exactly — same field names,
+// types, and @ao_serialize markers — or Save.try_get_json fails to
+// deserialize.
+// ────────────────────────────────────────────────────────────────────
+
+LOADOUT_SAVE_KEY     :: "loadout_v2";
+LOADOUT_DATA_VERSION :: 2;
+
+Loadout_Data :: class {
+    version:    int        @ao_serialize;
+    traitors:   [..]string @ao_serialize;
+    civilians:  [..]string @ao_serialize;
+    anarchists: [..]string @ao_serialize;
+}
+
+// Hub-side stable role IDs → game-side enum. Anything not in this map is
+// treated as always-eligible (see loadout_is_role_managed below).
+loadout_role_id_to_player_role :: proc(id: string) -> Player_Role {
+    if id == "sheriff"         return Player_Role.SHERIFF;
+    if id == "doctor"          return Player_Role.DOCTOR;
+    if id == "president"       return Player_Role.PRESIDENT;
+    if id == "movie_star"      return Player_Role.MOVIE_STAR;
+    if id == "coroner"         return Player_Role.CORONER;
+    if id == "portal_maker"    return Player_Role.PORTAL_MAKER;
+    if id == "prankster"       return Player_Role.PRANKSTER;
+    if id == "pyromaniac"      return Player_Role.PYROMANIAC;
+    if id == "pirate"          return Player_Role.PIRATE;
+    if id == "hitman"          return Player_Role.HITMAN;
+    if id == "werewolf"        return Player_Role.WEREWOLF;
+    if id == "goo_goo_gaga"    return Player_Role.GOO_GOO_GAGA;
+    if id == "mimicer"         return Player_Role.MIMICER;
+    if id == "lily_lovebraids" return Player_Role.LILY_LOVEBRAIDS;
+    return Player_Role.NONE;
+}
+
+// True iff the hub exposes this role in its loadout picker. Roles outside
+// the picker (e.g. BIG_CHARLIE) are not gated by loadout — the player
+// can still land on them.
+loadout_is_role_managed :: proc(role: Player_Role) -> bool {
+    if role == Player_Role.SHERIFF         return true;
+    if role == Player_Role.DOCTOR          return true;
+    if role == Player_Role.PRESIDENT       return true;
+    if role == Player_Role.MOVIE_STAR      return true;
+    if role == Player_Role.CORONER         return true;
+    if role == Player_Role.PORTAL_MAKER    return true;
+    if role == Player_Role.PRANKSTER       return true;
+    if role == Player_Role.PYROMANIAC      return true;
+    if role == Player_Role.PIRATE          return true;
+    if role == Player_Role.HITMAN          return true;
+    if role == Player_Role.WEREWOLF        return true;
+    if role == Player_Role.GOO_GOO_GAGA    return true;
+    if role == Player_Role.MIMICER         return true;
+    if role == Player_Role.LILY_LOVEBRAIDS return true;
+    return false;
+}
+
+// Read the player's saved loadout. May return null (no save written yet
+// — treat as legacy default = allow all). Callers should cache rather
+// than calling this per-attempt; it's a disk read.
+loadout_load_for_player :: proc(player: Player) -> Loadout_Data {
+    ld: Loadout_Data;
+    if player == null return ld;
+    Save.try_get_json(player, LOADOUT_SAVE_KEY, ref ld);
+    return ld;
+}
+
+// True iff `role` is allowed by `ld`. Pre-loaded form so role-pool code
+// can cache one Save read per player per round.
+//
+//   ld == null                    → true (no preference saved)
+//   role not in hub picker        → true (e.g. BIG_CHARLIE)
+//   relevant array empty          → true (no preference for that team)
+//   role listed in relevant array → true
+//   otherwise                     → false
+loadout_player_allows_role :: proc(ld: Loadout_Data, role: Player_Role) -> bool {
+    if ld == null return true;
+    if !loadout_is_role_managed(role) return true;
+
+    rt := rr_get_role_type(role);
+    if rt == Player_Type.TRAITOR {
+        if ld.traitors.count == 0 return true;
+        for i: 0..ld.traitors.count - 1 {
+            if loadout_role_id_to_player_role(ld.traitors[i]) == role return true;
+        }
+        return false;
+    }
+    if rt == Player_Type.CIVILIAN {
+        if ld.civilians.count == 0 return true;
+        for i: 0..ld.civilians.count - 1 {
+            if loadout_role_id_to_player_role(ld.civilians[i]) == role return true;
+        }
+        return false;
+    }
+    if rt == Player_Type.ANARCHIST {
+        if ld.anarchists.count == 0 return true;
+        for i: 0..ld.anarchists.count - 1 {
+            if loadout_role_id_to_player_role(ld.anarchists[i]) == role return true;
+        }
+        return false;
+    }
+    return true;
+}
+
+// Convenience: read + check in one call. Don't use inside the role-pool
+// inner loop — it does a fresh disk read each time. Use only for
+// one-off queries (chat commands, debug).
+loadout_player_allows_role_uncached :: proc(player: Player, role: Player_Role) -> bool {
+    return loadout_player_allows_role(loadout_load_for_player(player), role);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Chat command — /my_loadout
+// ════════════════════════════════════════════════════════════════════
+// Dumps the deserialized loadout for the calling player. Useful for
+// verifying the hub→game round-trip without playing a full round.
+my_loadout :: proc(player: Player) {
+    ld := loadout_load_for_player(player);
+    if ld == null {
+        Chat.server_send_message("No loadout saved.", player);
+        return;
+    }
+    msg := format_string("Loadout v%: T=% C=% A=%",
+        {ld.version, ld.traitors.count, ld.civilians.count, ld.anarchists.count});
+    Chat.server_send_message(msg, player);
+} @chat_command @youtuber
