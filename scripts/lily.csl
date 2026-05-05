@@ -4,8 +4,6 @@ import "core:ao"
 // Lily — Traitor Role (String Puppeteer)
 // =============================================================================
 
-rr_lily_role_enabled: bool;
-
 // --- Constants ---
 // Runtime-constructed paths to prevent engine pre-loading spine assets at startup.
 // The engine eagerly loads all spine assets referenced by string constants.
@@ -75,8 +73,8 @@ LILY_TREE_CD_REDUCTION_PER_STAGE :: 0.08; // -8% cooldowns per stage (6 stages)
 LILY_TREE_MODEL_SCALE_PER_STAGE :: 0.05; // Lily model grows slightly per stage
 
 // Tree requests
-LILY_TREE_TOTAL_REQUESTS :: 6;
-LILY_DEATHBRAID_THRESHOLD :: 6; // fulfilled requests needed for Deathbraid
+LILY_TREE_TOTAL_REQUESTS :: 5;
+LILY_DEATHBRAID_THRESHOLD :: 5; // fulfilled requests needed for Deathbraid
 
 // Tree delivery
 LILY_DELIVER_HOLD_TIME :: 2.0;
@@ -111,9 +109,10 @@ LILY_NO_EYES_START_DURATION :: 1.5; // approx duration of No_Eyes_Start anim bef
 
 // Leg Steal (spider)
 LILY_LEG_STEAL_COOLDOWN :: 60.0;
-LILY_SPIDER_RETURN_TIME :: 30.0; // seconds spider has to return to player
+LILY_SPIDER_RETURN_TIME :: 45.0; // seconds spider has to return to player
 LILY_SPIDER_ATTACK_RANGE :: 1.5; // range to chomp a player
 LILY_SPIDER_SPEED :: 5.0;
+LILY_SPIDER_RETURN_SPEED_MULT :: 1.6; // speed boost while carrying legs back to Lily
 LILY_SPIDER_PLAYER_RETURN_RANGE :: 2.0; // spider must get this close to player to deliver legs
 LILY_CRAWL_SPEED_MULTIPLIER :: 0.40; // 40% of normal speed
 LILY_LEGLESS_DURATION :: 20.0;
@@ -125,7 +124,6 @@ Tree_Request :: enum {
 	LEGS;                  // steal a player's legs, bring to tree
 	ALIVE_PLAYER;          // deliver a living (strung) player to the tree
 	LEGS_AND_EYES;         // deliver both stolen legs AND stolen eyes
-	LIVE_PLAYER_NO_PARTS;  // deliver a living player who has no eyes AND no legs
 }
 
 // Pull (base ability — drag strung to tree)
@@ -134,7 +132,7 @@ LILY_PULL_DRAG_SPEED :: 2.0;
 LILY_PULL_SNAP_SPEED :: 15.0;
 
 // Tea Party (single target, 3 cups)
-LILY_TEA_PARTY_COOLDOWN :: 60.0;
+LILY_TEA_PARTY_COOLDOWN :: 30.0;
 LILY_TEA_PARTY_RANGE :: 5.0;        // proximity range to activate on any player
 LILY_TEA_CUP_SPAWN_SECONDS :: 0.5;
 LILY_TEA_CUP_SPIN_SECONDS :: 10;
@@ -153,7 +151,7 @@ LILY_TEA_SLEEP_DURATION :: 15.0;
 LILY_TEA_SLEEP_REASON :: "lily_tea_sleep";
 
 // Mind Control
-LILY_MIND_CONTROL_COOLDOWN :: 20.0;
+LILY_MIND_CONTROL_COOLDOWN :: 40.0;
 LILY_MIND_CONTROL_DURATION :: 15.0;
 LILY_MIND_CONTROL_RANGE :: 3.0;     // melee range
 
@@ -1213,9 +1211,6 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 			case .LEGS_AND_EYES:
 				// Must be carrying both
 				return lm.carrying_eyes && lm.carrying_legs;
-			case .LIVE_PLAYER_NO_PARTS:
-				// A living strung player near tree who has no eyes AND no legs
-				return find_alive_strung_no_parts_near_tree(lm) != null;
 		}
 		return false;
 	}
@@ -1240,35 +1235,6 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 				dist := length(target.entity.world_position - tree_pos);
 				if dist <= LILY_TREE_DELIVER_RANGE {
 					return target;
-				}
-			}
-		}
-		return null;
-	}
-
-	// Find a living strung player near the tree who has no eyes AND no legs
-	find_alive_strung_no_parts_near_tree :: method(lm: Lily_Module) -> Player {
-		if tree_entity == null return null;
-		tree_pos := tree_entity.world_position;
-		for i: 0..lm.strung_player_ids.count-1 {
-			target := get_player_by_entity_id(lm.strung_player_ids[i]);
-			if target == null continue;
-			if target.player_state != Player_State.ALIVE continue;
-			if !target.lily_no_eyes continue;
-			if !target.lily_crawling continue;
-			dist := length(target.entity.world_position - tree_pos);
-			if dist <= LILY_TREE_DELIVER_RANGE {
-				return target;
-			}
-		}
-		if lm.dragging_live_player_id != 0 {
-			target := get_player_by_entity_id(lm.dragging_live_player_id);
-			if target != null && target.player_state == Player_State.ALIVE {
-				if target.lily_no_eyes && target.lily_crawling {
-					dist := length(target.entity.world_position - tree_pos);
-					if dist <= LILY_TREE_DELIVER_RANGE {
-						return target;
-					}
 				}
 			}
 		}
@@ -1355,21 +1321,6 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 					Notifier.notify(player, "Legs & Eyes delivered to the tree!");
 				}
 			}
-			case .LIVE_PLAYER_NO_PARTS: {
-				target := find_alive_strung_no_parts_near_tree(lm);
-				if target == null return;
-				if lm.dragging_live_player_id != 0 && lm.dragging_live_player_id == target.entity.id {
-					rr_lily_stop_live_drag(player);
-					root := target.entity.get_component(Lily_String_Trap_Root);
-					if root != null root.free();
-				}
-				target.kill_with_killer_no_corpse(player.entity.id);
-				rr_lily_remove_string(player, target.entity.id);
-				lm.kills += 1;
-				if player.is_local_or_server() {
-					Notifier.notify(player, format_string("% consumed by the tree!", {target.get_username()}));
-				}
-			}
 		}
 
 		// Fulfill the request — grow tree, advance to next
@@ -1397,7 +1348,6 @@ rr_lily_get_request_name :: proc(tree_comp: Lily_Hair_Tree) -> string {
 		case .LEGS: return "Legs";
 		case .ALIVE_PLAYER: return "Alive Player";
 		case .LEGS_AND_EYES: return "Legs & Eyes";
-		case .LIVE_PLAYER_NO_PARTS: return "Eyeless Legless Player";
 	}
 	return "Unknown";
 }
@@ -1485,7 +1435,6 @@ rr_lily_place_hair_tree :: proc(player: Player) {
 	tree_comp.request_order.append(2); // LEGS
 	tree_comp.request_order.append(3); // ALIVE_PLAYER
 	tree_comp.request_order.append(4); // LEGS_AND_EYES
-	tree_comp.request_order.append(5); // LIVE_PLAYER_NO_PARTS
 
 	deliver_interactable := tree_entity.add_component(Lily_Tree_Deliver_Interactable);
 	deliver_interactable.tree_entity = tree_entity;
@@ -3397,8 +3346,7 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 			if tree_comp != null {
 				request, has_request := tree_comp.get_current_request();
 				can_deliver_alive := has_request && request == Tree_Request.ALIVE_PLAYER;
-				can_deliver_no_parts := has_request && request == Tree_Request.LIVE_PLAYER_NO_PARTS && target.lily_no_eyes && target.lily_crawling;
-				if can_deliver_alive || can_deliver_no_parts {
+				if can_deliver_alive {
 					// Deliver alive player to tree
 					target.kill_with_killer_no_corpse(player.entity.id);
 					lm.kills += 1;
@@ -3442,10 +3390,11 @@ rr_lily_draw_mind_control_ui :: proc(player: Player) {
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
 
-	head_pos := target.entity.world_position + v2.{0, 2.2};
-	UI.push_z(head_pos.y + 0.01);
-	defer UI.pop_z();
+	// Layer above all world content (sprites, entities, other world UI).
+	UI.push_layer(9999);
+	defer UI.pop_layer();
 
+	head_pos := target.entity.world_position + v2.{0, 2.2};
 	text_rect := Rect.{head_pos, head_pos}.grow(0.15, 1.5, 0.15, 1.5);
 
 	// Timer
@@ -4963,10 +4912,12 @@ Lily_Spider :: class : Component {
 			}
 		}
 
-		// Forward input to spider movement
+		// Forward input to spider movement (boost speed while returning legs to Lily)
+		speed := LILY_SPIDER_SPEED;
+		if lm.spider_has_legs { speed *= LILY_SPIDER_RETURN_SPEED_MULT; }
 		if length_squared(input) > 0.01 {
 			dir := normalize(input);
-			desired := entity.local_position + dir * LILY_SPIDER_SPEED * dt;
+			desired := entity.local_position + dir * speed * dt;
 			nav_pt: v2;
 			tri_hint: s64;
 			if try_find_closest_point_on_navmesh(desired, ref nav_pt, ref tri_hint) {
@@ -6095,7 +6046,7 @@ Lily_Steal_Legs_Ability :: class : Ability_Base {
 
 		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
-		if lm.is_lily_form return false;
+		if !lm.is_lily_form return false;
 		if lm.mind_control_active return false;
 		if lm.spider_active return false; // spider already deployed
 		return true;
@@ -6324,7 +6275,7 @@ Lily_String_Trap_Ability :: class : Ability_Base {
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
-		if !lm.is_lily_form return false;
+		if lm.is_lily_form return false;
 		if lm.tea_party_active return false;
 		if lm.mind_control_active return false;
 		return true;
@@ -6452,14 +6403,14 @@ rr_lily_draw_abilities :: proc(player: Player, idx: int) -> int {
 	}
 
 	if lm.is_lily_form {
-		// Lily form (6 max): Kill, Transform, Mind Control, String Trap, Tea Party, Deathbraid
+		// Lily form (6 max): Kill, Transform, Steal Legs, Mind Control, Tea Party, Deathbraid
 		draw_ability_button(player, Lily_Kill_Ability, abilityIndex);
 		abilityIndex += 1;
 		draw_ability_button(player, Lily_Transform_Ability, abilityIndex);
 		abilityIndex += 1;
-		// String Trap: unlocked at 1+ fulfilled
-		if fulfilled >= 1 {
-			draw_ability_button(player, Lily_String_Trap_Ability, abilityIndex);
+		// Steal Legs: unlocked at 2+ fulfilled
+		if fulfilled >= 2 {
+			draw_ability_button(player, Lily_Steal_Legs_Ability, abilityIndex);
 			abilityIndex += 1;
 		}
 		// Mind Control: unlocked at 3+ fulfilled
@@ -6478,7 +6429,7 @@ rr_lily_draw_abilities :: proc(player: Player, idx: int) -> int {
 			abilityIndex += 1;
 		}
 	} else {
-		// Schleem form (5 max): Plant Tree / Kill, Transform, Eyes, Legs, Drag
+		// Schleem form (5 max): Plant Tree / Kill, Transform, Eyes, String Trap, Drag
 		if !lm.hair_tree_planted {
 			draw_ability_button(player, Lily_Hair_Tree_Ability, abilityIndex);
 			abilityIndex += 1;
@@ -6492,9 +6443,9 @@ rr_lily_draw_abilities :: proc(player: Player, idx: int) -> int {
 				draw_ability_button(player, Lily_Steal_Eyes_Ability, abilityIndex);
 				abilityIndex += 1;
 			}
-			// Steal Legs: unlocked at 2+ fulfilled
-			if fulfilled >= 2 {
-				draw_ability_button(player, Lily_Steal_Legs_Ability, abilityIndex);
+			// String Trap: unlocked at 1+ fulfilled
+			if fulfilled >= 1 {
+				draw_ability_button(player, Lily_String_Trap_Ability, abilityIndex);
 				abilityIndex += 1;
 			}
 			draw_ability_button(player, Drag_Body_Ability, abilityIndex);
