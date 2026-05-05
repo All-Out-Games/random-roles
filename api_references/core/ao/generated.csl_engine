@@ -36,11 +36,11 @@ Entity :: class {
     get_last_child      :: method() -> Entity    #foreign "entity_get_last_child";
     get_parent          :: method() -> Entity    #foreign "entity_get_parent";
     id:                   u64                 #read_only #offset 0;
-    local_position:       v2                  #read_only("use set_local_position()") #offset 24;
+    local_position:       v2                  #read_only #offset 24;
     world_position:       v2                  #read_only #offset 32;
-    local_rotation:       float               #read_only("use set_local_rotation()") #offset 52;
+    local_rotation:       float               #read_only #offset 52;
     world_rotation:       float               #read_only #offset 48;
-    local_scale:          v2                  #read_only("use set_local_scale()") #offset 64;
+    local_scale:          v2                  #read_only #offset 64;
     world_scale:          v2                  #read_only #offset 56;
     self:                 Entity              #read_only #offset 320;
     model_matrix:         Matrix4             #read_only #offset 80;
@@ -90,7 +90,7 @@ Component :: class {
     self:                     Component #read_only #offset 24;
 } #gc_root #foreign_struct "Component_Base" #size 64
 
-Component_Iterator :: struct(T: typeid) {
+Component_Iterator :: struct($T: typeid) {
     component_iterator_next_raw :: method() -> bool #foreign "component_iterator_next";
     current: T #read_only #offset 16;
     next :: method() -> bool {
@@ -102,7 +102,6 @@ Sprite_Renderer :: class : Component {
     set_texture  :: method(texture: Texture_Asset) #foreign "sprite_renderer_set_texture";
     get_texture  :: method() -> Texture_Asset #foreign "sprite_renderer_get_texture";
     set_material :: method(material: Material, transfer_ownership: bool) #foreign "sprite_renderer_set_material";
-    get_world_size :: method() -> v2 #foreign "sprite_renderer_get_world_size";
     color: v4           #offset 72;
     depth_offset: float #offset 88;
     layer: s32          #offset 92;
@@ -161,10 +160,10 @@ Interactable :: class : Component {
     radius:             float     #offset 112;
     required_hold_time: float     #offset 116;
     priority:           s64       #offset 120;
-    listener: Component                                      #offset 264 #read_only("use set_listener()");
-    can_use_proc: proc(t: Component, player: Player) -> bool #offset 272 #read_only("use set_listener()");
-    on_interact_proc: proc(t: Component, player: Player)     #offset 280 #read_only("use set_listener()");
-    on_holding_proc: proc(t: Component, player: Player)      #offset 288 #read_only("use set_listener()");
+    listener: Component                                      #offset 264 #read_only;
+    can_use_proc: proc(t: Component, player: Player) -> bool #offset 272 #read_only;
+    on_interact_proc: proc(t: Component, player: Player)     #offset 280 #read_only;
+    on_holding_proc: proc(t: Component, player: Player)      #offset 288 #read_only;
     #interface on_interact                :: proc(t: Interactable, player: Player);
     #interface on_holding                 :: proc(t: Interactable, player: Player);
 } #foreign_struct "Interactable" #size 304
@@ -190,8 +189,6 @@ Spine_Animator :: class : Component {
     refresh_skins           :: method() #foreign "spine_animator_refresh_skins";
     set_to_setup_pose       :: method() #foreign "spine_animator_set_to_setup_pose";
     get_skins               :: method() -> []string #foreign "spine_animator_get_skins";
-    get_tint                :: method() -> v4 #foreign "spine_animator_get_tint";
-    set_tint                :: method(new_tint: v4) #foreign "spine_animator_set_tint";
 } #foreign_struct "Spine_Animator" #size 280
 
 LOS_Caster :: class : Component {
@@ -216,15 +213,15 @@ Spine_Event_Data :: struct {
 }
 
 Spine_Instance_Fields :: class {
-    state_machine:    State_Machine  #read_only("use set_state_machine()") #offset 96;
-    color_multiplier: v4                        #offset 120;
-    scale:            v2                        #offset 80;
-    speed_multiplier: float                     #offset 152;
-    color_replace_color: Color_Replace_Color #read_only("use set_color_replace_color()") #offset 192;
-    on_event_userdata:           Object #read_only("use set_on_event()") #offset 240;
-    on_animation_start_userdata: Object #read_only("use set_on_animation_start()") #offset 256;
-    on_animation_end_userdata:   Object #read_only("use set_on_animation_end()") #offset 272;
-} #gc_root #foreign_struct "Spine_Instance" #size 304
+    state_machine:    State_Machine  #read_only #offset 48;
+    color_multiplier: v4                        #offset 72;
+    scale:            v2                        #offset 32;
+    speed_multiplier: float                     #offset 104;
+    color_replace_color: Color_Replace_Color #read_only #offset 144;
+    on_event_userdata:           Object #read_only #offset 192;
+    on_animation_start_userdata: Object #read_only #offset 208;
+    on_animation_end_userdata:   Object #read_only #offset 224;
+} #gc_root #foreign_struct "Spine_Instance" #size 264
 
 Spine_Instance_Base :: class : Spine_Instance_Fields {
     set_color_replace_color :: method(color: Color_Replace_Color) #foreign "spine_instance_set_color_replace_color";
@@ -232,7 +229,7 @@ Spine_Instance_Base :: class : Spine_Instance_Fields {
     set_on_event            :: method(userdata: Object, callback: proc(userdata: Object, event: Spine_Event_Data)) #foreign "spine_instance_set_on_event";
     set_on_animation_start  :: method(userdata: Object, callback: proc(userdata: Object, animation: string)) #foreign "spine_instance_set_on_animation_start";
     set_on_animation_end    :: method(userdata: Object, callback: proc(userdata: Object, animation: string)) #foreign "spine_instance_set_on_animation_end";
-} #gc_root #foreign_struct "Spine_Instance" #size 304
+} #gc_root #foreign_struct "Spine_Instance" #size 264
 
 Camera :: struct {
     position:            v2            #offset 0;
@@ -282,22 +279,19 @@ Post_Processing :: struct {
 }
 
 AO_Player :: class : Component {
-    animator:               Spine_Animator      #read_only #offset 3648;
+    animator:               Spine_Animator      #read_only #offset 31504;
     agent:                  Movement_Agent      #read_only #offset 120;
-    camera:                 Camera                         #offset 1472;
-    device_kind:            Device_Kind         #read_only #offset 1504;
-    do_name_color_override: bool                           #offset 2664;
-    name_color_override:    v4                             #offset 2668;
+    camera:                 Camera                         #offset 1552;
+    device_kind:            Device_Kind         #read_only #offset 1584;
+    do_name_color_override: bool                           #offset 30520;
+    name_color_override:    v4                             #offset 30524;
     avatar_color:           Color_Replace_Color #read_only #offset 96;
-    default_inventory:      Inventory           #read_only #offset 3528;
-    comms_channel_listen_mask: u64                         #offset 1632;
-    comms_channel_speak_mask:  u64                         #offset 1640;
-    username_rect:             Rect                        #offset 3604;
-    full_nameplate_rect:       Rect                        #offset 3620;
-    input_this_frame:          v2                          #offset 2732;
-    input_override:            v2                          #offset 84;
-    player_for_prediction:     Player                      #offset 3680;
-} #foreign_struct "Player" #size 3800
+    default_inventory:      Inventory           #read_only #offset 31384;
+    comms_channel_listen_mask: u64                         #offset 1712;
+    comms_channel_speak_mask:  u64                         #offset 1720;
+    username_rect:             Rect                        #offset 31460;
+    full_nameplate_rect:       Rect                        #offset 31476;
+} #foreign_struct "Player" #size 31648
 
 Movement_Agent :: class : Component {
     Set_Path_Target_Result :: struct {
@@ -320,8 +314,6 @@ Texture_Asset :: class : Asset {
     get_width :: method() -> s64 #foreign "texture_asset_get_width";
     get_height :: method() -> s64 #foreign "texture_asset_get_height";
     get_aspect :: method() -> float #foreign "texture_asset_get_aspect";
-    get_pivot :: method() -> v2 #foreign "texture_asset_get_pivot";
-    get_pixels_per_unit :: method() -> float #foreign "texture_asset_get_pixels_per_unit";
     get_uvs :: method() -> v2, v2 #foreign "texture_asset_get_uvs";
 } #foreign_struct "Texture"
 
@@ -330,9 +322,6 @@ SFX_Asset :: class : Asset {
 
 Spine_Asset :: class : Asset {
 } #foreign_struct "Spine_Skeleton_Data"
-
-Cosmetic_Asset :: class : Asset {
-} #foreign_struct "Cosmetic_Asset"
 
 Prefab_Asset :: class : Asset {
 } #foreign_struct "Prefab"
@@ -429,7 +418,7 @@ SFX_Channel :: enum {
 SFX_Desc :: struct {
     local_only:       bool                       #offset 0;
     positional:       bool                       #offset 1;
-    position:         v2              #read_only("use set_position()") #offset 4;
+    position:         v2              #read_only #offset 4;
     delay:            float                      #offset 12;
     volume:           float                      #offset 16;
     speed:            float                      #offset 20;
@@ -562,13 +551,11 @@ Item_Definition_Desc :: struct {
 } #foreign_struct "CSL_Item_Definition_Desc" #size 56
 
 Item_Definition_Base :: class {
-    id:   string          #read_only #offset 88;
-    name: string          #read_only #offset 104;
-    self: Item_Definition #read_only #offset 120;
-    type: typeid          #read_only #offset 128;
-    instance_type: typeid #read_only #offset 136;
+    self: Item_Definition #read_only #offset 88;
+    type: typeid          #read_only #offset 96;
+    instance_type: typeid #read_only #offset 104;
     tier: Item_Tier       #read_only #offset 72;
-} #gc_root #foreign_struct "Item_Definition" #size 160
+} #gc_root #foreign_struct "Item_Definition" #size 128
 
 Item_Instance_Base :: class {
     self: Item_Instance   #read_only #offset 144;
