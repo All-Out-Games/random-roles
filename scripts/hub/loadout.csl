@@ -11,6 +11,21 @@ LOADOUT_EXTRA_ANARCHIST_PRODUCT_ID :: "69f0deed456b3b0665690c24";
 
 LOADOUT_EXTRA_SLOT_PRICE :: "99";
 
+LOADOUT_SEEN_SAVE_KEY :: "loadout_seen";
+
+loadout_load_seen :: proc(player: Player) {
+    if !Game.is_server() return;
+    if Save.get_int(player, LOADOUT_SEEN_SAVE_KEY, 0) != 0 {
+        player.loadout_seen = true;
+    }
+}
+
+loadout_mark_seen :: proc(player: Player) {
+    if player.loadout_seen return;
+    player.loadout_seen = true;
+    if Game.is_server() Save.set_int(player, LOADOUT_SEEN_SAVE_KEY, 1);
+}
+
 loadout_min_slots :: proc(tab: int) -> int {
     switch tab {
         case LOADOUT_TAB_TRAITOR:   return 3;
@@ -23,7 +38,7 @@ loadout_min_slots :: proc(tab: int) -> int {
 loadout_max_slots_base :: proc(tab: int) -> int {
     switch tab {
         case LOADOUT_TAB_TRAITOR:   return 4;
-        case LOADOUT_TAB_CIVILIAN:  return 8;
+        case LOADOUT_TAB_CIVILIAN:  return 5;
         case LOADOUT_TAB_ANARCHIST: return 2;
     }
     return 1;
@@ -206,7 +221,7 @@ loadout_get_role_small_icon :: proc(role_idx: int) -> string {
 }
 
 loadout_get_role_name :: proc(role_idx: int) -> string {
-    if role_idx == 16 return "LILY LOVEBRAIDS";
+    if role_idx == 16 return "LILY";
     return rg_get_role_name(role_idx);
 }
 
@@ -305,8 +320,11 @@ loadout_try_auto_equip :: proc(player: Player, role_idx: int) -> bool {
     return true;
 }
 
-// Toggle equip state, enforcing min/max. No-op if blocked by constraints or role is locked.
-// Runs on both client (prediction) and server (authoritative); Save is gated server-only.
+// Toggle equip state. Allows transient states below minimum so users can swap
+// out a role they don't want before adding the replacement; finalize logic
+// (loadout_finalize) auto-fills any tab that's still below min on tab switch
+// or close. Save is suppressed while any tab is below min so the on-disk
+// loadout is always valid.
 loadout_toggle :: proc(player: Player, tab: int, role_idx: int) {
     if !player.is_local_or_server() return;
     if player.loadout == null return;
@@ -319,7 +337,6 @@ loadout_toggle :: proc(player: Player, tab: int, role_idx: int) {
     count := loadout_equipped_count(player, tab);
 
     if is_eq {
-        if count <= loadout_min_slots(tab) return;
         switch tab {
             case LOADOUT_TAB_TRAITOR:   unordered_remove_by_value(ref player.loadout.traitors,   id);
             case LOADOUT_TAB_CIVILIAN:  unordered_remove_by_value(ref player.loadout.civilians,  id);
@@ -334,6 +351,100 @@ loadout_toggle :: proc(player: Player, tab: int, role_idx: int) {
         }
     }
 
+    if !loadout_any_below_min(player) loadout_save(player);
+}
+
+loadout_below_min :: proc(player: Player, tab: int) -> bool {
+    return loadout_equipped_count(player, tab) < loadout_min_slots(tab);
+}
+
+loadout_any_below_min :: proc(player: Player) -> bool {
+    for tab: 0..LOADOUT_NUM_TABS - 1 {
+        if loadout_below_min(player, tab) return true;
+    }
+    return false;
+}
+
+// Append unlocked roles into `tab` until it satisfies its minimum. Returns the
+// number of roles added. No-op if already at/over min or no unlocked role
+// remains for the team.
+loadout_fill_to_minimum :: proc(player: Player, tab: int) -> int {
+    if player.loadout == null return 0;
+
+    target := loadout_min_slots(tab);
+    added  := 0;
+
+    team_roles: [..]int;
+    loadout_get_team_roles(tab, ref team_roles);
+
+    while loadout_equipped_count(player, tab) < target {
+        progressed := false;
+        for ri: 0..team_roles.count - 1 {
+            role_idx := team_roles[ri];
+            if rg_is_role_locked(player, role_idx) continue;
+            if loadout_is_equipped(player, tab, role_idx) continue;
+
+            id := loadout_role_id_for_idx(role_idx);
+            if id == "" continue;
+
+            switch tab {
+                case LOADOUT_TAB_TRAITOR:   append(ref player.loadout.traitors,   id);
+                case LOADOUT_TAB_CIVILIAN:  append(ref player.loadout.civilians,  id);
+                case LOADOUT_TAB_ANARCHIST: append(ref player.loadout.anarchists, id);
+            }
+            added += 1;
+            progressed = true;
+            break;
+        }
+        if !progressed break;
+    }
+    return added;
+}
+
+// Remove any equipped roles the player no longer owns from `tab`. Returns the
+// number of roles removed. Ownership is rechecked via rg_is_role_locked so this
+// also covers refunds and any future ownership changes.
+loadout_strip_unowned :: proc(player: Player, tab: int) -> int {
+    if player.loadout == null return 0;
+
+    arr := loadout_tab_array(player, tab);
+    removed := 0;
+    i := 0;
+    while i < arr.count {
+        role_idx := loadout_idx_for_role_id(arr[i]);
+        if role_idx >= 0 && rg_is_role_locked(player, role_idx) {
+            switch tab {
+                case LOADOUT_TAB_TRAITOR:   unordered_remove_by_value(ref player.loadout.traitors,   arr[i]);
+                case LOADOUT_TAB_CIVILIAN:  unordered_remove_by_value(ref player.loadout.civilians,  arr[i]);
+                case LOADOUT_TAB_ANARCHIST: unordered_remove_by_value(ref player.loadout.anarchists, arr[i]);
+            }
+            removed += 1;
+            // Don't advance i: the unordered removal swapped a new value into this slot.
+        } else {
+            i += 1;
+        }
+    }
+    return removed;
+}
+
+// Strip unowned roles, fill below-min tabs, save, and notify on any change.
+// Called when the user leaves the active tab (tab switch) or closes loadout.
+loadout_finalize :: proc(player: Player) {
+    if !player.is_local_or_server() return;
+    if player.loadout == null return;
+
+    total_removed := 0;
+    total_added   := 0;
+    for tab: 0..LOADOUT_NUM_TABS - 1 {
+        total_removed += loadout_strip_unowned(player, tab);
+        total_added   += loadout_fill_to_minimum(player, tab);
+    }
+    if total_removed > 0 {
+        Notifier.notify(player, "Removed unowned roles from your loadout");
+    }
+    if total_added > 0 {
+        Notifier.notify(player, "Loadout auto-filled to meet role type minimums");
+    }
     loadout_save(player);
 }
 
@@ -358,6 +469,8 @@ loadout_load :: proc(player: Player) {
 
     _loadout_validate_data(player, fresh);
     player.loadout = fresh;
+
+    loadout_load_seen(player);
 }
 
 loadout_save :: proc(player: Player) {
@@ -551,6 +664,21 @@ draw_loadout_open_button :: proc(player: Player) {
     label_ts.outline_color     = v4.{0, 0, 0, 1};
     label_rect := btn_rect.bottom_rect().offset(0, -10).grow_unscaled(18, 70, 0, 70);
     UI.text(label_rect, label_ts, "Loadout");
+
+    // First-time tutorial arrow pointing at the loadout button
+    if !player.loadout_seen {
+        arrow_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_2/selector_arrow.png");
+        if arrow_tex != null {
+            t := get_time();
+            bob := sin(t * 4.0) * 12.0;
+            ARROW_HALF :: 48.0;
+            arrow_center := loadout_center.offset(-(BTN_HALF + 80.0 + bob), 0);
+            arrow_rect := arrow_center.grow(ARROW_HALF).fit_aspect(arrow_tex.get_aspect());
+            UI.push_matrix(Matrix4.rotate_about_point(arrow_rect.center(), 90));
+            UI.quad(arrow_rect, arrow_tex, v4.{1, 0.95, 0.4, 1});
+            UI.pop_matrix();
+        }
+    }
 }
 
 // ---- Drawing: UIK modal ----
@@ -561,6 +689,17 @@ draw_loadout :: proc(player: Player) {
     // arrived yet, skip the frame rather than allocating a blank locally
     // (which would race-overwrite the server's data).
     if player.loadout == null return;
+
+    loadout_mark_seen(player);
+
+    // Strip any equipped roles the player no longer owns. Idempotent — safe to
+    // run every frame. Ownership is reliably observable by the time the user
+    // has the loadout open (check_owned_products has run since ao_start).
+    if player.is_local_or_server() {
+        for tab: 0..LOADOUT_NUM_TABS - 1 {
+            loadout_strip_unowned(player, tab);
+        }
+    }
 
     // Full-screen dim behind the modal (covers HUD too)
     UI.push_layer(999);
@@ -634,7 +773,9 @@ draw_loadout :: proc(player: Player) {
     UIK.panel_begin(left);
     extra_unlock_present: bool;
     extra_unlock_handle:  UIK.Interact_Handle;
-    loadout_draw_equipped_list(player, ref extra_unlock_present, ref extra_unlock_handle);
+    slot_handles:  [..]UIK.Interact_Handle;
+    slot_role_ids: [..]int;
+    loadout_draw_equipped_list(player, ref extra_unlock_present, ref extra_unlock_handle, ref slot_handles, ref slot_role_ids);
     UIK.panel_end();
 
     // Right grid
@@ -652,26 +793,39 @@ draw_loadout :: proc(player: Player) {
 
     // ---- Resolve handles ----
     if UIK.clicked(exit_handle) {
+        loadout_finalize(player);
         player.loadout_open = false;
     }
     for t: 0..tab_handles.count - 1 {
         if UIK.clicked(tab_handles[t]) {
+            if t != player.loadout_tab loadout_finalize(player);
             player.loadout_tab = t;
         }
     }
     for i: 0..card_handles.count - 1 {
         if UIK.clicked(card_handles[i]) {
-            loadout_toggle(player, player.loadout_tab, card_role_ids[i]);
+            rid := card_role_ids[i];
+            if rg_is_role_locked(player, rid) {
+                pid := rg_get_role_product_id(rid);
+                if pid != "" Purchasing.prompt_purchase(player, pid);
+            } else {
+                loadout_toggle(player, player.loadout_tab, rid);
+            }
         }
     }
     if extra_unlock_present && UIK.clicked(extra_unlock_handle) {
         Purchasing.prompt_purchase(player, loadout_extra_product_id(player.loadout_tab));
     }
+    for i: 0..slot_handles.count - 1 {
+        if UIK.clicked(slot_handles[i]) {
+            loadout_toggle(player, player.loadout_tab, slot_role_ids[i]);
+        }
+    }
 }
 
 // ---- Left sidebar: equipped list ----
 
-loadout_draw_equipped_list :: proc(player: Player, unlock_present: ref bool, unlock_handle: ref UIK.Interact_Handle) {
+loadout_draw_equipped_list :: proc(player: Player, unlock_present: ref bool, unlock_handle: ref UIK.Interact_Handle, slot_handles: ref [..]UIK.Interact_Handle, slot_role_ids: ref [..]int) {
     tab := player.loadout_tab;
 
     // Header line: "Equipped Roles   X/Y"
@@ -722,7 +876,9 @@ loadout_draw_equipped_list :: proc(player: Player, unlock_present: ref bool, unl
         if role_idx >= 0 {
             slot_row.background      = .BUTTON_BASIC_BLACK;
             slot_row.show_background = true;
-            UIK.panel_begin(slot_row);
+            sh := UIK.panel_begin_interactive(format_string("lo_slot_%", {slot}), slot_row);
+            append(ref slot_handles,  sh);
+            append(ref slot_role_ids, role_idx);
             loadout_draw_slot_filled(player, role_idx);
             UIK.panel_end();
         } else {
@@ -935,22 +1091,33 @@ loadout_draw_collection_card :: proc(player: Player, role_idx: int, handles: ref
     cell.width           = UIK.flex(1);
     cell.height          = UIK.flex(1);
 
-    h := UIK.panel_begin_interactive(format_string("lo_card_%", {role_idx}), cell, is_locked);
+    h := UIK.panel_begin_interactive(format_string("lo_card_%", {role_idx}), cell);
     append(ref handles,  h);
     append(ref role_ids, role_idx);
 
-    // Icon
+    // Small icon — expanded to fill, with name text overlaid on its lower portion
     icon_box := UIK.layout_column();
     icon_box.width  = UIK.flex(1);
     icon_box.height = UIK.flex(1);
     icon_box.show_background = false;
     UIK.panel_begin(icon_box);
-    icon_tex := get_asset(Texture_Asset, loadout_get_role_detail_icon(role_idx));
+    icon_tex := get_asset(Texture_Asset, loadout_get_role_small_icon(role_idx));
     if icon_tex != null {
         tint := v4.{dim_alpha, dim_alpha, dim_alpha, 1};
         UIK.image_fitted(icon_tex, UIK.image_desc(.CONTAIN), tint);
     }
     UIK.panel_end();
+
+    // Role name overlaid above stars, partially covering the icon's bottom edge
+    UIK.overlay_begin(.BOTTOM_CENTER, v2.{0, 24});
+    name_ts := UIK.text_body();
+    UIK.text_set_color(&name_ts, v4.{dim_alpha, dim_alpha, dim_alpha, 1});
+    UIK.text_set_halign(&name_ts, .CENTER);
+    UIK.text_set_valign(&name_ts, .CENTER);
+    UIK.text_set_word_wrap(&name_ts, false);
+    UIK.text_set_size_mult(&name_ts, 1.25);
+    UIK.text(loadout_get_role_name(role_idx), name_ts);
+    UIK.overlay_end();
 
     // Stars
     loadout_draw_stars_row(loadout_get_role_difficulty_stars(role_idx), 3, 24.0, true);
@@ -978,20 +1145,61 @@ loadout_draw_collection_card :: proc(player: Player, role_idx: int, handles: ref
 
     if is_locked {
         UIK.overlay_begin(.CENTER, v2.{0, 0});
+        lock_col := UIK.layout_column();
+        lock_col.width  = UIK.fit();
+        lock_col.height = UIK.fit();
+        lock_col.background = .MODAL_TRANSP_BLACK;
+        lock_col.show_background = true;
+        lock_col.padding = v4.{12, 18, 14, 18};
+        lock_col.gap = 6;
+        lock_col.main_align  = .CENTER;
+        lock_col.cross_align = .CENTER;
+        UIK.panel_begin(lock_col);
+
+        // Lock icon
         lock_box := UIK.layout_column();
-        lock_box.width  = UIK.pixels(104);
-        lock_box.height = UIK.pixels(104);
-        lock_box.background = .MODAL_TRANSP_BLACK;
-        lock_box.show_background = true;
-        lock_box.padding = v4.{16, 16, 16, 16};
-        lock_box.main_align  = .CENTER;
-        lock_box.cross_align = .CENTER;
+        lock_box.width  = UIK.pixels(56);
+        lock_box.height = UIK.pixels(56);
+        lock_box.show_background = false;
         UIK.panel_begin(lock_box);
         lock_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_1/lock_closed.png");
         if lock_tex != null {
             UIK.image_fitted(lock_tex, UIK.image_desc(.CONTAIN), v4.{1, 0.85, 0.3, 1});
         }
         UIK.panel_end();
+
+        // Price + sparks badge
+        price := rg_get_role_price(role_idx);
+        if price.count > 0 {
+            price_row := UIK.layout_row();
+            price_row.width  = UIK.fit();
+            price_row.height = UIK.fit();
+            price_row.gap    = 4;
+            price_row.cross_align = .CENTER;
+            price_row.show_background = false;
+            UIK.panel_begin(price_row);
+
+            spark_box := UIK.layout_column();
+            spark_box.width  = UIK.pixels(20);
+            spark_box.height = UIK.pixels(20);
+            spark_box.show_background = false;
+            UIK.panel_begin(spark_box);
+            sparks_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/sparks/spark_small.png");
+            if sparks_tex != null {
+                UIK.image_fitted(sparks_tex, UIK.image_desc(.CONTAIN), v4.{1, 0.9, 0.3, 1});
+            }
+            UIK.panel_end();
+
+            price_ts := UIK.text_body();
+            UIK.text_set_color(&price_ts, v4.{1, 0.9, 0.4, 1});
+            UIK.text_set_halign(&price_ts, .CENTER);
+            UIK.text_set_word_wrap(&price_ts, false);
+            UIK.text(price, price_ts);
+
+            UIK.panel_end(); // price_row
+        }
+
+        UIK.panel_end(); // lock_col
         UIK.overlay_end();
     }
 

@@ -1,11 +1,11 @@
 14
-17179869185
-2794298432
+4294967297
+1284800102
 {
-  "name": "pedestal.png",
+  "name": "Mimicer Pedestal",
   "local_enabled": true,
   "local_position": {
-    "X": -41.0142288208007812,
+    "X": -40.9994773864746094,
     "Y": 16.5442295074462891
   },
   "local_rotation": 0,
@@ -13,11 +13,12 @@
     "X": 2,
     "Y": 2
   },
-  "previous_sibling": 1284800102
+  "previous_sibling": 596077130,
+  "next_sibling": 2794298432
 },
 {
   "cid": 1,
-  "aoid": 3420361753,
+  "aoid": 327189709,
   "component_type": "Internal_Component",
   "internal_component_type": "Sprite_Renderer",
   "data": {
@@ -26,20 +27,23 @@
 },
 {
   "cid": 2,
-  "aoid": 1478139106,
+  "aoid": 2338879206,
   "component_type": "Internal_Component",
   "internal_component_type": "Role_Pedestal",
   "data": {
-    "text": "Buy GGG",
+    "text": "Buy MIMICER",
     "radius": 2,
     "offset": {
       "X": -0.5000000000000000,
       "Y": -0.2500000000000000
     },
     "required_hold_time": 0.6000000238418579,
+    "priority": 1,
     "prompt_offset": {
+      "X": 0.2500000000000000,
       "Y": 1
     },
-    "spine": 11184100
+    "role": 1,
+    "spine": 1693278884
   }
 }

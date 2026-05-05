@@ -1,4 +1,4 @@
-RG_NUM_ROLES :: 15;
+RG_NUM_ROLES :: 17;
 
 Rg_Ability_Entry :: struct {
     icon_path: string;
@@ -23,6 +23,7 @@ rg_get_role_name :: proc(idx: int) -> string {
         case 12: return "WEREWOLF";
         case 13: return "GOO GOO GAGA";
         case 14: return "MIMICER";
+        case 16: return "LILY";
     }
     return "UNKNOWN";
 }
@@ -82,6 +83,8 @@ rg_get_role_description :: proc(idx: int) -> string {
         case 11: return "A cold and calculating assassin. Silently snap necks up close. Rack up kills to unlock proximity mines and a sniper rifle.";
         case 12: return "A shape-shifting beast hiding among civilians. Switch between schleem and wolf form. Earn kills to unlock Infect and Claw.";
         case 13: return "A horrifying creature hiding in plain sight. Place a nest and consume bodies to earn nest points that unlock powerful abilities. Transform, crawl, lay traps, whip targets, and summon swarms.";
+        case 14: return "A shape-shifting predator. Kill civilians and corrupt their corpses at Void Pillars to steal faces. Each stolen face unlocks new powers - Void Lunge, Spew Corruption, and the devastating Unleash.";
+        case 16: return "A predatory weaver. String civilians to track them, then plant your Hair Tree as your permanent base. Feed the tree its requested offerings (corpses, eyes, legs, strung victims) to grow it and unlock stronger abilities - Tea Party, Mind Control, and the ultimate Deathbraid.";
     }
     return "";
 }
@@ -102,6 +105,8 @@ rg_get_role_difficulty :: proc(idx: int) -> string {
         case 11: return "HARD";
         case 12: return "MEDIUM";
         case 13: return "HARD";
+        case 14: return "HARD";
+        case 16: return "HARD";
     }
     return "EASY";
 }
@@ -171,6 +176,28 @@ rg_get_role_abilities :: proc(idx: int, results: ref [..]Rg_Ability_Entry) {
             append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/kill_wrap_player.png",        "Foil Whip",       "Unlocked with 2 nest points. Fire a projectile that pulls targets to you."});
             append(ref results, Rg_Ability_Entry.{"sprites/icons/ggg/swarm.png",                   "Swarm",           "Unlocked with 4 nest points. Summon decoy creatures from the nest."});
         }
+        case 14: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/transform_evil.png",              "Transform",       "Toggle between schleem and monster form. Monster form grants 115%% move speed."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/mimicer/prowl.png",               "Prowl",           "Toggle stealth mode. Move slower, but become near-invisible when close to walls."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/mimicer/kill_purple_slash.png",   "Kill",            "Eliminate a nearby civilian. Corrupt their corpse at a Void Pillar to steal their face."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/mimicer/void_lunge.png",          "Void Lunge",      "Unlocked at 1 Stolen Face. Dash forward in monster form and stun players you hit."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/mimicer/mimic.png",               "Mimic",           "Interact with a Void Pillar to disguise as the stored victim."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/mimicer/spew_corruption.png",     "Spew Corruption", "Unlocked at 3 Stolen Faces. Blind and root a nearby target for 10 seconds."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/mimicer/unleash_ultimate.png",    "Unleash",         "Unlocked at 5 Stolen Faces. One-time ultimate. Place 3 Dark Flame Pillars, then enter ultimate form with a jumpscare scream. Consume pillars to reset all cooldowns."});
+        }
+        case 16: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/transform_evil.png",              "Transform",       "Toggle between schleem and Lily form. Lily form moves faster."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Standard_Kill_Icon.png",     "Kill",            "Eliminate a nearby civilian."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/String_Icon.png",            "String",          "Attach a string to a player to track them and fulfill tree requests with them."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Hair_Tree_Icon.png",         "Plant Tree",      "One-time. Plant your Hair Tree - your permanent base. Fulfill its requests to grow it and unlock new powers."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Hair_Tree_Icon.png",         "Tree Requests",   "Offer in order: Corpse, Eyes, Legs, Alive Player, Legs & Eyes, Eyeless-Legless Player. Each grows the tree and buffs you."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Braid_Trap_Icon.png",        "String Trap",     "1 request. Lay a trap - players who walk over it get strung and can be dragged to the tree alive."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Suction_Tube_Icon.png",      "Steal Eyes",      "Deploy a machine that temporarily extracts a target's eyes. Pick up the dropped eyes to offer them to the tree."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Braid_Point_Icon.png",       "Steal Legs",      "Send a spider to temporarily chomp a target's legs. Pick up the dropped legs to offer them to the tree."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Dollhouse_Icon.png",         "Mind Control",    "3 requests. Possess a player and puppet their body. Release to return."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Tea_Party_Icon.png",         "Tea Party",       "4 requests. Invite a strung player to tea. They pick 1 of 3 cups - caffeine, poison, or empty."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Hair_Tree_Icon.png",         "Deathbraid",      "6 requests. Summon a vortex that pulls in and devours every living player. Ultimate win button."});
+        }
     }
 }
 
@@ -178,9 +205,27 @@ rg_is_role_locked :: proc(player: Player, idx: int) -> bool {
     switch idx {
         case 13: return !Purchasing.owns_product(player, GGG_PRODUCT_ID);
         case 14: return !Purchasing.owns_product(player, MIMICER_PRODUCT_ID);
-        case 16: return true;
+        case 16: return !Purchasing.owns_product(player, LILY_PRODUCT_ID);
     }
     return false;
+}
+
+rg_get_role_product_id :: proc(idx: int) -> string {
+    switch idx {
+        case 13: return GGG_PRODUCT_ID;
+        case 14: return MIMICER_PRODUCT_ID;
+        case 16: return LILY_PRODUCT_ID;
+    }
+    return "";
+}
+
+rg_get_role_price :: proc(idx: int) -> string {
+    switch idx {
+        case 13: return "199";
+        case 14: return "299";
+        case 16: return "499";
+    }
+    return "";
 }
 
 rg_get_role_detail_icon :: proc(idx: int) -> string {
@@ -197,6 +242,8 @@ rg_get_role_detail_icon :: proc(idx: int) -> string {
         case 11: return "ui/roles/hitman_icon.png";
         case 12: return "ui/roles/werewolf_icon.png";
         case 13: return "ui/roles/googoogaga_icon.png";
+        case 14: return "ui/roles/mimicer_icon.png";
+        case 16: return "ui/roles/lily_icon.png";
     }
     return "";
 }
@@ -222,587 +269,547 @@ rg_get_role_tips :: proc(idx: int) -> string {
         case 11: return "Neck snap for silent kills. Build kills to unlock mines and sniper.";
         case 12: return "Schleem form to blend in, wolf form to hunt. Switch wisely!";
         case 13: return "Place your nest early and drag bodies to it. More nest points = more abilities!";
+        case 14: return "Stash a corpse at a Void Pillar to mimic the victim. Stack stolen faces fast for Unleash.";
+        case 16: return "Plant your tree somewhere safe and feed it requests in order. String victims to track and reuse them.";
     }
     return "";
 }
 
-// ---- Main panel ----
+// ---- Main panel (UIK) ----
 
 draw_roles_guide :: proc(player: Player) {
     if !player.roles_guide_open return;
 
-    UI.push_layer(500);
-    defer UI.pop_layer();
+    // Full-screen dim behind the modal (covers HUD too)
+    UI.push_layer(999);
+    UI.quad(UI.get_screen_rect(), core_globals.white_sprite, v4.{0, 0, 0, 0.76});
+    UI.pop_layer();
 
-    // Dim the background
-    full_screen := UI.get_screen_rect();
-    UI.quad(full_screen, core_globals.white_sprite, v4.{0, 0, 0, 0.76});
+    UIK.begin(UIK.modal(UIK.rect_window_large(), 1000, v4.{0, 0, 0, 0}));
 
-    safe := UI.get_safe_screen_rect();
+    shell := UIK.panel_modal(.BLACK);
+    shell.padding = v4.{12, 14, 12, 14};
+    shell.gap = 8;
+    UIK.panel_begin(shell);
 
-    PANEL_W := safe.width() * 0.80;
-    PANEL_H := safe.height() * 0.82;
-    panel_rect := safe.center_rect().grow_unscaled(PANEL_H * 0.5, PANEL_W * 0.5, PANEL_H * 0.5, PANEL_W * 0.5);
+    exit_handle := UIK.title_area(UIK.title_area_desc("ROLES GUIDE"));
 
-    // 9-slice panel background (matches task help backing)
-    HELP_SLICE_PX :: 16.0;
-    bg_tex := get_asset(Texture_Asset, "ui/task_help_backing.png");
-    if bg_tex != null {
-        bs := UI.default_button_settings();
-        bs.sprite = bg_tex;
-        bs.press_scaling = 1.0;
-        bs.color = v4.{1, 1, 1, 0.95};
-        bs.hovered_color  = bs.color;
-        bs.pressed_color  = bs.color;
-        bs.disabled_color = bs.color;
-        bs.background_color_multiplier = v4.{1, 1, 1, 1};
-        bs.nine_slice_data.slice       = v4.{HELP_SLICE_PX, HELP_SLICE_PX, HELP_SLICE_PX, HELP_SLICE_PX};
-        bs.nine_slice_data.slice_scale = 1.0;
-        UI.push_disabled(true);
-        defer UI.pop_disabled();
-        UI.begin_button(panel_rect, bs, {}, ""); { defer UI.end_button(); }
-    } else {
-        UI.quad(panel_rect, core_globals.white_sprite, v4.{0.07, 0.07, 0.11, 0.97});
-    }
+    // Body row: left list / right detail
+    tab_handles:   [..]UIK.Interact_Handle;
+    list_handles:  [..]UIK.Interact_Handle;
+    list_role_ids: [..]int;
 
-    content := panel_rect.inset(16, 18, 16, 18);
+    body := UIK.layout_row();
+    body.width  = UIK.flex(1);
+    body.height = UIK.flex(1);
+    body.gap    = 12;
+    body.show_background = false;
+    UIK.panel_begin(body);
 
-    // ---- Title bar ----
-    title_strip := content.cut_top(46);
+    // Left: tabs + scrollable role list
+    left := UIK.panel_interior(.INSET);
+    left.width   = UIK.pixels(360);
+    left.height  = UIK.flex(1);
+    left.padding = v4.{10, 10, 10, 10};
+    left.gap     = 8;
+    UIK.panel_begin(left);
+    rg_draw_filter_tabs(player, ref tab_handles);
+    rg_draw_role_list_uik(player, ref list_handles, ref list_role_ids);
+    UIK.panel_end();
 
-    title_ts := UI.default_text_settings();
-    title_ts.size             = 36;
-    title_ts.color            = v4.{1, 1, 1, 1};
-    title_ts.halign           = .CENTER;
-    title_ts.valign           = .CENTER;
-    title_ts.do_outline       = true;
-    title_ts.outline_thickness = 3;
-    title_ts.outline_color    = v4.{0, 0, 0, 1};
-    UI.text(title_strip, title_ts, "ROLES GUIDE");
+    // Right: detail
+    buy_present:  bool;
+    buy_handle:   UIK.Interact_Handle;
+    buy_role_idx: int;
+    right := UIK.panel_interior(.INSET);
+    right.width   = UIK.flex(1);
+    right.height  = UIK.flex(1);
+    right.padding = v4.{14, 14, 14, 14};
+    UIK.panel_begin(right);
+    rg_draw_role_detail_uik(player, ref buy_present, ref buy_handle, ref buy_role_idx);
+    UIK.panel_end();
 
-    // Close button (icon sprite, top-right of panel)
-    UI.push_id("rg_close");
-    defer UI.pop_id();
+    UIK.panel_end(); // body
+    UIK.panel_end(); // shell
+    UIK.end();
 
-    CLOSE_HALF :: 30.0;
-    CLOSE_PAD  :: 10.0;
-    close_rect := panel_rect.top_right_rect().offset(-CLOSE_PAD, -CLOSE_PAD).grow(CLOSE_HALF);
-
-    close_bs := UI.default_button_settings();
-    close_bs.sprite        = get_asset(Texture_Asset, "ui/close_icon.png");
-    close_bs.press_scaling = 0.35;
-    close_bs.color         = v4.{1, 1, 1, 0.8};
-    close_bs.hovered_color = v4.{1, 1, 1, 1};
-    close_bs.pressed_color = v4.{0.6, 0.6, 0.6, 1};
-
-    if UI.button(close_rect, close_bs, UI.default_text_settings(), "").clicked {
+    // Resolve handles
+    if UIK.clicked(exit_handle) {
         player.roles_guide_open = false;
     }
+    for t: 0..tab_handles.count - 1 {
+        if UIK.clicked(tab_handles[t]) {
+            player.roles_guide_filter = t;
+        }
+    }
+    for i: 0..list_handles.count - 1 {
+        if UIK.clicked(list_handles[i]) {
+            player.roles_guide_selected = list_role_ids[i];
+        }
+    }
+    if buy_present && UIK.clicked(buy_handle) {
+        pid := rg_get_role_product_id(buy_role_idx);
+        if pid != "" Purchasing.prompt_purchase(player, pid);
+    }
 
-    content.cut_top(10);
-
-    // ---- Split left list | right detail ----
-    LIST_W :: 240.0;
-    GAP    :: 14.0;
-
-    left_panel := content.cut_left(LIST_W);
-    content.cut_left(GAP);
-
-    // Vertical divider
-    vert_div := content.cut_left(1);
-    UI.quad(vert_div, core_globals.white_sprite, v4.{1, 1, 1, 0.1});
-    content.cut_left(GAP);
-
-    rg_draw_role_list(player, left_panel);
-    rg_draw_role_detail(player, content);
+    // If filter hides current selection, snap to first visible role.
+    rg_ensure_visible_selection(player);
 }
 
-// ---- Left panel: role list ----
+rg_ensure_visible_selection :: proc(player: Player) {
+    if player.roles_guide_filter <= 0 return;
 
-rg_draw_role_list :: proc(player: Player, rect: Rect) {
-    list_area := rect;
+    sel_team := rg_get_role_team(player.roles_guide_selected);
+    filter_team := "CIVILIAN";
+    if player.roles_guide_filter == 2 filter_team = "ANARCHIST";
+    if player.roles_guide_filter == 3 filter_team = "TRAITOR";
+    if sel_team == filter_team return;
 
-    // ---- Filter tabs ----
-    TAB_H :: 50.0;
-    tab_strip := list_area.cut_top(TAB_H);
-    list_area.cut_top(6);
+    for fi: 1..RG_NUM_ROLES - 1 {
+        if fi == 9 || fi == 15 continue;
+        if rg_get_role_team(fi) == filter_team {
+            player.roles_guide_selected = fi;
+            return;
+        }
+    }
+}
 
-    tab_w := tab_strip.width() / 4.0;
+// ---- Filter tabs ----
+
+rg_draw_filter_tabs :: proc(player: Player, handles: ref [..]UIK.Interact_Handle) {
+    row := UIK.layout_row();
+    row.width  = UIK.flex(1);
+    row.height = UIK.fit();
+    row.gap    = 6;
+    row.show_background = false;
+    UIK.panel_begin(row);
 
     for ti: 0..3 {
-        UI.push_id("rg_tab_%", {ti});
-        defer UI.pop_id();
-
-        tab_rect := tab_strip.cut_left_unscaled(tab_w);
         is_active := player.roles_guide_filter == ti;
 
-        tab_bs := UI.default_button_settings();
-        tab_bs.press_scaling = 0.25;
-        tab_bs.color         = v4.{1, 1, 1, 1};
-        tab_bs.hovered_color = v4.{1, 1, 1, 1};
-        tab_bs.pressed_color = v4.{0.7, 0.7, 0.7, 1};
-
+        bg: UIK.Panel_Background_Kind = .BUTTON_BASIC_GREY;
         if is_active {
-            tab_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_9.png");
-            if ti == 0 { tab_bs.background_color_multiplier = v4.{0.35, 0.35, 0.40, 1.0}; }
-            if ti == 1 { tab_bs.background_color_multiplier = v4.{0.1,  0.7,  0.25, 1.0}; }
-            if ti == 2 { tab_bs.background_color_multiplier = v4.{0.7,  0.45, 0.08, 1.0}; }
-            if ti == 3 { tab_bs.background_color_multiplier = v4.{0.75, 0.15, 0.15, 1.0}; }
-        } else {
-            tab_bs.sprite = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png");
-            tab_bs.background_color_multiplier = v4.{0.20, 0.20, 0.24, 1.0};
+            if ti == 0 bg = .BUTTON_BASIC_GREY;
+            if ti == 1 bg = .BUTTON_BASIC_GREEN;
+            if ti == 2 bg = .BUTTON_BASIC_YELLOW1;
+            if ti == 3 bg = .BUTTON_BASIC_RED;
         }
 
-        tab_ts := UI.default_text_settings();
-        tab_ts.size              = 20;
-        tab_ts.halign            = .CENTER;
-        tab_ts.valign            = .CENTER;
-        tab_ts.do_outline        = true;
-        tab_ts.outline_thickness = 2;
-        tab_ts.outline_color     = v4.{0, 0, 0, 1};
+        label := "ALL";
+        if ti == 1 label = "CIV";
+        if ti == 2 label = "ANA";
+        if ti == 3 label = "TRA";
 
-        tab_ts.color = v4.{1, 1, 1, 1};
-        if !is_active {
-            if ti == 0 { tab_ts.color = v4.{0.6,  0.6,  0.6,  1}; }
-            if ti == 1 { tab_ts.color = v4.{0.3,  0.75, 0.4,  1}; }
-            if ti == 2 { tab_ts.color = v4.{0.75, 0.5,  0.2,  1}; }
-            if ti == 3 { tab_ts.color = v4.{0.8,  0.35, 0.35, 1}; }
-        }
+        d := UIK.widget_desc_button_default(bg);
+        d.panel.width   = UIK.flex(1);
+        d.panel.height  = UIK.pixels(56);
+        d.panel.padding = v4.{12, 14, 12, 14};
+        UIK.text_set_halign(&d.label_text, .CENTER);
+        UIK.text_set_valign(&d.label_text, .CENTER);
+        UIK.text_set_word_wrap(&d.label_text, false);
 
-        tab_label := "ALL";
-        if ti == 1 { tab_label = "CIV"; }
-        if ti == 2 { tab_label = "ANA"; }
-        if ti == 3 { tab_label = "TRA"; }
-
-        if UI.button(tab_rect.inset_unscaled(2, 2, 2, 2), tab_bs, tab_ts, tab_label).clicked {
-            player.roles_guide_filter = ti;
-        }
+        h := UIK.button(format_string("rg_tab_%", {ti}), label, d);
+        append(ref handles, h);
     }
 
-    // ---- Auto-select first visible role when filter hides current selection ----
-    if player.roles_guide_filter > 0 {
-        sel_team := rg_get_role_team(player.roles_guide_selected);
-        filter_team := "CIVILIAN";
-        if player.roles_guide_filter == 2 { filter_team = "ANARCHIST"; }
-        if player.roles_guide_filter == 3 { filter_team = "TRAITOR"; }
-
-        if sel_team != filter_team {
-            found := false;
-            for fi: 1..RG_NUM_ROLES-1 {
-                if fi == 9 continue;
-                    if !found && rg_get_role_team(fi) == filter_team {
-                    player.roles_guide_selected = fi;
-                    found = true;
-                }
-            }
-        }
-    }
-
-    // ---- Scrollable role list ----
-    scroll_area    := list_area;
-    scrollbar_area := scroll_area.cut_right(6).inset(2);
-
-    ROW_H   :: 60.0;
-    ROW_GAP :: 5.0;
-    HDR_H   :: 26.0;
-    HDR_GAP :: 4.0;
-
-    settings: Scroll_View_Settings;
-    settings.vertical     = true;
-    settings.horizontal   = false;
-    settings.clip_padding = v4.{2, 2, 2, 2};
-
-    sv := UI.push_scroll_view(scroll_area, "rg_role_list_sv", settings); {
-        defer UI.pop_scroll_view();
-
-        sc := sv.content_rect;
-        prev_team := "";
-
-        star_gold  := get_asset(Texture_Asset, "ui/star_gold 2.png");
-        star_empty := get_asset(Texture_Asset, "ui/star_empty2 2.png");
-
-        for i: 1..RG_NUM_ROLES-1 {
-            if i == 9 continue;
-
-            team := rg_get_role_team(i);
-
-            // Apply filter
-            if player.roles_guide_filter == 1 && team != "CIVILIAN"  continue;
-            if player.roles_guide_filter == 2 && team != "ANARCHIST" continue;
-            if player.roles_guide_filter == 3 && team != "TRAITOR"   continue;
-
-            // ---- Group header on team change ----
-            if team != prev_team {
-                if prev_team.count > 0 {
-                    sc.cut_top(HDR_GAP + 2);
-                }
-
-                hdr_row := sc.cut_top(HDR_H);
-                sc.cut_top(HDR_GAP);
-
-                hdr_ts := UI.default_text_settings();
-                hdr_ts.size              = 16;
-                hdr_ts.color             = rg_get_role_color(i);
-                hdr_ts.halign            = .LEFT;
-                hdr_ts.valign            = .CENTER;
-                hdr_ts.do_outline        = true;
-                hdr_ts.outline_thickness = 2;
-                hdr_ts.outline_color     = v4.{0, 0, 0, 1};
-                hdr_ts.offset.x          = 4;
-                UI.text(hdr_row, hdr_ts, team);
-
-                // Subtle colored underline
-                line_color := rg_get_role_color(i);
-                line_color.w = 0.25;
-                line_rect := hdr_row.bottom_rect().grow_unscaled(0, 0, 1, 0);
-                UI.quad(line_rect, core_globals.white_sprite, line_color);
-
-                UI.expand_current_scroll_view(hdr_row);
-                prev_team = team;
-            }
-
-            // ---- Role button ----
-            UI.push_id("rg_rl_%", {i});
-            defer UI.pop_id();
-
-            row := sc.cut_top(ROW_H);
-            sc.cut_top(ROW_GAP);
-
-            is_selected := player.roles_guide_selected == i;
-            is_locked   := rg_is_role_locked(player, i);
-            role_color  := rg_get_role_color(i);
-            muted_color := rg_get_role_muted_color(i);
-
-            btn_bs := UI.default_button_settings();
-            btn_bs.press_scaling = 0.3;
-
-            if is_selected {
-                btn_bs.sprite                      = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_9.png");
-                btn_bs.color                       = v4.{1, 1, 1, 1};
-                btn_bs.hovered_color               = v4.{1, 1, 1, 1};
-                btn_bs.pressed_color               = v4.{0.82, 0.82, 0.82, 1};
-                btn_bs.background_color_multiplier = role_color;
-            } else {
-                btn_bs.sprite                      = get_asset(Texture_Asset, "$AO/new/modal/buttons_2/button_8.png");
-                btn_bs.color                       = v4.{1, 1, 1, 1};
-                btn_bs.hovered_color               = v4.{1, 1, 1, 1};
-                btn_bs.pressed_color               = v4.{0.82, 0.82, 0.82, 1};
-                btn_bs.background_color_multiplier = muted_color;
-            }
-
-            // Custom button content: name + difficulty stars + lock icon
-            result := UI.begin_button(row, btn_bs, UI.default_text_settings(), ""); {
-                defer UI.end_button();
-
-                inner := result.rect.inset(4, 8, 4, 10);
-
-                // Reserve space for stars on the right
-                diff_stars := rg_get_role_difficulty_stars(i);
-                STAR_HALF :: 8.0;
-                STAR_SP   :: 2.0;
-                total_stars_w := 3.0 * STAR_HALF * 2.0 + 2.0 * STAR_SP;
-                stars_strip := inner.cut_right(total_stars_w);
-
-                star_layout := UI.make_directional_layout(stars_strip, .RIGHT);
-                for si: 0..2 {
-                    s_rect := star_layout.next(STAR_HALF * 2.0);
-                    star_tex := star_empty;
-                    if si < diff_stars { star_tex = star_gold; }
-                    if star_tex != null {
-                        UI.quad(s_rect.center_rect().grow(STAR_HALF).fit_aspect(star_tex.get_aspect()), star_tex);
-                    }
-                }
-
-                // Lock icon if role is locked
-                if is_locked {
-                    LOCK_HALF :: 10.0;
-                    lock_slot := inner.cut_left(LOCK_HALF * 2.0 + 4.0);
-                    lock_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_1/lock_closed.png");
-                    if lock_tex != null {
-                        lock_rect := lock_slot.center_rect().grow(LOCK_HALF);
-                        UI.quad(lock_rect.fit_aspect(lock_tex.get_aspect()), lock_tex, v4.{1, 1, 1, 0.8});
-                    }
-                }
-
-                // Role name on the left
-                name_ts := UI.default_text_settings();
-                name_ts.size              = 22;
-                name_ts.color             = v4.{1, 1, 1, 1};
-                if is_locked {
-                    name_ts.color = v4.{0.6, 0.6, 0.6, 1};
-                }
-                name_ts.halign            = .LEFT;
-                name_ts.valign            = .CENTER;
-                name_ts.do_outline        = true;
-                name_ts.outline_thickness = 2;
-                name_ts.outline_color     = v4.{0, 0, 0, 1};
-                name_ts.offset.x          = 2;
-                UI.text(inner, name_ts, rg_get_role_name(i));
-
-                // "NEW" badge for new roles
-                if i == 14 {
-                    NEW_BADGE_H :: 14.0;
-                    NEW_BADGE_W :: 30.0;
-                    badge_rect := result.rect.top_right_rect().offset(-4, -2).grow_unscaled(NEW_BADGE_H, NEW_BADGE_W, 0, 0);
-                    UI.quad(badge_rect, core_globals.white_sprite, v4.{0.1, 0.6, 1.0, 0.9});
-
-                    new_badge_ts := UI.default_text_settings();
-                    new_badge_ts.size = 11;
-                    new_badge_ts.halign = .CENTER;
-                    new_badge_ts.valign = .CENTER;
-                    new_badge_ts.color = v4.{1, 1, 1, 1};
-                    new_badge_ts.do_outline = true;
-                    new_badge_ts.outline_thickness = 1;
-                    new_badge_ts.outline_color = v4.{0, 0, 0, 1};
-                    UI.text(badge_rect, new_badge_ts, "NEW");
-                }
-            }
-
-            if result.clicked {
-                player.roles_guide_selected = i;
-            }
-
-            UI.expand_current_scroll_view(row);
-        }
-    }
-
-    sb_rect := sv.compute_scroll_bar_rect(scrollbar_area);
-    if sb_rect.height() < scrollbar_area.height() - 1.0 {
-        UI.quad(scrollbar_area, core_globals.white_sprite, v4.{0.1, 0.1, 0.1, 0.4});
-        UI.quad(sb_rect,        core_globals.white_sprite, v4.{0.4, 0.4, 0.4, 0.6});
-    }
+    UIK.panel_end();
 }
 
-// ---- Right panel: role detail ----
+// ---- Left: role list ----
 
-rg_draw_role_detail :: proc(player: Player, rect: Rect) {
-    idx := player.roles_guide_selected;
-    if idx < 1 { idx = 1; }
+rg_draw_role_list_uik :: proc(player: Player, handles: ref [..]UIK.Interact_Handle, role_ids: ref [..]int) {
+    list := UIK.layout_column();
+    list.width  = UIK.flex(1);
+    list.height = UIK.flex(1);
+    list.gap    = 2;
+    list.show_background = false;
+    UIK.list_begin("rg_role_list", list);
 
-    description := rg_get_role_description(idx);
+    prev_team := "";
+    for i: 1..RG_NUM_ROLES - 1 {
+        if i == 9 || i == 15 continue;
 
-    content := rect;
+        team := rg_get_role_team(i);
+        if player.roles_guide_filter == 1 && team != "CIVILIAN"  continue;
+        if player.roles_guide_filter == 2 && team != "ANARCHIST" continue;
+        if player.roles_guide_filter == 3 && team != "TRAITOR"   continue;
 
-    // ---- Header: role icon centered with stars to the right ----
-    ICON_HALF  :: 46.0;
-    HEADER_H   :: 100.0;
-    detail_icon_path := rg_get_role_detail_icon(idx);
-    diff_stars       := rg_get_role_difficulty_stars(idx);
-
-    header_strip := content.cut_top(HEADER_H);
-
-    if detail_icon_path.count > 0 {
-        role_icon_tex := get_asset(Texture_Asset, detail_icon_path);
-        if role_icon_tex != null {
-            icon_rect := header_strip.center_rect().grow(ICON_HALF);
-            UI.quad(icon_rect.fit_aspect(role_icon_tex.get_aspect(), .KEEP_HEIGHT), role_icon_tex, v4.{1, 1, 1, 1});
+        if team != prev_team {
+            if prev_team.count > 0 {
+                UIK.spacer(UIK.pixels(1), UIK.pixels(2));
+            }
+            hdr := UIK.layout_row();
+            hdr.width   = UIK.flex(1);
+            hdr.height  = UIK.fit();
+            hdr.padding = v4.{2, 4, 2, 4};
+            hdr.show_background = false;
+            UIK.panel_begin(hdr);
+            hdr_ts := UIK.text_body();
+            UIK.text_set_color(&hdr_ts, rg_get_role_color(i));
+            UIK.text_set_halign(&hdr_ts, .LEFT);
+            UIK.text_set_word_wrap(&hdr_ts, false);
+            UIK.text(team, hdr_ts);
+            UIK.panel_end();
+            prev_team = team;
         }
 
-        // Stars to the right of the icon
-        star_gold  := get_asset(Texture_Asset, "ui/star_gold 2.png");
-        star_empty := get_asset(Texture_Asset, "ui/star_empty2 2.png");
-        STAR_HALF :: 12.0;
-        STAR_GAP  :: 4.0;
-        stars_anchor := header_strip.center_rect().offset(ICON_HALF + 14.0, 0);
-        for si: 0..2 {
-            offset_y := (si.(float) - 1.0) * (STAR_HALF * 2.0 + STAR_GAP);
-            star_rect := stars_anchor.offset(0, -offset_y).grow(STAR_HALF);
-            star_tex := star_empty;
-            if si < diff_stars { star_tex = star_gold; }
-            if star_tex != null {
-                UI.quad(star_rect.fit_aspect(star_tex.get_aspect()), star_tex, v4.{1, 1, 1, 1});
-            }
+        rg_draw_role_list_row(player, i, ref handles, ref role_ids);
+    }
+
+    UIK.list_end();
+}
+
+rg_draw_role_list_row :: proc(player: Player, role_idx: int, handles: ref [..]UIK.Interact_Handle, role_ids: ref [..]int) {
+    is_selected := player.roles_guide_selected == role_idx;
+    is_locked   := rg_is_role_locked(player, role_idx);
+
+    bg: UIK.Panel_Background_Kind = .BUTTON_BASIC_BLACK;
+    if is_selected {
+        team_idx := loadout_team_for_role(role_idx);
+        if team_idx >= 0 {
+            bg = loadout_tab_active_bg(team_idx);
+        } else {
+            bg = .BUTTON_BASIC_GREY;
         }
     }
 
-    // ---- Locked banner ----
-    is_locked := rg_is_role_locked(player, idx);
-    if is_locked {
-        content.cut_top(6);
-        LOCK_BANNER_H :: 32.0;
-        lock_banner := content.cut_top(LOCK_BANNER_H);
-        UI.quad(lock_banner, core_globals.white_sprite, v4.{0.15, 0.12, 0.05, 0.6});
+    row := UIK.layout_row();
+    row.width   = UIK.flex(1);
+    row.height  = UIK.pixels(56);
+    row.gap     = 8;
+    row.padding = v4.{6, 10, 6, 10};
+    row.cross_align    = .CENTER;
+    row.background     = bg;
+    row.show_background = true;
 
-        lock_inner := lock_banner.inset(4, 8, 4, 8);
-        LOCK_ICON_HALF :: 10.0;
-        lock_icon_slot := lock_inner.cut_left(LOCK_ICON_HALF * 2.0 + 6.0);
+    h := UIK.panel_begin_interactive(format_string("rg_row_%", {role_idx}), row);
+    append(ref handles,  h);
+    append(ref role_ids, role_idx);
+
+    // Small role icon
+    icon_box := UIK.layout_column();
+    icon_box.width  = UIK.pixels(40);
+    icon_box.height = UIK.pixels(40);
+    icon_box.show_background = false;
+    UIK.panel_begin(icon_box);
+    icon_tex := get_asset(Texture_Asset, loadout_get_role_small_icon(role_idx));
+    if icon_tex != null {
+        tint := v4.{1, 1, 1, 1};
+        if is_locked tint = v4.{0.5, 0.5, 0.5, 1};
+        UIK.image_fitted(icon_tex, UIK.image_desc(.CONTAIN), tint);
+    }
+    UIK.panel_end();
+
+    // Name (flex)
+    name_col := UIK.layout_column();
+    name_col.width  = UIK.flex(1);
+    name_col.height = UIK.flex(1);
+    name_col.main_align = .CENTER;
+    name_col.show_background = false;
+    UIK.panel_begin(name_col);
+
+    name_color := v4.{1, 1, 1, 1};
+    if is_locked name_color = v4.{0.6, 0.6, 0.6, 1};
+    name_ts := UIK.text_body();
+    UIK.text_set_color(&name_ts, name_color);
+    UIK.text_set_halign(&name_ts, .LEFT);
+    UIK.text_set_word_wrap(&name_ts, false);
+    UIK.text(rg_get_role_name(role_idx), name_ts);
+
+    UIK.panel_end();
+
+    // Lock icon
+    if is_locked {
+        lock_box := UIK.layout_column();
+        lock_box.width  = UIK.pixels(20);
+        lock_box.height = UIK.pixels(20);
+        lock_box.show_background = false;
+        UIK.panel_begin(lock_box);
         lock_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_1/lock_closed.png");
         if lock_tex != null {
-            lock_icon_rect := lock_icon_slot.center_rect().grow(LOCK_ICON_HALF);
-            UI.quad(lock_icon_rect.fit_aspect(lock_tex.get_aspect()), lock_tex, v4.{1, 0.85, 0.3, 1});
+            UIK.image_fitted(lock_tex, UIK.image_desc(.CONTAIN), v4.{1, 0.85, 0.3, 1});
         }
-
-        lock_ts := UI.default_text_settings();
-        lock_ts.size              = 18;
-        lock_ts.color             = v4.{1, 0.85, 0.3, 1};
-        lock_ts.halign            = .LEFT;
-        lock_ts.valign            = .CENTER;
-        lock_ts.do_outline        = true;
-        lock_ts.outline_thickness = 2;
-        lock_ts.outline_color     = v4.{0, 0, 0, 1};
-        UI.text(lock_inner, lock_ts, "LOCKED - Available in Shop");
+        UIK.panel_end();
     }
 
-    content.cut_top(8);
+    // Stars (fixed-width slot so it doesn't fight name flex)
+    stars_wrap := UIK.layout_column();
+    stars_wrap.width  = UIK.pixels(60);
+    stars_wrap.height = UIK.fit();
+    stars_wrap.show_background = false;
+    UIK.panel_begin(stars_wrap);
+    loadout_draw_stars_row(rg_get_role_difficulty_stars(role_idx), 3, 16.0, false);
+    UIK.panel_end();
 
-    // Thin divider
-    UI.quad(content.cut_top(1), core_globals.white_sprite, v4.{1, 1, 1, 0.1});
-    content.cut_top(10);
+    UIK.panel_end(); // row
+}
+
+// ---- Right: role detail ----
+
+rg_draw_role_detail_uik :: proc(player: Player, buy_present: ref bool, buy_handle: ref UIK.Interact_Handle, buy_role_idx: ref int) {
+    idx := player.roles_guide_selected;
+    if idx < 1 idx = 1;
+
+    is_locked := rg_is_role_locked(player, idx);
+    buy_role_idx = idx;
+
+    content := UIK.layout_column();
+    content.width  = UIK.flex(1);
+    content.height = UIK.flex(1);
+    content.gap    = 8;
+    content.show_background = false;
+    UIK.list_begin("rg_detail_scroll", content);
+
+    // ---- Header card: [team] [icon w/ name overlay] [stars] ----
+    header := UIK.layout_row();
+    header.width   = UIK.flex(1);
+    header.height  = UIK.fit();
+    header.padding = v4.{16, 48, 16, 48};
+    header.gap     = 48;
+    header.main_align  = .CENTER;
+    header.cross_align = .CENTER;
+    header.background      = .BUTTON_BASIC_BLACK;
+    header.show_background = true;
+    UIK.panel_begin(header);
+
+    // Team label (left)
+    team_ts := UIK.text_body();
+    UIK.text_set_color(&team_ts, rg_get_role_color(idx));
+    UIK.text_set_halign(&team_ts, .CENTER);
+    UIK.text_set_valign(&team_ts, .CENTER);
+    UIK.text_set_word_wrap(&team_ts, false);
+    UIK.text_set_size_mult(&team_ts, 1.0);
+    UIK.text(rg_get_role_team(idx), team_ts);
+
+    // Icon + name overlay (center)
+    icon_box := UIK.layout_column();
+    icon_box.width  = UIK.pixels(140);
+    icon_box.height = UIK.pixels(140);
+    icon_box.show_background = false;
+    UIK.panel_begin(icon_box);
+    icon_tex := get_asset(Texture_Asset, loadout_get_role_small_icon(idx));
+    if icon_tex != null {
+        UIK.image_fitted(icon_tex, UIK.image_desc(.CONTAIN));
+    }
+
+    UIK.overlay_begin(.BOTTOM_CENTER, v2.{0, -4});
+    name_ts := UIK.text_body();
+    UIK.text_set_color(&name_ts, v4.{1, 1, 1, 1});
+    UIK.text_set_halign(&name_ts, .CENTER);
+    UIK.text_set_valign(&name_ts, .CENTER);
+    UIK.text_set_word_wrap(&name_ts, false);
+    UIK.text_set_size_mult(&name_ts, 1.15);
+    UIK.text(rg_get_role_name(idx), name_ts);
+    UIK.overlay_end();
+
+    UIK.panel_end(); // icon_box
+
+    // Stars (right)
+    stars_row := UIK.layout_row();
+    stars_row.width   = UIK.fit();
+    stars_row.height  = UIK.fit();
+    stars_row.gap     = 3;
+    stars_row.cross_align = .CENTER;
+    stars_row.show_background = false;
+    UIK.panel_begin(stars_row);
+    star_gold  := get_asset(Texture_Asset, "ui/star_gold 2.png");
+    star_empty := get_asset(Texture_Asset, "ui/star_empty2 2.png");
+    diff := rg_get_role_difficulty_stars(idx);
+    for si: 0..2 {
+        tex := star_empty;
+        if si < diff tex = star_gold;
+        slot := UIK.layout_column();
+        slot.width  = UIK.pixels(24);
+        slot.height = UIK.pixels(24);
+        slot.show_background = false;
+        UIK.panel_begin(slot);
+        if tex != null UIK.image_fitted(tex, UIK.image_desc(.CONTAIN));
+        UIK.panel_end();
+    }
+    UIK.panel_end(); // stars_row
+
+    UIK.panel_end(); // header
+
+    // ---- Locked banner + Buy CTA ----
+    if is_locked {
+        banner := UIK.layout_row();
+        banner.width   = UIK.flex(1);
+        banner.height  = UIK.fit();
+        banner.gap     = 8;
+        banner.padding = v4.{8, 12, 8, 12};
+        banner.cross_align     = .CENTER;
+        banner.background      = .MODAL_TRANSP_BLACK;
+        banner.show_background = true;
+        UIK.panel_begin(banner);
+
+        lock_box := UIK.layout_column();
+        lock_box.width  = UIK.pixels(20);
+        lock_box.height = UIK.pixels(20);
+        lock_box.show_background = false;
+        UIK.panel_begin(lock_box);
+        lock_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/misc_icons_1/lock_closed.png");
+        if lock_tex != null {
+            UIK.image_fitted(lock_tex, UIK.image_desc(.CONTAIN), v4.{1, 0.85, 0.3, 1});
+        }
+        UIK.panel_end();
+
+        lock_ts := UIK.text_body();
+        UIK.text_set_color(&lock_ts, v4.{1, 0.85, 0.3, 1});
+        UIK.text_set_halign(&lock_ts, .LEFT);
+        UIK.text_set_word_wrap(&lock_ts, false);
+        UIK.text("LOCKED", lock_ts);
+
+        UIK.panel_end();
+
+        price := rg_get_role_price(idx);
+        pid   := rg_get_role_product_id(idx);
+        if price.count > 0 && pid.count > 0 {
+            btn := UIK.panel_styled(.BUTTON_BASIC_GREEN);
+            btn.axis        = .HORIZONTAL;
+            btn.width       = UIK.flex(1);
+            btn.height      = UIK.pixels(64);
+            btn.padding     = v4.{10, 18, 22, 18};
+            btn.gap         = 8;
+            btn.main_align  = .CENTER;
+            btn.cross_align = .CENTER;
+            buy_handle  = UIK.panel_begin_interactive("rg_buy", btn);
+            buy_present = true;
+
+            spark_box := UIK.layout_column();
+            spark_box.width  = UIK.pixels(24);
+            spark_box.height = UIK.pixels(24);
+            spark_box.show_background = false;
+            UIK.panel_begin(spark_box);
+            sparks_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/sparks/spark_small.png");
+            if sparks_tex != null {
+                UIK.image_fitted(sparks_tex, UIK.image_desc(.CONTAIN), v4.{1, 0.9, 0.3, 1});
+            }
+            UIK.panel_end();
+
+            buy_ts := UIK.text_body();
+            UIK.text_set_color(&buy_ts, v4.{1, 1, 1, 1});
+            UIK.text_set_halign(&buy_ts, .CENTER);
+            UIK.text_set_valign(&buy_ts, .CENTER);
+            UIK.text_set_word_wrap(&buy_ts, false);
+            UIK.text_set_size_mult(&buy_ts, 1.1);
+            UIK.text(format_string("Unlock for % Sparks", {price}), buy_ts);
+
+            UIK.panel_end(); // btn
+        }
+    }
 
     // ---- Description ----
-    DESC_H :: 90.0;
-    desc_area := content.cut_top(DESC_H);
-
-    desc_ts := UI.default_text_settings();
-    desc_ts.size              = 28;
-    desc_ts.color             = v4.{0.9, 0.9, 0.95, 1};
-    desc_ts.halign            = .CENTER;
-    desc_ts.valign            = .TOP;
-    desc_ts.word_wrap         = true;
-    desc_ts.do_outline        = true;
-    desc_ts.outline_thickness = 3;
-    desc_ts.outline_color     = v4.{0, 0, 0, 1};
-    desc_ts.do_autofit        = true;
-    desc_ts.autofit_min_size  = 18;
-    desc_ts.autofit_max_size  = 28;
-    UI.text(desc_area, desc_ts, description);
+    desc_panel := UIK.layout_column();
+    desc_panel.width   = UIK.flex(1);
+    desc_panel.height  = UIK.fit();
+    desc_panel.padding = v4.{12, 14, 12, 14};
+    desc_panel.show_background = false;
+    UIK.panel_begin(desc_panel);
+    desc_ts := UIK.text_body();
+    UIK.text_set_color(&desc_ts, v4.{0.9, 0.9, 0.95, 1});
+    UIK.text_set_halign(&desc_ts, .CENTER);
+    UIK.text_set_word_wrap(&desc_ts, true);
+    UIK.text(rg_get_role_description(idx), desc_ts);
+    UIK.panel_end();
 
     // ---- Tips ----
     tips := rg_get_role_tips(idx);
     if tips.count > 0 {
-        content.cut_top(8);
-
-        TIPS_H :: 60.0;
-        tips_area := content.cut_top(TIPS_H);
-
-        tips_bg := tips_area.inset(2);
-        UI.quad(tips_bg, core_globals.white_sprite, v4.{0.12, 0.12, 0.18, 0.5});
-
-        tips_inner := tips_bg.inset(8, 10, 8, 10);
-
-        tips_ts := UI.default_text_settings();
-        tips_ts.size              = 22;
-        tips_ts.color             = v4.{0.95, 0.88, 0.45, 1};
-        tips_ts.halign            = .LEFT;
-        tips_ts.valign            = .CENTER;
-        tips_ts.word_wrap         = true;
-        tips_ts.do_outline        = true;
-        tips_ts.outline_thickness = 2;
-        tips_ts.outline_color     = v4.{0, 0, 0, 1};
-        tips_ts.do_autofit        = true;
-        tips_ts.autofit_min_size  = 16;
-        tips_ts.autofit_max_size  = 22;
-        UI.text(tips_inner, tips_ts, "TIP: %", {tips});
+        tips_panel := UIK.panel_styled(.MODAL_TRANSP_BLACK);
+        tips_panel.width   = UIK.flex(1);
+        tips_panel.height  = UIK.fit();
+        tips_panel.padding = v4.{10, 12, 10, 12};
+        UIK.panel_begin(tips_panel);
+        tips_ts := UIK.text_body();
+        UIK.text_set_color(&tips_ts, v4.{0.95, 0.88, 0.45, 1});
+        UIK.text_set_halign(&tips_ts, .LEFT);
+        UIK.text_set_word_wrap(&tips_ts, true);
+        UIK.text(format_string("TIP: %", {tips}), tips_ts);
+        UIK.panel_end();
     }
 
-    content.cut_top(10);
+    // ---- Abilities ----
+    UIK.spacer(UIK.pixels(1), UIK.pixels(4));
+    ab_label_ts := UIK.text_body();
+    UIK.text_set_color(&ab_label_ts, v4.{0.65, 0.65, 0.7, 1});
+    UIK.text_set_halign(&ab_label_ts, .LEFT);
+    UIK.text_set_word_wrap(&ab_label_ts, false);
+    UIK.text("ABILITIES", ab_label_ts);
+    UIK.spacer(UIK.pixels(1), UIK.pixels(2));
 
-    // Thin divider
-    UI.quad(content.cut_top(1), core_globals.white_sprite, v4.{1, 1, 1, 0.1});
-    content.cut_top(8);
-
-    // ---- Abilities section label ----
-    ab_label := content.cut_top(26);
-    ab_label_ts := UI.default_text_settings();
-    ab_label_ts.size             = 19;
-    ab_label_ts.color            = v4.{0.6, 0.6, 0.65, 1};
-    ab_label_ts.halign           = .LEFT;
-    ab_label_ts.valign           = .CENTER;
-    ab_label_ts.do_outline       = true;
-    ab_label_ts.outline_thickness = 2;
-    ab_label_ts.outline_color    = v4.{0, 0, 0, 1};
-    UI.text(ab_label, ab_label_ts, "ABILITIES");
-    content.cut_top(6);
-
-    // ---- Abilities list ----
     ab_entries: [..]Rg_Ability_Entry;
     rg_get_role_abilities(idx, ref ab_entries);
 
     if ab_entries.count == 0 {
-        no_ab_ts := UI.default_text_settings();
-        no_ab_ts.size             = 26;
-        no_ab_ts.color            = v4.{0.45, 0.45, 0.50, 1};
-        no_ab_ts.halign           = .CENTER;
-        no_ab_ts.valign           = .CENTER;
-        no_ab_ts.do_outline       = true;
-        no_ab_ts.outline_thickness = 2;
-        no_ab_ts.outline_color    = v4.{0, 0, 0, 1};
-        UI.text(content, no_ab_ts, "No special abilities.");
-        return;
-    }
-
-    // Scroll view for abilities
-    scroll_area    := content;
-    scrollbar_area := scroll_area.cut_right(6).inset(2);
-
-    settings: Scroll_View_Settings;
-    settings.vertical     = true;
-    settings.horizontal   = false;
-    settings.clip_padding = v4.{6, 6, 6, 6};
-
-    sv := UI.push_scroll_view(scroll_area, "rg_ability_sv", settings); {
-        defer UI.pop_scroll_view();
-
-        sc := sv.content_rect;
-
-        ROW_H      :: 64.0;
-        ICON_SIZE  :: 36.0;
-        ROW_GAP    :: 16.0;
-
-        for i: 0..ab_entries.count-1 {
-            entry := ab_entries[i];
-
-            UI.push_id("rg_ab_%", {i});
-            defer UI.pop_id();
-
-            row := sc.cut_top(ROW_H);
-            if i < ab_entries.count - 1 {
-                sc.cut_top(ROW_GAP);
-            }
-
-            row_inner := row.inset(6, 8, 6, 8);
-
-            // Icon slot
-            if entry.icon_path.count > 0 {
-                icon_slot := row_inner.cut_left(ICON_SIZE * 2.0 + 12.0);
-                icon_tex  := get_asset(Texture_Asset, entry.icon_path);
-                if icon_tex != null {
-                    icon_rect := icon_slot.center_rect().grow(ICON_SIZE);
-                    UI.quad(icon_rect.fit_aspect(icon_tex.get_aspect()), icon_tex, v4.{1, 1, 1, 1});
-                }
-            }
-
-            // Ability name
-            name_row := row_inner.cut_top(26);
-            ab_name_ts := UI.default_text_settings();
-            ab_name_ts.size             = 30;
-            ab_name_ts.color            = v4.{1, 1, 1, 1};
-            ab_name_ts.halign           = .LEFT;
-            ab_name_ts.valign           = .TOP;
-            ab_name_ts.do_outline       = true;
-            ab_name_ts.outline_thickness = 2;
-            ab_name_ts.outline_color    = v4.{0, 0, 0, 1};
-            UI.text(name_row, ab_name_ts, entry.name);
-
-            // Ability description
-            ab_desc_ts := UI.default_text_settings();
-            ab_desc_ts.size             = 22;
-            ab_desc_ts.color            = v4.{0.8, 0.8, 0.85, 0.85};
-            ab_desc_ts.halign           = .LEFT;
-            ab_desc_ts.valign           = .TOP;
-            ab_desc_ts.word_wrap        = true;
-            ab_desc_ts.do_outline       = true;
-            ab_desc_ts.outline_thickness = 2;
-            ab_desc_ts.outline_color    = v4.{0, 0, 0, 1};
-            UI.text(row_inner, ab_desc_ts, entry.desc);
-
-            UI.expand_current_scroll_view(row);
+        empty := UIK.layout_column();
+        empty.width   = UIK.flex(1);
+        empty.height  = UIK.pixels(40);
+        empty.main_align  = .CENTER;
+        empty.cross_align = .CENTER;
+        empty.show_background = false;
+        UIK.panel_begin(empty);
+        no_ts := UIK.text_body();
+        UIK.text_set_color(&no_ts, v4.{0.5, 0.5, 0.55, 1});
+        UIK.text_set_halign(&no_ts, .CENTER);
+        UIK.text("No special abilities.", no_ts);
+        UIK.panel_end();
+    } else {
+        for i: 0..ab_entries.count - 1 {
+            rg_draw_ability_row(ab_entries[i]);
         }
     }
 
-    sb_rect := sv.compute_scroll_bar_rect(scrollbar_area);
-    UI.quad(scrollbar_area, core_globals.white_sprite, v4.{0.1, 0.1, 0.1, 0.4});
-    UI.quad(sb_rect,        core_globals.white_sprite, v4.{0.4, 0.4, 0.4, 0.6});
+    UIK.list_end();
+}
+
+rg_draw_ability_row :: proc(entry: Rg_Ability_Entry) {
+    row := UIK.layout_row();
+    row.width   = UIK.flex(1);
+    row.height  = UIK.fit();
+    row.gap     = 12;
+    row.padding = v4.{8, 10, 8, 10};
+    row.cross_align = .START;
+    row.background      = .MODAL_TRANSP_BLACK;
+    row.show_background = true;
+    UIK.panel_begin(row);
+
+    // Icon
+    icon_box := UIK.layout_column();
+    icon_box.width  = UIK.pixels(48);
+    icon_box.height = UIK.pixels(48);
+    icon_box.show_background = false;
+    UIK.panel_begin(icon_box);
+    if entry.icon_path.count > 0 {
+        icon_tex := get_asset(Texture_Asset, entry.icon_path);
+        if icon_tex != null {
+            UIK.image_fitted(icon_tex, UIK.image_desc(.CONTAIN));
+        }
+    }
+    UIK.panel_end();
+
+    // Name + desc
+    info := UIK.layout_column();
+    info.width  = UIK.flex(1);
+    info.height = UIK.fit();
+    info.gap    = 2;
+    info.show_background = false;
+    UIK.panel_begin(info);
+
+    name_ts := UIK.text_body();
+    UIK.text_set_color(&name_ts, v4.{1, 1, 1, 1});
+    UIK.text_set_halign(&name_ts, .LEFT);
+    UIK.text_set_size_mult(&name_ts, 1.1);
+    UIK.text_set_word_wrap(&name_ts, false);
+    UIK.text(entry.name, name_ts);
+
+    desc_ts := UIK.text_body();
+    UIK.text_set_color(&desc_ts, v4.{0.8, 0.8, 0.85, 0.9});
+    UIK.text_set_halign(&desc_ts, .LEFT);
+    UIK.text_set_word_wrap(&desc_ts, true);
+    UIK.text(entry.desc, desc_ts);
+
+    UIK.panel_end(); // info
+    UIK.panel_end(); // row
 }
 
 // ---- Open/close button (drawn in HUD) ----
