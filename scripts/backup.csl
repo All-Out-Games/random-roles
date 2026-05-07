@@ -15,7 +15,7 @@
 //   - role / type / alive state / completed task ids
 //   - traitor scalar counters: Werewolf+Hitman+Mimicer kills, Pirate treasure
 //   - Lily: tree planted/pos/fulfilled_count, carrying eyes+legs
-//   - Big Charlie: flesh_mass, current+target scale
+//   - Big Charlie: planted_nugget_total, infection count
 //   - GGG: nest placed/pos/points
 //   - Portal Maker: red+blue portal positions
 //   - Hitman: placed-mine positions
@@ -23,7 +23,7 @@
 
 BACKUP_POLL_INTERVAL :: 0.5;
 RR_BACKUP_SAVE_KEY :: "rr_backup_snapshot";
-RR_BACKUP_SCHEMA_VERSION :: 4;
+RR_BACKUP_SCHEMA_VERSION :: 5;
 
 // Enums serialized as ints — JSON support for enums is unspecified, ints are
 // portable. Schema version bump guards against enum reordering.
@@ -46,10 +46,9 @@ Backup_Player_Entry :: class {
 	lily_carrying_eyes: bool @ao_serialize;
 	lily_carrying_legs: bool @ao_serialize;
 
-	// Big Charlie (scales stored ×1000 as int to avoid float-string parser issues)
-	bc_flesh_mass: int @ao_serialize;
-	bc_current_scale_x1000: int @ao_serialize;
-	bc_target_scale_x1000: int @ao_serialize;
+	// Big Charlie (anarchist) — checklist counters
+	bc_planted_nugget_total: int @ao_serialize;
+	bc_infection_count: int @ao_serialize;
 
 	// Goo Goo Gaga
 	ggg_nest_placed: bool @ao_serialize;
@@ -76,7 +75,6 @@ Backup_Corpse_Entry :: class {
 	pirate_map_taken: bool @ao_serialize;
 	ggg_is_wrapped: bool @ao_serialize;
 	mimicer_disguised_kill: bool @ao_serialize;
-	bc_nested: bool @ao_serialize;
 }
 
 Backup_Snapshot :: class {
@@ -254,9 +252,8 @@ rr_backup_fill_entry :: proc(e: Backup_Player_Entry, p: Player) {
 	// Big Charlie
 	bcm := p.entity.get_component(Big_Charlie_Module);
 	if bcm != null {
-		e.bc_flesh_mass = bcm.flesh_mass;
-		e.bc_current_scale_x1000 = (bcm.current_scale * 1000.0).(int);
-		e.bc_target_scale_x1000 = (bcm.target_scale * 1000.0).(int);
+		e.bc_planted_nugget_total = bcm.planted_nugget_total;
+		e.bc_infection_count = bcm.infected_player_ids.count;
 	}
 
 	// GGG
@@ -333,7 +330,6 @@ rr_backup_capture :: proc() {
 		ce.pirate_map_taken = c.pirate_map_taken;
 		ce.ggg_is_wrapped = c.ggg_is_wrapped;
 		ce.mimicer_disguised_kill = c.mimicer_disguised_kill;
-		ce.bc_nested = c.bc_nested;
 		append(ref snap.corpses, ce);
 	}
 
@@ -393,7 +389,8 @@ rr_backup_state_changed :: proc() -> bool {
 
 			bcm := p.entity.get_component(Big_Charlie_Module);
 			if bcm != null {
-				if e.bc_flesh_mass != bcm.flesh_mass return true;
+				if e.bc_planted_nugget_total != bcm.planted_nugget_total return true;
+				if e.bc_infection_count != bcm.infected_player_ids.count return true;
 			}
 
 			gm := p.entity.get_component(GGG_Module);
@@ -491,9 +488,12 @@ rr_backup_restore_lily :: proc(p: Player, e: Backup_Player_Entry) {
 rr_backup_restore_bc :: proc(p: Player, e: Backup_Player_Entry) {
 	bcm := p.entity.get_component(Big_Charlie_Module);
 	if bcm == null bcm = p.entity.add_component(Big_Charlie_Module);
-	bcm.flesh_mass = e.bc_flesh_mass;
-	bcm.current_scale = e.bc_current_scale_x1000.(float) / 1000.0;
-	bcm.target_scale = e.bc_target_scale_x1000.(float) / 1000.0;
+	bcm.planted_nugget_total = e.bc_planted_nugget_total;
+	// Infection count is restored as a number; the actual infected_player_ids
+	// list isn't snapshotted (would require serializing entity-id stability).
+	// On restore we leave the list empty — backup is a dev tool, not a perfect
+	// fidelity replay, and the infection slot count is rebuilt from new cocoons.
+	bcm.infected_player_ids.clear();
 }
 
 rr_backup_restore_ggg :: proc(p: Player, e: Backup_Player_Entry) {
@@ -576,7 +576,6 @@ rr_backup_restore_corpses :: proc() {
 		c.pirate_map_taken = ce.pirate_map_taken;
 		c.ggg_is_wrapped = ce.ggg_is_wrapped;
 		c.mimicer_disguised_kill = ce.mimicer_disguised_kill;
-		c.bc_nested = ce.bc_nested;
 		if ce.death_anim.count > 0 c.death_anim = ce.death_anim;
 	}
 }

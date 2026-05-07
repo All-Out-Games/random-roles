@@ -753,6 +753,7 @@ rr_role_has_abilities :: proc(role: Player_Role, ptype: Player_Type) -> bool {
 		case .PORTAL_MAKER: return true;
 		case .PRANKSTER:    return true;
 		case .PYROMANIAC:   return true;
+		case .BIG_CHARLIE:  return true;
 		case .PIRATE:       return true;
 		case .HITMAN:       return true;
 		case .WEREWOLF:     return true;
@@ -778,6 +779,7 @@ rr_get_role_description :: proc(role: Player_Role, ptype: Player_Type) -> string
 		switch role {
 			case .PRANKSTER: return "A chaotic wild card. Prank other schleems, call fake emergency meetings and get someone voted it, and when enough chaos is caused, unlock the Jester Win to win!";
 			case .PYROMANIAC: return "A fire-obsessed anarchist. Set rooms ablaze and ignite corpses to destroy evidence. Burn enough of the station to unlock World Fire and engulf everything in flames.";
+			case .BIG_CHARLIE: return "A solo horror. Transform into Big Charlie, birth range-limited Lil' Nuggets, cocoon victims to infect them, then complete the checklist and fire Mass Birth to win.";
 		}
 		return "You are an anarchist. You win alone by completing your unique objective.";
 	}
@@ -882,6 +884,13 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 				append(ref results, Help_Ability_Entry.{"sprites/icons/pyro/light_corpse.png", "Light Corpse", "Ignite a nearby dead body to destroy evidence."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/pyro/worldfire.png", "World Fire", "Unlocked after burning enough. Engulf the station in flames to win."});
 			}
+			case .BIG_CHARLIE: {
+				append(ref results, Help_Ability_Entry.{"sprites/icons/transform_evil.png", "Transform", "Toggle between schleem and Big Charlie form. Big Charlie form is faster and births Nuggets."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/big_charlie/Lil_Nugget.png", "Birth Nugget", "Big Charlie form. Plant a Lil' Nugget. Non-traitors only see Nuggets when close and can smush them with a 3s interaction."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/big_charlie/Lil_Nugget.png", "Scouting", "Schleem form. View through any active Nugget like a security camera. You are frozen and vulnerable while scouting."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/big_charlie/abilities/Slough_Icon.png", "Flesh Cocoon", "Big Charlie form. Cocoon a nearby victim, then incubate the cocoon with a planted Nugget to infect them."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/big_charlie/abilities/Stampede_Icon.png", "Mass Birth", "Unlocked when you have planted 5 Nuggets and infected 3 players. Use it in Big Charlie form to win."});
+			}
 		}
 		return;
 	}
@@ -923,6 +932,7 @@ rr_get_role_difficulty :: proc(role: Player_Role, ptype: Player_Type) -> int {
 		switch role {
 			case .PRANKSTER:   return 3;
 			case .PYROMANIAC:  return 3;
+			case .BIG_CHARLIE: return 3;
 		}
 		return 2;
 	}
@@ -1197,6 +1207,9 @@ rr_draw_role_help_panel :: proc(player: Player) {
 	if player.player_type != Player_Type.TRAITOR {
 		page2_label = "Tasks";
 	}
+	if player.player_role == Player_Role.BIG_CHARLIE {
+		page2_label = "Objectives";
+	}
 	UI.push_id("help_tab_sabotages");
 	defer UI.pop_id();
 	if player.task_help_page == 2 {
@@ -1266,15 +1279,21 @@ rr_draw_role_help_panel :: proc(player: Player) {
 			rr_draw_help_entry_list(content, "help_sabotages_scroll", ref sab_entries);
 		} else {
 			task_entries: [..]Help_Ability_Entry;
-			append(ref task_entries, Help_Ability_Entry.{"", "Calibrate Teleporter", "Drag the reticle to align it with the blinking target zone."});
-			append(ref task_entries, Help_Ability_Entry.{"", "Solve the Cypher", "Press the 4 icons in the exact order shown on the display panel."});
-			append(ref task_entries, Help_Ability_Entry.{"", "Restart System", "Rearrange the scrambled letters to spell the hidden word."});
-			append(ref task_entries, Help_Ability_Entry.{"", "Reroute Power", "Rotate the pipe tiles to form a connected path from left to right."});
-			append(ref task_entries, Help_Ability_Entry.{"", "Guide the Electron", "Move the electron left or right to steer it through the gaps."});
-			append(ref task_entries, Help_Ability_Entry.{"", "Sync Signals", "Aim the beam at each satellite dish until all signals are synced."});
-			append(ref task_entries, Help_Ability_Entry.{"", "Catching Butterflies", "Tap all the butterflies before they flutter away."});
-			append(ref task_entries, Help_Ability_Entry.{"", "Change Jail Codes", "Find and enter the 4-digit code shown on the sticky note nearby."});
-			append(ref task_entries, Help_Ability_Entry.{"", "Repair Laptop", "Drag each piece back into its correct slot on the laptop."});
+			if player.player_role == Player_Role.BIG_CHARLIE {
+				append(ref task_entries, Help_Ability_Entry.{"sprites/icons/big_charlie/Lil_Nugget.png", "Plant Nuggets", "Transform into Big Charlie, then use Birth Nugget to plant 5 Lil' Nuggets. Non-traitors only see them when close and can smush them."});
+				append(ref task_entries, Help_Ability_Entry.{"sprites/icons/big_charlie/abilities/Slough_Icon.png", "Infect Players", "Cocoon a nearby player, then use the cocoon's Incubate interact prompt to send a planted Nugget into it. Hatch 3 different infected players."});
+				append(ref task_entries, Help_Ability_Entry.{"sprites/icons/big_charlie/abilities/Stampede_Icon.png", "Fire Mass Birth", "Once 5 Nuggets are planted and 3 players are infected, use Mass Birth in Big Charlie form to start the win cinematic."});
+			} else {
+				append(ref task_entries, Help_Ability_Entry.{"", "Calibrate Teleporter", "Drag the reticle to align it with the blinking target zone."});
+				append(ref task_entries, Help_Ability_Entry.{"", "Solve the Cypher", "Press the 4 icons in the exact order shown on the display panel."});
+				append(ref task_entries, Help_Ability_Entry.{"", "Restart System", "Rearrange the scrambled letters to spell the hidden word."});
+				append(ref task_entries, Help_Ability_Entry.{"", "Reroute Power", "Rotate the pipe tiles to form a connected path from left to right."});
+				append(ref task_entries, Help_Ability_Entry.{"", "Guide the Electron", "Move the electron left or right to steer it through the gaps."});
+				append(ref task_entries, Help_Ability_Entry.{"", "Sync Signals", "Aim the beam at each satellite dish until all signals are synced."});
+				append(ref task_entries, Help_Ability_Entry.{"", "Catching Butterflies", "Tap all the butterflies before they flutter away."});
+				append(ref task_entries, Help_Ability_Entry.{"", "Change Jail Codes", "Find and enter the 4-digit code shown on the sticky note nearby."});
+				append(ref task_entries, Help_Ability_Entry.{"", "Repair Laptop", "Drag each piece back into its correct slot on the laptop."});
+			}
 			rr_draw_help_entry_list(content, "help_tasks_scroll", ref task_entries);
 		}
 	}
@@ -1570,8 +1589,8 @@ update_tasks_ui :: proc(player: Player) {
 		}
 	}
 
-	// Civilians see their normal tasks; Prankster/Pyromaniac see their objective; infected mini-werewolves see the infection objective.
-	if player.player_type != Player_Type.CIVILIAN && player.player_role != Player_Role.PRANKSTER && player.player_role != Player_Role.PYROMANIAC && player.player_role != Player_Role.GOO_GOO_GAGA && !player.werewolf_infected {
+	// Civilians see their normal tasks; anarchist role objectives and infected mini-werewolves use this list too.
+	if player.player_type != Player_Type.CIVILIAN && player.player_role != Player_Role.PRANKSTER && player.player_role != Player_Role.PYROMANIAC && player.player_role != Player_Role.GOO_GOO_GAGA && player.player_role != Player_Role.BIG_CHARLIE && !player.werewolf_infected {
 		return;
 	}
 

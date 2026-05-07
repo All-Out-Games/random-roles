@@ -125,11 +125,17 @@ Player :: class : Player_Base {
 	mimicer_blinded_until: float;
 	mimicer_distorted_until: float;
 
-	// --- Big Charlie (cross-player: any player can be trampled) ---
-	bc_trampled: bool;
-	bc_trampled_until: float;
-	bc_trampled_blind_until: float;
-	bc_trample_sfx_id: u64;
+	// --- Big Charlie (cross-player: any player can be cocooned / infected) ---
+	// Cocoon (root + blind from Flesh Cocoon — short-lived).
+	bc_cocooned: bool;
+	bc_cocoon_entity: Entity;
+	// Permanent Nugget follower attached after a hardened cocoon hatches.
+	bc_has_nugget_follower: bool;
+	bc_nugget_follower_entity: Entity;
+	bc_infected_by_id: u64;
+	// Mass Birth: infected players become mini Big Charlies during the cinematic.
+	bc_is_mini_charlie: bool;
+	bc_mini_charlie_creature_entity: Entity;
 	mim_jumpscare_until: float;
 	mim_jumpscare_spine: Spine_Instance;
 	autograph_stun_visual_start_time: float;
@@ -439,7 +445,6 @@ Player :: class : Player_Base {
 			rr_draw_power_outage_overlay_if_needed(this);
 			rr_ggg_draw_trap_blind_overlay(this);
 			rr_draw_mim_blind_overlay(this);
-			rr_bc_draw_trampled_overlay(this);
 			rr_draw_mim_jumpscare(this, delta_time);
 			// Global civilian progress bar – always visible at top-center (except lobby/cinematics).
 			rr_draw_civilian_progress_bar(this);
@@ -460,7 +465,7 @@ Player :: class : Player_Base {
 				// Draw fake nameplates (mimicer clones, etc.)
 				fake_nameplate_draw_all(this);
 			}
-			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN {
+			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN || game_state == Game_State.ANIM_BC_MASS_BIRTH {
 				this.draw_letterbox_bars();
 			}
 			if game_state == Game_State.ANIM_VOTE_EJECT {
@@ -511,11 +516,8 @@ Player :: class : Player_Base {
 		// Mimicer per-frame update (transform, prowl, disguise, void lunge).
 		rr_mimicer_update(this, delta_time);
 
-		// Big Charlie per-frame update (transform, growth, stampede, slough).
+		// Big Charlie per-frame update (transform, camera, mass birth).
 		rr_bc_update(this, delta_time);
-
-		// Big Charlie trampled status update.
-		rr_bc_update_trampled(this, delta_time);
 
 		// Lily per-frame update (transform, strings, RLGL, tea party, dollhouse).
 		rr_lily_update(this, delta_time);
@@ -993,6 +995,9 @@ Player :: class : Player_Base {
 							abilityIndex += 1;
 						}
 					}
+					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.BIG_CHARLIE {
+						abilityIndex = rr_bc_draw_abilities(this, abilityIndex);
+					}
 					}
 				} else if game_state == Game_State.LOBBY {
 					required_players := rr_get_lobby_required_player_count();
@@ -1177,7 +1182,7 @@ Player :: class : Player_Base {
 		rr_werewolf_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_ggg_on_player_killed(killer_player_entity_id, this.entity.id);
 		rr_mimicer_on_player_killed(killer_player_entity_id, this.entity.id);
-		rr_bc_on_player_killed(killer_player_entity_id, this.entity.id);
+		rr_bc_on_player_died(this.entity.id);
 		rr_lily_on_player_death(this.entity.id, killer_player_entity_id);
         log(format_string("Player % killed (killer=%)", .{this.entity.id, killer_player_entity_id}));
 	}
@@ -2089,150 +2094,9 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	} // end task_list_open
 }
 
-// --- Big Charlie Flesh Mass progress: left side ---
+// --- Big Charlie checklist HUD: left side --- (delegates to bigcharlie.csl)
 draw_bc_role_hud :: proc(player: Player) {
-	if player == null return;
-	if player.player_role != Player_Role.BIG_CHARLIE return;
-	if !player.is_local_or_server() return;
-	if player.player_type != Player_Type.TRAITOR return;
-
-	bc := player.entity.get_component(Big_Charlie_Module);
-	if bc == null return;
-
-	safe := UI.get_safe_screen_rect();
-	PANEL_W :: 300.0;
-	ROW_H :: 32.0;
-	LIST_PAD :: 10.0;
-	DROPDOWN_SLICE_PX :: 16.0;
-
-	row_count := 6;
-	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
-
-	header_rect := rr_draw_task_list_header(safe, false, player);
-
-	if player.task_list_open {
-	list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
-
-	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
-	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
-	checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
-
-	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
-
-	base_ts := UI.default_text_settings();
-	base_ts.size = 20;
-	base_ts.halign = .LEFT;
-	base_ts.valign = .CENTER;
-	base_ts.do_outline = true;
-	base_ts.outline_thickness = 3;
-	base_ts.outline_color = v4.{0, 0, 0, 1};
-
-	list_content := list_rect.inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
-	mass := bc.flesh_mass;
-
-	// Row 1: Form status
-	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		entry_content.cut_left(24.0);
-		row_ts := base_ts;
-		if bc.rampage_active {
-			row_ts.color = v4.{1.0, 0.1, 0.1, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "RAMPAGE");
-		} else if bc.is_monster_form {
-			row_ts.color = v4.{1.0, 0.4, 0.3, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "BIG CHARLIE");
-		} else {
-			row_ts.color = v4.{0.9, 0.9, 0.9, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Schleem");
-		}
-	}
-	// Row 2: Flesh Mass + Nuggets
-	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		entry_content.cut_left(24.0);
-		row_ts := base_ts;
-		row_ts.color = v4.{1.0, 0.6, 0.7, 1.0};
-		rr_bc_cleanup_dead_nuggets(bc);
-		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Flesh Mass: % | Nuggets: %/%", .{mass, bc.nugget_entities.count, BC_MAX_NUGGETS}));
-	}
-	// Row 3: Unlock Slough (1 Flesh Mass)
-	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content.cut_left(24.0);
-		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
-		unlocked := mass >= 1;
-		if unlocked {
-			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
-		} else {
-			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
-		}
-		row_ts := base_ts;
-		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Slough: %/1", .{min(mass, 1)}));
-	}
-	// Row 4: Unlock Marrow (2 Flesh Mass)
-	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content.cut_left(24.0);
-		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
-		unlocked := mass >= 2;
-		if unlocked {
-			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
-		} else {
-			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
-		}
-		row_ts := base_ts;
-		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Marrow: %/2", .{min(mass, 2)}));
-	}
-	// Row 5: Unlock Stampede (3 Flesh Mass)
-	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content.cut_left(24.0);
-		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
-		unlocked := mass >= 3;
-		if unlocked {
-			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
-		} else {
-			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
-		}
-		row_ts := base_ts;
-		row_ts.color = unlocked ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Stampede: %/3", .{min(mass, 3)}));
-	}
-	// Row 6: Live status callout
-	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		entry_content.cut_left(24.0);
-		row_ts := base_ts;
-		row_ts.size = 18;
-		rr_bc_cleanup_dead_nests(bc);
-		nest_count := bc.nest_entities.count;
-		if bc.camera_active {
-			row_ts.color = v4.{1.0, 0.85, 0.45, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Scouting: ACTIVE - You are vulnerable");
-		} else if bc.rampage_active {
-			row_ts.color = v4.{1.0, 0.25, 0.25, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "Rampage: ACTIVE");
-		} else if nest_count > 0 {
-			row_ts.color = v4.{0.5, 0.9, 1.0, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Active Nests: %", .{nest_count}));
-		} else if mass < 3 {
-			next_goal := mass + 1;
-			row_ts.color = v4.{0.9, 0.9, 0.9, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, format_string("Next unlock at Flesh Mass %", .{next_goal}));
-		} else {
-			row_ts.color = v4.{0.6, 1.0, 0.4, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), row_ts, "All ability unlocks online");
-		}
-	}
-	} // end task_list_open
+	rr_bc_draw_checklist_panel(player);
 }
 
 // --- Lily Braid Point progress: left side ---
@@ -2581,8 +2445,6 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 		}
 	} else if player_role == Player_Role.MIMICER {
 		abilityIndex = rr_mimicer_draw_abilities(player, abilityIndex);
-	} else if player_role == Player_Role.BIG_CHARLIE {
-		abilityIndex = rr_bc_draw_abilities(player, abilityIndex);
 	} else if player_role == Player_Role.LILY_LOVEBRAIDS {
 		abilityIndex = rr_lily_draw_abilities(player, abilityIndex);
 	} else {
@@ -2591,7 +2453,7 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 	}
 
 	// All traitors (except werewolf and GGG, handled above) can drag bodies.
-	if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA && player_role != Player_Role.MIMICER && player_role != Player_Role.BIG_CHARLIE && player_role != Player_Role.LILY_LOVEBRAIDS {
+	if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA && player_role != Player_Role.MIMICER && player_role != Player_Role.LILY_LOVEBRAIDS {
 		draw_ability_button(player, Drag_Body_Ability, abilityIndex);
 		abilityIndex += 1;
 	}
@@ -3210,42 +3072,11 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer.create_global_transition(bc_revert_state, false).create_trigger_condition(bc_revert_var);
 		layer.create_transition(bc_revert_state, idle_state, true);
 
-		// Trampled: Start -> Loop (stays until healed or expired)
-		bc_trampled_start_var := sm.create_variable("bc_trampled_start", State_Machine_Variable.Kind.TRIGGER);
-		bc_trampled_start_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Start", false, 0.5);
-		layer.create_global_transition(bc_trampled_start_state, false).create_trigger_condition(bc_trampled_start_var);
-
-		bc_trampled_idle_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Idle", true, 0.0);
-		layer.create_transition(bc_trampled_start_state, bc_trampled_idle_state, true);
-
-		bc_trampled_run_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Run", true, 0.0);
-		bc_trampled_moving_var := sm.create_variable("bc_trampled_moving", State_Machine_Variable.Kind.BOOL);
-		trampled_idle_to_run := layer.create_transition(bc_trampled_idle_state, bc_trampled_run_state, false);
-		trampled_idle_to_run.create_bool_condition(bc_trampled_moving_var, true);
-		trampled_run_to_idle := layer.create_transition(bc_trampled_run_state, bc_trampled_idle_state, false);
-		trampled_run_to_idle.create_bool_condition(bc_trampled_moving_var, false);
-
-		// Healed naturally -> back to Idle.
-		bc_trampled_heal_natural_var := sm.create_variable("bc_trampled_heal_natural", State_Machine_Variable.Kind.TRIGGER);
-		bc_trampled_heal_natural_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Heal_Natural", false, 0.5);
-		layer.create_global_transition(bc_trampled_heal_natural_state, false).create_trigger_condition(bc_trampled_heal_natural_var);
-		layer.create_transition(bc_trampled_heal_natural_state, idle_state, true);
-
-		// Healed by Doctor -> back to Idle.
-		bc_trampled_heal_player_var := sm.create_variable("bc_trampled_heal_player", State_Machine_Variable.Kind.TRIGGER);
-		bc_trampled_heal_player_state := layer.create_state("004RAND_BIGCHARLIE/Trampled_Heal_Player", false, 0.5);
-		layer.create_global_transition(bc_trampled_heal_player_state, false).create_trigger_condition(bc_trampled_heal_player_var);
-		layer.create_transition(bc_trampled_heal_player_state, idle_state, true);
-
-		// Open Cocoon (breaking a nest)
-		bc_cocoon_loop_var := sm.create_variable("bc_cocoon_loop", State_Machine_Variable.Kind.TRIGGER);
-		bc_cocoon_loop_state := layer.create_state("004RAND_BIGCHARLIE/Open_Cocoon_Loop", true, 0.0);
-		layer.create_global_transition(bc_cocoon_loop_state, false).create_trigger_condition(bc_cocoon_loop_var);
-
-		bc_cocoon_success_var := sm.create_variable("bc_cocoon_success", State_Machine_Variable.Kind.TRIGGER);
-		bc_cocoon_success_state := layer.create_state("004RAND_BIGCHARLIE/Open_Cocoon_Success", false, 0.5);
-		layer.create_global_transition(bc_cocoon_success_state, false).create_trigger_condition(bc_cocoon_success_var);
-		layer.create_transition(bc_cocoon_success_state, idle_state, true);
+		// Birth Nugget — Schleem squat + drop. Reuses Spawn_Nugget on the player rig.
+		bc_birth_var := sm.create_variable("bc_birth_nugget", State_Machine_Variable.Kind.TRIGGER);
+		bc_birth_state := layer.create_state("004RAND_BIGCHARLIE/Spawn_Nugget", false, 1.0);
+		layer.create_global_transition(bc_birth_state, false).create_trigger_condition(bc_birth_var);
+		layer.create_transition(bc_birth_state, idle_state, true);
 	}
 
 	// Lily player-rig state machine states.
@@ -3943,8 +3774,6 @@ Corpse :: class : Component {
 	ggg_pre_wrap_death_anim: string;
 	// Mimicer: true if the Mimicer killed this player while disguised.
 	mimicer_disguised_kill: bool;
-	// Big Charlie: true if this corpse is covered by a Nest (blocks Coroner).
-	bc_nested: bool;
 
 	// --- Drag Body ---
 	// 0 = not being dragged; otherwise entity id of the dragging player.
@@ -4960,12 +4789,14 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 		return;
 	}
 	if role == Player_Role.BIG_CHARLIE {
+		// Spec: Intro reuses the Birth Nugget animation (Big Charlie shudders, a
+		// Lil' Nugget drops, looks up, waddles once).
 		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, BC_CREATURE_RIG));
 		player.intro_role_spine.set_skin("BigCharlie_Base");
 		player.intro_role_spine.refresh_skins();
 		player.intro_role_spine.set_animation("Spawn_Nugget", false, 0);
 		player.intro_is_creature_rig = true;
-		player.intro_second_anim_name = "Bone_Snap_Kill";
+		player.intro_second_anim_name = "Idle";
 		player.intro_second_anim_at = 1.3;
 		return;
 	}
