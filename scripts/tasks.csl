@@ -960,9 +960,33 @@ rr_draw_help_entry_list :: proc(area: Rect, scroll_id: string, entries: ref [..]
 		defer UI.pop_scroll_view();
 
 		sc := sv.content_rect;
-		ROW_H :: 55.0;
+		ROW_MIN_H :: 55.0;
 		ICON_SIZE :: 32.0;
 		ROW_GAP :: 15.0;
+		NAME_H :: 26.0;
+		ROW_INSET_TOP :: 6.0;
+		ROW_INSET_BOTTOM :: 6.0;
+		ROW_INSET_SIDE :: 8.0;
+		ICON_SLOT_W :: ICON_SIZE * 2.0 + 8.0;
+
+		name_ts := UI.default_text_settings();
+		name_ts.size = 30;
+		name_ts.color = v4.{1, 1, 1, 1};
+		name_ts.halign = .LEFT;
+		name_ts.valign = .TOP;
+		name_ts.do_outline = true;
+		name_ts.outline_thickness = 2;
+		name_ts.outline_color = v4.{0, 0, 0, 1};
+
+		desc_ts := UI.default_text_settings();
+		desc_ts.size = 22;
+		desc_ts.color = v4.{0.8, 0.8, 0.85, 0.85};
+		desc_ts.halign = .LEFT;
+		desc_ts.valign = .TOP;
+		desc_ts.word_wrap = true;
+		desc_ts.do_outline = true;
+		desc_ts.outline_thickness = 2;
+		desc_ts.outline_color = v4.{0, 0, 0, 1};
 
 		for i: 0..entries.count-1 {
 			entry := entries[i];
@@ -970,43 +994,37 @@ rr_draw_help_entry_list :: proc(area: Rect, scroll_id: string, entries: ref [..]
 			UI.push_id("help_row_%", {i});
 			defer UI.pop_id();
 
-			row := sc.cut_top(ROW_H);
+			// Measure the description so each row is tall enough for its text;
+			// otherwise long descriptions overflow into the next row.
+			has_icon := entry.icon_path.count > 0;
+			text_left_pad := ROW_INSET_SIDE;
+			if has_icon text_left_pad += ICON_SLOT_W;
+			desc_avail_w := sc.width() - text_left_pad - ROW_INSET_SIDE;
+			measure_rect := Rect.{ v2.{0, 0}, v2.{desc_avail_w, 10000} };
+			desc_h := UI.measure_text(measure_rect, desc_ts, entry.description).height();
+
+			row_h := ROW_INSET_TOP + NAME_H + desc_h + ROW_INSET_BOTTOM;
+			if row_h < ROW_MIN_H row_h = ROW_MIN_H;
+
+			row := sc.cut_top(row_h);
 			if i < entries.count - 1 {
 				sc.cut_top(ROW_GAP);
 			}
 
-			row_content := row.inset(6, 8, 6, 8);
+			row_content := row.inset(ROW_INSET_TOP, ROW_INSET_SIDE, ROW_INSET_BOTTOM, ROW_INSET_SIDE);
 
-			if entry.icon_path.count > 0 {
-				icon_slot := row_content.cut_left(ICON_SIZE * 2.0 + 8.0);
-			icon_tex := get_asset(Texture_Asset, entry.icon_path);
-			if icon_tex != null {
-				icon_rect := icon_slot.center_rect().grow(ICON_SIZE);
-				UI.quad(icon_rect.fit_aspect(icon_tex.get_aspect()), icon_tex, v4.{1, 1, 1, 1});
+			if has_icon {
+				icon_slot := row_content.cut_left(ICON_SLOT_W);
+				icon_tex := get_asset(Texture_Asset, entry.icon_path);
+				if icon_tex != null {
+					icon_rect := icon_slot.center_rect().grow(ICON_SIZE);
+					UI.quad(icon_rect.fit_aspect(icon_tex.get_aspect()), icon_tex, v4.{1, 1, 1, 1});
+				}
 			}
 
-			}
-			name_ts := UI.default_text_settings();
-			name_ts.size = 30;
-			name_ts.color = v4.{1, 1, 1, 1};
-			name_ts.halign = .LEFT;
-			name_ts.valign = .TOP;
-			name_ts.do_outline = true;
-			name_ts.outline_thickness = 2;
-			name_ts.outline_color = v4.{0, 0, 0, 1};
-
-			name_row := row_content.cut_top(26.0);
+			name_row := row_content.cut_top(NAME_H);
 			UI.text(name_row, name_ts, entry.entry_name);
 
-			desc_ts := UI.default_text_settings();
-			desc_ts.size = 22;
-			desc_ts.color = v4.{0.8, 0.8, 0.85, 0.85};
-			desc_ts.halign = .LEFT;
-			desc_ts.valign = .TOP;
-			desc_ts.word_wrap = true;
-			desc_ts.do_outline = true;
-			desc_ts.outline_thickness = 2;
-			desc_ts.outline_color = v4.{0, 0, 0, 1};
 			UI.text(row_content, desc_ts, entry.description);
 		}
 	}

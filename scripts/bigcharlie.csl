@@ -64,10 +64,17 @@ BC_CHECKLIST_NUGGETS         :: 5;
 BC_CHECKLIST_INFECTIONS      :: 3;
 BC_DUMMY_INFECTION_ID_BASE   :: 9000000000; // /unlock low-player playtest padding
 
+// Growth Stages — monster form swells visibly per infection.
+// 0 infections = 1.00, 1 = 1.10, 2 = 1.20, 3 (Full Size) = 1.30 + pulsing veins.
+BC_GROWTH_SCALE_PER_INFECTION :: 0.10;       // X[10]% per infection
+BC_GROWTH_PULSE_THRESHOLD     :: 3;          // Full-size veiny pulse at 3+ infections
+BC_GROWTH_PULSE_RATE          :: 4.0;        // rad/s (~0.64 Hz visible throb)
+BC_GROWTH_PULSE_SCALE_AMP     :: 0.04;       // ±4% breathing on top of base scale
+
 // Mass Birth
 BC_MASS_BIRTH_KILL_INTERVAL  :: 0.6;     // gap between sequential survivor deaths
 BC_MASS_BIRTH_STAMPEDE_DELAY :: 1.0;     // bellow wind-up before mini Charlies launch
-BC_MASS_BIRTH_STAMPEDE_SPEED :: 12.0;    // mini Big Charlie charge speed
+BC_MASS_BIRTH_STAMPEDE_SPEED :: 6.0;     // mini Big Charlie charge speed
 BC_MASS_BIRTH_KILL_RADIUS    :: 1.1;     // contact radius for stampede kills
 BC_MASS_BIRTH_MINI_SCALE     :: v2.{0.62, 0.62};
 
@@ -240,6 +247,7 @@ rr_bc_ensure_creature_entity :: proc(player: Player) {
 	ce.set_local_enabled(false);
 	bc.creature_entity = ce;
 	bc.creature_animator = ca;
+	bc.creature_full_size_skin = false;
 }
 
 rr_bc_destroy_creature_entity :: proc(player: Player) {
@@ -254,6 +262,7 @@ rr_bc_destroy_creature_entity :: proc(player: Player) {
 	bc.creature_entity = null;
 	bc.creature_animator = null;
 	bc.creature_visible = false;
+	bc.creature_full_size_skin = false;
 }
 
 rr_bc_swap_to_creature :: proc(player: Player) {
@@ -284,6 +293,38 @@ rr_bc_swap_to_player :: proc(player: Player) {
 	bc.creature_visible = false;
 	player.remove_invisibility_reason(BC_INVIS_REASON);
 	player.remove_name_invisibility_reason(BC_NAME_INVIS_REASON);
+}
+
+// Growth Stages: Big Charlie's monster form swells visibly per unique infection.
+// Scale scales linearly with infection count (capped at BC_CHECKLIST_INFECTIONS).
+// At full size (3+), swap to BigCharlie_Stampede skin (pulsing veins) and add a
+// sin-wave breathing scale on top.
+// Scale is re-applied every frame because server->client sync overwrites local
+// transform; skin is only swapped when the target stage crosses the threshold.
+rr_bc_apply_growth_visuals :: proc(bc: Big_Charlie_Module, now: float) {
+	if bc == null return;
+	if bc.creature_entity == null || !#alive(bc.creature_entity) return;
+
+	stage := bc.infected_player_ids.count;
+	if stage > BC_CHECKLIST_INFECTIONS stage = BC_CHECKLIST_INFECTIONS;
+
+	base_scale := 1.0 + cast(float) stage * BC_GROWTH_SCALE_PER_INFECTION;
+
+	full_size := stage >= BC_GROWTH_PULSE_THRESHOLD;
+	scale := base_scale;
+	if full_size {
+		scale = base_scale + sin(now * BC_GROWTH_PULSE_RATE) * BC_GROWTH_PULSE_SCALE_AMP;
+	}
+
+	bc.creature_entity.set_local_scale(v2.{scale, scale});
+
+	if bc.creature_animator != null && bc.creature_animator.instance != null {
+		if full_size != bc.creature_full_size_skin {
+			bc.creature_animator.instance.set_skin(full_size ? "BigCharlie_Stampede" : "BigCharlie_Base");
+			bc.creature_animator.instance.refresh_skins();
+			bc.creature_full_size_skin = full_size;
+		}
+	}
 }
 
 rr_bc_creature_trigger :: proc(player: Player, trigger_name: string) {
@@ -1534,6 +1575,12 @@ rr_bc_update :: proc(player: Player, dt: float) {
 			is_moving := length(player.agent.velocity) > 0.5;
 			bc.creature_animator.instance.state_machine.set_bool("is_moving", is_moving);
 		}
+	}
+
+	// Growth Stages: scale up monster form per infection (re-applied every frame
+	// because server->client sync resets local transform).
+	if bc.creature_visible {
+		rr_bc_apply_growth_visuals(bc, now);
 	}
 
 	// Camera per-frame override (server sync resets follow_player).
