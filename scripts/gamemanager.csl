@@ -1011,7 +1011,7 @@ pyro_win_active: bool;
 pyro_win_start_time: float;
 pyro_win_player_id: u64;
 
-BC_MASS_BIRTH_CINEMATIC_TIME :: 5.0;
+BC_MASS_BIRTH_CINEMATIC_TIME :: 9.0;
 bc_mass_birth_active: bool;
 bc_mass_birth_start_time: float;
 bc_mass_birth_player_id: u64;
@@ -2011,6 +2011,9 @@ end_game_with_winners :: proc(victor: Player_Type, winners: List(Player)) {
 	for i: 0..players.elements.count-1 {
 		on_player_go_passive(players.elements[i]);
 		rr_lily_cleanup(players.elements[i]);
+		// Strip mini-Charlie visuals/locks/followers so the victory screen and
+		// lobby don't show players still wrapped up as Big Charlie spawn.
+		rr_bc_cleanup(players.elements[i]);
 		// Clear tasks at end of round
 		players.elements[i].active_tasks = List(Task_Base).{};
 	}
@@ -2583,9 +2586,8 @@ unlock :: proc(player: Player) {
 		if bc != null {
 			bc.planted_nugget_total = max(bc.planted_nugget_total, BC_CHECKLIST_NUGGETS);
 
-			// Prefer real alive non-Charlie victims for infection slots.
+			// Goal is "infect everyone" — slot every alive non-Charlie player.
 			for i: 0..players.elements.count-1 {
-				if bc.infected_player_ids.count >= BC_CHECKLIST_INFECTIONS break;
 				p := players.elements[i];
 				if p == null continue;
 				if !#alive(p.entity) continue;
@@ -2604,11 +2606,9 @@ unlock :: proc(player: Player) {
 				}
 			}
 
-			// If playtesting with too few players, pad the counter with dummy IDs.
-			while bc.infected_player_ids.count < BC_CHECKLIST_INFECTIONS {
-				dummy_id: u64 = BC_DUMMY_INFECTION_ID_BASE;
-				dummy_id += bc.infected_player_ids.count.(u64);
-				bc.infected_player_ids.append(dummy_id);
+			// Solo playtest fallback: ensure at least one entry so Mass Birth unlocks.
+			if bc.infected_player_ids.count == 0 {
+				bc.infected_player_ids.append(BC_DUMMY_INFECTION_ID_BASE);
 			}
 		}
 	}
@@ -3519,11 +3519,15 @@ assign_players_to_types :: proc() {
 		p.forced_role_next_round = Player_Role.NONE;
 	}
 
+	// Big Charlie: nuke any leftover scene entities (cocoons, nuggets) before
+	// per-player resets so previous-round artifacts can't survive a reroll.
+	rr_bc_round_global_cleanup();
+
 	// Assign role-specific tasks / objectives
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
-		
+
 		// Per-round resets
 		if p.player_role == Player_Role.DOCTOR {
 			dm := p.entity.get_component(Doctor_Module);

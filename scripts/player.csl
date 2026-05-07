@@ -129,13 +129,15 @@ Player :: class : Player_Base {
 	// Cocoon (root + blind from Flesh Cocoon — short-lived).
 	bc_cocooned: bool;
 	bc_cocoon_entity: Entity;
-	// Permanent Nugget follower attached after a hardened cocoon hatches.
-	bc_has_nugget_follower: bool;
-	bc_nugget_follower_entity: Entity;
+	// Permanent Nugget followers attached after each hardened cocoon hatches.
+	// One entity per infection — re-infecting a player adds another follower.
+	bc_nugget_follower_entities: [..]Entity;
 	bc_infected_by_id: u64;
 	// Mass Birth: infected players become mini Big Charlies during the cinematic.
 	bc_is_mini_charlie: bool;
 	bc_mini_charlie_creature_entity: Entity;
+	bc_mini_chanting: bool;
+	bc_mini_chant_angle: float;
 	mim_jumpscare_until: float;
 	mim_jumpscare_spine: Spine_Instance;
 	autograph_stun_visual_start_time: float;
@@ -224,6 +226,8 @@ Player :: class : Player_Base {
 	ao_can_use_ability :: proc(using this: Player, ability: Ability_Base) -> bool {
 		// While on fire, you can only move.
 		if pyro_on_fire return false;
+		// Cocooned by Big Charlie — wrapped up, no abilities.
+		if bc_cocooned return false;
 		// Trapped or being dragged by GGG — no abilities.
 		ggg_root := entity.get_component(GGG_Trap_Root_Effect);
 		if ggg_root != null && ggg_root.active return false;
@@ -1265,6 +1269,17 @@ rr_get_stun_remaining :: proc(p: Player) -> float {
 	if p.werewolf_infected && p.werewolf_infection_expires_at > 0.0 && p.werewolf_skin_active {
 		r := p.werewolf_infection_expires_at - now;
 		if r > best { best = r; }
+	}
+
+	// Big Charlie cocoon — fresh shows time until victim is auto-freed; hardened shows time until hatch.
+	if p.bc_cocooned && #alive(p.bc_cocoon_entity) {
+		cocoon := p.bc_cocoon_entity.get_component(BC_Flesh_Cocoon);
+		if cocoon != null && !cocoon.pending_destroy {
+			end_time := cocoon.expires_at;
+			if cocoon.hardened { end_time = cocoon.hatch_at; }
+			r := end_time - now;
+			if r > best { best = r; }
+		}
 	}
 
 	if best < 0.0 { best = 0.0; }
