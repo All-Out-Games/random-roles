@@ -9,8 +9,6 @@ LOADOUT_EXTRA_TRAITOR_PRODUCT_ID   :: "69f0deeaf910103de110f1cb";
 LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID  :: "69f0deecf910103de110f1cc";
 LOADOUT_EXTRA_ANARCHIST_PRODUCT_ID :: "69f0deed456b3b0665690c24";
 
-LOADOUT_EXTRA_SLOT_PRICE :: "99";
-
 LOADOUT_SEEN_SAVE_KEY :: "loadout_seen";
 
 loadout_load_seen :: proc(player: Player) {
@@ -128,6 +126,7 @@ loadout_role_id_for_idx :: proc(role_idx: int) -> string {
         case 12: return "werewolf";
         case 13: return "goo_goo_gaga";
         case 14: return "mimicer";
+        case 15: return "big_charlie";
         case 16: return "lily_lovebraids";
     }
     return "";
@@ -147,6 +146,7 @@ loadout_idx_for_role_id :: proc(id: string) -> int {
     if id == "werewolf"       return 12;
     if id == "goo_goo_gaga"   return 13;
     if id == "mimicer"        return 14;
+    if id == "big_charlie"    return 15;
     if id == "lily_lovebraids" return 16;
     return -1;
 }
@@ -192,14 +192,6 @@ loadout_tab_active_bg :: proc(tab: int) -> UIK.Panel_Background_Kind {
     return .BUTTON_BASIC_GREY;
 }
 
-loadout_get_role_detail_icon :: proc(role_idx: int) -> string {
-    switch role_idx {
-        case 14: return "ui/roles/mimicer_icon.png";
-        case 16: return "ui/roles/lily_icon.png";
-    }
-    return rg_get_role_detail_icon(role_idx);
-}
-
 loadout_get_role_small_icon :: proc(role_idx: int) -> string {
     switch role_idx {
         case 1:  return "ui/roles_small/sheriff_icon.png";
@@ -215,17 +207,20 @@ loadout_get_role_small_icon :: proc(role_idx: int) -> string {
         case 12: return "ui/roles_small/werewolf_icon.png";
         case 13: return "ui/roles_small/goo_goo_icon.png";
         case 14: return "ui/roles_small/mimicer_icon.png";
+        case 15: return "ui/roles_small/charlie_icon (1).png";
         case 16: return "ui/roles_small/lily_icon (1).png";
     }
-    return loadout_get_role_detail_icon(role_idx);
+    return "";
 }
 
 loadout_get_role_name :: proc(role_idx: int) -> string {
+    if role_idx == 15 return "BIG CHARLIE";
     if role_idx == 16 return "LILY";
     return rg_get_role_name(role_idx);
 }
 
 loadout_get_role_difficulty_stars :: proc(role_idx: int) -> int {
+    if role_idx == 15 return 3;
     if role_idx == 16 return 3;
     return rg_get_role_difficulty_stars(role_idx);
 }
@@ -239,6 +234,7 @@ loadout_get_team_roles :: proc(tab: int, results: ref [..]int) {
         case LOADOUT_TAB_ANARCHIST: {
             append(ref results, 7);
             append(ref results, 8);
+            append(ref results, 15);
         }
         case LOADOUT_TAB_TRAITOR: {
             append(ref results, 10);
@@ -933,7 +929,12 @@ loadout_draw_equipped_list :: proc(player: Player, unlock_present: ref bool, unl
         UIK.text_set_color(&price_ts, v4.{1.0, 0.9, 0.4, 1});
         UIK.text_set_halign(&price_ts, .LEFT);
         UIK.text_set_size_mult(&price_ts, 0.85);
-        UIK.text(format_string("% Sparks", {LOADOUT_EXTRA_SLOT_PRICE}), price_ts);
+        extra_pid := loadout_extra_product_id(tab);
+        extra_price: s64 = 0;
+        if extra_pid != "" {
+            extra_price = Purchasing.get_product(extra_pid).price;
+        }
+        UIK.text(format_string("% Sparks", {extra_price}), price_ts);
 
         UIK.panel_end(); // info
 

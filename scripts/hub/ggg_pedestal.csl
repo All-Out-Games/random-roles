@@ -1,6 +1,7 @@
 GGG_PRODUCT_ID :: "69b1aa6e3a1668e54467c5d4";
 MIMICER_PRODUCT_ID :: "69d67dac5a645398b8c19d96";
 LILY_PRODUCT_ID :: "69e7ceac7c51b1e14b7a5611";
+BIG_CHARLIE_PRODUCT_ID :: "69fe2c16961587c2b549b47b";
 
 stamp_product_purchase :: proc(player: Player, product_id: string, reason: string) {
     if Game.is_server() {
@@ -36,6 +37,13 @@ ao_purchase_handler :: proc(player: Player, id: string) -> bool {
         loadout_open_after_purchase(player, 16);
         return true;
     }
+    if id == BIG_CHARLIE_PRODUCT_ID {
+        stamp_product_purchase(player, BIG_CHARLIE_PRODUCT_ID, "purchase");
+        player.big_charlie_bought = true;
+        Notifier.notify(player, "Big Charlie unlocked!");
+        loadout_open_after_purchase(player, 15);
+        return true;
+    }
     if loadout_purchase_handler(player, id) return true;
     return false;
 }
@@ -60,6 +68,10 @@ check_owned_products :: proc(player: Player) {
         stamp_product_purchase(player, LILY_PRODUCT_ID, "corrective");
         player.lily_bought = true;
     }
+    if Purchasing.owns_product(player, BIG_CHARLIE_PRODUCT_ID) {
+        stamp_product_purchase(player, BIG_CHARLIE_PRODUCT_ID, "corrective");
+        player.big_charlie_bought = true;
+    }
     if Purchasing.owns_product(player, LOADOUT_EXTRA_TRAITOR_PRODUCT_ID)   player.loadout_extra_traitor_owned   = true;
     if Purchasing.owns_product(player, LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID)  player.loadout_extra_civilian_owned  = true;
     if Purchasing.owns_product(player, LOADOUT_EXTRA_ANARCHIST_PRODUCT_ID) player.loadout_extra_anarchist_owned = true;
@@ -69,6 +81,7 @@ Pedestal_Role :: enum {
     GOO_GOO_GAGA;
     MIMICER;
     LILY;
+    BIG_CHARLIE;
 }
 
 pedestal_get_product_id :: proc(role: Pedestal_Role) -> string {
@@ -76,6 +89,7 @@ pedestal_get_product_id :: proc(role: Pedestal_Role) -> string {
         case .GOO_GOO_GAGA: return GGG_PRODUCT_ID;
         case .MIMICER:      return MIMICER_PRODUCT_ID;
         case .LILY:         return LILY_PRODUCT_ID;
+        case .BIG_CHARLIE:  return BIG_CHARLIE_PRODUCT_ID;
     }
     return "";
 }
@@ -85,6 +99,7 @@ pedestal_get_display_name :: proc(role: Pedestal_Role) -> string {
         case .GOO_GOO_GAGA: return "Goo Goo Ga Ga";
         case .MIMICER:      return "Mimicer";
         case .LILY:         return "Lily";
+        case .BIG_CHARLIE:  return "Big Charlie";
     }
     return "";
 }
@@ -94,6 +109,7 @@ pedestal_get_idle_anim :: proc(role: Pedestal_Role) -> string {
         case .GOO_GOO_GAGA: return "Idle";
         case .MIMICER:      return "004RAND/Idle";
         case .LILY:         return "idle";
+        case .BIG_CHARLIE:  return "Idle";
     }
     return "Idle";
 }
@@ -103,6 +119,7 @@ pedestal_get_action_anim :: proc(role: Pedestal_Role) -> string {
         case .GOO_GOO_GAGA: return "PounceWrap";
         case .MIMICER:      return "004RAND/Absorb_Flames";
         case .LILY:         return "action";
+        case .BIG_CHARLIE:  return "Stampede_Roar";
     }
     return "Idle";
 }
@@ -112,6 +129,7 @@ pedestal_is_bought :: proc(role: Pedestal_Role, player: Player) -> bool {
         case .GOO_GOO_GAGA: return player.ggg_bought;
         case .MIMICER:      return player.mimicer_bought;
         case .LILY:         return player.lily_bought;
+        case .BIG_CHARLIE:  return player.big_charlie_bought;
     }
     return false;
 }
@@ -124,12 +142,10 @@ pedestal_is_new :: proc(role: Pedestal_Role) -> bool {
 }
 
 pedestal_get_price :: proc(role: Pedestal_Role) -> string {
-    switch role {
-        case .GOO_GOO_GAGA: return "199";
-        case .MIMICER:      return "299";
-        case .LILY:         return "499";
-    }
-    return "";
+    pid := pedestal_get_product_id(role);
+    if pid == "" return "";
+    product := Purchasing.get_product(pid);
+    return format_string("%", {product.price});
 }
 
 PEDESTAL_ACTION_INTERVAL :: 15.0;
@@ -143,7 +159,9 @@ Role_Pedestal :: class : Interactable {
     ao_start :: method() {
         this.set_listener(this);
         this.set_text(format_string("Buy %", {pedestal_get_display_name(role)}));
-        action_timer = PEDESTAL_ACTION_INTERVAL;
+        // Stagger pedestals so their special anims don't all fire in lockstep.
+        rng: u64 = rng_root_seed() ^ entity.id;
+        action_timer = rng_range_float(ref rng, 0.0, PEDESTAL_ACTION_INTERVAL);
 
         if spine != null {
             spine.awaken();
