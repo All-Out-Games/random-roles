@@ -1597,6 +1597,9 @@ setup_lobby :: proc() {
 	lobby_timer_paused_at = 0.0;
 	lobby_relaxed_min_players_active = false;
 	lobby_under_min_players_since = 0.0;
+	lobby_minigame_active = false;
+	lobby_minigame_wait_since = 0.0;
+	lobby_minigame_started_at = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
 	rr_end_game_pending = false;
@@ -1664,6 +1667,8 @@ setup_lobby :: proc() {
 }
 
 setup_ingame :: proc() {
+	// Tear down lobby minigame state (gun skins, IK, ghost reasons, etc) before flipping flags.
+	rr_lobby_minigame_stop();
 	game_state = Game_State.INGAME;
 	countdown_active = false;
 	countdown_start_time = 0.0;
@@ -1671,6 +1676,9 @@ setup_ingame :: proc() {
 	lobby_timer_paused_at = 0.0;
 	game_end_time = 0.0;
 	waiting_for_restart = false;
+	lobby_minigame_active = false;
+	lobby_minigame_wait_since = 0.0;
+	lobby_minigame_started_at = 0.0;
 	rr_end_game_pending = false;
 	rr_end_game_pending_started_at = 0.0;
 	rr_end_game_pending_victor = Player_Type.CIVILIAN;
@@ -2095,6 +2103,8 @@ ao_update_lobby :: proc(dt: float) {
 			return;
 		}
 	}
+
+	rr_lobby_minigame_update_state(current_time, player_count);
 
 	// If lobby stays under the normal minimum for long enough, relax requirement for one round.
 	if !lobby_relaxed_min_players_active {

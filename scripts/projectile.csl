@@ -9,6 +9,7 @@ RR_Projectile :: class : Component {
     spawn_time: float;
     owner: Entity;
     hit_radius: float;
+    lobby_minigame: bool;
 
     triangle_hint: s64;
 
@@ -37,11 +38,21 @@ RR_Projectile :: class : Component {
                 if player.player_state == Player_State.DEAD continue;
                 if #alive(owner) && owner == player.entity continue;
 
-				// Traitors shouldn't be able to projectile-kill other traitors.
 				owner_player: Player = null;
 				if #alive(owner) {
 					owner_player = owner.get_component(Player);
 				}
+
+				if lobby_minigame && game_state == Game_State.LOBBY && lobby_minigame_active {
+					if in_range(player.entity.world_position - entity.world_position, hit_radius) {
+						rr_lobby_minigame_handle_projectile_hit(owner_player, player, entity.world_position);
+						destroy_self = true;
+						break;
+					}
+					continue;
+				}
+
+				// Traitors shouldn't be able to projectile-kill other traitors.
 				if owner_player != null && owner_player.player_type == Player_Type.TRAITOR && player.player_type == Player_Type.TRAITOR {
 					continue;
 				}

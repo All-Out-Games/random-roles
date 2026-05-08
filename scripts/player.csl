@@ -74,6 +74,22 @@ Player :: class : Player_Base {
 	task_help_page: int;
 	lobby_waiting_since_time: float;
 
+	// Waiting-lobby minigame state (per player, so multiple players are safe).
+	lobby_minigame_ready: bool;
+	lobby_minigame_score: int;
+	lobby_minigame_tags_taken: int;
+	lobby_minigame_shield_until: float;
+	lobby_minigame_roll_until: float;
+	lobby_minigame_roll_direction: v2;
+	lobby_minigame_respawn_until: float;
+	lobby_minigame_respawn_locked: bool;
+	lobby_minigame_shake_start: float;
+	lobby_minigame_shake_until: float;
+	lobby_minigame_shake_intensity: float;
+	lobby_minigame_camera_shaking: bool;
+
+	gun_skin_active: string;
+
 	// Local-only LOS light (viewer-specific).
 	local_light_entity: Entity;
 	local_light: Light;
@@ -458,6 +474,9 @@ Player :: class : Player_Base {
 			rr_draw_civilian_progress_bar(this);
             update_tasks_ui(this);
 			update_minimap_ui(this);
+			rr_lobby_minigame_update_player(this, delta_time);
+			rr_lobby_minigame_draw_world(this);
+			rr_lobby_minigame_draw_leaderboard(this);
 			rr_draw_pirate_treasure_guidance_if_needed(this);
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			draw_player_role_hud(this);
@@ -1070,6 +1089,11 @@ Player :: class : Player_Base {
 					}
 					}
 				} else if game_state == Game_State.LOBBY {
+					if lobby_minigame_active {
+						draw_ability_button(this, Lobby_Minigame_Shoot_Ability, 0);
+						draw_ability_button(this, Lobby_Minigame_Roll_Ability, 1);
+						draw_ability_button(this, Lobby_Minigame_Shield_Ability, 2);
+					}
 					required_players := rr_get_lobby_required_player_count();
 					if !waiting_for_restart && players.elements.count < required_players {
 						if lobby_waiting_since_time <= 0.0 {
@@ -1086,6 +1110,9 @@ Player :: class : Player_Base {
 						t := get_time();
 						screen := UI.get_safe_screen_rect();
 						area_rect := screen.bottom_center_rect().offset(0, 230);
+						if lobby_minigame_active {
+							area_rect = screen.top_center_rect().offset(0, -85);
+						}
 
 						// --- Elapsed timer (top) ---
 						timer_rect := area_rect.grow(20, 240, 0, 240).offset(0, 40);
@@ -2933,6 +2960,18 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		traitor_kill_state := layer.create_state("Attack_Melee_1", false, 1.0);
 		layer.create_global_transition(traitor_kill_state, false).create_trigger_condition(traitor_kill_var);
 		layer.create_transition(traitor_kill_state, idle_state, true);
+
+		// dodge_roll (trigger var -> one-shot anim state -> back to Idle)
+		dodge_roll_var := sm.create_variable("dodge_roll", State_Machine_Variable.Kind.TRIGGER);
+		dodge_roll_state := layer.create_state("Dodge_Roll", false, 0.466);
+		layer.create_global_transition(dodge_roll_state, false).create_trigger_condition(dodge_roll_var);
+		layer.create_transition(dodge_roll_state, idle_state, true);
+
+		// shoot_gun (trigger var -> one-shot gun anim state -> back to Idle)
+		shoot_gun_var := sm.create_variable("shoot_gun", State_Machine_Variable.Kind.TRIGGER);
+		shoot_gun_state := layer.create_state("Shoot_Gun_mIK", false, 0.367);
+		layer.create_global_transition(shoot_gun_state, false).create_trigger_condition(shoot_gun_var);
+		layer.create_transition(shoot_gun_state, idle_state, true);
 	}
 
 	rr_sm_setup_movie_star :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
@@ -3476,6 +3515,18 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		}
 		return false;
 	}
+}
+
+rr_set_player_gun_skin :: proc(player: Player, skin: string) {
+	if player == null return;
+	if player.gun_skin_active == skin return;
+	if player.gun_skin_active.count > 0 {
+		Player.rr_player_set_skin_enabled(player, player.gun_skin_active, false);
+	}
+	if skin.count > 0 {
+		Player.rr_player_set_skin_enabled(player, skin, true);
+	}
+	player.gun_skin_active = skin;
 }
 
 rr_drag_body_force_drop_for_player :: proc(player: Player) {

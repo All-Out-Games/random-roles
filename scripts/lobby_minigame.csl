@@ -1,0 +1,547 @@
+import "core:ao"
+
+// Waiting-lobby minigame. Starts after the lobby is short on players for a bit,
+// and stays up until a real round is imminent.
+LOBBY_MINIGAME_ENTER_WAIT_SECONDS :: 10.0;
+LOBBY_MINIGAME_ENTER_PLAYER_COUNT :: 5;
+LOBBY_MINIGAME_STOP_START_TIMER_SECONDS :: 10.0;
+LOBBY_MINIGAME_SPAWN_SHIELD_SECONDS :: 2.5;
+LOBBY_MINIGAME_RESPAWN_SECONDS :: 3.0;
+LOBBY_MINIGAME_RESPAWN_REASON :: "lobby_minigame_respawn";
+LOBBY_MINIGAME_SHAKE_SECONDS :: 0.28;
+
+lobby_minigame_active: bool;
+lobby_minigame_wait_since: float;
+lobby_minigame_started_at: float;
+
+rr_lobby_minigame_set_respawn_lock :: proc(player: Player, locked: bool) {
+	if player == null return;
+	if player.lobby_minigame_respawn_locked == locked return;
+	if locked {
+		player.add_ghost_reason(LOBBY_MINIGAME_RESPAWN_REASON);
+	} else {
+		player.remove_ghost_reason(LOBBY_MINIGAME_RESPAWN_REASON);
+	}
+	player.lobby_minigame_respawn_locked = locked;
+}
+
+rr_lobby_minigame_reset_player :: proc(player: Player, reset_score: bool) {
+	if player == null return;
+	if reset_score {
+		player.lobby_minigame_score = 0;
+		player.lobby_minigame_tags_taken = 0;
+	}
+	player.lobby_minigame_shield_until = get_time() + LOBBY_MINIGAME_SPAWN_SHIELD_SECONDS;
+	player.lobby_minigame_roll_until = 0.0;
+	player.lobby_minigame_roll_direction = v2.{0, 0};
+	player.lobby_minigame_respawn_until = 0.0;
+	rr_lobby_minigame_set_respawn_lock(player, false);
+	player.lobby_minigame_ready = true;
+	player.revive();
+	player.player_state = Player_State.PASSIVE;
+	player.remove_ghost_reason("spectator");
+	if player.baseline_movement_speed_saved {
+		player.agent.movement_speed = player.baseline_movement_speed;
+	}
+	player.agent.set_navmesh_to_lock_to(world_references.main_navmesh);
+}
+
+rr_lobby_minigame_start :: proc() {
+	if lobby_minigame_active return;
+	lobby_minigame_active = true;
+	lobby_minigame_started_at = get_time();
+	for i: 0..players.elements.count-1 {
+		rr_lobby_minigame_reset_player(players.elements[i], true);
+	}
+}
+
+rr_lobby_minigame_stop :: proc() {
+	if !lobby_minigame_active return;
+	lobby_minigame_active = false;
+	lobby_minigame_started_at = 0.0;
+	lobby_minigame_wait_since = 0.0;
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		p.lobby_minigame_ready = false;
+		p.lobby_minigame_shield_until = 0.0;
+		p.lobby_minigame_roll_until = 0.0;
+		p.lobby_minigame_roll_direction = v2.{0, 0};
+		p.lobby_minigame_respawn_until = 0.0;
+		rr_lobby_minigame_set_respawn_lock(p, false);
+		p.lobby_minigame_shake_until = 0.0;
+		p.lobby_minigame_camera_shaking = false;
+		p.set_mouse_ik_enabled(false);
+		rr_set_player_gun_skin(p, "");
+	}
+}
+
+rr_lobby_minigame_should_keep_running :: proc() -> bool {
+	if game_state != Game_State.LOBBY return false;
+	if waiting_for_restart return false;
+	return rr_lobby_seconds_until_round_start() > LOBBY_MINIGAME_STOP_START_TIMER_SECONDS;
+}
+
+rr_lobby_minigame_update_state :: proc(current_time: float, player_count: int) {
+	if lobby_minigame_active {
+		if !rr_lobby_minigame_should_keep_running() {
+			rr_lobby_minigame_stop();
+			return;
+		}
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+			if !p.lobby_minigame_ready {
+				rr_lobby_minigame_reset_player(p, false);
+			}
+		}
+		return;
+	}
+
+	if waiting_for_restart || player_count >= LOBBY_MINIGAME_ENTER_PLAYER_COUNT {
+		lobby_minigame_wait_since = 0.0;
+		return;
+	}
+
+	if lobby_minigame_wait_since <= 0.0 {
+		lobby_minigame_wait_since = current_time;
+	}
+
+	if current_time - lobby_minigame_wait_since >= LOBBY_MINIGAME_ENTER_WAIT_SECONDS {
+		rr_lobby_minigame_start();
+	}
+}
+
+Lobby_Minigame_Pop_VFX :: class : Component {
+	start_time: float;
+	lifetime: float;
+	start_scale: float;
+	end_scale: float;
+	color: v4;
+
+	ao_start :: proc(using this: Lobby_Minigame_Pop_VFX) {
+		start_time = get_time();
+		if lifetime <= 0.0 lifetime = 0.45;
+		if start_scale <= 0.0 start_scale = 0.3;
+		if end_scale <= 0.0 end_scale = 1.6;
+		if color.w <= 0.0 color = v4.{1.0, 1.0, 1.0, 1.0};
+	}
+
+	ao_update :: proc(using this: Lobby_Minigame_Pop_VFX, dt: float) {
+		t := (get_time() - start_time) / lifetime;
+		if t >= 1.0 {
+			entity.destroy();
+			return;
+		}
+		ease := 1.0 - pow(1.0 - t, 3.0);
+		scale := lerp(start_scale, end_scale, ease);
+		entity.set_local_scale(v2.{scale, scale});
+		sr := entity.get_component(Sprite_Renderer);
+		if sr != null {
+			sr.color = v4.{color.x, color.y, color.z, color.w * (1.0 - t)};
+		}
+	}
+}
+
+rr_lobby_minigame_spawn_pop_vfx :: proc(pos: v2, texture_path: string, color: v4, start_scale: float, end_scale: float) {
+	tex := get_asset(Texture_Asset, texture_path);
+	if tex == null return;
+	e := Scene.create_entity();
+	e.set_local_position(pos);
+	e.set_local_scale(v2.{start_scale, start_scale});
+	sr := e.add_component(Sprite_Renderer);
+	sr.set_texture(tex);
+	sr.layer = -2;
+	sr.color = color;
+	vfx := e.add_component(Lobby_Minigame_Pop_VFX);
+	vfx.lifetime = 0.45;
+	vfx.start_scale = start_scale;
+	vfx.end_scale = end_scale;
+	vfx.color = color;
+}
+
+rr_lobby_minigame_burst :: proc(pos: v2, shield_pop: bool) {
+	if shield_pop {
+		rr_lobby_minigame_spawn_pop_vfx(pos, "minigame/Bubble Shield_16bc73.png", v4.{0.2, 0.75, 1.0, 0.85}, 0.35, 2.1);
+		rr_lobby_minigame_spawn_pop_vfx(pos + v2.{0.0, 0.25}, "minigame/Shattered Bubble Shield_88c76e.png", v4.{0.5, 0.95, 1.0, 0.95}, 0.25, 1.2);
+	} else {
+		rr_lobby_minigame_spawn_pop_vfx(pos, "minigame/Shattered Bubble Shield_88c76e.png", v4.{1.0, 0.85, 0.12, 1.0}, 0.35, 1.8);
+		rr_lobby_minigame_spawn_pop_vfx(pos + v2.{0.15, 0.18}, "minigame/Bubble Shield_16bc73.png", v4.{1.0, 0.2, 0.65, 0.75}, 0.25, 2.4);
+	}
+}
+
+rr_lobby_minigame_add_screenshake :: proc(center: v2, intensity: float) {
+	now := get_time();
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		dist := length(p.entity.world_position - center);
+		falloff := clamp(1.0 - dist / 18.0, 0.25, 1.0);
+		p.lobby_minigame_shake_start = now;
+		p.lobby_minigame_shake_until = now + LOBBY_MINIGAME_SHAKE_SECONDS;
+		p.lobby_minigame_shake_intensity = max(p.lobby_minigame_shake_intensity, intensity * falloff);
+	}
+}
+
+rr_lobby_minigame_apply_local_screenshake :: proc(player: Player) {
+	if player == null return;
+	if !player.is_local() return;
+	if game_state != Game_State.LOBBY || !lobby_minigame_active {
+		if player.lobby_minigame_camera_shaking {
+			player.camera.follow_player = true;
+			player.lobby_minigame_camera_shaking = false;
+		}
+		return;
+	}
+
+	now := get_time();
+	if now >= player.lobby_minigame_shake_until {
+		if player.lobby_minigame_camera_shaking {
+			player.camera.follow_player = true;
+			player.lobby_minigame_camera_shaking = false;
+			player.lobby_minigame_shake_intensity = 0.0;
+		}
+		return;
+	}
+
+	duration := player.lobby_minigame_shake_until - player.lobby_minigame_shake_start;
+	if duration <= 0.0 duration = LOBBY_MINIGAME_SHAKE_SECONDS;
+	remaining := (player.lobby_minigame_shake_until - now) / duration;
+	amp := player.lobby_minigame_shake_intensity * remaining;
+	shake_x := sin(now * 75.0) * amp;
+	shake_y := cos(now * 91.0) * amp * 0.75;
+	player.camera.follow_player = false;
+	if player.camera_default_size_saved {
+		player.camera.size = player.camera_default_size;
+	}
+	player.camera.position = player.entity.world_position + v2.{shake_x, shake_y};
+	player.lobby_minigame_camera_shaking = true;
+}
+
+rr_lobby_minigame_player_can_act :: proc(player: Player) -> bool {
+	if player == null return false;
+	if game_state != Game_State.LOBBY return false;
+	if !lobby_minigame_active return false;
+	return get_time() >= player.lobby_minigame_respawn_until;
+}
+
+rr_lobby_minigame_update_player :: proc(player: Player, dt: float) {
+	if player == null return;
+	if game_state != Game_State.LOBBY || !lobby_minigame_active {
+		player.lobby_minigame_roll_until = 0.0;
+		rr_lobby_minigame_set_respawn_lock(player, false);
+		rr_lobby_minigame_apply_local_screenshake(player);
+		return;
+	}
+
+	if !player.lobby_minigame_ready {
+		rr_lobby_minigame_reset_player(player, false);
+	}
+
+	if get_time() < player.lobby_minigame_respawn_until {
+		rr_lobby_minigame_set_respawn_lock(player, true);
+		rr_lobby_minigame_apply_local_screenshake(player);
+		return;
+	}
+	rr_lobby_minigame_set_respawn_lock(player, false);
+
+	if get_time() < player.lobby_minigame_roll_until {
+		player.entity.add_local_position(player.lobby_minigame_roll_direction * 13.0 * dt);
+	}
+
+	rr_lobby_minigame_apply_local_screenshake(player);
+}
+
+rr_lobby_minigame_player_has_shield :: proc(player: Player) -> bool {
+	if player == null return false;
+	return lobby_minigame_active && game_state == Game_State.LOBBY && get_time() < player.lobby_minigame_shield_until;
+}
+
+rr_lobby_minigame_play_sfx_at :: proc(path: string, pos: v2, volume: float, speed_perturb: float) {
+	desc := SFX.default_sfx_desc();
+	desc.set_position(pos);
+	desc.volume = volume;
+	desc.speed_perturb = speed_perturb;
+	rr_play_sfx(path, desc);
+}
+
+rr_lobby_minigame_handle_projectile_hit :: proc(attacker: Player, target: Player, hit_pos: v2) {
+	if attacker == null return;
+	if target == null return;
+	if attacker == target return;
+	if game_state != Game_State.LOBBY || !lobby_minigame_active return;
+	if get_time() < target.lobby_minigame_respawn_until return;
+
+	if rr_lobby_minigame_player_has_shield(target) {
+		target.lobby_minigame_shield_until = 0.0;
+		rr_lobby_minigame_burst(hit_pos, true);
+		rr_lobby_minigame_add_screenshake(hit_pos, 0.05);
+		rr_lobby_minigame_play_sfx_at("minigame/shield_block_390d4b.wav", hit_pos, 0.125, 0.12);
+		rr_lobby_minigame_play_sfx_at("minigame/bubble_pop_92af67.wav", hit_pos, 0.08, 0.2);
+		return;
+	}
+
+	attacker.lobby_minigame_score += 1;
+	target.lobby_minigame_tags_taken += 1;
+	target.lobby_minigame_respawn_until = get_time() + LOBBY_MINIGAME_RESPAWN_SECONDS;
+	target.lobby_minigame_shield_until = get_time() + LOBBY_MINIGAME_SPAWN_SHIELD_SECONDS;
+	rr_lobby_minigame_burst(hit_pos, false);
+	rr_lobby_minigame_add_screenshake(hit_pos, 0.09);
+	world_references.teleport_near_lobby(target);
+	rr_lobby_minigame_spawn_pop_vfx(target.entity.world_position, "minigame/Bubble Shield_16bc73.png", v4.{0.35, 1.0, 0.45, 0.75}, 0.4, 1.9);
+	target.set_trigger("RESET");
+
+	rr_lobby_minigame_play_sfx_at("minigame/bonk_staff_77864c.wav", hit_pos, 0.1625, 0.08);
+	rr_lobby_minigame_play_sfx_at("minigame/imposter_slap_a3182b.wav", hit_pos, 0.08, 0.12);
+	rr_lobby_minigame_play_sfx_at("sfx/transform_poof_2da056.wav", target.entity.world_position, 0.1125, 0.18);
+}
+
+rr_lobby_minigame_draw_world :: proc(viewer: Player) {
+	if viewer == null return;
+	if !viewer.is_local() return;
+	if game_state != Game_State.LOBBY || !lobby_minigame_active return;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+	UI.push_layer(9999);
+	defer UI.pop_layer();
+	shield_tex := get_asset(Texture_Asset, "minigame/Bubble Shield_16bc73.png");
+	now := get_time();
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		if now < p.lobby_minigame_respawn_until continue;
+		if !rr_lobby_minigame_player_has_shield(p) continue;
+
+		pos := p.entity.world_position + v2.{0.0, 0.35};
+		shield_rect := Rect{pos, pos}.grow(1.05, 1.05, 1.05, 1.05);
+		pulse := 0.7 + sin(now * 8.0) * 0.12;
+		if shield_tex != null {
+			UI.quad(shield_rect, shield_tex, v4.{0.25, 0.75, 1.0, pulse});
+		} else {
+			UI.quad(shield_rect, core_globals.white_sprite, v4.{0.25, 0.65, 1.0, pulse * 0.32});
+		}
+	}
+}
+
+rr_lobby_minigame_draw_leaderboard :: proc(viewer: Player) {
+	if viewer == null return;
+	if game_state != Game_State.LOBBY || !lobby_minigame_active return;
+	if players.elements.count <= 0 return;
+
+	hud_bounds := UI.get_safe_screen_rect().top_left_rect().grow_right(360).grow_bottom(280).offset(15, -15);
+	UIK.begin(UIK.window(hud_bounds));
+
+	shell := UIK.panel_modal(.BLACK);
+	shell.width = UIK.flex(1);
+	shell.height = UIK.fit();
+	shell.padding = v4.{10, 8, 10, 8};
+	shell.gap = 4;
+	UIK.panel_begin(shell);
+
+	title_desc := UIK.text_title();
+	title_desc.size_multiplier = 0.55;
+	title_desc.override_flags |= UIK.Text_Override_SIZE_MULT;
+	UIK.text("BLASTER PANIC!", title_desc);
+	UIK.spacer(UIK.pixels(1), UIK.pixels(4));
+
+	row_text := UIK.text_body();
+	UIK.text_set_size_mult(&row_text, 0.7);
+	UIK.text_set_word_wrap(&row_text, false);
+	UIK.text_set_valign(&row_text, .CENTER);
+
+	viewer_text := row_text;
+	viewer_text.color = v4.{1.0, 0.85, 0.2, 1.0};
+	viewer_text.override_flags |= UIK.Text_Override_COLOR;
+
+	printed: [..]Player;
+	shown := 0;
+	while shown < 5 {
+		best: Player = null;
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+
+			was_printed := false;
+			for j: 0..printed.count-1 {
+				if printed[j] == p { was_printed = true; }
+			}
+			if was_printed continue;
+
+			if best == null || p.lobby_minigame_score > best.lobby_minigame_score || (p.lobby_minigame_score == best.lobby_minigame_score && p.entity.id < best.entity.id) {
+				best = p;
+			}
+		}
+		if best == null break;
+		printed.append(best);
+
+		row := UIK.panel_styled(.BUTTON_BASIC_BLACK);
+		row.axis = .HORIZONTAL;
+		row.width = UIK.flex(1);
+		row.height = UIK.pixels(30);
+		row.padding = v4.{2, 20, 2, 20};
+		row.cross_align = .CENTER;
+		UIK.panel_begin(row);
+
+		name := best.get_username();
+		if name.count > 12 {
+			name = format_string("%...", .{string_substring(name, 0, 12)});
+		}
+		text_style := row_text;
+		if best == viewer {
+			text_style = viewer_text;
+		}
+		UIK.text(format_string("#%  %", .{shown + 1, name}), text_style);
+		UIK.spacer(UIK.flex(1), UIK.pixels(1));
+		UIK.text(format_string("%", .{best.lobby_minigame_score}), text_style);
+
+		UIK.panel_end();
+		shown += 1;
+	}
+
+	UIK.panel_end();
+	UIK.end();
+
+	if get_time() < viewer.lobby_minigame_respawn_until {
+		secs := (viewer.lobby_minigame_respawn_until - get_time()).(int) + 1;
+		screen := UI.get_safe_screen_rect();
+		hud_rect := screen.bottom_center_rect().offset(0, 240).grow(160, 24, 160, 24);
+		hud_ts := UI.default_text_settings();
+		hud_ts.size = 26;
+		hud_ts.color = v4.{1.0, 0.85, 0.3, 1.0};
+		hud_ts.halign = .CENTER;
+		hud_ts.valign = .CENTER;
+		hud_ts.do_outline = true;
+		hud_ts.outline_thickness = 3;
+		hud_ts.outline_color = v4.{0, 0, 0, 1};
+		UI.text(hud_rect, hud_ts, "Respawning %", .{secs});
+	}
+}
+
+Lobby_Minigame_Shoot_Ability :: class : Ability_Base {
+	NAME :: "Shoot";
+
+	on_init :: proc(instance: Lobby_Minigame_Shoot_Ability) {
+		instance.name = NAME;
+		instance.icon = get_asset(Texture_Asset, "ui/voting/shoot_weapon_icon.png");
+		instance.is_aimed_ability = true;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.LOBBY return false;
+		if !lobby_minigame_active return false;
+		if !rr_lobby_minigame_player_can_act(player) return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if !params.can_use {
+			player.set_mouse_ik_enabled(false);
+			rr_set_player_gun_skin(player, "");
+			return;
+		}
+		rr_set_player_gun_skin(player, "weapons/hand_gun");
+		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+
+		targeting := player.active_ability == this.(Ability_Base);
+		if targeting {
+			player.set_mouse_ik_enabled(true);
+			player.set_aim_target(player.entity.world_position + player.last_aim_direction * 5.0);
+		} else {
+			player.set_mouse_ik_enabled(false);
+		}
+
+		if activation.activate {
+			player.set_facing_right(activation.direction.x > 0);
+			player.set_trigger("shoot_gun");
+			player.set_aim_target(player.entity.world_position + activation.direction * 5.0);
+			proj := shoot_projectile(player.entity.world_position, activation.direction * 15.0, 1, 0.55, player.entity);
+			if proj != null {
+				projectile := proj.get_component(RR_Projectile);
+				if projectile != null {
+					projectile.lobby_minigame = true;
+					projectile.hit_radius = 0.45;
+				}
+			}
+			sfx := SFX.default_sfx_desc();
+			sfx.set_position(player.entity.world_position);
+			sfx.volume = 0.095;
+			sfx.volume_perturb = 0.03;
+			sfx.speed_perturb = 0.12;
+			rr_play_sfx("sfx/shoot.wav", sfx);
+			rr_lobby_minigame_play_sfx_at("minigame/zap_19674e.wav", player.entity.world_position, 0.05, 0.18);
+			current_cooldown = 0.35;
+		}
+	}
+
+	on_draw_button :: proc(instance: Lobby_Minigame_Shoot_Ability, rect: Rect) {
+		draw_ability_name_label(rect, NAME);
+	}
+}
+
+Lobby_Minigame_Roll_Ability :: class : Ability_Base {
+	NAME :: "Roll";
+
+	on_init :: proc(instance: Lobby_Minigame_Roll_Ability) {
+		instance.name = NAME;
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/crawl_speedup.png");
+		instance.is_aimed_ability = true;
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.LOBBY return false;
+		if !lobby_minigame_active return false;
+		if !rr_lobby_minigame_player_can_act(player) return false;
+		if get_time() < player.lobby_minigame_roll_until return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if !params.can_use return;
+		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+		if activation.activate {
+			player.lobby_minigame_roll_direction = activation.direction;
+			player.lobby_minigame_roll_until = get_time() + 0.45;
+			player.set_trigger("dodge_roll");
+			rr_lobby_minigame_spawn_pop_vfx(player.entity.world_position, "minigame/Bubble Shield_16bc73.png", v4.{0.25, 1.0, 0.55, 0.65}, 0.25, 1.4);
+			rr_lobby_minigame_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.08, 0.18);
+			current_cooldown = 1.1;
+		}
+	}
+
+	on_draw_button :: proc(instance: Lobby_Minigame_Roll_Ability, rect: Rect) {
+		draw_ability_name_label(rect, NAME);
+	}
+}
+
+Lobby_Minigame_Shield_Ability :: class : Ability_Base {
+	NAME :: "Shield";
+
+	on_init :: proc(instance: Lobby_Minigame_Shield_Ability) {
+		instance.name = NAME;
+		instance.icon = get_asset(Texture_Asset, "minigame/Shield Blue Icon_0c7a3a.png");
+	}
+
+	can_use :: method() -> bool {
+		if game_state != Game_State.LOBBY return false;
+		if !lobby_minigame_active return false;
+		if !rr_lobby_minigame_player_can_act(player) return false;
+		return true;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			player.lobby_minigame_shield_until = get_time() + 2.0;
+			rr_lobby_minigame_burst(player.entity.world_position, true);
+			rr_lobby_minigame_play_sfx_at("minigame/shield_block_390d4b.wav", player.entity.world_position, 0.0875, 0.08);
+			rr_lobby_minigame_play_sfx_at("minigame/bubble_pop_92af67.wav", player.entity.world_position, 0.07, 0.14);
+			current_cooldown = 4.0;
+		}
+	}
+
+	on_draw_button :: proc(instance: Lobby_Minigame_Shield_Ability, rect: Rect) {
+		draw_ability_name_label(rect, NAME);
+	}
+}

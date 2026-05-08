@@ -2019,7 +2019,6 @@ shoot_projectile :: proc(spawn_position: v2, velocity: v2, damage: int, lifetime
 Shoot_Ability :: class : Ability_Base {
     on_init :: proc(ability: Shoot_Ability) {
         ability.name = "Shoot";
-        ability.disable_keybind = true;
         ability.is_aimed_ability = true;
     }
 
@@ -2053,11 +2052,28 @@ Shoot_Ability :: class : Ability_Base {
         icon = get_icon(this, player.player_role);
 		// Hide the aim line while unusable (cooldown/lockout/etc).
 		if !params.can_use {
+			player.set_mouse_ik_enabled(false);
+			rr_set_player_gun_skin(player, "");
 			return;
 		}
 
+		gun_skin := player.player_role == Player_Role.PIRATE ? "weapons/flintlock" : "weapons/revolver";
+		rr_set_player_gun_skin(player, gun_skin);
+
         activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+
+		targeting := player.active_ability == this.(Ability_Base);
+		if targeting {
+			player.set_mouse_ik_enabled(true);
+			player.set_aim_target(player.entity.world_position + player.last_aim_direction * 5.0);
+		} else {
+			player.set_mouse_ik_enabled(false);
+		}
+
         if params.can_use && activation.activate {
+			player.set_facing_right(activation.direction.x > 0);
+			player.set_trigger("shoot_gun");
+			player.set_aim_target(player.entity.world_position + activation.direction * 5.0);
 			sfx := SFX.default_sfx_desc();
 			sfx.set_position(player.entity.local_position);
 			sfx.volume = 0.5;
@@ -2609,7 +2625,7 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 			// Global SFX mix: everything at 25% volume.
 			sfx.volume *= 0.25;
 			sfx.volume_perturb *= 0.25;
-			rr_play_sfx("sfx/other_death.wav", sfx);
+			rr_play_sfx("minigame/bonk_staff_77864c.wav", sfx);
 		}
 	}
 
