@@ -12,7 +12,7 @@ MIMICER_VFX_RIG :: "anims/roles/Mimicer/vfx/004RAND_Mimicer.spine";
 MIMICER_PILLAR_RIG :: "anims/roles/Mimicer/vfx/012MIM_Dark_Flame_Pillar.spine";
 
 // Kill
-MIMICER_KILL_COOLDOWN :: 80.0;
+MIMICER_KILL_COOLDOWN :: 50.0;
 MIMICER_KILL_RANGE_SCHLEEM :: 10.0;
 MIMICER_KILL_RANGE_MONSTER :: 18.0;
 MIMICER_KILL_ESCALATION_FACES :: 2;
@@ -357,11 +357,11 @@ rr_mimicer_force_revert :: proc(player: Player) {
 	if mm == null return;
 
 	if mm.is_prowling {
-		rr_mimicer_end_prowl(player);
+		rr_mimicer_end_prowl(player, true);
 	}
 
 	if mm.is_disguised {
-		rr_mimicer_end_disguise(player);
+		rr_mimicer_end_disguise(player, true);
 	}
 
 	if mm.void_lunge_active {
@@ -604,7 +604,7 @@ rr_mimicer_start_prowl :: proc(player: Player) {
 	}
 }
 
-rr_mimicer_end_prowl :: proc(player: Player) {
+rr_mimicer_end_prowl :: proc(player: Player, silent: bool = false) {
 	mm := player.entity.get_component(Mimicer_Module);
 	if mm == null return;
 	if !mm.is_prowling return;
@@ -624,7 +624,7 @@ rr_mimicer_end_prowl :: proc(player: Player) {
 	player.remove_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
 	player.remove_name_invisibility_reason(MIMICER_PROWL_INVIS_REASON);
 
-	if !mm.is_monster_form {
+	if !silent && !mm.is_monster_form {
 		player.set_trigger("mimicer_prowl_end");
 	}
 }
@@ -744,7 +744,7 @@ rr_mimicer_start_disguise_from_pillar :: proc(player: Player, pillar: Void_Pilla
 	}
 }
 
-rr_mimicer_end_disguise :: proc(player: Player) {
+rr_mimicer_end_disguise :: proc(player: Player, silent: bool = false) {
 	mm := player.entity.get_component(Mimicer_Module);
 	if mm == null return;
 	if !mm.is_disguised return;
@@ -771,7 +771,9 @@ rr_mimicer_end_disguise :: proc(player: Player) {
 	mm.disguise_target_id = 0;
 	mm.disguise_target_name = "";
 
-	rr_mimicer_spawn_vfx(player.entity.world_position, "004RAND/Mimic_Poof", 1.0);
+	if !silent {
+		rr_mimicer_spawn_vfx(player.entity.world_position, "004RAND/Mimic_Poof", 1.0);
+	}
 }
 
 // =============================================================================
