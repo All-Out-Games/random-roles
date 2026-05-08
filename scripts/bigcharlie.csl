@@ -1,8 +1,5 @@
 import "core:ao"
 
-// Admin toggle for round-start role pool inclusion (set elsewhere via chat command).
-rr_bigcharlie_role_enabled: bool;
-
 // =============================================================================
 // Big Charlie — Anarchist Role (Nugget Mother)
 // =============================================================================
@@ -71,10 +68,15 @@ BC_GROWTH_PULSE_SCALE_AMP     :: 0.04;       // ±4% breathing on top of base sc
 
 // Shockwave (Absorb_Expansion knockback burst — Big Charlie form)
 BC_SHOCKWAVE_COOLDOWN        :: 20.0;    // X[20]s
-BC_SHOCKWAVE_RANGE           :: 4.0;     // X[4] stud blast radius
+BC_SHOCKWAVE_RANGE           :: 7.0;     // X[7] stud max blast radius (clipped by walls)
 BC_SHOCKWAVE_WINDUP          :: 0.5;     // delay before knockback fires (lines up with anim impact)
-BC_SHOCKWAVE_KNOCKBACK_SECS  :: 0.55;    // movement-input disable window
-BC_SHOCKWAVE_KNOCKBACK_SPEED :: 70.0;    // initial impulse speed
+BC_SHOCKWAVE_FLING_SECS      :: 0.8;     // max time the fling can travel (collides early on walls)
+BC_SHOCKWAVE_FLING_SPEED     :: 16.0;    // applied every frame during fling — sends victim to the wall
+BC_SHOCKWAVE_STUN_SECS       :: 2.7;     // stun window — matches Land_On_Front_Recover_Stationary anim length
+BC_SHOCKWAVE_STEP            :: 0.25;    // sample step along the wave (smaller = tighter wall-stop)
+BC_SHOCKWAVE_OFFNAV_TOL      :: 0.4;     // sample is "behind a wall" when navmesh nearest point is this far
+BC_SHOCKWAVE_FLING_REASON    :: "bc_shockwave_fling";
+BC_SHOCKWAVE_STUN_REASON     :: "bc_shockwave_stun";
 
 // Mass Birth
 BC_MASS_BIRTH_STAMPEDE_DELAY :: 1.0;     // bellow wind-up before mini Charlies launch
@@ -82,6 +84,12 @@ BC_MASS_BIRTH_STAMPEDE_SPEED :: 6.0;     // mini Big Charlie converge speed
 BC_MASS_BIRTH_MINI_SCALE     :: v2.{0.62, 0.62};
 BC_MASS_BIRTH_CHANT_RADIUS   :: 1.4;     // inner ring: mini Charlies form a circle at this distance from Big Charlie
 BC_MASS_BIRTH_NUGGET_RADIUS  :: 2.4;     // outer ring: nuggets form a circle further out
+
+// Cinematic camera lock + transform screenshake (driven from Player.ao_late_update)
+BC_MASS_BIRTH_CAM_Y_OFFSET    :: 0.5;    // raise the cinematic camera a bit above Charlie's feet
+BC_MASS_BIRTH_SHAKE_DURATION  :: 0.6;    // total shake window after sync
+BC_MASS_BIRTH_SHAKE_INTENSITY :: 0.5;    // medium intensity (matches Lily deathbraid scale)
+BC_MASS_BIRTH_SHAKE_SPEED     :: 28.0;   // rad/s
 
 // --- Reasons (movement/freeze/invisibility lock keys) ---
 BC_TRANSFORM_LOCK_REASON     :: "bc_transform_lock";
@@ -94,6 +102,8 @@ BC_MASS_BIRTH_LOCK_REASON    :: "bc_mass_birth";
 
 // --- SFX paths (placeholders — replace with dedicated BC SFX) ---
 BC_SFX_TRANSFORM             :: "sfx/transform_poof_2da056.wav";
+BC_SFX_TRANSFORM_SCREAM      :: "sfx/roar_f23931.wav"; // Charlie's scream when Schleem -> Big Charlie
+BC_SFX_TRANSFORM_SCREAM_DELAY :: 0.25;                  // line up with the visible scream beat
 BC_SFX_TRANSFORM_BACK        :: "sfx/cast_freeze_spell_244d4c.wav";
 BC_SFX_NUGGET_BIRTH          :: "sfx/plant_seed_end_1ff22e.wav";
 BC_SFX_COCOON_WRAP           :: "sfx/cast_invis_spell_d2e239.wav";
@@ -127,6 +137,7 @@ rr_bc_round_start :: proc(p: Player) {
 	bcm.camera_lockout_until = 0.0;
 	bcm.mass_birth_active = false;
 	bcm.mass_birth_started_at = 0.0;
+	bcm.mass_birth_sync_at = 0.0;
 	bcm.shockwave_pending = false;
 	bcm.shockwave_fire_at = 0.0;
 	bcm.cocoon_entities.clear();
@@ -487,7 +498,9 @@ BC_Lil_Nugget :: class : Component {
 	}
 
 	// Proximity-based local visibility — Big Charlie always sees nuggets;
-	// non-Charlie players only see them when close, like Lily trees / GGG nests.
+	// non-Charlie players only see planted nuggets when close, like Lily trees /
+	// GGG nests. Follower nuggets are always fully visible (they trail an
+	// infected player — proximity-fade would obscure the diegetic warning).
 	apply_local_visibility :: method() {
 		spine := entity.get_component(Spine_Animator);
 		if spine == null return;
@@ -500,6 +513,11 @@ BC_Lil_Nugget :: class : Component {
 		}
 
 		if local_player.player_role == Player_Role.BIG_CHARLIE {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
+			return;
+		}
+
+		if is_follower {
 			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
 			return;
 		}
@@ -737,7 +755,7 @@ rr_bc_spawn_planted_nugget :: proc(player: Player, position: v2) -> Entity {
 
 	ne := Scene.create_entity();
 	ne.set_local_position(position);
-	ne.set_local_scale(v2.{0.7, 0.7});
+	ne.set_local_scale(v2.{1.0, 1.0});
 
 	spine := ne.add_component(Spine_Animator);
 	spine.awaken();
@@ -770,7 +788,7 @@ rr_bc_spawn_follower_nugget :: proc(bc_player: Player, victim: Player) -> Entity
 
 	ne := Scene.create_entity();
 	ne.set_local_position(victim.entity.world_position + BC_NUGGET_FOLLOWER_OFFSET);
-	ne.set_local_scale(v2.{0.65, 0.65});
+	ne.set_local_scale(v2.{1.0, 1.0});
 
 	spine := ne.add_component(Spine_Animator);
 	spine.awaken();
@@ -1203,14 +1221,23 @@ rr_bc_on_player_died :: proc(dead_player_entity_id: u64) {
 		bc := bc_player.entity.get_component(Big_Charlie_Module);
 		if bc == null continue;
 
-		// Drop every infection slot for this victim (re-infections stack).
+		// Drop every infection slot for this victim (re-infections stack). Each
+		// slot was paid for with one consumed planted Nugget, so decrement the
+		// task-list checklist tally by however many followers this victim was
+		// carrying — Charlie has to re-plant to make up for the lost infection.
+		removed := 0;
 		i := 0;
 		while i < bc.infected_player_ids.count {
 			if bc.infected_player_ids[i] == dead_player_entity_id {
 				bc.infected_player_ids.unordered_remove_by_index(i);
+				removed += 1;
 				continue;
 			}
 			i += 1;
+		}
+		if removed > 0 {
+			bc.planted_nugget_total -= removed;
+			if bc.planted_nugget_total < 0 bc.planted_nugget_total = 0;
 		}
 		rr_bc_clear_infected_player(dead);
 
@@ -1375,6 +1402,16 @@ rr_bc_start_transform :: proc(player: Player) {
 		sfx.entity_to_follow = player.entity.id;
 		sfx.volume = 0.5;
 		rr_play_sfx(BC_SFX_TRANSFORM, sfx);
+
+		// Layer Charlie's scream on top of the poof so the transform feels
+		// monstrous, not just smoky. Delayed slightly to land on the visible
+		// scream beat in the transform anim.
+		scream := SFX.default_sfx_desc();
+		scream.entity_to_follow = player.entity.id;
+		scream.volume = 0.3;
+		scream.delay = BC_SFX_TRANSFORM_SCREAM_DELAY;
+		scream.range_multiplier = 0.3;
+		rr_play_sfx(BC_SFX_TRANSFORM_SCREAM, scream);
 	}
 }
 
@@ -1469,12 +1506,20 @@ rr_bc_start_mass_birth :: proc(player: Player) {
 
 	bc.mass_birth_active = true;
 	bc.mass_birth_started_at = get_time();
+	bc.mass_birth_sync_at = 0.0;
+
+	// Charlie stays planted at her birthing spot — the cinematic camera locks
+	// onto her for everyone, so she must not be able to walk during it. Mirrors
+	// the lily deathbraid pattern (LILY_DEATHBRAID_REASON freezes Lily too).
+	player.add_freeze_reason(BC_MASS_BIRTH_LOCK_REASON);
 
 	rr_bc_creature_trigger(player, "bellow");
 
-	// Collect unique mini-Charlie players and assign each one a stable angle on
-	// the inner ring around Big Charlie. Re-infections stack in infected_player_ids
-	// so we de-dupe here to avoid double-spawning visuals on the same victim.
+	// Collect unique chasers and assign each one a stable angle on the inner
+	// ring around Big Charlie. Re-infections stack in infected_player_ids so we
+	// de-dupe here. NOTE: at this stage victims keep their HUMAN appearance —
+	// they stampede in as themselves and only transform into mini Big Charlies
+	// when they personally reach the chant ring (see rr_bc_update_mass_birth).
 	mini_players: [..]Player;
 	for i: 0..bc.infected_player_ids.count-1 {
 		victim := get_player_by_entity_id(bc.infected_player_ids[i]);
@@ -1493,14 +1538,14 @@ rr_bc_start_mass_birth :: proc(player: Player) {
 	for i: 0..mini_count-1 {
 		victim := mini_players[i];
 		angle := (i.(float) / max(mini_count, 1).(float)) * 2.0 * PI;
+		// bc_is_mini_charlie marks this victim as a chaser slot in the
+		// stampede update; the visual / invisibility swap is deferred until
+		// arrival so they appear as humans during the run-in.
 		victim.bc_is_mini_charlie = true;
 		victim.bc_mini_chant_angle = angle;
 		victim.bc_mini_chanting = false;
 		victim.entity.set_local_position(victim.entity.world_position);
 		victim.add_disable_movement_input_reason(BC_MASS_BIRTH_LOCK_REASON);
-		rr_bc_spawn_mini_charlie_visual(victim);
-		victim.add_invisibility_reason(BC_INVIS_REASON);
-		victim.add_name_invisibility_reason(BC_NAME_INVIS_REASON);
 	}
 
 	// Defensive: any alive non-Charlie who somehow isn't infected (race conditions,
@@ -1536,10 +1581,14 @@ rr_bc_start_mass_birth :: proc(player: Player) {
 			+ v2.{cos(n.chant_angle), sin(n.chant_angle)} * BC_MASS_BIRTH_NUGGET_RADIUS;
 	}
 
-	// Global guttural bellow audible to all players.
+	// Big Charlie's mass-birth scream — anchored to her so the SFX replicates
+	// to every client (non-positional bellows don't propagate). Volume cranked
+	// + extended range so the cinematic crowd hears it from anywhere on the map.
 	if Game.is_server() {
 		desc := SFX.default_sfx_desc();
-		desc.volume = 0.35;
+		desc.entity_to_follow = player.entity.id;
+		desc.volume = 1.0;
+		desc.range_multiplier = 50.0;
 		rr_play_sfx(BC_SFX_MASS_BIRTH_BELLOW, desc);
 
 		// Hand off to gamemanager: freeze game state into ANIM_BC_MASS_BIRTH and
@@ -1576,6 +1625,22 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 		if dup continue;
 		stepped.append(chaser.entity.id);
 
+		// Fire the staggered follow-up scream once its scheduled time hits.
+		// Server-only — bc_mini_second_scream_at is server-stamped at arrival
+		// and replicates to clients only as a flag; the actual SFX play is
+		// kicked off here so engine-side delay limits can't drop it.
+		if Game.is_server() && chaser.bc_mini_second_scream_at > 0.0 && get_time() >= chaser.bc_mini_second_scream_at {
+			scream2 := SFX.default_sfx_desc();
+			scream2.entity_to_follow = chaser.entity.id;
+			scream2.volume = 0.7;
+			scream2.speed = 1.5;
+			scream2.speed_perturb = 0.15;
+			scream2.volume_perturb = 0.1;
+			scream2.range_multiplier = 4.0;
+			rr_play_sfx(BC_SFX_TRANSFORM_SCREAM, scream2);
+			chaser.bc_mini_second_scream_at = 0.0;
+		}
+
 		slot_pos := bc_pos + v2.{cos(chaser.bc_mini_chant_angle), sin(chaser.bc_mini_chant_angle)} * BC_MASS_BIRTH_CHANT_RADIUS;
 		cur := chaser.entity.world_position;
 		diff := slot_pos - cur;
@@ -1587,6 +1652,41 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 			chaser.set_facing_right(face_diff.x > 0.0);
 			if !chaser.bc_mini_chanting {
 				chaser.bc_mini_chanting = true;
+				// Transform on arrival: spawn the mini-Charlie visual, hide the
+				// human rig + nameplate, and play a higher-pitched poof so each
+				// arrival has its own punctuation. Earlier in the cinematic the
+				// chaser stampedes in as their human self — the transform is
+				// deliberately deferred to this beat.
+				rr_bc_spawn_mini_charlie_visual(chaser);
+				chaser.add_invisibility_reason(BC_INVIS_REASON);
+				chaser.add_name_invisibility_reason(BC_NAME_INVIS_REASON);
+				if Game.is_server() {
+					sfx := SFX.default_sfx_desc();
+					sfx.entity_to_follow = chaser.entity.id;
+					sfx.volume = 0.4;
+					sfx.speed = 1.5; // pitched-up — small charlies have small voices
+					rr_play_sfx(BC_SFX_TRANSFORM, sfx);
+
+					// Pitched-up scream #1 plays right after the poof (engine
+					// handles the short delay). Scream #2 is server-scheduled
+					// for a later beat via bc_mini_second_scream_at — long
+					// engine-side delays don't replicate reliably, so we fire
+					// the follow-up explicitly from rr_bc_update_mass_birth.
+					rng: u64 = rng_root_seed();
+					first_delay := BC_SFX_TRANSFORM_SCREAM_DELAY + rng_range_float(ref rng, 0.0, 0.4);
+
+					scream := SFX.default_sfx_desc();
+					scream.entity_to_follow = chaser.entity.id;
+					scream.volume = 0.7;
+					scream.speed = 1.5;
+					scream.speed_perturb = 0.15;
+					scream.volume_perturb = 0.1;
+					scream.delay = first_delay;
+					scream.range_multiplier = 4.0;
+					rr_play_sfx(BC_SFX_TRANSFORM_SCREAM, scream);
+
+					chaser.bc_mini_second_scream_at = get_time() + first_delay + rng_range_float(ref rng, 1.0, 4.0);
+				}
 				mini := chaser.bc_mini_charlie_creature_entity;
 				if mini != null && #alive(mini) {
 					ms := mini.get_component(Spine_Animator);
@@ -1598,11 +1698,23 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 			continue;
 		}
 
-		dir := normalize(diff);
+		// Route around walls via the navmesh: ask the agent to path to the slot,
+		// then step toward the returned next waypoint. We can't let the agent
+		// drive itself because chasers have movement input disabled for the
+		// cinematic — set_path_target gives us the routed waypoint, we integrate.
+		path := chaser.agent.set_path_target(slot_pos, BC_MASS_BIRTH_STAMPEDE_SPEED);
+		step_target := slot_pos;
+		if path.success {
+			step_target = path.next_point;
+		}
+		step_diff := step_target - cur;
+		step_dist := length(step_diff);
+		if step_dist <= 0.001 continue;
+		dir := normalize(step_diff);
 		chaser.set_facing_right((bc_pos - cur).x > 0.0);
 		chaser.agent.velocity = dir * BC_MASS_BIRTH_STAMPEDE_SPEED;
 		step := dir * BC_MASS_BIRTH_STAMPEDE_SPEED * dt;
-		if length(step) > dist step = diff;
+		if length(step) > step_dist step = step_diff;
 		new_pos := cur + step;
 		nav_pt: v2;
 		tri: s64;
@@ -1621,6 +1733,37 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 		if n == null continue;
 		if !n.is_stampeding continue;
 		n.stampede_target_pos = bc_pos + v2.{cos(n.chant_angle), sin(n.chant_angle)} * BC_MASS_BIRTH_NUGGET_RADIUS;
+	}
+
+	// Stamp the synced-transform timestamp once every chaser has arrived at
+	// the chant ring. This drives the camera screenshake on every client (each
+	// client reads the synced timestamp off the BC module).
+	if Game.is_server() && bc.mass_birth_sync_at == 0.0 {
+		any_chaser := false;
+		all_arrived := true;
+		seen: [..]u64;
+		for i: 0..bc.infected_player_ids.count-1 {
+			id := bc.infected_player_ids[i];
+			dup := false;
+			for k: 0..seen.count-1 {
+				if seen[k] == id { dup = true; break; }
+			}
+			if dup continue;
+			seen.append(id);
+
+			chaser := get_player_by_entity_id(id);
+			if chaser == null continue;
+			if chaser.player_state != Player_State.ALIVE continue;
+			if !chaser.bc_is_mini_charlie continue;
+			any_chaser = true;
+			if !chaser.bc_mini_chanting {
+				all_arrived = false;
+				break;
+			}
+		}
+		if any_chaser && all_arrived {
+			bc.mass_birth_sync_at = now;
+		}
 	}
 }
 
@@ -1707,7 +1850,9 @@ rr_bc_update :: proc(player: Player, dt: float) {
 	}
 
 
-	// Cleanup any infected players who died — drop their follower & infection slot.
+	// Cleanup any infected players who died — drop their follower & infection
+	// slot. Mirrors rr_bc_on_player_died: each slot represents one consumed
+	// planted Nugget, so the checklist tally decrements alongside.
 	i := 0;
 	while i < bc.infected_player_ids.count {
 		infected_id := bc.infected_player_ids[i];
@@ -1719,6 +1864,8 @@ rr_bc_update :: proc(player: Player, dt: float) {
 		if vp == null || vp.player_state != Player_State.ALIVE {
 			if vp != null rr_bc_clear_infected_player(vp);
 			bc.infected_player_ids.unordered_remove_by_index(i);
+			bc.planted_nugget_total -= 1;
+			if bc.planted_nugget_total < 0 bc.planted_nugget_total = 0;
 		} else {
 			i += 1;
 		}
@@ -2216,11 +2363,166 @@ BC_Shockwave_Ability :: class : Ability_Base {
 	}
 }
 
+// Walk the navmesh from `origin` toward `target` in fixed steps; return true if
+// the straight line stays on (or near) the navmesh the whole way — i.e. no
+// wall sits between the two points. The shockwave uses this so the blast
+// stops at obstacles like a Hitman mine's expansion ring. Engine has no
+// raycast API; nearest-point-on-navmesh sampling is the closest analogue.
+rr_bc_line_clear_on_navmesh :: proc(origin: v2, target: v2) -> bool {
+	diff := target - origin;
+	dist := length(diff);
+	if dist <= 0.001 return true;
+	dir := diff / dist;
+
+	steps := (dist / BC_SHOCKWAVE_STEP).(int);
+	if steps < 1 steps = 1;
+
+	tol_sq := BC_SHOCKWAVE_OFFNAV_TOL * BC_SHOCKWAVE_OFFNAV_TOL;
+	for i: 1..steps {
+		t := i.(float) * BC_SHOCKWAVE_STEP;
+		if t > dist t = dist;
+		sample := origin + dir * t;
+
+		nav_pt: v2;
+		tri: s64;
+		if !try_find_closest_point_on_navmesh(sample, ref nav_pt, ref tri) {
+			return false;
+		}
+		off := sample - nav_pt;
+		if length_squared(off) > tol_sq return false;
+	}
+	return true;
+}
+
+// Active fling phase — re-applies the outward velocity every frame so the
+// victim travels until they hit a wall (or the timeout expires), like a
+// Hitman mine fling. This is what makes the shockwave throw players to the
+// edge of the room rather than a few studs from Charlie. On collision /
+// timeout, hands off to BC_Shockwave_Stun for the post-knockback stun.
+BC_Shockwave_Knockback :: class : Component {
+	active: bool;
+	end_time: float;
+	dir: v2;
+	last_pos: v2;
+	stuck_frames: int;
+
+	arm :: proc(using this: BC_Shockwave_Knockback, seconds: float, direction: v2, speed: float) {
+		if seconds <= 0.0 seconds = 0.1;
+		end_time = get_time() + seconds;
+		active = true;
+		dir = direction;
+		last_pos = entity.world_position;
+		stuck_frames = 0;
+
+		p := entity.get_component(Player);
+		if p != null {
+			p.add_disable_movement_input_reason(BC_SHOCKWAVE_FLING_REASON);
+			// Reuse the merged-rig fly-forward state (originally added for the
+			// Hitman mine fling) so the victim looks airborne instead of
+			// jogging while being pushed.
+			p.set_facing_right(dir.x > 0);
+			p.set_trigger("hitman_fly_forward");
+			p.agent.velocity = dir * speed;
+		}
+	}
+
+	ao_update :: proc(using this: BC_Shockwave_Knockback, dt: float) {
+		if !active return;
+		p := entity.get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p.remove_disable_movement_input_reason(BC_SHOCKWAVE_FLING_REASON);
+			active = false;
+			return;
+		}
+
+		// Keep pushing every frame until something stops us.
+		p.agent.velocity = dir * BC_SHOCKWAVE_FLING_SPEED;
+
+		pos := entity.world_position;
+		moved := length(pos - last_pos);
+		last_pos = pos;
+
+		if moved < 0.01 {
+			stuck_frames += 1;
+		} else {
+			stuck_frames = 0;
+		}
+
+		collided := stuck_frames >= 3;
+		if collided || get_time() >= end_time {
+			p.remove_disable_movement_input_reason(BC_SHOCKWAVE_FLING_REASON);
+			// Hard-landing pose, then settles into the broken-leg stun loop.
+			p.set_trigger("hitman_collide_midair_land");
+
+			stun := entity.get_component(BC_Shockwave_Stun);
+			if stun == null {
+				stun = entity.add_component(BC_Shockwave_Stun);
+			}
+			stun.arm(BC_SHOCKWAVE_STUN_SECS);
+
+			active = false;
+		}
+	}
+}
+
+// Post-fling stun — keeps movement input disabled for BC_SHOCKWAVE_STUN_SECS
+// after the victim lands. Modelled on Hitman_Mine_Stun.
+BC_Shockwave_Stun :: class : Component {
+	active: bool;
+	end_time: float;
+
+	arm :: proc(using this: BC_Shockwave_Stun, seconds: float) {
+		if seconds <= 0.0 seconds = 0.1;
+		end_time = get_time() + seconds;
+		active = true;
+
+		p := entity.get_component(Player);
+		if p != null {
+			p.add_disable_movement_input_reason(BC_SHOCKWAVE_STUN_REASON);
+			// Fall_To_Ground_Hurt one-shot — anim length (3.4s) matches the
+			// stun window, so the player gets up at the same moment movement
+			// input re-enables.
+			p.set_trigger("bc_shockwave_stun");
+		}
+	}
+
+	ao_update :: proc(using this: BC_Shockwave_Stun, dt: float) {
+		if !active return;
+		p := entity.get_component(Player);
+		if p == null {
+			active = false;
+			return;
+		}
+
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+			p.remove_disable_movement_input_reason(BC_SHOCKWAVE_STUN_REASON);
+			p.set_trigger("RESET");
+			active = false;
+			return;
+		}
+
+		if get_time() >= end_time {
+			p.remove_disable_movement_input_reason(BC_SHOCKWAVE_STUN_REASON);
+			p.set_trigger("RESET");
+			active = false;
+			return;
+		}
+	}
+}
+
 // Knock every alive non-cocooned non-self player within BC_SHOCKWAVE_RANGE
-// outward from Charlie's position. Reuses the Powder_Keg_Knockback component
-// since the disable-input + impulse behaviour is identical.
+// outward from Charlie's position. The wave is blocked by walls (sampled on
+// the navmesh, like a Hitman mine ring), so players safely behind cover are
+// untouched. Each victim gets a sustained outward fling until they hit a
+// wall, followed by a 2s stun.
 rr_bc_apply_shockwave :: proc(player: Player) {
 	origin := player.entity.world_position;
+	range_sq := BC_SHOCKWAVE_RANGE * BC_SHOCKWAVE_RANGE;
 	for p: component_iterator(Player) {
 		if p == null continue;
 		if p == player continue;
@@ -2230,7 +2532,10 @@ rr_bc_apply_shockwave :: proc(player: Player) {
 
 		d := p.entity.world_position - origin;
 		dist_sq := length_squared(d);
-		if dist_sq > BC_SHOCKWAVE_RANGE * BC_SHOCKWAVE_RANGE continue;
+		if dist_sq > range_sq continue;
+
+		// Wall-stop: the wave only reaches players with an unobstructed path.
+		if !rr_bc_line_clear_on_navmesh(origin, p.entity.world_position) continue;
 
 		dir := d;
 		if length_squared(dir) < 0.001 {
@@ -2239,11 +2544,11 @@ rr_bc_apply_shockwave :: proc(player: Player) {
 			dir = normalize(dir);
 		}
 
-		knock := p.entity.get_component(Powder_Keg_Knockback);
+		knock := p.entity.get_component(BC_Shockwave_Knockback);
 		if knock == null {
-			knock = p.entity.add_component(Powder_Keg_Knockback);
+			knock = p.entity.add_component(BC_Shockwave_Knockback);
 		}
-		knock.arm(BC_SHOCKWAVE_KNOCKBACK_SECS, dir, BC_SHOCKWAVE_KNOCKBACK_SPEED);
+		knock.arm(BC_SHOCKWAVE_FLING_SECS, dir, BC_SHOCKWAVE_FLING_SPEED);
 	}
 }
 

@@ -1011,7 +1011,7 @@ pyro_win_active: bool;
 pyro_win_start_time: float;
 pyro_win_player_id: u64;
 
-BC_MASS_BIRTH_CINEMATIC_TIME :: 9.0;
+BC_MASS_BIRTH_CINEMATIC_TIME :: 7.0;
 bc_mass_birth_active: bool;
 bc_mass_birth_start_time: float;
 bc_mass_birth_player_id: u64;
@@ -2945,6 +2945,15 @@ ao_update_bc_mass_birth :: proc(dt: float) {
 		}
 	}
 
+	// Release Charlie's mass-birth freeze before handing off to the endgame
+	// flow so the victory pose / lobby return aren't stuck in place.
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		p.remove_freeze_reason(BC_MASS_BIRTH_LOCK_REASON);
+	}
+
 	bc_mass_birth_active = false;
 	bc_mass_birth_player_id = 0;
 	bc_mass_birth_start_time = 0.0;
@@ -3481,7 +3490,7 @@ assign_players_to_types :: proc() {
 	if rp_any_player_owns(ref players, MIMICER_PRODUCT_ID) {
 		append(ref traitor_roles_master, Player_Role.MIMICER);
 	}
-	if rr_bigcharlie_role_enabled {
+	if rp_any_player_owns(ref players, BIG_CHARLIE_PRODUCT_ID) {
 		append(ref anarchist_roles_master, Player_Role.BIG_CHARLIE);
 	}
 	if rp_any_player_owns(ref players, LILY_PRODUCT_ID) {

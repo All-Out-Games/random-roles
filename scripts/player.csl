@@ -114,6 +114,9 @@ Player :: class : Player_Base {
 	// --- Pyromaniac (cross-player: any player can be on fire) ---
 	pyro_on_fire: bool;
 
+	// Big Charlie mass birth cinematic camera (kept on Player for now)
+	bc_mass_birth_camera_override_active: bool;
+
 	// Jester / vote eject camera (kept on Player for now)
 	sm_inited: bool;
 	jester_win_camera_override_active: bool;
@@ -138,6 +141,7 @@ Player :: class : Player_Base {
 	bc_mini_charlie_creature_entity: Entity;
 	bc_mini_chanting: bool;
 	bc_mini_chant_angle: float;
+	bc_mini_second_scream_at: float; // server-stamped fire time for the follow-up cinematic scream (0 = none)
 	mim_jumpscare_until: float;
 	mim_jumpscare_spine: Spine_Instance;
 	autograph_stun_visual_start_time: float;
@@ -886,6 +890,19 @@ Player :: class : Player_Base {
 				jester_win_camera_override_active = false;
 			}
 
+			// Restore camera + LOS after Big Charlie mass birth cinematic.
+			if bc_mass_birth_camera_override_active && game_state != Game_State.ANIM_BC_MASS_BIRTH {
+				this.camera.follow_player = true;
+				if camera_default_size_saved {
+					this.camera.size = camera_default_size;
+				}
+				if this.local_light_entity != null && #alive(this.local_light_entity) {
+					this.local_light_entity.set_parent(this.entity, false);
+					this.local_light_entity.set_local_position(v2.{0, 0});
+				}
+				bc_mass_birth_camera_override_active = false;
+			}
+
 			// Restore camera after vote ejection cinematic.
 			if vote_eject_camera_override_active && game_state != Game_State.ANIM_VOTE_EJECT {
 				this.camera.follow_player = true;
@@ -918,6 +935,55 @@ Player :: class : Player_Base {
 				if !jester_win_camera_override_active {
 					if this.try_begin_jester_win_camera_override() {
 						jester_win_camera_override_active = true;
+					}
+				}
+				return;
+			}
+
+			// Big Charlie Mass Birth cinematic: lock every player's camera onto
+			// Big Charlie for the duration of the wave-of-deaths, with a brief
+			// medium screenshake on the synced transform beat.
+			//
+			// Mirrors the lily deathbraid camera pattern: direct-set position
+			// every frame (no lerp — lerp reads camera.position back, fights
+			// engine smoothing, and produced a two-position oscillation when
+			// combined with shake offsets and reconciliation). Camera writes
+			// are gated to is_local(); the override flag is set under the
+			// outer is_local_or_server() gate so it sticks through reconcile.
+			if game_state == Game_State.ANIM_BC_MASS_BIRTH {
+				bc_target := get_player_by_entity_id(bc_mass_birth_player_id);
+				if bc_target != null && #alive(bc_target.entity) {
+					bc_mass_birth_camera_override_active = true;
+					if this.is_local() {
+						target_pos := bc_target.entity.world_position;
+
+						shake_x := 0.0;
+						shake_y := 0.0;
+						bc_mod := bc_target.entity.get_component(Big_Charlie_Module);
+						if bc_mod != null && bc_mod.mass_birth_sync_at > 0.0 {
+							since := get_time() - bc_mod.mass_birth_sync_at;
+							if since >= 0.0 && since <= BC_MASS_BIRTH_SHAKE_DURATION {
+								decay := 1.0 - clamp(since / BC_MASS_BIRTH_SHAKE_DURATION, 0.0, 1.0);
+								amp := decay * BC_MASS_BIRTH_SHAKE_INTENSITY;
+								shake_x = sin(get_time() * BC_MASS_BIRTH_SHAKE_SPEED) * amp;
+								shake_y = cos(get_time() * BC_MASS_BIRTH_SHAKE_SPEED * 1.3) * amp * 0.7;
+							}
+						}
+
+						this.camera.follow_player = false;
+						if camera_default_size_saved {
+							this.camera.size = camera_default_size;
+						}
+						this.camera.position = v2.{target_pos.x + shake_x, target_pos.y + BC_MASS_BIRTH_CAM_Y_OFFSET + shake_y};
+
+						// Detach the local LOS light from this player and pin it
+						// to Charlie's position so the cinematic view isn't dark
+						// for spectators / chasers viewing from the wrong angle.
+						// Mirrors lily deathbraid (lily.csl:4167).
+						if this.local_light_entity != null && #alive(this.local_light_entity) {
+							this.local_light_entity.set_parent(null, true);
+							this.local_light_entity.set_local_position(target_pos);
+						}
 					}
 				}
 				return;
@@ -1232,6 +1298,12 @@ rr_get_stun_remaining :: proc(p: Player) -> float {
 	hm := p.entity.get_component(Hitman_Mine_Stun);
 	if hm != null && hm.active {
 		r := hm.stun_end_time - now;
+		if r > best { best = r; }
+	}
+
+	bcs := p.entity.get_component(BC_Shockwave_Stun);
+	if bcs != null && bcs.active {
+		r := bcs.end_time - now;
 		if r > best { best = r; }
 	}
 
@@ -3092,6 +3164,15 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		bc_birth_state := layer.create_state("004RAND_BIGCHARLIE/Spawn_Nugget", false, 1.0);
 		layer.create_global_transition(bc_birth_state, false).create_trigger_condition(bc_birth_var);
 		layer.create_transition(bc_birth_state, idle_state, true);
+
+		// Shockwave stun — victim plays the Fall_To_Ground_Hurt one-shot
+		// (3.4s) and returns to idle. The BC_Shockwave_Stun component holds
+		// movement-input disabled for the same duration so the anim and the
+		// gameplay stun end together.
+		bc_shockwave_stun_var := sm.create_variable("bc_shockwave_stun", State_Machine_Variable.Kind.TRIGGER);
+		bc_shockwave_stun_state := layer.create_state("004RAND_hitman/Land_On_Front_Recover_Stationary", false, 2.7);
+		layer.create_global_transition(bc_shockwave_stun_state, false).create_trigger_condition(bc_shockwave_stun_var);
+		layer.create_transition(bc_shockwave_stun_state, idle_state, true);
 	}
 
 	// Lily player-rig state machine states.

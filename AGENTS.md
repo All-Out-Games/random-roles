@@ -233,18 +233,17 @@ COST :: 50;
 if Economy.can_withdraw_currency(player, "Coins", COST) {
     Economy.withdraw_currency(player, "Coins", COST);
 }
-
+```
 Any time players receive item or currencies you MUST play a sick animation of the item/coins going up or lerping over and have tactile sfx. 
 
 Round based games should reset economy on ao_start with Economy.delete_save_data
-```
 
 ## UI
 - Reference the `UIK` skill for any game UI. Do not mix UIK and UI APIs. 
 
 ## Inventory & Items
 - When players acquire items (e.g. from a shop or interacting with the world), you MUST use the All Out inventory system documented in the `inventory` skill.
-- For placing items in the world use the `inventory-droppable-items` skill. 
+- For placing items in the world use the `inventory-placeable-items` skill. 
 
 ## Math Functions
 `sin`, `cos`, `pow`, `sqrt`, `lerp`, `clamp`, `abs`, `min`, `max`, `length`, `length_squared`, `normalize` there are no other math functions. 
@@ -260,12 +259,23 @@ Round based games should reset economy on ao_start with Economy.delete_save_data
 - p.add_invisibility_reason(reason: string)
 
 ## Best Practices
-- Do not write your own input. Movement is handled by default. If you need to consume it, use player.agent.inputs_this_frame and ability buttons. Default player movement speed is 300. 
+- Do not write your own input. Movement is handled by default (speed = 300). If you need to consume it use player.agent.inputs_this_frame and ability buttons.
 - When unsure about an API signature find the appropriate skill. If no results are found you may grep api_references/core/ao/[core/generated].csl_engine.
+- You MUST fundamentally design your games to account for multiple players. No global tycoons, everything must either be plot based (tycoons) or round based (shooters)
+- Brainrots refer to a special class of character you can find by using the get_remote_assets_that_work_well_with tool with catalogId 05604152b758f509 (these are usually collection based games where brainrots obtained in a user defined way generate money over time you can collect by walking up to them when placed in your base)
+- All games with plots must have a UIK button to teleport to their own plot.
+- Only use the Notifyer API for critical messages there is no other way to convey. Skip notifications if there's a more natural way to convey something.  
+- For new-player onboarding, use world-space objective arrows over tutorial text. Reference the `world-space-ui` skill and use `Tutorial_Arrow.default_options()` + `Tutorial_Arrow.draw(player, target_position, options)`.
+- Any games involving weapons MUST clone https://github.com/All-Out-Games/reusable-weapons-csl.git repo with curl and follow its README. 
+- When the prompt requires building a game world do so using the allout MCP scene editing tools instead of scripts. 
+
+### Guidelines for text / copy
+- USE LESS TEXT IN UI if an icon + value would suffice. Players won't spend time reading huge blobs of text.
+- If you use text in UI make CERTAIN it fits within its container. UIK does not wrap automatically and you have a tendancy to overflow container bounds. Pay attention. Keep it short, and use resize as appropriate. 
+
+### Guidelines for maps
+- Follow all directions carefully from the world building skill
+- Every map must be a large comprehensive game **world**, not a demo. There should be no blue editor backing showing behind anything and the players must have space to explore. 
 
 After you make script changes run the All Out MCP compile tool.
-When the prompt requires building a game world do so using the allout MCP scene editing tools instead of scripts. 
-
-Any games involving weapons MUST clone https://github.com/All-Out-Games/reusable-weapons-csl.git repo with curl and follow its README. 
-
-Start with the scene_summary tool. Do exactly what the users asks for and nothing more. 
+Do exactly what the users asks for and nothing more.

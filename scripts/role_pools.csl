@@ -17,12 +17,14 @@
 // ────────────────────────────────────────────────────────────────────
 
 // ── Product configuration ───────────────────────────────────────────
-GGG_PRODUCT_ID     :: "69b1aa6e3a1668e54467c5d4";
-GGG_USAGE_KEY      :: "purchase_usage_69b1aa6e3a1668e54467c5d4";
-MIMICER_PRODUCT_ID :: "69d67dac5a645398b8c19d96";
-MIMICER_USAGE_KEY  :: "purchase_usage_69d67dac5a645398b8c19d96";
-LILY_PRODUCT_ID    :: "69e7ceac7c51b1e14b7a5611";
-LILY_USAGE_KEY     :: "purchase_usage_69e7ceac7c51b1e14b7a5611";
+GGG_PRODUCT_ID         :: "69b1aa6e3a1668e54467c5d4";
+GGG_USAGE_KEY          :: "purchase_usage_69b1aa6e3a1668e54467c5d4";
+MIMICER_PRODUCT_ID     :: "69d67dac5a645398b8c19d96";
+MIMICER_USAGE_KEY      :: "purchase_usage_69d67dac5a645398b8c19d96";
+LILY_PRODUCT_ID        :: "69e7ceac7c51b1e14b7a5611";
+LILY_USAGE_KEY         :: "purchase_usage_69e7ceac7c51b1e14b7a5611";
+BIG_CHARLIE_PRODUCT_ID :: "69fe2c16961587c2b549b47b";
+BIG_CHARLIE_USAGE_KEY  :: "purchase_usage_69fe2c16961587c2b549b47b";
 
 // ── Boost tiers ─────────────────────────────────────────────────────
 RP_BOOST_HIGH           :: 0.80;
@@ -52,6 +54,7 @@ rp_is_purchase_gated :: proc(role: Player_Role) -> bool {
     if role == Player_Role.GOO_GOO_GAGA return true;
     if role == Player_Role.MIMICER return true;
     if role == Player_Role.LILY_LOVEBRAIDS return true;
+    if role == Player_Role.BIG_CHARLIE return true;
     return false;
 }
 
@@ -65,6 +68,9 @@ rp_is_role_locked :: proc(player: Player, role: Player_Role) -> bool {
     }
     if role == Player_Role.LILY_LOVEBRAIDS {
         return !Purchasing.owns_product(player, LILY_PRODUCT_ID);
+    }
+    if role == Player_Role.BIG_CHARLIE {
+        return !Purchasing.owns_product(player, BIG_CHARLIE_PRODUCT_ID);
     }
     return false;
 }
@@ -117,6 +123,18 @@ rp_get_player_boost :: proc(player: Player) -> Role_Boost_Info {
         }
     }
 
+    // ── Big Charlie ──
+    if Purchasing.owns_product(player, BIG_CHARLIE_PRODUCT_ID) {
+        usage := Save.get_int(player, BIG_CHARLIE_USAGE_KEY, 0);
+        chance := rp_get_boost_chance(usage.(int));
+        if chance > info.chance {
+            info.has_boost = true;
+            info.role      = Player_Role.BIG_CHARLIE;
+            info.role_type = Player_Type.ANARCHIST;
+            info.chance    = chance;
+        }
+    }
+
     return info;
 }
 
@@ -134,6 +152,10 @@ rp_record_boost_used :: proc(player: Player, role: Player_Role) {
     if role == Player_Role.LILY_LOVEBRAIDS {
         current := Save.get_int(player, LILY_USAGE_KEY, 0);
         Save.set_int(player, LILY_USAGE_KEY, current + 1);
+    }
+    if role == Player_Role.BIG_CHARLIE {
+        current := Save.get_int(player, BIG_CHARLIE_USAGE_KEY, 0);
+        Save.set_int(player, BIG_CHARLIE_USAGE_KEY, current + 1);
     }
 }
 
@@ -433,6 +455,7 @@ my_boost :: proc(player: Player) {
     rp_check_boost(player, "Goo Goo Gaga", GGG_PRODUCT_ID, GGG_USAGE_KEY, ref found_any);
     rp_check_boost(player, "Mimicer", MIMICER_PRODUCT_ID, MIMICER_USAGE_KEY, ref found_any);
     rp_check_boost(player, "Lily Lovebraids", LILY_PRODUCT_ID, LILY_USAGE_KEY, ref found_any);
+    rp_check_boost(player, "Big Charlie", BIG_CHARLIE_PRODUCT_ID, BIG_CHARLIE_USAGE_KEY, ref found_any);
     if !found_any {
         Chat.server_send_message("You don't own any purchasable roles.", player);
     }
