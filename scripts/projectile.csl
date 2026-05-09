@@ -32,6 +32,11 @@ RR_Projectile :: class : Component {
 
         destroy_self := false;
 
+		// Lobby projectiles must NEVER fall through to the real-damage branch.
+		if lobby_minigame && (game_state != Game_State.LOBBY || !lobby_minigame_active) {
+			destroy_self = true;
+		}
+
 		// Check for player collisions
         if !destroy_self {
             for player: component_iterator(Player) {
@@ -43,7 +48,9 @@ RR_Projectile :: class : Component {
 					owner_player = owner.get_component(Player);
 				}
 
-				if lobby_minigame && game_state == Game_State.LOBBY && lobby_minigame_active {
+				if lobby_minigame {
+					if !player.lobby_minigame_ready continue;
+					if get_time() < player.lobby_minigame_respawn_until continue;
 					if in_range(player.entity.world_position - entity.world_position, hit_radius) {
 						rr_lobby_minigame_handle_projectile_hit(owner_player, player, entity.world_position);
 						destroy_self = true;
