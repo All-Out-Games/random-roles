@@ -82,6 +82,69 @@ rp_get_boost_chance :: proc(usage_count: int) -> float {
     return 0.0;
 }
 
+// Returns the player's owned boostable roles with chance > 0, sorted by chance desc.
+rp_collect_player_boost_candidates :: proc(player: Player, out: ref [..]Role_Boost_Info) {
+    if player == null return;
+
+    if Purchasing.owns_product(player, GGG_PRODUCT_ID) {
+        usage  := Save.get_int(player, GGG_USAGE_KEY, 0);
+        chance := rp_get_boost_chance(usage.(int));
+        if chance > 0.0 {
+            c: Role_Boost_Info;
+            c.role      = Player_Role.GOO_GOO_GAGA;
+            c.role_type = Player_Type.TRAITOR;
+            c.chance    = chance;
+            out.append(c);
+        }
+    }
+    if Purchasing.owns_product(player, MIMICER_PRODUCT_ID) {
+        usage  := Save.get_int(player, MIMICER_USAGE_KEY, 0);
+        chance := rp_get_boost_chance(usage.(int));
+        if chance > 0.0 {
+            c: Role_Boost_Info;
+            c.role      = Player_Role.MIMICER;
+            c.role_type = Player_Type.TRAITOR;
+            c.chance    = chance;
+            out.append(c);
+        }
+    }
+    if Purchasing.owns_product(player, LILY_PRODUCT_ID) {
+        usage  := Save.get_int(player, LILY_USAGE_KEY, 0);
+        chance := rp_get_boost_chance(usage.(int));
+        if chance > 0.0 {
+            c: Role_Boost_Info;
+            c.role      = Player_Role.LILY_LOVEBRAIDS;
+            c.role_type = Player_Type.TRAITOR;
+            c.chance    = chance;
+            out.append(c);
+        }
+    }
+    if Purchasing.owns_product(player, BIG_CHARLIE_PRODUCT_ID) {
+        usage  := Save.get_int(player, BIG_CHARLIE_USAGE_KEY, 0);
+        chance := rp_get_boost_chance(usage.(int));
+        if chance > 0.0 {
+            c: Role_Boost_Info;
+            c.role      = Player_Role.BIG_CHARLIE;
+            c.role_type = Player_Type.ANARCHIST;
+            c.chance    = chance;
+            out.append(c);
+        }
+    }
+
+    if out.count <= 1 return;
+    for a: 0..out.count - 2 {
+        best := a;
+        for b: a + 1..out.count - 1 {
+            if out[b].chance > out[best].chance { best = b; }
+        }
+        if best != a {
+            tmp := out[a];
+            out[a] = out[best];
+            out[best] = tmp;
+        }
+    }
+}
+
 // Query a player's active boost (if any). Picks the highest boost when multiple are owned.
 rp_get_player_boost :: proc(player: Player) -> Role_Boost_Info {
     info: Role_Boost_Info;
@@ -288,27 +351,36 @@ rp_assign_roles_for_type :: proc(
 
     for i: 0..count - 1 {
         p := type_players.elements[i];
-        boost := rp_get_player_boost(p);
-        if !boost.has_boost continue;
-        // Only apply when the boost type matches this player's assigned type.
-        if boost.role_type != p.player_type continue;
 
-        // One claim per boosted role per round.
-        already := false;
-        for c: 0..claimed.count - 1 {
-            if claimed[c] == boost.role { already = true; break; }
+        candidates: [..]Role_Boost_Info;
+        rp_collect_player_boost_candidates(p, ref candidates);
+        if candidates.count == 0 continue;
+
+        won_role: Player_Role = Player_Role.NONE;
+        for ci: 0..candidates.count - 1 {
+            cand := candidates[ci];
+            if cand.role_type != p.player_type continue;
+
+            // One claim per boosted role per round.
+            is_claimed := false;
+            for c: 0..claimed.count - 1 {
+                if claimed[c] == cand.role { is_claimed = true; break; }
+            }
+            if is_claimed continue;
+
+            roll := rng_range_float(ref rng, 0.0, 1.0);
+            if roll > cand.chance continue;
+
+            won_role = cand.role;
+            break;
         }
-        if already continue;
+        if won_role == Player_Role.NONE continue;
 
-        roll := rng_range_float(ref rng, 0.0, 1.0);
-        if roll > boost.chance continue;
-
-        // Won!
         boost_won[i]  = true;
-        boost_role[i] = boost.role;
-        claimed.append(boost.role);
+        boost_role[i] = won_role;
+        claimed.append(won_role);
         boost_winner_count += 1;
-        rp_record_boost_used(p, boost.role);
+        rp_record_boost_used(p, won_role);
     }
 
     // ── Draw remaining roles from bag ───────────────────────────────

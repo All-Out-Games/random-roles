@@ -862,6 +862,10 @@ rr_vote_results_end_time: float;
 RR_VOTE_HURRY_SECONDS :: 10.0;
 rr_vote_hurry_deadline: float; // 0 = not active; otherwise game-time when voting should end
 round_number: int;
+// Game-level save key for a published-game-wide round counter. Used as
+// extra entropy in the role-assignment seed so two fresh server instances
+// don't collide on round 1 if rng_root_seed() happens to match.
+RR_GLOBAL_ROUND_COUNT_KEY :: "rr_global_round_count";
 meeting_cooldown_ends_at: float;
 post_meeting_kill_lockout_ends_at: float;
 // One-shot override for next-round traitor team size. -1 means disabled.
@@ -1761,6 +1765,7 @@ rr_force_revert_all_roles_for_meeting :: proc(player: Player) {
 	rr_mimicer_force_revert(player);
 	rr_lily_force_revert(player);
 	rr_werewolf_force_revert_for_meeting(player);
+	rr_bc_force_revert(player);
 }
 
 setup_voting :: proc() {
@@ -3453,7 +3458,13 @@ assign_players_to_types :: proc() {
 	}
 
 	// Build unforced player list and assign types with purchase boosts.
-	rng := rng_seed(rng_root_seed() + player_count.(u64) + round_number.(u64) * 7919);
+	// Mix in a globally-monotonic round counter so the seed varies across
+	// server instances even when rng_root_seed() collides. The game-level
+	// save is published-game-wide; optimistic_update keeps client+server in
+	// agreement within the same frame.
+	Save.increment_game_int(RR_GLOBAL_ROUND_COUNT_KEY, 1);
+	global_round_count := Save.get_game_int(RR_GLOBAL_ROUND_COUNT_KEY, 0);
+	rng := rng_seed(rng_root_seed() + player_count.(u64) + round_number.(u64) * 7919 + global_round_count.(u64) * 2654435761);
 	unforced_for_types: [..]Player;
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
@@ -3684,6 +3695,16 @@ assign_players_to_types :: proc() {
 			prk.fake_meetings_called = 0;
 			prk.jester_unlocked_time = 0.0;
 			prk.fake_meeting_target_id = 0;
+
+			// Clear the lockout cooldown applied by the previous round's
+			// Jester Win cinematic
+			for i: 0..p.abilities.count-1 {
+				ab := p.abilities[i];
+				if ab.type == Jester_Win_Ability {
+					ab.current_cooldown = 0.0;
+					break;
+				}
+			}
 		}
 
 		if p.player_role == Player_Role.GOO_GOO_GAGA {
