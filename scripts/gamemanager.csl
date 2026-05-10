@@ -1510,6 +1510,10 @@ on_player_go_dead :: proc(player: Player) {
 	// Clear Lily strings/braids for any player entering the dead state, including vote ejection.
 	rr_lily_on_player_death(player.entity.id, 0);
 
+	// Shoot_Ability.on_update normally clears this, but it stops running once the
+	// ability button is no longer drawn — which is the moment we leave ALIVE.
+	rr_player_clear_gun_state(player);
+
 	player.player_state = Player_State.DEAD;
 
 	// Ghost QoL: apply a movement speed boost while spectating.
@@ -1546,6 +1550,8 @@ on_player_go_passive :: proc(player: Player) {
 	if player.lily_crawling {
 		rr_lily_restore_legs(player);
 	}
+
+	rr_player_clear_gun_state(player);
 
 	player.revive();
 	player.player_state = Player_State.PASSIVE;
@@ -1783,8 +1789,12 @@ setup_voting :: proc() {
 		player.voted_skip = false;
 		player.votes_received = 0;
 
-		world_references.teleport_to_voting(player);
+		// Revert before teleporting: Lily's eye-machine / spider (leg-steal) reverts
+		// reattach her detached body via rr_lily_reattach_body_from_origin, which
+		// snaps player.entity back to the ability origin. Doing it after the teleport
+		// undoes the jump to the voting circle.
 		rr_force_revert_all_roles_for_meeting(player);
+		world_references.teleport_to_voting(player);
 	}
 }
 
@@ -2028,6 +2038,9 @@ end_game_with_winners :: proc(victor: Player_Type, winners: List(Player)) {
 		// Strip mini-Charlie visuals/locks/followers so the victory screen and
 		// lobby don't show players still wrapped up as Big Charlie spawn.
 		rr_bc_cleanup(players.elements[i]);
+		// setup_lobby() also clears these, but only after the victory popup —
+		// clear now so pillars don't linger in the victory cinematic.
+		rr_mimicer_clear_void_pillars(players.elements[i]);
 		// Clear tasks at end of round
 		players.elements[i].active_tasks = List(Task_Base).{};
 	}

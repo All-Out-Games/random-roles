@@ -1214,21 +1214,25 @@ rr_mimicer_get_active_pillar_count :: proc(player: Player) -> int {
 }
 
 rr_mimicer_clear_void_pillars :: proc(player: Player) {
+	// Global sweep catches pillars orphaned by a Mimicer who left mid-round.
+	// Mirrors rr_lily_cleanup's pattern.
+	for vp: component_iterator(Void_Pillar) {
+		if vp == null continue;
+		if #alive(vp.entity) {
+			vp.entity.destroy();
+		}
+	}
+	for up: component_iterator(Unleash_Pillar_Consume_Interact) {
+		if up == null continue;
+		if #alive(up.entity) {
+			up.entity.destroy();
+		}
+	}
+
 	mm := player.entity.get_component(Mimicer_Module);
 	if mm == null return;
 
-	for i: 0..mm.void_pillars.count-1 {
-		if mm.void_pillars[i] != null && #alive(mm.void_pillars[i]) {
-			mm.void_pillars[i].destroy();
-		}
-	}
 	mm.void_pillars.clear();
-
-	for i: 0..mm.unleash_pillars.count-1 {
-		if mm.unleash_pillars[i] != null && #alive(mm.unleash_pillars[i]) {
-			mm.unleash_pillars[i].destroy();
-		}
-	}
 	mm.unleash_pillars.clear();
 	mm.unleash_active = false;
 	mm.is_ultimate_form = false;
