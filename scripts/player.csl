@@ -493,13 +493,15 @@ Player :: class : Player_Base {
 				rr_draw_autograph_stun_visual(this);
 				// Draw fake nameplates (mimicer clones, etc.)
 				fake_nameplate_draw_all(this);
+				rr_hacker_draw_task_rings(this);
 			}
-			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN || game_state == Game_State.ANIM_BC_MASS_BIRTH {
+			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN || game_state == Game_State.ANIM_BC_MASS_BIRTH || game_state == Game_State.ANIM_HACKER_WIN {
 				this.draw_letterbox_bars();
 			}
 			if game_state == Game_State.ANIM_VOTE_EJECT {
 				this.draw_vote_eject_cinematic_ui();
 			}
+			rr_hacker_draw_win_overlay(this);
             if game_state == Game_State.ANIM_ROLE_SPIN {
                 role_spin_popup.set_local_player(this);
                 role_spin_popup.update(delta_time);
@@ -693,10 +695,11 @@ Player :: class : Player_Base {
 			game_state == Game_State.ANIM_INTRO ||
 			game_state == Game_State.ANIM_BODY_FOUND ||
 			game_state == Game_State.ANIM_MEETING_CALLED ||
-			game_state == Game_State.ANIM_VOTE_EJECT ||
-			game_state == Game_State.ANIM_JESTER_WIN ||
-			game_state == Game_State.ANIM_PYRO_WIN ||
-			game_state == Game_State.ANIM_VICTORY;
+            game_state == Game_State.ANIM_VOTE_EJECT ||
+            game_state == Game_State.ANIM_JESTER_WIN ||
+            game_state == Game_State.ANIM_PYRO_WIN ||
+            game_state == Game_State.ANIM_HACKER_WIN ||
+            game_state == Game_State.ANIM_VICTORY;
 		if is_anim_state {
 			return v2.{999.0, 999.0};
 		}
@@ -1012,9 +1015,16 @@ Player :: class : Player_Base {
             if this.player_state == Player_State.ALIVE {
                 abilityIndex := 0;
                 
-                if game_state == Game_State.VOTING {
+                if game_state == Game_State.VOTING || game_state == Game_State.ANIM_MEETING_CALLED || game_state == Game_State.ANIM_BODY_FOUND {
                     // During voting, only show the vote ability
-                    draw_ability_button(this, Vote_Ability, abilityIndex);
+					if game_state == Game_State.VOTING {
+						draw_ability_button(this, Vote_Ability, abilityIndex);
+						abilityIndex += 1;
+					}
+					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.HACKER {
+						draw_ability_button(this, Cancel_Meeting_Ability, abilityIndex);
+						abilityIndex += 1;
+					}
                 } else if game_state == Game_State.INGAME {
 					// Mini-werewolf infection: suppress ALL normal abilities until they pass the bite.
 					// Only show after the transformation has revealed (skin active = wolf look applied).
@@ -1088,6 +1098,9 @@ Player :: class : Player_Base {
 					}
 					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.BIG_CHARLIE {
 						abilityIndex = rr_bc_draw_abilities(this, abilityIndex);
+					}
+					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.HACKER {
+						abilityIndex = rr_hacker_draw_abilities(this, abilityIndex);
 					}
 					}
 				} else if game_state == Game_State.LOBBY {
@@ -1298,6 +1311,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .PORTAL_MAKER: return "WARPER";
 		case .PRANKSTER:  return "PRANKSTER";
 		case .PYROMANIAC: return "PYROMANIAC";
+		case .HACKER:     return "HACKER";
 		case .PIRATE:     return "PIRATE";
 		case .HITMAN:     return "HITMAN";
 		case .WEREWOLF:      return "WEREWOLF";
@@ -1363,6 +1377,12 @@ rr_get_stun_remaining :: proc(p: Player) -> float {
 	ms := p.entity.get_component(Mimicer_Stun);
 	if ms != null && ms.active {
 		r := ms.end_time - now;
+		if r > best { best = r; }
+	}
+
+	hs := p.entity.get_component(Hacker_Electrocuted_Stun);
+	if hs != null && hs.active {
+		r := hs.end_time - now;
 		if r > best { best = r; }
 	}
 
@@ -3063,6 +3083,22 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		layer.create_transition(pirate_dig_for_treasure_state, idle_state, true);
 	}
 
+	rr_sm_setup_hacker :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		hacker_hack_task_var := sm.create_variable("hacker_hack_task", State_Machine_Variable.Kind.TRIGGER);
+		hacker_hack_task_state := layer.create_state("004RAND_hacker/Hack_Task", false, HACKER_TYPING_SECONDS);
+		layer.create_global_transition(hacker_hack_task_state, false).create_trigger_condition(hacker_hack_task_var);
+		layer.create_transition(hacker_hack_task_state, idle_state, true);
+
+		hacker_game_win_var := sm.create_variable("hacker_game_win", State_Machine_Variable.Kind.TRIGGER);
+		hacker_game_win_state := layer.create_state("004RAND_hacker/Hacker_Win_Game", false, HACKER_WIN_ANIMATION_SECONDS);
+		layer.create_global_transition(hacker_game_win_state, false).create_trigger_condition(hacker_game_win_var);
+		layer.create_transition(hacker_game_win_state, idle_state, true);
+
+		hacker_crying_var := sm.create_variable("hacker_crying_loop", State_Machine_Variable.Kind.TRIGGER);
+		hacker_crying_state := layer.create_state("Emote/crying_loop", true, 0.0);
+		layer.create_global_transition(hacker_crying_state, false).create_trigger_condition(hacker_crying_var);
+	}
+
 	rr_sm_setup_ggg :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		ggg_transform_var := sm.create_variable("ggg_transform", State_Machine_Variable.Kind.TRIGGER);
 		ggg_transform_state := layer.create_state("004RAND_GOOGOOGAGA/Transform_Monster_Start", false, 2.0);
@@ -3440,6 +3476,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		rr_sm_setup_werewolf(sm, layer, idle_state);
 		rr_sm_setup_pyromaniac(sm, layer, idle_state);
 		rr_sm_setup_pirate(sm, layer, idle_state);
+		rr_sm_setup_hacker(sm, layer, idle_state);
 		rr_sm_setup_ggg(sm, layer, idle_state);
 		rr_mimicer_setup_player_state_machine(sm, layer, idle_state);
 		rr_sm_setup_big_charlie(sm, layer, idle_state);
@@ -3657,6 +3694,9 @@ Task_Interactable :: class : Component {
     }
 
     on_interact :: proc(using this: Task_Interactable, player: Player) {
+		if rr_hacker_try_trigger_hacked_task(this, player) {
+			return;
+		}
 		task_id := this.get_task_id();
         for i: 0..player.active_tasks.elements.count-1 {
             task := player.active_tasks.elements[i];
@@ -3923,6 +3963,8 @@ Corpse :: class : Component {
 	pyro_has_been_burned: bool;
 	// Pirate can only loot one treasure map per corpse.
 	pirate_map_taken: bool;
+	// Hacker can steal each civilian identity once.
+	hacker_identity_stolen: bool;
 	// GGG: true once the corpse has been wrapped in foil.
 	ggg_is_wrapped: bool;
 	// GGG: death animation saved before wrapping, so we can restore it on unwrap.
@@ -4203,6 +4245,17 @@ rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 	if player == null return;
 	if !player.is_local() return;
 
+	// Hacker: show every normal task interaction point so they can plan hacks.
+	if rr_is_hacker(player) {
+		for i: 0..rr_task_destination_entries.elements.count-1 {
+			e := rr_task_destination_entries.elements[i];
+			if e == null continue;
+			if !rr_hacker_is_normal_task_id(e.task_id) continue;
+			rr_draw_task_marker_on_minimap(map_rect, e.pos, v4.{1, 1, 1, 1});
+		}
+		return;
+	}
+
 	// Pyromaniac: show all igniteable prop locations with the pyro icon.
 	if player.player_role == Player_Role.PYROMANIAC {
 		rr_draw_pyro_prop_markers_on_minimap(player, map_rect);
@@ -4294,6 +4347,7 @@ update_minimap_ui :: proc(player: Player) {
 			is_civilian_like := player.player_type == Player_Type.CIVILIAN ||
 				player.player_role == Player_Role.PRANKSTER ||
 				player.player_role == Player_Role.PYROMANIAC ||
+				player.player_role == Player_Role.HACKER ||
 				player.werewolf_infected;
 			if is_civilian_like && player.active_tasks.elements.count > 0 {
 				// Dead non-civilians don't get the task panel.
@@ -4683,13 +4737,25 @@ update_minimap_ui :: proc(player: Player) {
 		rr_comms_outage_cooldown_ends_at
 	);
 	if power_clicked {
-		rr_try_start_power_outage(player);
+		if rr_is_hacker(player) && rr_power_outage_active {
+			rr_end_power_outage(player);
+		} else {
+			rr_try_start_power_outage(player);
+		}
 	}
 	if comms_clicked {
-		rr_try_start_comms_outage(player);
+		if rr_is_hacker(player) && rr_comms_outage_active {
+			rr_end_comms_outage(player);
+		} else {
+			rr_try_start_comms_outage(player);
+		}
 	}
 	if lockdown_clicked {
-		rr_try_start_lockdown(player);
+		if rr_is_hacker(player) && rr_lockdown_active {
+			rr_end_lockdown(player);
+		} else {
+			rr_try_start_lockdown(player);
+		}
 	}
 
 	if draw_minimap_close_button(map_rect) {
@@ -4702,7 +4768,7 @@ draw_traitor_sabotage_map_button :: proc(player: Player) {
 	if !player.is_local_or_server() return;
 	if game_state != Game_State.INGAME return;
 	if player.player_state != Player_State.ALIVE return;
-	if player.player_type != Player_Type.TRAITOR return;
+	if player.player_type != Player_Type.TRAITOR && !rr_is_hacker(player) return;
 
 	safe := UI.get_safe_screen_rect();
 
@@ -4995,6 +5061,11 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 		rr_intro_copy_player_skins(player);
 		player.intro_role_spine.refresh_skins();
 		player.intro_role_spine.set_animation("004RAND_pyromaniac/Pyromaniac_Intro", false, 0);
+	} else if role == Player_Role.HACKER {
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Hacker/004RAND_Hacker.spine"));
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_hacker/Hack_Task", false, 0);
 	} else if role == Player_Role.MOVIE_STAR {
 		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/MovieStar/004RAND_MovieStar.spine"));
 		rr_intro_copy_player_skins(player);

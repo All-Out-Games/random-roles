@@ -177,13 +177,14 @@ rr_draw_sabotage_button :: proc(
 	icon: Texture_Asset,
 	label: string,
 	active: bool,
-	cooldown_ends_at: float
+	cooldown_ends_at: float,
+	can_end_active: bool = false
 ) -> bool {
 	UI.push_id(id);
 	defer UI.pop_id();
 
 	on_cooldown := get_time() < cooldown_ends_at;
-	disabled := active || on_cooldown;
+	disabled := (active && !can_end_active) || (!active && on_cooldown);
 	UI.push_disabled(disabled);
 	defer UI.pop_disabled();
 
@@ -251,7 +252,8 @@ rr_draw_sabotages_next_to_minimap :: proc(
 	comms_clicked = false;
 	lockdown_clicked = false;
 	if player == null return;
-	if player.player_type != Player_Type.TRAITOR return;
+	can_use_sabotages := player.player_type == Player_Type.TRAITOR || rr_is_hacker(player);
+	if !can_use_sabotages return;
 
 	// Mobile scale boost (no-op on PC).
 	_pushed_scale := rr_push_mobile_ui_scale(player);
@@ -285,9 +287,10 @@ rr_draw_sabotages_next_to_minimap :: proc(
 	comms_cd := max(comms_cooldown_ends_at, rr_global_sabotage_cooldown_ends_at);
 	lock_cd := max(rr_lockdown_cooldown_ends_at, rr_global_sabotage_cooldown_ends_at);
 
-	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", power_icon, "POWER", rr_power_outage_active, power_cd);
-	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", comms_icon, "COMMS", comms_down, comms_cd);
-	lockdown_clicked = rr_draw_sabotage_button(btn3, "sabotage_lockdown", lock_icon, "LOCKDOWN", rr_lockdown_active, lock_cd);
+	can_end_active := rr_is_hacker(player);
+	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", power_icon, "POWER", rr_power_outage_active, power_cd, can_end_active);
+	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", comms_icon, "COMMS", comms_down, comms_cd, can_end_active);
+	lockdown_clicked = rr_draw_sabotage_button(btn3, "sabotage_lockdown", lock_icon, "LOCKDOWN", rr_lockdown_active, lock_cd, can_end_active);
 
 	// Labels under icons.
 	label_h := size * 0.26;

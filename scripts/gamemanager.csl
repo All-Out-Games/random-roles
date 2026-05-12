@@ -374,6 +374,7 @@ Game_State :: enum {
 	ANIM_JESTER_WIN;
 	ANIM_PYRO_WIN;
 	ANIM_BC_MASS_BIRTH;
+	ANIM_HACKER_WIN;
 	ANIM_VICTORY;
 }
 
@@ -401,6 +402,7 @@ Player_Role :: enum {
 	//Anarchist Roles
 	PRANKSTER;
 	PYROMANIAC;
+	HACKER;
 	//Traitor Roles
 	PIRATE;
 	HITMAN;
@@ -421,6 +423,7 @@ rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
 		case .PORTAL_MAKER: return Player_Type.CIVILIAN;
 		case .PRANKSTER:    return Player_Type.ANARCHIST;
 		case .PYROMANIAC:   return Player_Type.ANARCHIST;
+		case .HACKER:       return Player_Type.ANARCHIST;
 		case .PIRATE:       return Player_Type.TRAITOR;
 		case .HITMAN:       return Player_Type.TRAITOR;
 		case .WEREWOLF:      return Player_Type.TRAITOR;
@@ -443,6 +446,7 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .PORTAL_MAKER: return "portal_maker";
 		case .PRANKSTER:    return "prankster";
 		case .PYROMANIAC:   return "pyromaniac";
+		case .HACKER:       return "hacker";
 		case .PIRATE:       return "pirate";
 		case .HITMAN:       return "hitman";
 		case .WEREWOLF:      return "werewolf";
@@ -478,6 +482,7 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	if name == "portal_maker" || name == "warper"              return Player_Role.PORTAL_MAKER, true;
 	if name == "prankster"                                     return Player_Role.PRANKSTER, true;
 	if name == "pyromaniac" || name == "pyro"                  return Player_Role.PYROMANIAC, true;
+	if name == "hacker"                                        return Player_Role.HACKER, true;
 	if name == "pirate"                                        return Player_Role.PIRATE, true;
 	if name == "hitman"                                        return Player_Role.HITMAN, true;
 	if name == "werewolf"                                      return Player_Role.WEREWOLF, true;
@@ -1027,7 +1032,7 @@ rr_try_start_power_outage :: proc(caller: Player) {
 	if game_state != Game_State.INGAME return;
 	if caller == null return;
 	if caller.player_state != Player_State.ALIVE return;
-	if caller.player_type != Player_Type.TRAITOR return;
+	if caller.player_type != Player_Type.TRAITOR && !rr_is_hacker(caller) return;
 
 	if rr_power_outage_active return;
 	if get_time() < rr_power_outage_cooldown_ends_at return;
@@ -1117,7 +1122,7 @@ rr_try_start_comms_outage :: proc(caller: Player) {
 	if game_state != Game_State.INGAME return;
 	if caller == null return;
 	if caller.player_state != Player_State.ALIVE return;
-	if caller.player_type != Player_Type.TRAITOR return;
+	if caller.player_type != Player_Type.TRAITOR && !rr_is_hacker(caller) return;
 
 	if rr_comms_outage_active return;
 	if get_time() < rr_comms_outage_cooldown_ends_at return;
@@ -1159,7 +1164,7 @@ rr_try_start_lockdown :: proc(caller: Player) {
 	if game_state != Game_State.INGAME return;
 	if caller == null return;
 	if caller.player_state != Player_State.ALIVE return;
-	if caller.player_type != Player_Type.TRAITOR return;
+	if caller.player_type != Player_Type.TRAITOR && !rr_is_hacker(caller) return;
 
 	if rr_lockdown_active return;
 	if get_time() < rr_lockdown_cooldown_ends_at return;
@@ -1974,6 +1979,8 @@ ao_update :: proc(dt: float) {
 		ao_update_pyro_win(dt);
 	} else if(game_state == Game_State.ANIM_BC_MASS_BIRTH) {
 		ao_update_bc_mass_birth(dt);
+	} else if(game_state == Game_State.ANIM_HACKER_WIN) {
+		ao_update_hacker_win(dt);
 	} else if(game_state == Game_State.ANIM_VICTORY) {
 		ao_update_victory(dt);
 	}
@@ -2681,6 +2688,15 @@ unlock :: proc(player: Player) {
 			if pyro.world_fire_unlocked_time <= 0.0 {
 				pyro.world_fire_unlocked_time = get_time();
 			}
+		}
+	}
+	// Hacker: complete Game Hack checklist
+	if role == Player_Role.HACKER {
+		hacker := rr_hacker_get_module(player);
+		if hacker != null {
+			hacker.hacked_tasks = max(hacker.hacked_tasks, HACKER_HACK_TASK_GOAL);
+			hacker.stolen_identities = max(hacker.stolen_identities, HACKER_STEAL_IDENTITY_GOAL);
+			rr_hacker_refresh_objectives(player);
 		}
 	}
 
@@ -3515,6 +3531,7 @@ assign_players_to_types :: proc() {
 	append(ref civilian_roles_master, Player_Role.PORTAL_MAKER);
 	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
 	append(ref anarchist_roles_master, Player_Role.PYROMANIAC);
+	append(ref anarchist_roles_master, Player_Role.HACKER);
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 	append(ref traitor_roles_master, Player_Role.HITMAN);
 	append(ref traitor_roles_master, Player_Role.WEREWOLF);
@@ -3566,6 +3583,7 @@ assign_players_to_types :: proc() {
 	// Big Charlie: nuke any leftover scene entities (cocoons, nuggets) before
 	// per-player resets so previous-round artifacts can't survive a reroll.
 	rr_bc_round_global_cleanup();
+	rr_hacker_round_global_cleanup();
 
 	// Assign role-specific tasks / objectives
 	for i: 0..players.elements.count-1 {
@@ -3730,6 +3748,9 @@ assign_players_to_types :: proc() {
 
 		// Big Charlie
 		rr_bc_round_start(p);
+
+		// Hacker
+		rr_hacker_round_start(p);
 
 		// Lily
 		rr_lily_round_start(p);

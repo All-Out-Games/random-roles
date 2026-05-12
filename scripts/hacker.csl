@@ -1,0 +1,766 @@
+import "core:ao"
+
+HACKER_HACK_TASK_GOAL :: 6;
+HACKER_STEAL_IDENTITY_GOAL :: 2;
+HACKER_HACK_TASK_RANGE :: 2.2;
+HACKER_IDENTITY_THEFT_RANGE :: 3.0;
+HACKER_HACK_TASK_COOLDOWN :: 40.0;
+HACKER_STUN_SECONDS :: 5.0;
+HACKER_TYPING_SECONDS :: 2.0333;
+HACKER_WIN_ANIMATION_SECONDS :: 4.5;
+HACKER_WIN_CINEMATIC_SECONDS :: 7.0;
+HACKER_WIN_BLACKOUT_DELAY :: 4.5;
+HACKER_WIN_SCREEN_SFX_LEAD_SECONDS :: 0.5;
+HACKER_WIN_SCREEN_FADE_SECONDS :: 0.55;
+HACKER_WIN_SCREEN_SFX :: "sfx/hacker/sci-fi_alarm_siren_loop_01_1f7a6b.wav";
+HACKER_LOCK_REASON :: "hacker_typing";
+HACKER_STUN_REASON :: "hacker_electrocute";
+HACKER_TASK_ID_HACK_TASKS :: "hacker_hack_tasks";
+HACKER_TASK_ID_STEAL_IDENTITIES :: "hacker_steal_identities";
+
+Hacker_Module :: class : Component {
+	hacked_tasks: int;
+	stolen_identities: int;
+	stolen_role: Player_Role;
+	stolen_identity_player_id: u64;
+}
+
+Hacker_Hacked_Task :: class {
+	task_entity_id: u64;
+	task_id: string;
+	hacker_player_id: u64;
+}
+
+hacker_hacked_tasks: List(Hacker_Hacked_Task);
+hacker_win_active: bool;
+hacker_win_start_time: float;
+hacker_win_player_id: u64;
+
+rr_is_hacker :: proc(player: Player) -> bool {
+	if player == null return false;
+	return player.player_type == Player_Type.ANARCHIST && player.player_role == Player_Role.HACKER;
+}
+
+rr_hacker_get_module :: proc(player: Player) -> Hacker_Module {
+	if player == null return null;
+	mod := player.entity.get_component(Hacker_Module);
+	if mod == null {
+		mod = player.entity.add_component(Hacker_Module);
+	}
+	return mod;
+}
+
+rr_hacker_has_stolen_civilian_role :: proc(player: Player, role: Player_Role) -> bool {
+	if !rr_is_hacker(player) return false;
+	mod := player.entity.get_component(Hacker_Module);
+	if mod == null return false;
+	return mod.stolen_role == role;
+}
+
+rr_player_has_civilian_power :: proc(player: Player, role: Player_Role) -> bool {
+	if player == null return false;
+	if player.player_type == Player_Type.CIVILIAN && player.player_role == role return true;
+	return rr_hacker_has_stolen_civilian_role(player, role);
+}
+
+rr_hacker_is_normal_task_id :: proc(task_id: string) -> bool {
+	if task_id.count == 0 return false;
+	if task_id == RR_RESTART_GENERATOR_TASK_ID return false;
+	if task_id == RR_ENABLE_COMMUNICATIONS_TASK_ID return false;
+	return true;
+}
+
+rr_hacker_is_task_hacked :: proc(task_entity_id: u64) -> bool {
+	if task_entity_id == 0 return false;
+	for i: 0..hacker_hacked_tasks.elements.count-1 {
+		entry := hacker_hacked_tasks.elements[i];
+		if entry == null continue;
+		if entry.task_entity_id == task_entity_id return true;
+	}
+	return false;
+}
+
+rr_hacker_find_nearby_task :: proc(player: Player) -> Task_Interactable {
+	if player == null return null;
+	finder := make_finder(Task_Interactable, player.entity.world_position, HACKER_HACK_TASK_RANGE);
+	for task_interactable: component_iterator(Task_Interactable) {
+		if task_interactable == null continue;
+		if !#alive(task_interactable.entity) continue;
+		if task_interactable.interactable == null continue;
+		task_id := task_interactable.get_task_id();
+		if !rr_hacker_is_normal_task_id(task_id) continue;
+		if rr_hacker_is_task_hacked(task_interactable.entity.id) continue;
+		finder.check(task_interactable, task_interactable.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_hacker_add_hacked_task :: proc(hacker: Player, task_interactable: Task_Interactable) {
+	if hacker == null || task_interactable == null return;
+	if !#alive(task_interactable.entity) return;
+	if rr_hacker_is_task_hacked(task_interactable.entity.id) return;
+
+	entry := new(Hacker_Hacked_Task);
+	entry.task_entity_id = task_interactable.entity.id;
+	entry.task_id = task_interactable.get_task_id();
+	entry.hacker_player_id = hacker.entity.id;
+	append(ref hacker_hacked_tasks, entry);
+
+	mod := rr_hacker_get_module(hacker);
+	if mod != null {
+		mod.hacked_tasks += 1;
+		rr_hacker_refresh_objectives(hacker);
+	}
+}
+
+rr_hacker_try_trigger_hacked_task :: proc(task_interactable: Task_Interactable, user: Player) -> bool {
+	if task_interactable == null || user == null return false;
+	for i: 0..hacker_hacked_tasks.elements.count-1 {
+		entry := hacker_hacked_tasks.elements[i];
+		if entry == null continue;
+		if entry.task_entity_id != task_interactable.entity.id continue;
+
+		unordered_remove_by_index(ref hacker_hacked_tasks, i);
+		rr_hacker_electrocute_player(user);
+		return true;
+	}
+	return false;
+}
+
+Hacker_Typing_Lock :: class : Component {
+	end_time: float;
+	active: bool;
+
+	arm :: proc(using this: Hacker_Typing_Lock, seconds: float) {
+		end_time = get_time() + seconds;
+		active = true;
+		p := entity.get_component(Player);
+		if p != null {
+			p.add_disable_movement_input_reason(HACKER_LOCK_REASON);
+			p.set_facing_right(true);
+			p.set_trigger("hacker_hack_task");
+			if p.is_local_or_server() {
+				sfx := SFX.default_sfx_desc();
+				sfx.entity_to_follow = p.entity.id;
+				sfx.volume = 0.25;
+				sfx.speed_perturb = 0.08;
+				rr_play_sfx(RR_TASK_SFX_KEY_PRESS, sfx);
+			}
+		}
+	}
+
+	ao_update :: proc(using this: Hacker_Typing_Lock, dt: float) {
+		if !active return;
+		p := entity.get_component(Player);
+		if p == null || game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE || get_time() >= end_time {
+			if p != null {
+				p.remove_disable_movement_input_reason(HACKER_LOCK_REASON);
+				p.set_trigger("RESET");
+			}
+			active = false;
+		}
+	}
+}
+
+Hacker_Electrocuted_Stun :: class : Component {
+	end_time: float;
+	active: bool;
+
+	arm :: proc(using this: Hacker_Electrocuted_Stun, seconds: float) {
+		end_time = get_time() + seconds;
+		active = true;
+		p := entity.get_component(Player);
+		if p != null {
+			p.add_disable_movement_input_reason(HACKER_STUN_REASON);
+			if p.animator.instance != null && p.animator.instance.state_machine != null {
+				p.animator.instance.state_machine.set_bool("electrocute", true);
+			}
+			if p.is_local_or_server() {
+				sfx := SFX.default_sfx_desc();
+				sfx.entity_to_follow = p.entity.id;
+				sfx.volume = 0.45;
+				sfx.speed_perturb = 0.08;
+				rr_play_sfx("sfx/zap.wav", sfx);
+			}
+		}
+	}
+
+	ao_update :: proc(using this: Hacker_Electrocuted_Stun, dt: float) {
+		if !active return;
+		p := entity.get_component(Player);
+		if p == null || game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE || get_time() >= end_time {
+			if p != null {
+				p.remove_disable_movement_input_reason(HACKER_STUN_REASON);
+				if p.animator.instance != null && p.animator.instance.state_machine != null {
+					p.animator.instance.state_machine.set_bool("electrocute", false);
+				}
+				p.set_trigger("RESET");
+			}
+			active = false;
+		}
+	}
+}
+
+rr_hacker_electrocute_player :: proc(player: Player) {
+	if player == null return;
+	stun := player.entity.get_component(Hacker_Electrocuted_Stun);
+	if stun == null {
+		stun = player.entity.add_component(Hacker_Electrocuted_Stun);
+	}
+	stun.arm(HACKER_STUN_SECONDS);
+}
+
+rr_hacker_find_nearby_corpse :: proc(player: Player) -> Corpse {
+	if player == null return null;
+	finder := make_finder(Corpse, player.entity.world_position, HACKER_IDENTITY_THEFT_RANGE);
+	for corpse: component_iterator(Corpse) {
+		if corpse == null continue;
+		if !#alive(corpse.entity) continue;
+		finder.check(corpse, corpse.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_hacker_find_nearby_civilian_corpse :: proc(player: Player) -> Corpse {
+	if player == null return null;
+	finder := make_finder(Corpse, player.entity.world_position, HACKER_IDENTITY_THEFT_RANGE);
+	for corpse: component_iterator(Corpse) {
+		if corpse == null continue;
+		if !#alive(corpse.entity) continue;
+		if corpse.hacker_identity_stolen continue;
+		if corpse.has_been_reported continue;
+		owner := get_player_by_entity_id(corpse.owner_player_entity_id);
+		if owner == null continue;
+		if owner.player_type != Player_Type.CIVILIAN continue;
+		if owner.player_role == Player_Role.NONE continue;
+		finder.check(corpse, corpse.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_hacker_notify_identity_theft_failure :: proc(player: Player, corpse: Corpse) {
+	if player == null return;
+	if corpse == null {
+		player.Notify("No corpse in range.");
+		return;
+	}
+	if corpse.hacker_identity_stolen {
+		player.Notify("Identity already stolen.");
+		return;
+	}
+	if corpse.has_been_reported {
+		player.Notify("That body was already reported.");
+		return;
+	}
+
+	owner := get_player_by_entity_id(corpse.owner_player_entity_id);
+	if owner == null {
+		player.Notify("No identity found.");
+		return;
+	}
+	if owner.player_type != Player_Type.CIVILIAN {
+		player.Notify("Only civilian roles can be stolen.");
+		return;
+	}
+	if owner.player_role == Player_Role.NONE {
+		player.Notify("No role power to steal.");
+		return;
+	}
+
+	player.Notify("No identity found.");
+}
+
+rr_hacker_grant_stolen_role_support :: proc(player: Player, role: Player_Role) {
+	if player == null return;
+	if role == Player_Role.DOCTOR {
+		dm := player.entity.get_component(Doctor_Module);
+		if dm == null { dm = player.entity.add_component(Doctor_Module); }
+	}
+	if role == Player_Role.CORONER {
+		cm := player.entity.get_component(Coroner_Module);
+		if cm == null { cm = player.entity.add_component(Coroner_Module); }
+	}
+	if role == Player_Role.PORTAL_MAKER {
+		pm := player.entity.get_component(Portal_Maker_Module);
+		if pm == null { pm = player.entity.add_component(Portal_Maker_Module); }
+	}
+}
+
+rr_hacker_steal_identity :: proc(player: Player, corpse: Corpse) {
+	if player == null || corpse == null return;
+	owner := get_player_by_entity_id(corpse.owner_player_entity_id);
+	if owner == null return;
+	if owner.player_type != Player_Type.CIVILIAN return;
+	if owner.player_role == Player_Role.NONE return;
+
+	corpse.hacker_identity_stolen = true;
+	mod := rr_hacker_get_module(player);
+	if mod != null {
+		mod.stolen_identities += 1;
+		mod.stolen_role = owner.player_role;
+		mod.stolen_identity_player_id = owner.entity.id;
+		rr_hacker_grant_stolen_role_support(player, owner.player_role);
+		rr_hacker_refresh_objectives(player);
+	}
+
+	player.Notify(format_string("Stole % powers.", .{get_role_name(owner.player_role)}));
+}
+
+rr_hacker_find_task :: proc(player: Player, id: string) -> Task_Base {
+	if player == null return null;
+	for i: 0..player.active_tasks.elements.count-1 {
+		task := player.active_tasks.elements[i];
+		if task == null continue;
+		if task.id == id return task;
+	}
+	return null;
+}
+
+rr_hacker_refresh_objectives :: proc(player: Player) {
+	if !rr_is_hacker(player) return;
+	mod := rr_hacker_get_module(player);
+	if mod == null return;
+
+	hack_task := rr_hacker_find_task(player, HACKER_TASK_ID_HACK_TASKS);
+	if hack_task != null {
+		hack_task.completed = mod.hacked_tasks >= HACKER_HACK_TASK_GOAL;
+	}
+	identity_task := rr_hacker_find_task(player, HACKER_TASK_ID_STEAL_IDENTITIES);
+	if identity_task != null {
+		identity_task.completed = mod.stolen_identities >= HACKER_STEAL_IDENTITY_GOAL;
+	}
+}
+
+rr_hacker_is_game_hack_unlocked :: proc(player: Player) -> bool {
+	if !rr_is_hacker(player) return false;
+	mod := player.entity.get_component(Hacker_Module);
+	if mod == null return false;
+	return mod.hacked_tasks >= HACKER_HACK_TASK_GOAL && mod.stolen_identities >= HACKER_STEAL_IDENTITY_GOAL;
+}
+
+rr_hacker_round_global_cleanup :: proc() {
+	hacker_hacked_tasks = List(Hacker_Hacked_Task).{};
+	hacker_win_active = false;
+	hacker_win_start_time = 0.0;
+	hacker_win_player_id = 0;
+}
+
+rr_hacker_round_start :: proc(player: Player) {
+	if player == null return;
+	if player.player_role != Player_Role.HACKER return;
+
+	player.active_tasks = List(Task_Base).{};
+
+	mod := rr_hacker_get_module(player);
+	mod.hacked_tasks = 0;
+	mod.stolen_identities = 0;
+	mod.stolen_role = Player_Role.NONE;
+	mod.stolen_identity_player_id = 0;
+
+	dm := player.entity.get_component(Doctor_Module);
+	if dm != null { dm.resurrects_used = 0; }
+	cm := player.entity.get_component(Coroner_Module);
+	if cm != null { cm.dna_vials.clear(); }
+	pm := player.entity.get_component(Portal_Maker_Module);
+	if pm != null {
+		pm.red_portal = null;
+		pm.blue_portal = null;
+	}
+
+	task1 := new(Task_Base);
+	task1.id = HACKER_TASK_ID_HACK_TASKS;
+	task1.started = true;
+	task1.completed = false;
+	append(ref player.active_tasks, task1);
+
+	task2 := new(Task_Base);
+	task2.id = HACKER_TASK_ID_STEAL_IDENTITIES;
+	task2.started = true;
+	task2.completed = false;
+	append(ref player.active_tasks, task2);
+}
+
+rr_hacker_cancel_meeting_now :: proc(caller: Player) {
+	if caller == null return;
+	if !rr_is_hacker(caller) return;
+	if game_state != Game_State.VOTING && game_state != Game_State.ANIM_MEETING_CALLED && game_state != Game_State.ANIM_BODY_FOUND return;
+
+	rr_vote_results_active = false;
+	rr_vote_results_end_time = 0.0;
+	rr_vote_hurry_deadline = 0.0;
+	rr_last_vote_ejected_player_id = 0;
+	rr_last_vote_was_fake_meeting = false;
+	fake_meeting_active = false;
+	fake_meeting_caller_id = 0;
+
+	restore_now := get_time();
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		for j: 0..p.abilities.count-1 {
+			if j < p.meeting_saved_cooldowns.count {
+				p.abilities[j].current_cooldown = p.meeting_saved_cooldowns[j];
+			}
+		}
+		p.meeting_saved_cooldowns.clear();
+		p.voted_for = null;
+		p.has_voted = false;
+		p.voted_skip = false;
+		p.votes_received = 0;
+		p.Notify("Emergency council cancelled.");
+	}
+
+	if rr_saved_power_outage_cooldown_remaining > 0.0 {
+		rr_power_outage_cooldown_ends_at = restore_now + rr_saved_power_outage_cooldown_remaining;
+	}
+	if rr_saved_comms_outage_cooldown_remaining > 0.0 {
+		rr_comms_outage_cooldown_ends_at = restore_now + rr_saved_comms_outage_cooldown_remaining;
+	}
+	if rr_saved_lockdown_cooldown_remaining > 0.0 {
+		rr_lockdown_cooldown_ends_at = restore_now + rr_saved_lockdown_cooldown_remaining;
+	}
+	if rr_saved_global_sabotage_cooldown_remaining > 0.0 {
+		rr_global_sabotage_cooldown_ends_at = restore_now + rr_saved_global_sabotage_cooldown_remaining;
+	}
+	if rr_saved_fake_meeting_cooldown_remaining > 0.0 {
+		fake_meeting_cooldown_ends_at = restore_now + rr_saved_fake_meeting_cooldown_remaining;
+	}
+	rr_saved_power_outage_cooldown_remaining = 0.0;
+	rr_saved_comms_outage_cooldown_remaining = 0.0;
+	rr_saved_lockdown_cooldown_remaining = 0.0;
+	rr_saved_global_sabotage_cooldown_remaining = 0.0;
+	rr_saved_fake_meeting_cooldown_remaining = 0.0;
+
+	post_meeting_kill_lockout_ends_at = get_time() + POST_MEETING_KILL_LOCKOUT_SECONDS;
+	meeting_cooldown_ends_at = get_time() + MEETING_COOLDOWN_SECONDS;
+	voting_start_time = 0.0;
+	deaths_since_last_meeting = List(u64).{};
+	meeting_initiator_id = 0;
+	meeting_initiator_from_body = false;
+	game_state = Game_State.INGAME;
+	if !rr_lockdown_active {
+		open_all_doors();
+	}
+}
+
+rr_end_lockdown :: proc(fixer: Player) {
+	if !rr_lockdown_active return;
+	rr_lockdown_active = false;
+	rr_lockdown_started_at = 0.0;
+	rr_lockdown_triggered_by_id = 0;
+	rr_lockdown_ends_at = 0.0;
+	if game_state == Game_State.INGAME {
+		open_all_doors();
+	}
+	if fixer != null {
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+			p.Notify(format_string("Door lockdown ended by %.", .{fixer.get_username()}));
+		}
+	}
+}
+
+rr_hacker_start_win_cinematic :: proc(caller: Player) {
+	if caller == null return;
+	if !rr_is_hacker(caller) return;
+	if caller.player_state != Player_State.ALIVE return;
+	if game_state != Game_State.INGAME return;
+	if !rr_hacker_is_game_hack_unlocked(caller) return;
+
+	hacker_win_active = true;
+	hacker_win_start_time = get_time();
+	hacker_win_player_id = caller.entity.id;
+	game_state = Game_State.ANIM_HACKER_WIN;
+	close_all_doors();
+
+	center := caller.entity.world_position;
+	total := max(1, players.elements.count);
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		angle := (i.(float) / total.(float)) * 2.0 * PI;
+		offset := v2.{cos(angle), sin(angle)} * 1.4;
+		p.entity.set_local_position(center + offset);
+		p.add_disable_movement_input_reason(HACKER_LOCK_REASON);
+		p.set_facing_right(center.x > p.entity.world_position.x);
+		if p != caller && p.player_state == Player_State.ALIVE {
+			p.set_trigger("hacker_crying_loop");
+		}
+	}
+
+	caller.set_facing_right(true);
+	caller.set_trigger("hacker_game_win");
+
+	if Game.is_server() {
+		sfx := SFX.default_sfx_desc();
+		sfx.delay = max(0.0, HACKER_WIN_BLACKOUT_DELAY - HACKER_WIN_SCREEN_SFX_LEAD_SECONDS);
+		sfx.volume = 0.75;
+		sfx.speed_perturb = 0.0;
+		rr_play_sfx(HACKER_WIN_SCREEN_SFX, sfx);
+	}
+}
+
+ao_update_hacker_win :: proc(dt: float) {
+	if !hacker_win_active {
+		game_state = Game_State.INGAME;
+		return;
+	}
+	if (get_time() - hacker_win_start_time) < HACKER_WIN_CINEMATIC_SECONDS return;
+
+	winners: List(Player);
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p != null && #alive(p.entity) && p.entity.id == hacker_win_player_id {
+			append(ref winners, p);
+			break;
+		}
+	}
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		p.remove_disable_movement_input_reason(HACKER_LOCK_REASON);
+		p.set_trigger("RESET");
+	}
+
+	hacker_win_active = false;
+	hacker_win_start_time = 0.0;
+	hacker_win_player_id = 0;
+
+	if winners.elements.count > 0 {
+		end_game_with_winners(Player_Type.ANARCHIST, winners);
+	} else {
+		end_game_with_victor(Player_Type.ANARCHIST);
+	}
+}
+
+rr_hacker_draw_win_overlay :: proc(player: Player) {
+	if player == null return;
+	if !player.is_local() return;
+	if game_state != Game_State.ANIM_HACKER_WIN return;
+
+	screen := UI.get_screen_rect();
+	UI.push_layer(9500);
+	defer UI.pop_layer();
+
+	elapsed := get_time() - hacker_win_start_time;
+	if elapsed < HACKER_WIN_BLACKOUT_DELAY return;
+
+	screen_t := (elapsed - HACKER_WIN_BLACKOUT_DELAY) / HACKER_WIN_SCREEN_FADE_SECONDS;
+	screen_alpha := clamp(screen_t, 0.0, 1.0);
+
+	UI.quad(screen, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, screen_alpha});
+
+	title := "HACKER WINS";
+	ts := UI.default_text_settings();
+	ts.size = 82;
+	ts.color = v4.{0.05, 1.0, 0.25, screen_alpha};
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 4;
+	ts.outline_color = v4.{0.0, 0.12, 0.0, screen_alpha};
+	UI.text(screen.center_rect().grow(70.0, 420.0, 70.0, 420.0), ts, title);
+
+	small := UI.default_text_settings();
+	small.size = 28;
+	small.color = v4.{0.05, 0.85, 0.22, 0.9 * screen_alpha};
+	small.halign = .CENTER;
+	small.valign = .CENTER;
+	UI.text(screen.center_rect().offset(0.0, -95.0).grow(28.0, 360.0, 28.0, 360.0), small, "SYSTEM OVERRIDE COMPLETE");
+}
+
+rr_hacker_draw_task_rings :: proc(player: Player) {
+	if !rr_is_hacker(player) return;
+	if !player.is_local() return;
+	if game_state != Game_State.INGAME return;
+
+	reticle := get_asset(Texture_Asset, GROUND_RETICLE_TEXTURE_PATH);
+	if reticle == null return;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+	UI.push_layer(9999);
+	defer UI.pop_layer();
+
+	for task_interactable: component_iterator(Task_Interactable) {
+		if task_interactable == null continue;
+		if !#alive(task_interactable.entity) continue;
+		task_id := task_interactable.get_task_id();
+		if !rr_hacker_is_normal_task_id(task_id) continue;
+
+		pos := task_interactable.entity.world_position;
+		UI.push_z(pos.y);
+		rect := Rect{pos, pos}.grow(0.9, 0.9, 0.9, 0.9);
+		col := v4.{0.05, 1.0, 0.25, 0.65};
+		if rr_hacker_is_task_hacked(task_interactable.entity.id) {
+			col = v4.{0.2, 1.0, 0.45, 0.95};
+		}
+		UI.quad(rect.fit_aspect(reticle.get_aspect()), reticle, col);
+		UI.pop_z();
+	}
+}
+
+Hack_Task_Ability :: class : Ability_Base {
+	NAME :: "Hack Task";
+
+	on_init :: proc(instance: Hack_Task_Ability) {
+		instance.name = NAME;
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/hacker/hack_task.png");
+	}
+
+	can_use :: method() -> bool {
+		if !rr_is_hacker(player) return false;
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.has_task_in_progress() return false;
+		return rr_hacker_find_nearby_task(player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			task := rr_hacker_find_nearby_task(player);
+			if task == null return;
+			rr_hacker_add_hacked_task(player, task);
+			lock := player.entity.get_component(Hacker_Typing_Lock);
+			if lock == null { lock = player.entity.add_component(Hacker_Typing_Lock); }
+			lock.arm(HACKER_TYPING_SECONDS);
+			current_cooldown = HACKER_HACK_TASK_COOLDOWN;
+		}
+	}
+
+	on_draw_button :: proc(instance: Hack_Task_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Hack_Task_Ability.NAME);
+	}
+}
+
+Cancel_Meeting_Ability :: class : Ability_Base {
+	NAME :: "Cancel Meeting";
+
+	on_init :: proc(instance: Cancel_Meeting_Ability) {
+		instance.name = NAME;
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/communication_outage_icon.png");
+	}
+
+	can_use :: method() -> bool {
+		if !rr_is_hacker(player) return false;
+		if player.player_state != Player_State.ALIVE return false;
+		return game_state == Game_State.VOTING || game_state == Game_State.ANIM_MEETING_CALLED || game_state == Game_State.ANIM_BODY_FOUND;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			rr_hacker_cancel_meeting_now(player);
+			current_cooldown = 10.0;
+		}
+	}
+
+	on_draw_button :: proc(instance: Cancel_Meeting_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Cancel_Meeting_Ability.NAME);
+	}
+}
+
+Identity_Theft_Ability :: class : Ability_Base {
+	NAME :: "Identity Theft";
+
+	on_init :: proc(instance: Identity_Theft_Ability) {
+		instance.name = NAME;
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/coroner/ability_take_dna.png");
+	}
+
+	can_use :: method() -> bool {
+		if !rr_is_hacker(player) return false;
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.has_task_in_progress() return false;
+		return rr_hacker_find_nearby_corpse(player) != null;
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			corpse := rr_hacker_find_nearby_civilian_corpse(player);
+			if corpse == null {
+				rr_hacker_notify_identity_theft_failure(player, rr_hacker_find_nearby_corpse(player));
+				return;
+			}
+			rr_hacker_steal_identity(player, corpse);
+			lock := player.entity.get_component(Hacker_Typing_Lock);
+			if lock == null { lock = player.entity.add_component(Hacker_Typing_Lock); }
+			lock.arm(HACKER_TYPING_SECONDS);
+			current_cooldown = 20.0;
+		}
+	}
+
+	on_draw_button :: proc(instance: Identity_Theft_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Identity_Theft_Ability.NAME);
+	}
+}
+
+Game_Hack_Ability :: class : Ability_Base {
+	NAME :: "Game Hack";
+
+	on_init :: proc(instance: Game_Hack_Ability) {
+		instance.name = NAME;
+		instance.icon = get_asset(Texture_Asset, "sprites/icons/hacker/game_end.png");
+	}
+
+	can_use :: method() -> bool {
+		if !rr_is_hacker(player) return false;
+		if game_state != Game_State.INGAME return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.has_task_in_progress() return false;
+		return rr_hacker_is_game_hack_unlocked(player);
+	}
+
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			rr_hacker_start_win_cinematic(player);
+			current_cooldown = 999.0;
+		}
+	}
+
+	on_draw_button :: proc(instance: Game_Hack_Ability, rect: Rect) {
+		draw_ability_name_label(rect, Game_Hack_Ability.NAME);
+	}
+}
+
+rr_hacker_draw_abilities :: proc(player: Player, abilityIndex: int) -> int {
+	draw_ability_button(player, Hack_Task_Ability, abilityIndex);
+	abilityIndex += 1;
+	draw_ability_button(player, Identity_Theft_Ability, abilityIndex);
+	abilityIndex += 1;
+	if rr_hacker_is_game_hack_unlocked(player) {
+		draw_ability_button(player, Game_Hack_Ability, abilityIndex);
+		abilityIndex += 1;
+	}
+
+	mod := player.entity.get_component(Hacker_Module);
+	if mod != null {
+		if mod.stolen_role == Player_Role.SHERIFF {
+			draw_ability_button(player, Shoot_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if mod.stolen_role == Player_Role.DOCTOR {
+			draw_ability_button(player, Resurrect_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if mod.stolen_role == Player_Role.MOVIE_STAR {
+			draw_ability_button(player, Autograph_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if mod.stolen_role == Player_Role.CORONER {
+			draw_ability_button(player, DNA_Sample_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, DNA_Match_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+		if mod.stolen_role == Player_Role.PORTAL_MAKER {
+			draw_ability_button(player, Red_Portal_Ability, abilityIndex);
+			abilityIndex += 1;
+			draw_ability_button(player, Blue_Portal_Ability, abilityIndex);
+			abilityIndex += 1;
+		}
+	}
+
+	return abilityIndex;
+}

@@ -379,8 +379,12 @@ get_task_display_name :: proc(task_id: string) -> string {
 			return "Prank 3 people";
 		case "call_fake_meeting":
 			return "Vote out target";
-	case "pyro_burn_1_corpse":
-		return "Burn 1 corpse";
+		case "pyro_burn_1_corpse":
+			return "Burn 1 corpse";
+		case HACKER_TASK_ID_HACK_TASKS:
+			return "Hack tasks";
+		case HACKER_TASK_ID_STEAL_IDENTITIES:
+			return "Steal identities";
 		case "ggg_wrap_3":
 			return "Wrap 3 bodies";
 		case "jail_codes":
@@ -647,6 +651,7 @@ rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player
 				case .PORTAL_MAKER: { role_name = "WARPER";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/portalmaker_icon.png"); }
 				case .PRANKSTER:    { role_name = "PRANKSTER";    role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/trickster_icon.png"); }
 				case .PYROMANIAC:   { role_name = "PYROMANIAC";   role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/pyromaniac_icon.png"); }
+				case .HACKER:       { role_name = "HACKER";       role_icon = get_asset(Texture_Asset, "sprites/icons/hacker/game_end.png"); }
 				case .PIRATE:       { role_name = "PIRATE";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/pirate_icon.png"); }
 				case .HITMAN:       { role_name = "HITMAN";       role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/hitman_icon.png"); }
 				case .WEREWOLF:     { role_name = "WEREWOLF";     role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/werewolf_icon.png"); }
@@ -753,6 +758,7 @@ rr_role_has_abilities :: proc(role: Player_Role, ptype: Player_Type) -> bool {
 		case .PORTAL_MAKER: return true;
 		case .PRANKSTER:    return true;
 		case .PYROMANIAC:   return true;
+		case .HACKER:       return true;
 		case .BIG_CHARLIE:  return true;
 		case .PIRATE:       return true;
 		case .HITMAN:       return true;
@@ -779,6 +785,7 @@ rr_get_role_description :: proc(role: Player_Role, ptype: Player_Type) -> string
 		switch role {
 			case .PRANKSTER: return "A chaotic wild card. Prank other schleems, call fake emergency meetings and get someone voted it, and when enough chaos is caused, unlock the Jester Win to win!";
 			case .PYROMANIAC: return "A fire-obsessed anarchist. Set rooms ablaze and ignite corpses to destroy evidence. Burn enough of the station to unlock World Fire and engulf everything in flames.";
+			case .HACKER: return "A sabotage specialist. Trap task stations, steal civilian powers from corpses, cancel emergency councils, and complete the checklist to fire Game Hack.";
 			case .BIG_CHARLIE: return "A solo horror. Transform into Big Charlie, birth range-limited Lil' Nuggets, cocoon victims to infect them, then complete the checklist and fire Mass Birth to win.";
 		}
 		return "You are an anarchist. You win alone by completing your unique objective.";
@@ -884,6 +891,12 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 				append(ref results, Help_Ability_Entry.{"sprites/icons/pyro/light_corpse.png", "Light Corpse", "Ignite a nearby dead body to destroy evidence."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/pyro/worldfire.png", "World Fire", "Unlocked after burning enough. Engulf the station in flames to win."});
 			}
+			case .HACKER: {
+				append(ref results, Help_Ability_Entry.{"sprites/icons/hacker/hack_task.png", "Hack Task", "Trap a nearby task. The next player to use it is electrocuted and stunned."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/coroner/ability_take_dna.png", "Identity Theft", "Hack a civilian corpse to steal that role's powers."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/communication_outage_icon.png", "Cancel Meeting", "End an emergency council immediately."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/hacker/game_end.png", "Game Hack", "Unlocked after your checklist. Pull everyone to you and win."});
+			}
 			case .BIG_CHARLIE: {
 				append(ref results, Help_Ability_Entry.{"sprites/icons/transform_evil.png", "Transform", "Toggle between schleem and Big Charlie form. Big Charlie form is faster and births Nuggets."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/big_charlie/Lil_Nugget.png", "Birth Nugget", "Big Charlie form. Plant a Lil' Nugget. Non-traitors only see Nuggets when close and can smush them with a 3s interaction."});
@@ -932,6 +945,7 @@ rr_get_role_difficulty :: proc(role: Player_Role, ptype: Player_Type) -> int {
 		switch role {
 			case .PRANKSTER:   return 3;
 			case .PYROMANIAC:  return 3;
+			case .HACKER:      return 3;
 			case .BIG_CHARLIE: return 3;
 		}
 		return 2;
@@ -1301,6 +1315,10 @@ rr_draw_role_help_panel :: proc(player: Player) {
 				append(ref task_entries, Help_Ability_Entry.{"sprites/icons/big_charlie/Lil_Nugget.png", "Plant Nuggets", "Transform into Big Charlie, then use Birth Nugget to plant 5 Lil' Nuggets. Non-traitors only see them when close and can smush them."});
 				append(ref task_entries, Help_Ability_Entry.{"sprites/icons/big_charlie/abilities/Slough_Icon.png", "Infect Players", "Cocoon a nearby player, then use the cocoon's Incubate interact prompt to send a planted Nugget into it. Hatch 3 different infected players."});
 				append(ref task_entries, Help_Ability_Entry.{"sprites/icons/big_charlie/abilities/Stampede_Icon.png", "Fire Mass Birth", "Once 5 Nuggets are planted and 3 players are infected, use Mass Birth in Big Charlie form to start the win cinematic."});
+			} else if player.player_role == Player_Role.HACKER {
+				append(ref task_entries, Help_Ability_Entry.{"sprites/tasks/repair_laptop/Banned_Laptop solo.png", "Hack Tasks", "Trap task stations around the map."});
+				append(ref task_entries, Help_Ability_Entry.{"sprites/icons/coroner/ability_take_dna.png", "Steal Identities", "Hack civilian corpses to steal their powers."});
+				append(ref task_entries, Help_Ability_Entry.{"sprites/icons/hacker/game_end.png", "Game Hack", "Use Game Hack after both objectives are complete."});
 			} else {
 				append(ref task_entries, Help_Ability_Entry.{"", "Calibrate Teleporter", "Drag the reticle to align it with the blinking target zone."});
 				append(ref task_entries, Help_Ability_Entry.{"", "Solve the Cypher", "Press the 4 icons in the exact order shown on the display panel."});
@@ -1608,7 +1626,7 @@ update_tasks_ui :: proc(player: Player) {
 	}
 
 	// Civilians see their normal tasks; anarchist role objectives and infected mini-werewolves use this list too.
-	if player.player_type != Player_Type.CIVILIAN && player.player_role != Player_Role.PRANKSTER && player.player_role != Player_Role.PYROMANIAC && player.player_role != Player_Role.GOO_GOO_GAGA && player.player_role != Player_Role.BIG_CHARLIE && !player.werewolf_infected {
+	if player.player_type != Player_Type.CIVILIAN && player.player_role != Player_Role.PRANKSTER && player.player_role != Player_Role.PYROMANIAC && player.player_role != Player_Role.HACKER && player.player_role != Player_Role.GOO_GOO_GAGA && player.player_role != Player_Role.BIG_CHARLIE && !player.werewolf_infected {
 		return;
 	}
 
@@ -1723,6 +1741,18 @@ update_tasks_ui :: proc(player: Player) {
 					pyro.cached_corpse_progress_str = format_string("%/1", .{pyro_corpses});
 				}
 				task_progress = pyro.cached_corpse_progress_str;
+			}
+		}
+		if task.id == HACKER_TASK_ID_HACK_TASKS {
+			hacker := player.entity.get_component(Hacker_Module);
+			if hacker != null {
+				task_progress = format_string("%/%", .{min(hacker.hacked_tasks, HACKER_HACK_TASK_GOAL), HACKER_HACK_TASK_GOAL});
+			}
+		}
+		if task.id == HACKER_TASK_ID_STEAL_IDENTITIES {
+			hacker := player.entity.get_component(Hacker_Module);
+			if hacker != null {
+				task_progress = format_string("%/%", .{min(hacker.stolen_identities, HACKER_STEAL_IDENTITY_GOAL), HACKER_STEAL_IDENTITY_GOAL});
 			}
 		}
 
