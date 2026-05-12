@@ -197,9 +197,6 @@ get_random_task_list :: proc(num_tasks: int, player: Player) -> List(Task_Base) 
 	// Build a pool of available task indices
 	available_indices: List(int);
 	for i: 0..NUM_TASKS-1 {
-		// TEMP: Disable "Build a Robot" from random civilian task selection.
-		// (Task still exists and can be manually assigned / referenced by id.)
-		if i == 6 continue; // Task_Build_A_Robot ("build_a_robot")
 		append(ref available_indices, i);
 	}
 	
@@ -1326,6 +1323,7 @@ rr_draw_role_help_panel :: proc(player: Player) {
 				append(ref task_entries, Help_Ability_Entry.{"", "Reroute Power", "Rotate the pipe tiles to form a connected path from left to right."});
 				append(ref task_entries, Help_Ability_Entry.{"", "Guide the Electron", "Move the electron left or right to steer it through the gaps."});
 				append(ref task_entries, Help_Ability_Entry.{"", "Sync Signals", "Aim the beam at each satellite dish until all signals are synced."});
+				append(ref task_entries, Help_Ability_Entry.{"", "Build a Robot", "Drag each robot piece onto the matching spot on the frame."});
 				append(ref task_entries, Help_Ability_Entry.{"", "Catching Butterflies", "Tap all the butterflies before they flutter away."});
 				append(ref task_entries, Help_Ability_Entry.{"", "Change Jail Codes", "Find and enter the 4-digit code shown on the sticky note nearby."});
 				append(ref task_entries, Help_Ability_Entry.{"", "Repair Laptop", "Drag each piece back into its correct slot on the laptop."});
@@ -5122,13 +5120,313 @@ Task_Signal_Sync :: class : Task_Base {
 }
 
 Task_Build_A_Robot :: class : Task_Base {
+	seen_attempt_id: int;
+	layout_initialized: bool;
+	dragging_idx: int;
+	drag_offset: v2;
+	part_pos: [6]v2;
+	part_placed: [6]bool;
+	success_time: float;
+
+	background_texture: Texture_Asset;
+	armature_texture: Texture_Asset;
+	head_table_texture: Texture_Asset;
+	body_table_texture: Texture_Asset;
+	arm_l_table_texture: Texture_Asset;
+	arm_r_table_texture: Texture_Asset;
+	leg_l_table_texture: Texture_Asset;
+	leg_r_table_texture: Texture_Asset;
+	head_assembled_texture: Texture_Asset;
+	body_assembled_texture: Texture_Asset;
+	arm_l_assembled_texture: Texture_Asset;
+	arm_r_assembled_texture: Texture_Asset;
+	leg_l_assembled_texture: Texture_Asset;
+	leg_r_assembled_texture: Texture_Asset;
+
+	PART_HEAD :: 0;
+	PART_BODY :: 1;
+	PART_ARM_L :: 2;
+	PART_ARM_R :: 3;
+	PART_LEG_L :: 4;
+	PART_LEG_R :: 5;
+	SUCCESS_DISPLAY_TIME :: 0.6;
+
+	reset_attempt_state :: proc(using this: Task_Build_A_Robot) {
+		layout_initialized = false;
+		dragging_idx = -1;
+		drag_offset = v2.{0.0, 0.0};
+		for i: 0..5 {
+			part_pos[i] = v2.{0.0, 0.0};
+			part_placed[i] = false;
+		}
+		success_time = 0.0;
+	}
+
+	cancel_attempt :: proc(using this: Task_Build_A_Robot, player: Player) {
+		if !started return;
+		if completed return;
+		started = false;
+		reset_attempt_state(this);
+	}
+
+	init_textures :: proc(using this: Task_Build_A_Robot) {
+		background_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/background.png");
+		armature_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/armature.png");
+
+		head_table_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_table/head.png");
+		body_table_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_table/body.png");
+		arm_l_table_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_table/armL.png");
+		arm_r_table_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_table/armR.png");
+		leg_l_table_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_table/legL.png");
+		leg_r_table_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_table/legR.png");
+
+		head_assembled_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_body/head_assembled.png");
+		body_assembled_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_body/body_assembled.png");
+		arm_l_assembled_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_body/armL_assembled.png");
+		arm_r_assembled_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_body/armR_assembled.png");
+		leg_l_assembled_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_body/legL_assembled.png");
+		leg_r_assembled_texture = get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_body/legR_assembled.png");
+	}
+
+	get_table_texture :: proc(using this: Task_Build_A_Robot, idx: int) -> Texture_Asset {
+		switch idx {
+			case PART_HEAD: return head_table_texture;
+			case PART_BODY: return body_table_texture;
+			case PART_ARM_L: return arm_r_table_texture;
+			case PART_ARM_R: return arm_l_table_texture;
+			case PART_LEG_L: return leg_l_table_texture;
+			case PART_LEG_R: return leg_r_table_texture;
+			default: return null;
+		}
+	}
+
+	get_assembled_texture :: proc(using this: Task_Build_A_Robot, idx: int) -> Texture_Asset {
+		switch idx {
+			case PART_HEAD: return head_assembled_texture;
+			case PART_BODY: return body_assembled_texture;
+			case PART_ARM_L: return arm_l_assembled_texture;
+			case PART_ARM_R: return arm_r_assembled_texture;
+			case PART_LEG_L: return leg_l_assembled_texture;
+			case PART_LEG_R: return leg_r_assembled_texture;
+			default: return null;
+		}
+	}
+
+	get_target_rect :: proc(using this: Task_Build_A_Robot, idx: int, art_rect: Rect) -> Rect {
+		switch idx {
+			case PART_HEAD:  return art_rect.subrect(0.381, 0.672, 0.621, 0.973);
+			case PART_BODY:  return art_rect.subrect(0.386, 0.325, 0.616, 0.694);
+			case PART_ARM_L: return art_rect.subrect(0.146, 0.342, 0.454, 0.717);
+			case PART_ARM_R: return art_rect.subrect(0.546, 0.342, 0.854, 0.717);
+			case PART_LEG_L: return art_rect.subrect(0.327, 0.094, 0.477, 0.451);
+			case PART_LEG_R: return art_rect.subrect(0.523, 0.094, 0.673, 0.451);
+			default: return art_rect.subrect(0.0, 0.0, 0.0, 0.0);
+		}
+	}
+
+	get_spawn_center :: proc(using this: Task_Build_A_Robot, idx: int, art_rect: Rect) -> v2 {
+		x := 0.5;
+		y := 0.12;
+		switch idx {
+			case PART_HEAD:  { x = 0.86; y = 0.16; }
+			case PART_BODY:  { x = 0.48; y = 0.10; }
+			case PART_ARM_L: { x = 0.18; y = 0.10; }
+			case PART_ARM_R: { x = 0.70; y = 0.10; }
+			case PART_LEG_L: { x = 0.08; y = 0.22; }
+			case PART_LEG_R: { x = 0.95; y = 0.14; }
+		}
+		return v2.{lerp(art_rect.min.x, art_rect.max.x, x), lerp(art_rect.min.y, art_rect.max.y, y)};
+	}
+
+	get_loose_part_height :: proc(using this: Task_Build_A_Robot, idx: int, art_rect: Rect) -> float {
+		switch idx {
+			case PART_HEAD: return art_rect.height() * 0.20;
+			case PART_BODY: return art_rect.height() * 0.22;
+			case PART_ARM_L: return art_rect.height() * 0.25;
+			case PART_ARM_R: return art_rect.height() * 0.25;
+			case PART_LEG_L: return art_rect.height() * 0.23;
+			case PART_LEG_R: return art_rect.height() * 0.23;
+			default: return art_rect.height() * 0.20;
+		}
+	}
+
+	is_point_in_rect :: proc(p: v2, r: Rect) -> bool {
+		if p.x < r.min.x return false;
+		if p.x > r.max.x return false;
+		if p.y < r.min.y return false;
+		if p.y > r.max.y return false;
+		return true;
+	}
+
+	draw_rect_outline :: proc(r: Rect, thickness: float, color: v4) {
+		tex := get_asset(Texture_Asset, "$AO/white.png");
+		top := Rect.{v2.{r.min.x, r.max.y - thickness}, v2.{r.max.x, r.max.y}};
+		bot := Rect.{v2.{r.min.x, r.min.y}, v2.{r.max.x, r.min.y + thickness}};
+		left := Rect.{v2.{r.min.x, r.min.y}, v2.{r.min.x + thickness, r.max.y}};
+		right := Rect.{v2.{r.max.x - thickness, r.min.y}, v2.{r.max.x, r.max.y}};
+		UI.quad(top, tex, color);
+		UI.quad(bot, tex, color);
+		UI.quad(left, tex, color);
+		UI.quad(right, tex, color);
+	}
+
+	draw_loose_part :: proc(using this: Task_Build_A_Robot, idx: int, rect: Rect, is_dragging: bool) -> Interact_Result {
+		UI.push_id("robot_part_%", .{idx});
+		defer UI.pop_id();
+
+		btn_bs: Button_Settings = .{};
+		rr_ui_apply_button_click_sound(ref btn_bs);
+		interact := UI.button(rect, btn_bs, .{}, "");
+
+		if is_dragging {
+			shadow := rect.offset_unscaled(7, -7);
+			UI.quad(shadow, get_asset(Texture_Asset, "$AO/white.png"), v4.{0, 0, 0, 0.25});
+		}
+
+		tex := get_table_texture(this, idx);
+		if tex != null {
+			UI.quad(rect, tex, v4.{1, 1, 1, 1});
+		}
+		return interact;
+	}
+
+	draw_placed_parts :: proc(using this: Task_Build_A_Robot, art_rect: Rect) {
+		draw_order: [6]int = {PART_ARM_L, PART_ARM_R, PART_LEG_L, PART_LEG_R, PART_BODY, PART_HEAD};
+		for oi: 0..5 {
+			idx := draw_order[oi];
+			if !part_placed[idx] continue;
+			tex := get_assembled_texture(this, idx);
+			if tex == null continue;
+			target := get_target_rect(this, idx, art_rect);
+			UI.quad(target, tex, v4.{1, 1, 1, 1});
+		}
+	}
+
 	update_task :: proc(using this: Task_Build_A_Robot, player: Player) {
-		if !started {
+		if !started return;
+		if completed return;
+		if !player.is_local_or_server() return;
+
+		if seen_attempt_id != attempt_id {
+			seen_attempt_id = attempt_id;
+			reset_attempt_state(this);
+		}
+
+		if background_texture == null {
+			init_textures(this);
+		}
+
+		screen := UI.get_screen_rect();
+		dim := get_asset(Texture_Asset, "$AO/white.png");
+		UI.quad(screen, dim, v4.{0.0, 0.0, 0.0, 0.85});
+
+		safe := UI.get_safe_screen_rect();
+		window := safe.center_rect().grow(310, 545, 310, 545);
+		if background_texture != null {
+			window = window.fit_aspect(background_texture.get_aspect(), .KEEP_BIGGER);
+		}
+		art_rect := window;
+
+		if !layout_initialized {
+			layout_initialized = true;
+			for i: 0..5 {
+				part_pos[i] = get_spawn_center(this, i, art_rect);
+			}
+		}
+
+		if background_texture != null {
+			UI.quad(art_rect, background_texture, v4.{1, 1, 1, 1});
+		}
+
+		armature_rect := art_rect.subrect(0.224, 0.132, 0.775, 0.814);
+		if armature_texture != null {
+			UI.quad(armature_rect, armature_texture, v4.{1, 1, 1, 1});
+		}
+
+		if dragging_idx >= 0 && dragging_idx <= 5 {
+			target := get_target_rect(this, dragging_idx, art_rect);
+			pad := art_rect.height() * 0.015;
+			draw_rect_outline(target, max(2.0, pad), v4.{1.0, 0.9, 0.15, 0.85});
+		}
+
+		draw_placed_parts(this, art_rect);
+
+		if success_time > 0.0 {
+			if get_time() - success_time >= SUCCESS_DISPLAY_TIME {
+				complete_attempt(this, player, true);
+			}
 			return;
 		}
-		log(format_string("Build a Robot Task Updated"));
-		//Instant success
-		complete_attempt(this, player, true);
+
+		if draw_task_close_button(window, player, this) {
+			return;
+		}
+
+		mouse_pos := get_mouse_screen_position();
+
+		for i: 0..5 {
+			if part_placed[i] continue;
+			if dragging_idx == i continue;
+
+			tex := get_table_texture(this, i);
+			if tex == null continue;
+
+			h := get_loose_part_height(this, i, art_rect);
+			w := h * tex.get_aspect();
+			half := v2.{w * 0.5, h * 0.5};
+			rect := Rect.{part_pos[i] - half, part_pos[i] + half};
+
+			interact := draw_loose_part(this, i, rect, false);
+			mouse_pos = interact.mouse_position;
+
+			if interact.just_pressed && dragging_idx < 0 {
+				dragging_idx = i;
+				drag_offset = mouse_pos - part_pos[i];
+			}
+		}
+
+		if dragging_idx >= 0 && dragging_idx <= 5 && !part_placed[dragging_idx] {
+			i := dragging_idx;
+			tex := get_table_texture(this, i);
+			if tex != null {
+				h := get_loose_part_height(this, i, art_rect);
+				w := h * tex.get_aspect();
+				half := v2.{w * 0.5, h * 0.5};
+				rect := Rect.{part_pos[i] - half, part_pos[i] + half};
+
+				interact := draw_loose_part(this, i, rect, true);
+				mouse_pos = interact.mouse_position;
+
+				if interact.active {
+					part_pos[i] = mouse_pos - drag_offset;
+				}
+
+				if interact.released {
+					target := get_target_rect(this, i, art_rect);
+					pad := art_rect.height() * 0.06;
+					drop_rect := target.grow_unscaled(pad, pad, pad, pad);
+					if is_point_in_rect(part_pos[i], drop_rect) {
+						part_pos[i] = target.center();
+						part_placed[i] = true;
+						rr_task_sfx(player, RR_TASK_SFX_TILE_CLICK, 0.65);
+					}
+					dragging_idx = -1;
+				}
+			} else {
+				dragging_idx = -1;
+			}
+		}
+
+		all_placed := true;
+		for i: 0..5 {
+			if !part_placed[i] {
+				all_placed = false;
+				break;
+			}
+		}
+		if all_placed {
+			success_time = get_time();
+		}
 	}
 }
 
