@@ -763,6 +763,43 @@ draw_loadout_open_button :: proc(player: Player) {
     }
 }
 
+draw_role_boost_shop_open_button :: proc(player: Player) {
+    UI.push_id("boost_shop_open_btn");
+    defer UI.pop_id();
+
+    BTN_HALF :: 60.0;
+    BTN_GAP  :: 24.0;
+
+    safe := UI.get_safe_screen_rect();
+    guide_center := safe.right_center_rect().offset(-(BTN_HALF + 16.0), 0);
+    boost_center := guide_center.offset(0, -(2.0 * BTN_HALF + BTN_GAP));
+    btn_rect := boost_center.grow(BTN_HALF);
+
+    bs := UI.default_button_settings();
+    bs.sprite = get_asset(Texture_Asset, "ui/civilian_boost_icon.png");
+    bs.press_scaling = 0.35;
+    bs.color = v4.{1, 1, 1, 1};
+    bs.hovered_color = v4.{1, 1, 1, 1};
+    bs.pressed_color = v4.{0.6, 0.6, 0.6, 1};
+
+    if UI.button(btn_rect, bs, UI.default_text_settings(), "").clicked {
+        player.roles_guide_open = false;
+        player.loadout_open = false;
+        player.role_boost_shop_open = !player.role_boost_shop_open;
+    }
+
+    label_ts := UI.default_text_settings();
+    label_ts.size = 28;
+    label_ts.color = v4.{1, 1, 1, 0.9};
+    label_ts.halign = .CENTER;
+    label_ts.valign = .TOP;
+    label_ts.do_outline = true;
+    label_ts.outline_thickness = 4;
+    label_ts.outline_color = v4.{0, 0, 0, 1};
+    label_rect := btn_rect.bottom_rect().offset(0, -10).grow_unscaled(18, 70, 0, 70);
+    UI.text(label_rect, label_ts, "Boosts");
+}
+
 // ---- Drawing: UIK modal ----
 
 draw_loadout :: proc(player: Player) {
@@ -918,116 +955,250 @@ draw_loadout :: proc(player: Player) {
 
 // ---- Drawing: role boost shop ----
 
-role_boost_price :: proc(tab: int) -> s64 {
-    pid := role_boost_product_id(tab);
-    if pid == "" return 0;
-    return Purchasing.get_product(pid).price;
+role_boost_short_label :: proc(tab: int) -> string {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   return "Traitor";
+        case LOADOUT_TAB_CIVILIAN:  return "Civilian";
+        case LOADOUT_TAB_ANARCHIST: return "Anarchist";
+    }
+    return "";
+}
+
+role_boost_card_bg :: proc(tab: int) -> UIK.Panel_Background_Kind {
+    switch tab {
+        case LOADOUT_TAB_TRAITOR:   return .BUTTON_BASIC_RED;
+        case LOADOUT_TAB_CIVILIAN:  return .BUTTON_BASIC_GREEN;
+        case LOADOUT_TAB_ANARCHIST: return .BUTTON_BASIC_PURPLE;
+    }
+    return .BUTTON_BASIC_GREY;
 }
 
 role_boost_draw_shop_card :: proc(player: Player, tab: int, handles: ref [..]UIK.Interact_Handle, tabs: ref [..]int) {
-    card := UIK.layout_row();
-    card.width       = UIK.flex(1);
-    card.height      = UIK.pixels(132);
-    card.gap         = 14;
-    card.padding     = v4.{12, 14, 12, 14};
-    card.cross_align = .CENTER;
-    card.background      = loadout_tab_active_bg(tab);
-    card.show_background = true;
+    pid := role_boost_product_id(tab);
+    if pid == "" return;
 
-    h := UIK.panel_begin_interactive(format_string("role_boost_shop_%", {tab}), card);
+    product := Purchasing.get_product(pid);
+
+    card_h := 500.0;
+    if player.device_kind == .PHONE {
+        card_h = 390.0;
+    }
+
+    card := UIK.layout_column();
+    card.width = UIK.flex(1);
+    card.height = UIK.pixels(card_h);
+    card.padding = v4.{16, 16, 16, 16};
+    card.gap = 10;
+    card.cross_align = .CENTER;
+    card.background = role_boost_card_bg(tab);
+    card.show_background = true;
+    h := UIK.panel_begin_interactive(format_string("role_boost_buy_%", {tab}), card);
     append(ref handles, h);
     append(ref tabs, tab);
 
-    icon_tex := get_asset(Texture_Asset, role_boost_icon_path(tab));
+    icon_size := 150.0;
+    if player.device_kind == .PHONE {
+        icon_size = 110.0;
+    }
+
     icon_box := UIK.layout_column();
-    icon_box.width  = UIK.pixels(78);
-    icon_box.height = UIK.pixels(78);
+    icon_box.width = UIK.pixels(icon_size);
+    icon_box.height = UIK.pixels(icon_size);
     icon_box.show_background = false;
     UIK.panel_begin(icon_box);
-    if icon_tex != null {
-        UIK.image_fitted(icon_tex, UIK.image_desc(.CONTAIN));
+    icon := get_asset(Texture_Asset, role_boost_icon_path(tab));
+    if icon != null {
+        UIK.image_fitted(icon, UIK.image_desc(.CONTAIN));
     }
     UIK.panel_end();
 
-    info := UIK.layout_column();
-    info.width  = UIK.flex(1);
-    info.height = UIK.flex(1);
-    info.main_align = .CENTER;
-    info.gap = 4;
-    info.show_background = false;
-    UIK.panel_begin(info);
+    name_ts := UIK.text_title();
+    UIK.text_set_halign(&name_ts, .CENTER);
+    UIK.text_set_word_wrap(&name_ts, false);
+    UIK.text(format_string("% Boost", {role_boost_short_label(tab)}), name_ts);
 
-    title_ts := UIK.text_body();
-    UIK.text_set_color(&title_ts, v4.{1, 1, 1, 1});
-    UIK.text_set_halign(&title_ts, .LEFT);
-    UIK.text_set_size_mult(&title_ts, 1.15);
-    UIK.text_set_word_wrap(&title_ts, false);
-    UIK.text(format_string("% Boost", {loadout_team_label(tab)}), title_ts);
+    desc_panel := UIK.panel_styled(.MODAL_TRANSP_BLACK);
+    desc_panel.width = UIK.flex(1);
+    desc_panel.height = UIK.pixels(92);
+    desc_panel.padding = v4.{8, 12, 8, 12};
+    desc_panel.main_align = .CENTER;
+    UIK.panel_begin(desc_panel);
 
-    remain_ts := UIK.text_body();
-    UIK.text_set_color(&remain_ts, v4.{0.92, 0.92, 0.92, 1});
-    UIK.text_set_halign(&remain_ts, .LEFT);
-    UIK.text_set_size_mult(&remain_ts, 0.9);
-    UIK.text_set_word_wrap(&remain_ts, false);
-    UIK.text(format_string("Active: % rolls", {role_boost_remaining(player, tab)}), remain_ts);
+    desc_ts := UIK.text_body();
+    UIK.text_set_halign(&desc_ts, .CENTER);
+    UIK.text_set_word_wrap(&desc_ts, true);
+    UIK.text(format_string("+% weighted rolls. Stacks with active boosts.", {ROLE_BOOST_GAMES_PER_PURCHASE}), desc_ts);
 
-    price_ts := UIK.text_body();
-    UIK.text_set_color(&price_ts, v4.{1.0, 0.92, 0.35, 1});
-    UIK.text_set_halign(&price_ts, .LEFT);
-    UIK.text_set_size_mult(&price_ts, 0.9);
-    UIK.text_set_word_wrap(&price_ts, false);
-    UIK.text(format_string("+3 rolls - % Sparks", {role_boost_price(tab)}), price_ts);
+    UIK.panel_end();
 
-    UIK.panel_end(); // info
+    remaining := role_boost_remaining(player, tab);
+    status_ts := UIK.text_body();
+    UIK.text_set_halign(&status_ts, .CENTER);
+    UIK.text_set_word_wrap(&status_ts, false);
+    if remaining > 0 {
+        UIK.text(format_string("Active: x%", {remaining}), status_ts);
+    } else {
+        UIK.text("Not active", status_ts);
+    }
 
-    UIK.panel_end(); // card
+    UIK.spacer(UIK.pixels(1), UIK.flex(1));
+
+    buy_bar := UIK.layout_row();
+    buy_bar.width = UIK.flex(1);
+    buy_bar.height = UIK.pixels(72);
+    buy_bar.padding = v4.{8, 16, 8, 16};
+    buy_bar.main_align = .CENTER;
+    buy_bar.cross_align = .CENTER;
+    buy_bar.background = .BUTTON_BASIC_YELLOW1;
+    buy_bar.show_background = true;
+    UIK.panel_begin(buy_bar);
+
+    buy_ts := UIK.text_button();
+    UIK.text_set_halign(&buy_ts, .CENTER);
+    UIK.text_set_word_wrap(&buy_ts, false);
+    UIK.text(format_string("Buy - % Sparks", {product.price}), buy_ts);
+
+    UIK.panel_end();
+    UIK.panel_end();
 }
 
 draw_role_boost_shop :: proc(player: Player) {
     if !player.role_boost_shop_open return;
     if player.loadout == null return;
 
-    UI.push_layer(999);
-    UI.quad(UI.get_screen_rect(), core_globals.white_sprite, v4.{0, 0, 0, 0.92});
-    UI.pop_layer();
-
-    UIK.begin(UIK.modal(UIK.rect_window(), 1001, v4.{0, 0, 0, 0.35}));
+    UIK.begin(UIK.modal(UIK.rect_window_large(), 1000, v4.{0, 0, 0, 0.86}));
 
     shell := UIK.panel_modal(.BLACK);
-    shell.padding = v4.{14, 16, 14, 16};
-    shell.gap = 10;
+    shell.padding = v4.{12, 14, 14, 14};
+    shell.gap = 0;
     UIK.panel_begin(shell);
 
-    title_desc := UIK.title_area_desc("ROLE BOOSTS");
-    exit_handle := UIK.title_area(title_desc);
+    exit_handle := UIK.title_area(UIK.title_area_desc("BOOST SHOP"));
 
-    handles: [..]UIK.Interact_Handle;
-    tabs: [..]int;
+    UIK.spacer(UIK.pixels(1), UIK.pixels(18));
 
-    list := UIK.layout_column();
-    list.width  = UIK.flex(1);
-    list.height = UIK.flex(1);
-    list.gap    = 10;
-    list.show_background = false;
-    UIK.list_begin("role_boost_shop_list", list);
+    card_handles: [..]UIK.Interact_Handle;
+    card_tabs: [..]int;
 
-    role_boost_draw_shop_card(player, LOADOUT_TAB_TRAITOR, ref handles, ref tabs);
-    role_boost_draw_shop_card(player, LOADOUT_TAB_ANARCHIST, ref handles, ref tabs);
-    role_boost_draw_shop_card(player, LOADOUT_TAB_CIVILIAN, ref handles, ref tabs);
+    if player.device_kind == .PHONE {
+        cards := UIK.layout_column();
+        cards.width = UIK.flex(1);
+        cards.height = UIK.flex(1);
+        cards.gap = 14;
+        cards.show_background = false;
+        UIK.list_begin("role_boost_shop_cards", cards);
 
-    UIK.list_end();
+        role_boost_draw_shop_card(player, LOADOUT_TAB_TRAITOR, ref card_handles, ref card_tabs);
+        role_boost_draw_shop_card(player, LOADOUT_TAB_CIVILIAN, ref card_handles, ref card_tabs);
+        role_boost_draw_shop_card(player, LOADOUT_TAB_ANARCHIST, ref card_handles, ref card_tabs);
 
-    UIK.panel_end(); // shell
+        UIK.list_end();
+    } else {
+        cards := UIK.layout_row();
+        cards.width = UIK.flex(1);
+        cards.height = UIK.fit();
+        cards.gap = 14;
+        cards.show_background = false;
+        UIK.panel_begin(cards);
+
+        role_boost_draw_shop_card(player, LOADOUT_TAB_TRAITOR, ref card_handles, ref card_tabs);
+        role_boost_draw_shop_card(player, LOADOUT_TAB_CIVILIAN, ref card_handles, ref card_tabs);
+        role_boost_draw_shop_card(player, LOADOUT_TAB_ANARCHIST, ref card_handles, ref card_tabs);
+
+        UIK.panel_end();
+    }
+
+    UIK.spacer(UIK.pixels(1), UIK.flex(1));
+    UIK.spacer(UIK.pixels(1), UIK.pixels(18));
+
+    hint := UIK.panel_styled(.MODAL_TRANSP_BLACK);
+    hint.width = UIK.flex(1);
+    hint.height = UIK.fit();
+    hint.padding = v4.{8, 14, 8, 14};
+    UIK.panel_begin(hint);
+    hint_ts := UIK.text_body();
+    UIK.text_set_halign(&hint_ts, .CENTER);
+    UIK.text_set_word_wrap(&hint_ts, false);
+    UIK.text("Boosts increase the chance of rolling that team for upcoming games.", hint_ts);
+    UIK.panel_end();
+
+    UIK.panel_end();
     UIK.end();
 
     if UIK.clicked(exit_handle) {
         player.role_boost_shop_open = false;
     }
-    for i: 0..handles.count - 1 {
-        if UIK.clicked(handles[i]) {
-            Purchasing.prompt_purchase(player, role_boost_product_id(tabs[i]));
+    for i: 0..card_handles.count - 1 {
+        if UIK.clicked(card_handles[i]) {
+            pid := role_boost_product_id(card_tabs[i]);
+            if pid != "" Purchasing.prompt_purchase(player, pid);
         }
     }
+}
+
+// ---- Drawing: permanent HUD visual for active boosts ----
+
+draw_role_boost_hud :: proc(player: Player) {
+    if player.loadout == null return;
+    if player.loadout_open return;
+    if player.role_boost_shop_open return;
+
+    any_active := false;
+    for tab: 0..LOADOUT_NUM_TABS - 1 {
+        if role_boost_remaining(player, tab) > 0 {
+            any_active = true;
+            break;
+        }
+    }
+    if !any_active return;
+
+    UIK.begin(UIK.window(UIK.rect_stats()));
+
+    panel := UIK.panel_styled(.MODAL_TRANSP_BLACK);
+    panel.width = UIK.pixels(290);
+    panel.height = UIK.fit();
+    panel.padding = v4.{10, 12, 10, 12};
+    panel.gap = 8;
+    UIK.panel_begin(panel);
+
+    title_ts := UIK.text_body();
+    UIK.text_set_halign(&title_ts, .LEFT);
+    UIK.text_set_word_wrap(&title_ts, false);
+    UIK.text("Active Boosts", title_ts);
+
+    for tab: 0..LOADOUT_NUM_TABS - 1 {
+        remaining := role_boost_remaining(player, tab);
+        if remaining <= 0 continue;
+
+        row := UIK.layout_row();
+        row.width = UIK.flex(1);
+        row.height = UIK.pixels(50);
+        row.gap = 8;
+        row.cross_align = .CENTER;
+        row.show_background = false;
+        UIK.panel_begin(row);
+
+        icon_box := UIK.layout_column();
+        icon_box.width = UIK.pixels(42);
+        icon_box.height = UIK.pixels(42);
+        icon_box.show_background = false;
+        UIK.panel_begin(icon_box);
+        tex := get_asset(Texture_Asset, role_boost_icon_path(tab));
+        if tex != null {
+            UIK.image_fitted(tex, UIK.image_desc(.CONTAIN));
+        }
+        UIK.panel_end();
+
+        label_ts := UIK.text_body();
+        UIK.text_set_halign(&label_ts, .LEFT);
+        UIK.text_set_word_wrap(&label_ts, false);
+        UIK.text(format_string("% x%", {role_boost_short_label(tab), remaining}), label_ts);
+
+        UIK.panel_end();
+    }
+
+    UIK.panel_end();
+    UIK.end();
 }
 
 // ---- Left sidebar: equipped list ----
