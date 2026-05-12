@@ -1256,13 +1256,17 @@ rr_end_comms_outage :: proc(fixer: Player) {
 	// Notify everyone
 	msg := "Communications restored!";
 	if fixer != null {
-		msg = format_string("Communications restored by %!", .{fixer.entity.get_name()});
+		if rr_is_hacker(fixer) {
+			msg = "The Hacker shut down the comms outage.";
+		} else {
+			msg = format_string("Communications restored by %!", .{fixer.entity.get_name()});
+		}
 	}
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
-		p.Notify(msg);
+		Notifier.notify(p, msg);
 	}
 }
 
@@ -1292,13 +1296,17 @@ rr_end_power_outage :: proc(fixer: Player) {
 	// Notify everyone
 	msg := "Power restored!";
 	if fixer != null {
-		msg = format_string("Power restored by %!", .{fixer.entity.get_name()});
+		if rr_is_hacker(fixer) {
+			msg = "The Hacker shut down the power outage.";
+		} else {
+			msg = format_string("Power restored by %!", .{fixer.entity.get_name()});
+		}
 	}
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
-		p.Notify(msg);
+		Notifier.notify(p, msg);
 	}
 }
 
@@ -1917,6 +1925,13 @@ start_meeting :: proc(from_body: bool, caller: Player) -> bool {
 	rr_saved_lockdown_cooldown_remaining = max(0.0, rr_lockdown_cooldown_ends_at - now);
 	rr_saved_global_sabotage_cooldown_remaining = max(0.0, rr_global_sabotage_cooldown_ends_at - now);
 	rr_saved_fake_meeting_cooldown_remaining = max(0.0, fake_meeting_cooldown_ends_at - now);
+
+	// Cancel any pending end-game queued by the 1v1 auto-end while INGAME.
+	// The meeting outcome must take precedence: if voting ejects the last traitor,
+	// civilians should win instead of the stale traitor-victory firing on return to INGAME.
+	rr_end_game_pending = false;
+	rr_end_game_pending_started_at = 0.0;
+	rr_end_game_pending_victor = Player_Type.CIVILIAN;
 
 	if from_body {
 		game_state = Game_State.ANIM_BODY_FOUND;

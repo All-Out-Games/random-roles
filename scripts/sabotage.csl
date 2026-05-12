@@ -178,13 +178,14 @@ rr_draw_sabotage_button :: proc(
 	label: string,
 	active: bool,
 	cooldown_ends_at: float,
-	can_end_active: bool = false
+	can_end_active: bool = false,
+	can_start: bool = true
 ) -> bool {
 	UI.push_id(id);
 	defer UI.pop_id();
 
 	on_cooldown := get_time() < cooldown_ends_at;
-	disabled := (active && !can_end_active) || (!active && on_cooldown);
+	disabled := (active && !can_end_active) || (!active && (on_cooldown || !can_start));
 	UI.push_disabled(disabled);
 	defer UI.pop_disabled();
 
@@ -287,10 +288,12 @@ rr_draw_sabotages_next_to_minimap :: proc(
 	comms_cd := max(comms_cooldown_ends_at, rr_global_sabotage_cooldown_ends_at);
 	lock_cd := max(rr_lockdown_cooldown_ends_at, rr_global_sabotage_cooldown_ends_at);
 
-	can_end_active := rr_is_hacker(player);
-	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", power_icon, "POWER", rr_power_outage_active, power_cd, can_end_active);
-	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", comms_icon, "COMMS", comms_down, comms_cd, can_end_active);
-	lockdown_clicked = rr_draw_sabotage_button(btn3, "sabotage_lockdown", lock_icon, "LOCKDOWN", rr_lockdown_active, lock_cd, can_end_active);
+	is_hacker := rr_is_hacker(player);
+	can_end_active := is_hacker;
+	can_start := !is_hacker;
+	power_clicked = rr_draw_sabotage_button(btn1, "sabotage_power_outage", power_icon, "POWER", rr_power_outage_active, power_cd, can_end_active, can_start);
+	comms_clicked = rr_draw_sabotage_button(btn2, "sabotage_comms_outage", comms_icon, "COMMS", comms_down, comms_cd, can_end_active, can_start);
+	lockdown_clicked = rr_draw_sabotage_button(btn3, "sabotage_lockdown", lock_icon, "LOCKDOWN", rr_lockdown_active, lock_cd, can_end_active, can_start);
 
 	// Labels under icons.
 	label_h := size * 0.26;

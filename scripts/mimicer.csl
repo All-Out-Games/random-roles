@@ -715,16 +715,17 @@ rr_mimicer_start_disguise_from_pillar :: proc(player: Player, pillar: Void_Pilla
 	mm.disguise_target_id = pillar.stored_victim_entity_id;
 	mm.disguise_target_name = pillar.stored_victim_name;
 
+	// Apply shadow mask first so the material swap doesn't clobber the color we set below.
+	rr_apply_shadow_mask(player.animator.instance);
+
 	// Apply stored victim's appearance
 	player.animator.instance.disable_all_skins();
 	for i: 0..pillar.stored_victim_skins.count-1 {
 		player.animator.instance.enable_skin(pillar.stored_victim_skins[i]);
 	}
 	player.animator.instance.refresh_skins();
+	// Set color AFTER refresh_skins and material swap so neither resets it.
 	player.animator.instance.set_color_replace_color(pillar.stored_victim_color);
-
-	// Apply shadow mask so disguised player respects LOS/fog
-	rr_apply_shadow_mask(player.animator.instance);
 
 	player.add_name_invisibility_reason("mimicer_disguise");
 
@@ -750,15 +751,16 @@ rr_mimicer_end_disguise :: proc(player: Player, silent: bool = false) {
 	if !mm.is_disguised return;
 
 	if player.animator != null && player.animator.instance != null {
+		// Remove shadow mask material first so the material swap doesn't clobber the color we set below.
+		player.animator.instance.set_material(null, false);
+
 		player.animator.instance.disable_all_skins();
 		for i: 0..mm.disguise_saved_skins.count-1 {
 			player.animator.instance.enable_skin(mm.disguise_saved_skins[i]);
 		}
 		player.animator.instance.refresh_skins();
+		// Set color AFTER refresh_skins and material swap so neither resets it.
 		player.animator.instance.set_color_replace_color(mm.disguise_saved_color);
-
-		// Remove shadow mask material (restore default)
-		player.animator.instance.set_material(null, false);
 	}
 
 	player.remove_name_invisibility_reason("mimicer_disguise");
@@ -1110,14 +1112,22 @@ rr_mimicer_create_void_pillar :: proc(player: Player, pos: v2, corpse: Corpse) {
 		for i: 0..corpse_skins.count-1 {
 			append(ref pillar.stored_victim_skins, corpse_skins[i]);
 		}
-		pillar.stored_victim_color = corpse_spine.instance.color_replace_color;
 	} else if victim != null && victim.animator != null && victim.animator.instance != null {
-		// Fallback: read from victim player
+		// Fallback: read skins from victim player
 		victim_skins := victim.animator.instance.get_skins();
 		for i: 0..victim_skins.count-1 {
 			append(ref pillar.stored_victim_skins, victim_skins[i]);
 		}
+	}
+
+	// Always read color from the victim player's avatar_color (reliably synced),
+	// not from the corpse spine — Spine_Instance.color_replace_color is a local
+	// field and reads NONE on sides where set_color_replace_color was skipped
+	// (e.g. spine instance wasn't constructed yet at corpse-spawn time).
+	if victim != null {
 		pillar.stored_victim_color = victim.avatar_color;
+	} else if corpse_spine != null && corpse_spine.instance != null {
+		pillar.stored_victim_color = corpse_spine.instance.color_replace_color;
 	}
 
 	pillar.is_smoldered = false;

@@ -17,6 +17,7 @@ HACKER_LOCK_REASON :: "hacker_typing";
 HACKER_STUN_REASON :: "hacker_electrocute";
 HACKER_TASK_ID_HACK_TASKS :: "hacker_hack_tasks";
 HACKER_TASK_ID_STEAL_IDENTITIES :: "hacker_steal_identities";
+HACKER_CANCEL_MEETING_COOLDOWN :: 180.0;
 
 Hacker_Module :: class : Component {
 	hacked_tasks: int;
@@ -228,7 +229,6 @@ rr_hacker_find_nearby_civilian_corpse :: proc(player: Player) -> Corpse {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
 		if corpse.hacker_identity_stolen continue;
-		if corpse.has_been_reported continue;
 		owner := get_player_by_entity_id(corpse.owner_player_entity_id);
 		if owner == null continue;
 		if owner.player_type != Player_Type.CIVILIAN continue;
@@ -248,11 +248,6 @@ rr_hacker_notify_identity_theft_failure :: proc(player: Player, corpse: Corpse) 
 		player.Notify("Identity already stolen.");
 		return;
 	}
-	if corpse.has_been_reported {
-		player.Notify("That body was already reported.");
-		return;
-	}
-
 	owner := get_player_by_entity_id(corpse.owner_player_entity_id);
 	if owner == null {
 		player.Notify("No identity found.");
@@ -407,7 +402,13 @@ rr_hacker_cancel_meeting_now :: proc(caller: Player) {
 		p.has_voted = false;
 		p.voted_skip = false;
 		p.votes_received = 0;
-		p.Notify("Emergency council cancelled.");
+	}
+	if Game.is_server() {
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+			Notifier.notify(p, "The Hacker cancelled the emergency council.");
+		}
 	}
 
 	if rr_saved_power_outage_cooldown_remaining > 0.0 {
@@ -452,11 +453,15 @@ rr_end_lockdown :: proc(fixer: Player) {
 	if game_state == Game_State.INGAME {
 		open_all_doors();
 	}
-	if fixer != null {
+	if fixer != null && Game.is_server() {
+		msg := format_string("Door lockdown ended by %.", .{fixer.get_username()});
+		if rr_is_hacker(fixer) {
+			msg = "The Hacker ended the door lockdown.";
+		}
 		for i: 0..players.elements.count-1 {
 			p := players.elements[i];
 			if p == null continue;
-			p.Notify(format_string("Door lockdown ended by %.", .{fixer.get_username()}));
+			Notifier.notify(p, msg);
 		}
 	}
 }
@@ -651,7 +656,7 @@ Cancel_Meeting_Ability :: class : Ability_Base {
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
 			rr_hacker_cancel_meeting_now(player);
-			current_cooldown = 10.0;
+			current_cooldown = HACKER_CANCEL_MEETING_COOLDOWN;
 		}
 	}
 

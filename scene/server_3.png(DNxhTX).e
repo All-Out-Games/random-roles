@@ -26,22 +26,4 @@
     "texture": "sprites/phota/Server_Room/Server_Stacks/server_3.png",
     "depth_offset": -0.5635800361633301
   }
-},
-{
-  "cid": 2,
-  "aoid": 2936759425,
-  "component_type": "Internal_Component",
-  "internal_component_type": "Box_Collider",
-  "data": {
-    "make_navmesh_loop": true,
-    "flip_navmesh_loop": true,
-    "size": {
-      "X": 1.1706752777099609,
-      "Y": 0.3769454956054688
-    },
-    "offset": {
-      "X": -0.0042676925659180,
-      "Y": -0.6102514266967773
-    }
-  }
 }

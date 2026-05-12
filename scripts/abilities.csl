@@ -2049,16 +2049,27 @@ Shoot_Ability :: class : Ability_Base {
         icon = get_icon(this, player.player_role);
 		// Hide the aim line while unusable (cooldown/lockout/etc).
 		if !params.can_use {
-			rr_player_clear_gun_state(player);
+			player.set_mouse_ik_enabled(false);
+			if get_time() >= player.gun_visible_until {
+				rr_set_player_gun_skin(player, "");
+			}
 			return;
 		}
 
-		gun_skin := player.player_role == Player_Role.PIRATE ? "weapons/flintlock" : "weapons/revolver";
-		rr_set_player_gun_skin(player, gun_skin);
-
         activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
 
+		if params.can_use && activation.activate {
+			player.gun_visible_until = get_time() + 0.5;
+		}
+
 		targeting := player.active_ability == this.(Ability_Base);
+		gun_visible := targeting || get_time() < player.gun_visible_until;
+		if gun_visible {
+			gun_skin := player.player_role == Player_Role.PIRATE ? "weapons/flintlock" : "weapons/revolver";
+			rr_set_player_gun_skin(player, gun_skin);
+		} else {
+			rr_set_player_gun_skin(player, "");
+		}
 		if targeting {
 			player.set_mouse_ik_enabled(true);
 			player.set_aim_target(player.entity.world_position + player.last_aim_direction * 5.0);
