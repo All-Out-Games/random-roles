@@ -31,6 +31,7 @@ RP_BOOST_HIGH           :: 0.80;
 RP_BOOST_LOW            :: 0.33;
 RP_BOOST_THRESHOLD_MID  :: 5;
 RP_BOOST_THRESHOLD_GONE :: 25;
+RP_ROLE_TYPE_BOOST_CHANCE :: 0.65;
 
 // ── Per-player boost descriptor (transient, rebuilt each round) ─────
 Role_Boost_Info :: struct {
@@ -38,6 +39,40 @@ Role_Boost_Info :: struct {
     role:      Player_Role;
     role_type: Player_Type;
     chance:    float;
+}
+
+rp_set_type_boost_candidate :: proc(out: ref [..]Role_Boost_Info, role_type: Player_Type, chance: float) {
+    if chance <= 0.0 return;
+    for i: 0..out.count - 1 {
+        if out[i].role_type == role_type {
+            if chance > out[i].chance {
+                out[i].chance = chance;
+            }
+            return;
+        }
+    }
+
+    c: Role_Boost_Info;
+    c.has_boost = true;
+    c.role      = Player_Role.NONE;
+    c.role_type = role_type;
+    c.chance    = chance;
+    out.append(c);
+}
+
+rp_sort_boost_candidates :: proc(out: ref [..]Role_Boost_Info) {
+    if out.count <= 1 return;
+    for a: 0..out.count - 2 {
+        best := a;
+        for b: a + 1..out.count - 1 {
+            if out[b].chance > out[best].chance { best = b; }
+        }
+        if best != a {
+            tmp := out[a];
+            out[a] = out[best];
+            out[best] = tmp;
+        }
+    }
 }
 
 // Returns true if any connected player owns the given product.
@@ -249,6 +284,11 @@ rp_assign_player_types :: proc(
     type_locked: [..]bool;
     for i: 0..count - 1 { type_locked.append(false); }
 
+    loadouts: [..]Loadout_Data;
+    for i: 0..count - 1 {
+        loadouts.append(loadout_load_for_player(unforced[i]));
+    }
+
     r_civ := remaining_civ;
     r_an  := remaining_an;
     r_tr  := remaining_tr;
@@ -276,6 +316,42 @@ rp_assign_player_types :: proc(
     }
 
     // Pass 2 — build and shuffle type list for remaining players.
+    // Consumable role-type boosts from the hub loadout.
+    for i: 0..count - 1 {
+        if type_locked[i] continue;
+
+        candidates: [..]Role_Boost_Info;
+        if loadout_role_boost_remaining(loadouts[i], Player_Type.TRAITOR) > 0 {
+            rp_set_type_boost_candidate(ref candidates, Player_Type.TRAITOR, RP_ROLE_TYPE_BOOST_CHANCE);
+        }
+        if loadout_role_boost_remaining(loadouts[i], Player_Type.ANARCHIST) > 0 {
+            rp_set_type_boost_candidate(ref candidates, Player_Type.ANARCHIST, RP_ROLE_TYPE_BOOST_CHANCE);
+        }
+        if loadout_role_boost_remaining(loadouts[i], Player_Type.CIVILIAN) > 0 {
+            rp_set_type_boost_candidate(ref candidates, Player_Type.CIVILIAN, RP_ROLE_TYPE_BOOST_CHANCE);
+        }
+        rp_sort_boost_candidates(ref candidates);
+
+        for ci: 0..candidates.count - 1 {
+            boost := candidates[ci];
+            slots := 0;
+            if boost.role_type == Player_Type.CIVILIAN  { slots = r_civ; }
+            if boost.role_type == Player_Type.ANARCHIST { slots = r_an; }
+            if boost.role_type == Player_Type.TRAITOR   { slots = r_tr; }
+            if slots <= 0 continue;
+
+            roll := rng_range_float(ref rng, 0.0, 1.0);
+            if roll > boost.chance continue;
+
+            unforced[i].player_type = boost.role_type;
+            type_locked[i] = true;
+            if boost.role_type == Player_Type.CIVILIAN  { r_civ -= 1; }
+            if boost.role_type == Player_Type.ANARCHIST { r_an  -= 1; }
+            if boost.role_type == Player_Type.TRAITOR   { r_tr  -= 1; }
+            break;
+        }
+    }
+
     type_list: [..]Player_Type;
     for i: 0..r_civ - 1 { type_list.append(Player_Type.CIVILIAN); }
     for i: 0..r_an - 1  { type_list.append(Player_Type.ANARCHIST); }
@@ -304,6 +380,10 @@ rp_assign_player_types :: proc(
         } else {
             unforced[i].player_type = Player_Type.CIVILIAN;
         }
+    }
+
+    for i: 0..count - 1 {
+        loadout_role_boost_consume(unforced[i], loadouts[i], unforced[i].player_type);
     }
 
 }

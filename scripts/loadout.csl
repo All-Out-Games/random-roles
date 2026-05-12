@@ -27,6 +27,10 @@ Loadout_Data :: class {
     traitors:   [..]string @ao_serialize;
     civilians:  [..]string @ao_serialize;
     anarchists: [..]string @ao_serialize;
+
+    traitor_boost_games:   int @ao_serialize;
+    civilian_boost_games:  int @ao_serialize;
+    anarchist_boost_games: int @ao_serialize;
 }
 
 // Hub-side stable role IDs → game-side enum. Anything not in this map is
@@ -78,6 +82,46 @@ loadout_load_for_player :: proc(player: Player) -> Loadout_Data {
     if player == null return ld;
     Save.try_get_json(player, LOADOUT_SAVE_KEY, ref ld);
     return ld;
+}
+
+loadout_save_for_player :: proc(player: Player, ld: Loadout_Data) {
+    if player == null return;
+    if ld == null return;
+    ld.version = LOADOUT_DATA_VERSION;
+    if Game.is_server() {
+        Save.set_json(player, LOADOUT_SAVE_KEY, ref ld);
+    }
+}
+
+loadout_role_boost_remaining :: proc(ld: Loadout_Data, ptype: Player_Type) -> int {
+    if ld == null return 0;
+    if ptype == Player_Type.TRAITOR return ld.traitor_boost_games;
+    if ptype == Player_Type.CIVILIAN return ld.civilian_boost_games;
+    if ptype == Player_Type.ANARCHIST return ld.anarchist_boost_games;
+    return 0;
+}
+
+loadout_role_boost_consume :: proc(player: Player, ld: Loadout_Data, ptype: Player_Type) -> bool {
+    if ld == null return false;
+    if ptype == Player_Type.TRAITOR {
+        if ld.traitor_boost_games <= 0 return false;
+        ld.traitor_boost_games -= 1;
+        loadout_save_for_player(player, ld);
+        return true;
+    }
+    if ptype == Player_Type.CIVILIAN {
+        if ld.civilian_boost_games <= 0 return false;
+        ld.civilian_boost_games -= 1;
+        loadout_save_for_player(player, ld);
+        return true;
+    }
+    if ptype == Player_Type.ANARCHIST {
+        if ld.anarchist_boost_games <= 0 return false;
+        ld.anarchist_boost_games -= 1;
+        loadout_save_for_player(player, ld);
+        return true;
+    }
+    return false;
 }
 
 // True iff `role` is allowed by `ld`. Pre-loaded form so role-pool code
