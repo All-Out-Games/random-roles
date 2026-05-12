@@ -74,21 +74,6 @@ Player :: class : Player_Base {
 	task_help_page: int;
 	lobby_waiting_since_time: float;
 
-	// Waiting-lobby minigame state (per player, so multiple players are safe).
-	lobby_minigame_ready: bool;
-	lobby_minigame_score: int;
-	lobby_minigame_tags_taken: int;
-	lobby_minigame_shield_until: float;
-	lobby_minigame_roll_until: float;
-	lobby_minigame_roll_direction: v2;
-	lobby_minigame_respawn_until: float;
-	lobby_minigame_respawn_locked: bool;
-	lobby_minigame_shake_start: float;
-	lobby_minigame_shake_until: float;
-	lobby_minigame_shake_intensity: float;
-	lobby_minigame_camera_shaking: bool;
-	lobby_minigame_intro_sfx_started_at: float;
-
 	gun_skin_active: string;
 	gun_visible_until: float;
 
@@ -401,8 +386,14 @@ Player :: class : Player_Base {
 	apply_voice_chat_masks_ghost_or_passive :: proc(using this: Player) {
         log_info("apply_voice_chat_masks_ghost_or_passive");
 		// Ghosts/spectators can hear everyone, but only speak to other ghosts.
+		// Exception: during the lobby minigame, everyone shares one channel so
+		// respawning players can still chat with active ones.
 		comms_channel_listen_mask = ALL_VOICE_CHANNELS;
-		comms_channel_speak_mask  = DEAD_CHANNEL;
+		if lobby_minigame_active && game_state == Game_State.LOBBY {
+			comms_channel_speak_mask = ALL_VOICE_CHANNELS;
+		} else {
+			comms_channel_speak_mask = DEAD_CHANNEL;
+		}
 	}
 
     ao_end :: proc(using this: Player) {
@@ -476,10 +467,6 @@ Player :: class : Player_Base {
 			rr_draw_civilian_progress_bar(this);
             update_tasks_ui(this);
 			update_minimap_ui(this);
-			rr_lobby_minigame_update_player(this, delta_time);
-			rr_lobby_minigame_draw_world(this);
-			rr_lobby_minigame_draw_intro(this);
-			rr_lobby_minigame_draw_leaderboard(this);
 			rr_draw_pirate_treasure_guidance_if_needed(this);
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			draw_player_role_hud(this);
