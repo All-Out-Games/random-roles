@@ -3,7 +3,7 @@
 // values at role assignment time, the min/max + save scaffolding here will already be ready.
 
 LOADOUT_SAVE_KEY :: "loadout_v2";
-LOADOUT_DATA_VERSION :: 2;
+LOADOUT_DATA_VERSION :: 3;
 
 LOADOUT_EXTRA_TRAITOR_PRODUCT_ID   :: "69f0deeaf910103de110f1cb";
 LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID  :: "69f0deecf910103de110f1cc";
@@ -97,9 +97,9 @@ role_boost_product_id :: proc(tab: int) -> string {
 
 role_boost_icon_path :: proc(tab: int) -> string {
     switch tab {
-        case LOADOUT_TAB_TRAITOR:   return "ui/roles_small/hitman_icon.png";
-        case LOADOUT_TAB_CIVILIAN:  return "ui/roles_small/sheriff_icon.png";
-        case LOADOUT_TAB_ANARCHIST: return "ui/roles_small/trickster_icon.png";
+        case LOADOUT_TAB_TRAITOR:   return "ui/traitor_boost_icon.png";
+        case LOADOUT_TAB_CIVILIAN:  return "ui/civilian_boost_icon.png";
+        case LOADOUT_TAB_ANARCHIST: return "ui/anarchist_boost_icon.png";
     }
     return "";
 }
@@ -197,6 +197,7 @@ loadout_role_id_for_idx :: proc(role_idx: int) -> string {
         case 6:  return "portal_maker";
         case 7:  return "prankster";
         case 8:  return "pyromaniac";
+        case 17: return "hacker";
         case 10: return "pirate";
         case 11: return "hitman";
         case 12: return "werewolf";
@@ -217,6 +218,7 @@ loadout_idx_for_role_id :: proc(id: string) -> int {
     if id == "portal_maker"   return 6;
     if id == "prankster"      return 7;
     if id == "pyromaniac"     return 8;
+    if id == "hacker"         return 17;
     if id == "pirate"         return 10;
     if id == "hitman"         return 11;
     if id == "werewolf"       return 12;
@@ -278,6 +280,7 @@ loadout_get_role_small_icon :: proc(role_idx: int) -> string {
         case 6:  return "ui/roles_small/portalmaker_icon.png";
         case 7:  return "ui/roles_small/trickster_icon.png";
         case 8:  return "ui/roles_small/pyromaniac_icon.png";
+        case 17: return "sprites/icons/hacker/game_end.png";
         case 10: return "ui/roles_small/pirate_icon.png";
         case 11: return "ui/roles_small/hitman_icon.png";
         case 12: return "ui/roles_small/werewolf_icon.png";
@@ -310,6 +313,7 @@ loadout_get_team_roles :: proc(tab: int, results: ref [..]int) {
         case LOADOUT_TAB_ANARCHIST: {
             append(ref results, 7);
             append(ref results, 8);
+            append(ref results, 17);
             append(ref results, 15);
         }
         case LOADOUT_TAB_TRAITOR: {
@@ -579,6 +583,12 @@ _loadout_validate_data :: proc(player: Player, data: Loadout_Data) {
     _loadout_strip_invalid_data(LOADOUT_TAB_TRAITOR,   ref data.traitors);
     _loadout_strip_invalid_data(LOADOUT_TAB_CIVILIAN,  ref data.civilians);
     _loadout_strip_invalid_data(LOADOUT_TAB_ANARCHIST, ref data.anarchists);
+
+    if data.version < 3 && !_loadout_data_contains(data, LOADOUT_TAB_ANARCHIST, "hacker") {
+        if _loadout_data_count(data, LOADOUT_TAB_ANARCHIST) < loadout_max_slots(player, LOADOUT_TAB_ANARCHIST) {
+            append(ref data.anarchists, "hacker");
+        }
+    }
 
     for tab: 0..LOADOUT_NUM_TABS - 1 {
         team_roles: [..]int;

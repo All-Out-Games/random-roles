@@ -1,4 +1,4 @@
-RG_NUM_ROLES :: 17;
+RG_NUM_ROLES :: 18;
 
 Rg_Ability_Entry :: struct {
     icon_path: string;
@@ -25,11 +25,13 @@ rg_get_role_name :: proc(idx: int) -> string {
         case 14: return "MIMICER";
         case 15: return "BIG CHARLIE";
         case 16: return "LILY";
+        case 17: return "HACKER";
     }
     return "UNKNOWN";
 }
 
 rg_get_role_team :: proc(idx: int) -> string {
+    if idx == 17             return "ANARCHIST";
     if idx == 15             return "ANARCHIST";
     if idx >= 7 && idx <= 8 return "ANARCHIST";
     if idx >= 9               return "TRAITOR";
@@ -37,6 +39,7 @@ rg_get_role_team :: proc(idx: int) -> string {
 }
 
 rg_get_role_color :: proc(idx: int) -> v4 {
+    if idx == 17             return v4.{0.9,  0.55, 0.1,  1.0};
     if idx == 15             return v4.{0.9,  0.55, 0.1,  1.0};
     if idx >= 7 && idx <= 8 return v4.{0.9,  0.55, 0.1,  1.0};
     if idx >= 9               return v4.{0.95, 0.2,  0.2,  1.0};
@@ -44,6 +47,7 @@ rg_get_role_color :: proc(idx: int) -> v4 {
 }
 
 rg_get_team_badge_bg :: proc(idx: int) -> v4 {
+    if idx == 17             return v4.{0.20, 0.12, 0.02, 0.75};
     if idx == 15             return v4.{0.20, 0.12, 0.02, 0.75};
     if idx >= 7 && idx <= 8 return v4.{0.20, 0.12, 0.02, 0.75};
     if idx >= 9               return v4.{0.20, 0.04, 0.04, 0.75};
@@ -51,6 +55,7 @@ rg_get_team_badge_bg :: proc(idx: int) -> v4 {
 }
 
 rg_get_role_muted_color :: proc(idx: int) -> v4 {
+    if idx == 17             return v4.{0.34, 0.24, 0.10, 1.0};
     if idx == 15             return v4.{0.34, 0.24, 0.10, 1.0};
     if idx >= 7 && idx <= 8 return v4.{0.34, 0.24, 0.10, 1.0};
     if idx >= 9               return v4.{0.36, 0.14, 0.14, 1.0};
@@ -69,6 +74,7 @@ rg_get_role_icon :: proc(idx: int) -> string {
         case 12: return "sprites/icons/kill_ability.png";
         case 13: return "sprites/icons/transform_evil.png";
         case 15: return "sprites/icons/big_charlie/Big_Charlie.png";
+        case 17: return "sprites/icons/hacker/game_end.png";
     }
     return "";
 }
@@ -92,6 +98,7 @@ rg_get_role_description :: proc(idx: int) -> string {
         case 14: return "A shape-shifting predator. Kill civilians and corrupt their corpses at Void Pillars to steal faces. Each stolen face unlocks new powers - Void Lunge, Spew Corruption, and the devastating Unleash.";
         case 15: return "A solo Anarchist horror. Plant 5 Lil' Nuggets around the map and infect every other living player with Flesh Cocoons. Once nobody is left to infect, Mass Birth turns every victim into a mini Big Charlie and stampedes the round into your win.";
         case 16: return "A predatory weaver. String civilians to track them, then plant your Hair Tree as your permanent base. Feed the tree its requested offerings (corpses, eyes, legs, strung victims) to grow it and unlock stronger abilities - Tea Party, Mind Control, and the ultimate Deathbraid.";
+        case 17: return "A sabotage specialist. Trap task stations, steal civilian powers from corpses, cancel emergency councils, and complete the checklist to fire Game Hack.";
     }
     return "";
 }
@@ -115,6 +122,7 @@ rg_get_role_difficulty :: proc(idx: int) -> string {
         case 14: return "HARD";
         case 15: return "HARD";
         case 16: return "HARD";
+        case 17: return "MEDIUM";
     }
     return "EASY";
 }
@@ -214,6 +222,12 @@ rg_get_role_abilities :: proc(idx: int, results: ref [..]Rg_Ability_Entry) {
             append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Tea_Party_Icon.png",         "Tea Party",       "4 requests. Invite a strung player to tea. They pick 1 of 3 cups - caffeine, poison, or empty."});
             append(ref results, Rg_Ability_Entry.{"sprites/icons/lily/Hair_Tree_Icon.png",         "Deathbraid",      "6 requests. Summon a vortex that pulls in and devours every living player. Ultimate win button."});
         }
+        case 17: {
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/hacker/hack_task.png",            "Hack Task",        "Trap a nearby task. The next player to use it is electrocuted and stunned."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/coroner/ability_take_dna.png",    "Identity Theft",   "Hack a civilian corpse to steal that role's powers."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/communication_outage_icon.png",   "Cancel Meeting",  "End an emergency council immediately."});
+            append(ref results, Rg_Ability_Entry.{"sprites/icons/hacker/game_end.png",             "Game Hack",        "Unlocked after your checklist. Pull everyone to you and win."});
+        }
     }
 }
 
@@ -268,6 +282,7 @@ rg_get_role_tips :: proc(idx: int) -> string {
         case 14: return "Stash a corpse at a Void Pillar to mimic the victim. Stack stolen faces fast for Unleash.";
         case 15: return "Plant nuggets early so Scouting reveals the map, then cocoon and incubate every remaining player to unlock Mass Birth.";
         case 16: return "Plant your tree somewhere safe and feed it requests in order. String victims to track and reuse them.";
+        case 17: return "Use task markers to trap busy stations, then steal civilian powers when bodies drop.";
     }
     return "";
 }
@@ -354,7 +369,7 @@ draw_roles_guide :: proc(player: Player) {
 }
 
 // Display order ensures team groupings stay contiguous in the list (anarchist
-// roles 7, 8, 15 are visited before the traitor section 10..16, otherwise the
+// roles 7, 8, 17, 15 are visited before the traitor section 10..16, otherwise the
 // list iteration would emit a second ANARCHIST header below TRAITOR).
 rg_get_display_order :: proc(out: ref [..]int) {
     append(ref out, 1);
@@ -365,6 +380,7 @@ rg_get_display_order :: proc(out: ref [..]int) {
     append(ref out, 6);
     append(ref out, 7);
     append(ref out, 8);
+    append(ref out, 17);
     append(ref out, 15);
     append(ref out, 10);
     append(ref out, 11);
