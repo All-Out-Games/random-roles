@@ -84,6 +84,9 @@ Kill_Ability :: class : Ability_Base {
     }
 
     get_closest_alive_player :: proc(instance: Kill_Ability, player: Player) -> Player {
+		if player == null return null;
+		if player.entity == null || !#alive(player.entity) return null;
+		if player.bc_cocooned return null;
 		// GGG creature form has extended kill range (lunge)
 		kill_range := 5.0;
 		if player.player_role == Player_Role.GOO_GOO_GAGA {
@@ -107,6 +110,9 @@ Kill_Ability :: class : Ability_Base {
             if target.player_state != Player_State.ALIVE {
                 continue;
             }
+			if target.bc_cocooned {
+				continue;
+			}
 
             // Traitors shouldn't be able to melee-kill other traitors.
             if player.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR {
@@ -130,6 +136,7 @@ Kill_Ability :: class : Ability_Base {
 		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
 		if lockout_remaining < 0.0 lockout_remaining = 0.0;
 		current_cooldown = max(current_cooldown, lockout_remaining);
+		if player.bc_cocooned return;
 
         // GGG: queue kill during active whip pull → insta-kill on arrival
 		if params.clicked && player.player_role == Player_Role.GOO_GOO_GAGA {

@@ -210,6 +210,7 @@ rr_bc_cleanup :: proc(player: Player) {
 			}
 		}
 		bc.nugget_entities.clear();
+		bc.planted_nugget_total = 0;
 
 		// Clear infected followers' state on each victim
 		for i: 0..bc.infected_player_ids.count-1 {
@@ -1068,12 +1069,19 @@ rr_bc_find_nearest_planted_nugget_for_incubate :: proc(player: Player, pos: v2) 
 
 // Spawn a flesh cocoon, root + blind the victim.
 rr_bc_create_cocoon :: proc(player: Player, victim: Player) -> Entity {
+	if player == null return null;
+	if player.entity == null || !#alive(player.entity) return null;
+	if player.player_state != Player_State.ALIVE return null;
 	if victim == null return null;
+	if victim == player return null;
+	if victim.entity == null return null;
 	if !#alive(victim.entity) return null;
+	if victim.player_state != Player_State.ALIVE return null;
 	if victim.bc_cocooned return null;
 
 	bc := player.entity.get_component(Big_Charlie_Module);
 	if bc == null return null;
+	if !bc.is_big_charlie_form return null;
 
 	pos := victim.entity.world_position;
 
@@ -1210,8 +1218,13 @@ rr_bc_on_player_died :: proc(dead_player_entity_id: u64) {
 	dead := get_player_by_entity_id(dead_player_entity_id);
 	if dead == null return;
 
-	// Victim-side: free any cocoon they were in.
-	if dead.bc_cocooned {
+	// Owner-side: if Big Charlie dies during a predicted cocoon/nugget action,
+	// immediately tear down all locally-owned BC state. This prevents stale
+	// client-predicted cocoons from pinning a killer or ticking after the server
+	// reconciles the kill first. rr_bc_cleanup already releases the victim half.
+	if dead.player_role == Player_Role.BIG_CHARLIE {
+		rr_bc_cleanup(dead);
+	} else if dead.bc_cocooned {
 		rr_bc_release_player_from_cocoon(dead);
 	}
 
@@ -2302,10 +2315,10 @@ BC_Flesh_Cocoon_Ability :: class : Ability_Base {
 		target := get_target(this, player);
 		if target == null return;
 
+		created := rr_bc_create_cocoon(player, target);
+		if created == null return;
 		player.set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
 		rr_bc_creature_trigger(player, "cocoon");
-
-		rr_bc_create_cocoon(player, target);
 		current_cooldown = BC_COCOON_COOLDOWN;
 	}
 

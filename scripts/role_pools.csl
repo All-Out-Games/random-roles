@@ -236,6 +236,21 @@ rp_get_player_boost :: proc(player: Player) -> Role_Boost_Info {
     return info;
 }
 
+rp_loadout_has_role_restriction_for_type :: proc(ld: Loadout_Data, ptype: Player_Type) -> bool {
+    if ld == null return false;
+    if ptype == Player_Type.TRAITOR return ld.traitors.count > 0;
+    if ptype == Player_Type.CIVILIAN return ld.civilians.count > 0;
+    if ptype == Player_Type.ANARCHIST return ld.anarchists.count > 0;
+    return false;
+}
+
+rp_claimed_contains :: proc(claimed: [..]Player_Role, role: Player_Role) -> bool {
+    for c: 0..claimed.count - 1 {
+        if claimed[c] == role return true;
+    }
+    return false;
+}
+
 // Persist that a player received their boosted role (server-only).
 rp_record_boost_used :: proc(player: Player, role: Player_Role) {
     if !Game.is_server() return;
@@ -464,7 +479,47 @@ rp_assign_roles_for_type :: proc(
     }
 
     // ── Draw remaining roles from bag ───────────────────────────────
-    normal_count := count - boost_winner_count;
+    // Strict loadout pass: players with a non-empty allow-list for this team
+    // get an eligible role before the generic bag draw. This prevents a
+    // Sparks-only traitor loadout from rejecting all drawn base traitor roles
+    // and staying Player_Role.NONE ("Normal Dude").
+    loadout_won:  [..]bool;
+    loadout_role: [..]Player_Role;
+    for i: 0..count - 1 {
+        loadout_won.append(false);
+        loadout_role.append(Player_Role.NONE);
+    }
+
+    loadout_winner_count := 0;
+    for i: 0..count - 1 {
+        if boost_won[i] continue;
+        p := type_players.elements[i];
+        if !rp_loadout_has_role_restriction_for_type(loadouts[i], p.player_type) continue;
+
+        eligible: [..]Player_Role;
+        for m: 0..master.elements.count - 1 {
+            role := master.elements[m];
+            if rp_is_role_locked(p, role) continue;
+            if !loadout_player_allows_role(loadouts[i], role) continue;
+
+            if !allow_duplicates && rp_claimed_contains(claimed, role) continue;
+
+            eligible.append(role);
+        }
+
+        if eligible.count <= 0 continue;
+
+        pick := rng_range_int(ref rng, 0, eligible.count - 1);
+        won_role := eligible[pick];
+        loadout_won[i] = true;
+        loadout_role[i] = won_role;
+        if !allow_duplicates {
+            claimed.append(won_role);
+        }
+        loadout_winner_count += 1;
+    }
+
+    normal_count := count - boost_winner_count - loadout_winner_count;
 
     // Build filtered master excluding claimed boost roles.
     filtered_master: List(Player_Role);
@@ -498,8 +553,10 @@ rp_assign_roles_for_type :: proc(
     for i: 0..count - 1 {
         if boost_won[i] {
             type_players.elements[i].player_role = boost_role[i];
+        } else if loadout_won[i] {
+            type_players.elements[i].player_role = loadout_role[i];
         }
-        assigned.append(boost_won[i]);
+        assigned.append(boost_won[i] || loadout_won[i]);
     }
 
     drawn_used: [..]bool;
@@ -521,6 +578,10 @@ rp_assign_roles_for_type :: proc(
     for d: 0..drawn.elements.count - 1 {
         role := drawn.elements[d];
         if !rp_is_purchase_gated(role) continue; // free role, handle in pass 2
+        if !allow_duplicates && rp_claimed_contains(claimed, role) {
+            drawn_used[d] = true;
+            continue;
+        }
         found_owner := false;
         for i: 0..count - 1 {
             if assigned[i] continue;
@@ -529,6 +590,9 @@ rp_assign_roles_for_type :: proc(
             type_players.elements[i].player_role = role;
             assigned[i] = true;
             drawn_used[d] = true;
+            if !allow_duplicates {
+                claimed.append(role);
+            }
             found_owner = true;
             break;
         }
@@ -554,6 +618,11 @@ rp_assign_roles_for_type :: proc(
     while d < drawn.elements.count {
         if drawn_used[d] { d += 1; continue; }
         role := drawn.elements[d];
+        if !allow_duplicates && rp_claimed_contains(claimed, role) {
+            drawn_used[d] = true;
+            d += 1;
+            continue;
+        }
         placed := false;
         for i: 0..count - 1 {
             if assigned[i] continue;
@@ -562,6 +631,9 @@ rp_assign_roles_for_type :: proc(
             type_players.elements[i].player_role = role;
             assigned[i] = true;
             drawn_used[d] = true;
+            if !allow_duplicates {
+                claimed.append(role);
+            }
             placed = true;
             break;
         }
@@ -593,7 +665,40 @@ rp_assign_roles_for_type :: proc(
             type_players.elements[i].player_role = drawn.elements[leftover_idx];
             assigned[i] = true;
             drawn_used[leftover_idx] = true;
+            if !allow_duplicates {
+                claimed.append(drawn.elements[leftover_idx]);
+            }
             leftover_idx += 1;
+        }
+    }
+
+    // Final safety: never leave a team-assigned player with Player_Role.NONE.
+    // Prefer an unlocked, not-yet-claimed role; if every role is claimed, use
+    // an unlocked duplicate rather than showing "Normal Dude" for the team.
+    for i: 0..count - 1 {
+        if assigned[i] continue;
+
+        p := type_players.elements[i];
+        preferred := Player_Role.NONE;
+        duplicate := Player_Role.NONE;
+        for m: 0..master.elements.count - 1 {
+            role := master.elements[m];
+            if rp_is_role_locked(p, role) continue;
+            if duplicate == Player_Role.NONE duplicate = role;
+            if !allow_duplicates && rp_claimed_contains(claimed, role) continue;
+            preferred = role;
+            break;
+        }
+
+        fallback := preferred;
+        if fallback == Player_Role.NONE fallback = duplicate;
+
+        if fallback != Player_Role.NONE {
+            p.player_role = fallback;
+            assigned[i] = true;
+            if !allow_duplicates {
+                claimed.append(fallback);
+            }
         }
     }
 
