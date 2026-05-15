@@ -270,8 +270,9 @@ Round based games should reset economy on ao_start with Economy.delete_save_data
 - When the prompt requires building a game world do so using the allout MCP scene editing tools instead of scripts. 
 
 ### Guidelines for text / copy
-- USE LESS TEXT IN UI if an icon + value would suffice. Players won't spend time reading huge blobs of text.
+- Don't use text in UI if an icon would suffice. Players won't spend time reading huge blobs of text.
 - If you use text in UI make CERTAIN it fits within its container. UIK does not wrap automatically and you have a tendancy to overflow container bounds. Pay attention. Keep it short, and use resize as appropriate. 
+- Don't "explain" the game with UI. Put effort into making the game clear via INTUITIVE GAMEPLAY. 
 
 ### Guidelines for maps
 - Follow all directions carefully from the world building skill

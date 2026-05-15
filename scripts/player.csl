@@ -28,6 +28,10 @@ Player :: class : Player_Base {
     loadout_extra_civilian_owned:  bool;
     loadout_extra_anarchist_owned: bool;
 
+    transferring: bool;
+    transferring_start_time: float;
+    transfer_last_attempt: float;
+
     Notify :: proc(using this: Player, message: string) {
         if this.is_local_or_server() {
             Notifier.notify(message);
@@ -60,6 +64,12 @@ Player :: class : Player_Base {
     ao_update :: proc(using this: Player, delta_time: float) {
         // Hub-only runtime: no per-frame gameplay systems. - checking products for correction
         check_owned_products(this);
+
+        if transferring && Game.is_server() {
+            if get_time() - transfer_last_attempt > TRANSFER_RETRY_INTERVAL {
+                hub_request_player_transfer(this);
+            }
+        }
     }
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
@@ -84,6 +94,7 @@ Player :: class : Player_Base {
             draw_loadout(this);
             draw_role_boost_shop(this);
             draw_role_boost_hud(this);
+            draw_transferring_screen(this);
         }
     }
 

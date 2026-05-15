@@ -9,6 +9,29 @@ rr_try_get_hub_portal_position :: proc(out_position: ref v2) -> bool {
     return true;
 }
 
+TRANSFER_RETRY_INTERVAL :: 3.0;
+
+// Server-side: kick off a transfer to the main game. Re-callable for retries.
+hub_request_player_transfer :: proc(player: Player) {
+    if !Game.is_server() return;
+    if player == null return;
+
+    player.transfer_last_attempt = get_time();
+
+    game_id := MAIN_GAME_ID;
+    if Game.get_game_id() == STAGING_HUB_GAME_ID {
+        game_id = STAGING_MAIN_GAME_ID;
+    }
+
+    host_id, has_host := Server.get_private_server_host_id();
+    if has_host {
+        transfer_id := format_string("%:%", {game_id, host_id});
+        Server.transfer_player_to_game(player, transfer_id);
+    } else {
+        Server.transfer_player_to_game(player, game_id);
+    }
+}
+
 Hub_Normal_Queue_Portal :: class : Interactable {
     ao_start :: method() {
         this.set_listener(this);
@@ -30,22 +53,14 @@ Hub_Normal_Queue_Portal :: class : Interactable {
     }
 
     on_interact :: method(player: Player) {
-        if !Game.is_server() return;
         if player == null return;
 
-        // Transfer to game — use staging game ID when running on the staging hub.
-        game_id := MAIN_GAME_ID;
-        if Game.get_game_id() == STAGING_HUB_GAME_ID {
-            game_id = STAGING_MAIN_GAME_ID;
+        if !player.transferring {
+            player.transferring = true;
+            player.transferring_start_time = get_time();
         }
 
-        host_id, has_host := Server.get_private_server_host_id();
-        if has_host  {
-            transfer_id := format_string("%:%", {game_id, host_id});
-            Server.transfer_player_to_game(player, transfer_id);
-        } else {
-            Server.transfer_player_to_game(player, game_id);
-        }
+        hub_request_player_transfer(player);
     }
 }
 
