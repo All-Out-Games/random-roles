@@ -2708,6 +2708,9 @@ rr_werewolf_enable_wolf_look :: proc(player: Player) {
 		player.werewolf_round_start_avatar_color = player.werewolf_saved_avatar_color;
 	}
 
+	player.animator.mask_in_shadow = true;
+	rr_apply_shadow_mask(player.animator.instance);
+
 	// Strip all skins and enable only the werewolf skin.
 	player.animator.instance.disable_all_skins();
 	player.animator.instance.enable_skin(WEREWOLF_SKIN_NAME);
@@ -2732,6 +2735,9 @@ rr_werewolf_disable_wolf_look :: proc(player: Player) {
 
 	// Safety: if wolf look was never enabled, don't strip skins (nothing to restore from).
 	if !player.werewolf_skin_active return;
+
+	// Remove shadow mask material first so the material swap doesn't clobber the color we set below.
+	player.animator.instance.set_material(null, false);
 
 	// Disable werewolf skin and restore saved cosmetics.
 	// Safety: if the per-transform snapshot is unexpectedly empty, fall back to the
