@@ -72,11 +72,13 @@ RR_Projectile :: class : Component {
 					}
 
                     // False Fire: Sheriff shooting a civilian kills BOTH the victim and the Sheriff.
+                    // Also applies to a Hacker who has stolen the Sheriff's gun.
                     if owner_player != null {
                         is_sheriff := owner_player.player_type == Player_Type.CIVILIAN && owner_player.player_role == Player_Role.SHERIFF;
+                        has_stolen_gun := rr_hacker_has_stolen_civilian_role(owner_player, Player_Role.SHERIFF);
                         target_is_civilian := player.player_type == Player_Type.CIVILIAN;
-                        
-                        if is_sheriff && target_is_civilian {
+
+                        if (is_sheriff || has_stolen_gun) && target_is_civilian {
                             owner_player.Notify("False Fire! You shot an innocent!");
                             player.kill_with_killer(killer_id);
                             owner_player.kill_with_killer(killer_id);

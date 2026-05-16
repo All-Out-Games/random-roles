@@ -251,6 +251,25 @@ rp_claimed_contains :: proc(claimed: [..]Player_Role, role: Player_Role) -> bool
     return false;
 }
 
+rp_role_must_be_unique :: proc(role: Player_Role) -> bool {
+    if role == Player_Role.SHERIFF return true;
+    if role == Player_Role.DOCTOR return true;
+    if role == Player_Role.PRESIDENT return true;
+    return false;
+}
+
+rp_blocks_duplicate_role :: proc(allow_duplicates: bool, claimed: [..]Player_Role, role: Player_Role) -> bool {
+    if !rp_claimed_contains(claimed, role) return false;
+    if !allow_duplicates return true;
+    return rp_role_must_be_unique(role);
+}
+
+rp_claim_role_if_needed :: proc(allow_duplicates: bool, claimed: ref [..]Player_Role, role: Player_Role) {
+    if !allow_duplicates || rp_role_must_be_unique(role) {
+        claimed.append(role);
+    }
+}
+
 // Persist that a player received their boosted role (server-only).
 rp_record_boost_used :: proc(player: Player, role: Player_Role) {
     if !Game.is_server() return;
@@ -502,7 +521,7 @@ rp_assign_roles_for_type :: proc(
             if rp_is_role_locked(p, role) continue;
             if !loadout_player_allows_role(loadouts[i], role) continue;
 
-            if !allow_duplicates && rp_claimed_contains(claimed, role) continue;
+            if rp_blocks_duplicate_role(allow_duplicates, claimed, role) continue;
 
             eligible.append(role);
         }
@@ -513,9 +532,7 @@ rp_assign_roles_for_type :: proc(
         won_role := eligible[pick];
         loadout_won[i] = true;
         loadout_role[i] = won_role;
-        if !allow_duplicates {
-            claimed.append(won_role);
-        }
+        rp_claim_role_if_needed(allow_duplicates, ref claimed, won_role);
         loadout_winner_count += 1;
     }
 
@@ -578,7 +595,7 @@ rp_assign_roles_for_type :: proc(
     for d: 0..drawn.elements.count - 1 {
         role := drawn.elements[d];
         if !rp_is_purchase_gated(role) continue; // free role, handle in pass 2
-        if !allow_duplicates && rp_claimed_contains(claimed, role) {
+        if rp_blocks_duplicate_role(allow_duplicates, claimed, role) {
             drawn_used[d] = true;
             continue;
         }
@@ -590,9 +607,7 @@ rp_assign_roles_for_type :: proc(
             type_players.elements[i].player_role = role;
             assigned[i] = true;
             drawn_used[d] = true;
-            if !allow_duplicates {
-                claimed.append(role);
-            }
+            rp_claim_role_if_needed(allow_duplicates, ref claimed, role);
             found_owner = true;
             break;
         }
@@ -618,7 +633,7 @@ rp_assign_roles_for_type :: proc(
     while d < drawn.elements.count {
         if drawn_used[d] { d += 1; continue; }
         role := drawn.elements[d];
-        if !allow_duplicates && rp_claimed_contains(claimed, role) {
+        if rp_blocks_duplicate_role(allow_duplicates, claimed, role) {
             drawn_used[d] = true;
             d += 1;
             continue;
@@ -631,9 +646,7 @@ rp_assign_roles_for_type :: proc(
             type_players.elements[i].player_role = role;
             assigned[i] = true;
             drawn_used[d] = true;
-            if !allow_duplicates {
-                claimed.append(role);
-            }
+            rp_claim_role_if_needed(allow_duplicates, ref claimed, role);
             placed = true;
             break;
         }
@@ -662,12 +675,16 @@ rp_assign_roles_for_type :: proc(
             leftover_idx += 1;
         }
         if leftover_idx < drawn.elements.count {
-            type_players.elements[i].player_role = drawn.elements[leftover_idx];
+            role := drawn.elements[leftover_idx];
+            if rp_blocks_duplicate_role(allow_duplicates, claimed, role) {
+                drawn_used[leftover_idx] = true;
+                leftover_idx += 1;
+                continue;
+            }
+            type_players.elements[i].player_role = role;
             assigned[i] = true;
             drawn_used[leftover_idx] = true;
-            if !allow_duplicates {
-                claimed.append(drawn.elements[leftover_idx]);
-            }
+            rp_claim_role_if_needed(allow_duplicates, ref claimed, role);
             leftover_idx += 1;
         }
     }
@@ -685,7 +702,7 @@ rp_assign_roles_for_type :: proc(
             role := master.elements[m];
             if rp_is_role_locked(p, role) continue;
             if duplicate == Player_Role.NONE duplicate = role;
-            if !allow_duplicates && rp_claimed_contains(claimed, role) continue;
+            if rp_blocks_duplicate_role(allow_duplicates, claimed, role) continue;
             preferred = role;
             break;
         }
@@ -696,9 +713,7 @@ rp_assign_roles_for_type :: proc(
         if fallback != Player_Role.NONE {
             p.player_role = fallback;
             assigned[i] = true;
-            if !allow_duplicates {
-                claimed.append(fallback);
-            }
+            rp_claim_role_if_needed(allow_duplicates, ref claimed, fallback);
         }
     }
 
