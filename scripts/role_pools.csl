@@ -7,9 +7,10 @@
 //
 //   Usage count     Boost chance
 //   ───────────     ────────────
-//   0 – 4           80 %
-//   5 – 24          33 %
-//   25 +             0 % (normal odds)
+//   0 – 1          100 %
+//   2               40 %
+//   3 – 5           20 %
+//   6 +              0 % (normal odds)
 //
 // The system preserves exact type-count targets (civilian / anarchist /
 // traitor distribution) while giving boosted players priority access to
@@ -27,11 +28,13 @@ BIG_CHARLIE_PRODUCT_ID :: "69fe2c16961587c2b549b47b";
 BIG_CHARLIE_USAGE_KEY  :: "purchase_usage_69fe2c16961587c2b549b47b";
 
 // ── Boost tiers ─────────────────────────────────────────────────────
-RP_BOOST_HIGH           :: 0.80;
-RP_BOOST_LOW            :: 0.33;
-RP_BOOST_THRESHOLD_MID  :: 5;
-RP_BOOST_THRESHOLD_GONE :: 25;
-RP_ROLE_TYPE_BOOST_CHANCE :: 0.65;
+RP_BOOST_GUARANTEED      :: 1.0;
+RP_BOOST_HIGH            :: 0.25;
+RP_BOOST_LOW             :: 0.20;
+RP_BOOST_THRESHOLD_HIGH  :: 2;
+RP_BOOST_THRESHOLD_MID   :: 4;
+RP_BOOST_THRESHOLD_GONE  :: 6;
+RP_ROLE_TYPE_BOOST_CHANCE :: 0.60;
 
 // ── Per-player boost descriptor (transient, rebuilt each round) ─────
 Role_Boost_Info :: struct {
@@ -112,6 +115,7 @@ rp_is_role_locked :: proc(player: Player, role: Player_Role) -> bool {
 
 // Returns boost probability based on cumulative usage count.
 rp_get_boost_chance :: proc(usage_count: int) -> float {
+    if usage_count < RP_BOOST_THRESHOLD_HIGH return RP_BOOST_GUARANTEED;
     if usage_count < RP_BOOST_THRESHOLD_MID  return RP_BOOST_HIGH;
     if usage_count < RP_BOOST_THRESHOLD_GONE return RP_BOOST_LOW;
     return 0.0;
