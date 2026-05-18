@@ -1,0 +1,49 @@
+// Marks specific roles as "new" so the loadout UI can highlight them.
+// To flag a role as new: add its index to rg_is_role_new.
+// To stop flagging: remove it. Per-player "seen" state is persisted.
+
+ROLES_NEW_SEEN_SAVE_KEY :: "roles_new_seen_v1";
+
+rg_is_role_new :: proc(role_idx: int) -> bool {
+    switch role_idx {
+        case 17: return true; // HACKER
+    }
+    return false;
+}
+
+rg_load_new_seen :: proc(player: Player) {
+    if !Game.is_server() return;
+    player.roles_new_seen_mask = Save.get_int(player, ROLES_NEW_SEEN_SAVE_KEY, 0);
+}
+
+rg_is_role_new_seen :: proc(player: Player, role_idx: int) -> bool {
+    if role_idx < 0 || role_idx >= 32 return true;
+    return (player.roles_new_seen_mask & (1 << role_idx)) != 0;
+}
+
+rg_compute_new_unseen_mask :: proc(player: Player) -> int {
+    mask := 0;
+    for i: 0..RG_NUM_ROLES - 1 {
+        if rg_is_role_new(i) && !rg_is_role_new_seen(player, i) {
+            mask |= (1 << i);
+        }
+    }
+    return mask;
+}
+
+rg_mark_all_new_seen :: proc(player: Player) {
+    next := player.roles_new_seen_mask;
+    for i: 0..RG_NUM_ROLES - 1 {
+        if rg_is_role_new(i) next |= (1 << i);
+    }
+    if next == player.roles_new_seen_mask return;
+    player.roles_new_seen_mask = next;
+    if Game.is_server() Save.set_int(player, ROLES_NEW_SEEN_SAVE_KEY, next);
+}
+
+rg_has_any_new_unseen :: proc(player: Player) -> bool {
+    for i: 0..RG_NUM_ROLES - 1 {
+        if rg_is_role_new(i) && !rg_is_role_new_seen(player, i) return true;
+    }
+    return false;
+}

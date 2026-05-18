@@ -760,6 +760,21 @@ draw_loadout_open_button :: proc(player: Player) {
             UI.quad(arrow_rect, arrow_tex, v4.{1, 0.95, 0.4, 1});
             UI.pop_matrix();
         }
+    } else if rg_has_any_new_unseen(player) {
+        // "!" notification pip in the top-right of the loadout button - signals new roles
+        pip_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/notification_pips/red_pip.png");
+        excl_tex := get_asset(Texture_Asset, "$AO/ui/kit/Icons/notification_pips/small_icons/exclamation_mark.png");
+        if pip_tex != null {
+            PIP_HALF :: 22.0;
+            t := get_time();
+            pulse := 1.0 + sin(t * 6.0) * 0.08;
+            pip_rect := btn_rect.top_right_rect().offset(-22.0, -22.0).grow(PIP_HALF * pulse);
+            UI.quad(pip_rect, pip_tex, v4.{1, 1, 1, 1});
+            if excl_tex != null {
+                excl_rect := pip_rect.fit_aspect(excl_tex.get_aspect()).scale(0.55, 0.55);
+                UI.quad(excl_rect, excl_tex, v4.{1, 1, 1, 1});
+            }
+        }
     }
 }
 
@@ -803,7 +818,13 @@ draw_role_boost_shop_open_button :: proc(player: Player) {
 // ---- Drawing: UIK modal ----
 
 draw_loadout :: proc(player: Player) {
-    if !player.loadout_open return;
+    if !player.loadout_open {
+        if player.loadout_new_session_active {
+            player.loadout_new_session_active = false;
+            player.loadout_new_session_mask = 0;
+        }
+        return;
+    }
     if player.role_boost_shop_open return;
     // loadout is server-loaded then auto-synced to the client. If sync hasn't
     // arrived yet, skip the frame rather than allocating a blank locally
@@ -811,6 +832,14 @@ draw_loadout :: proc(player: Player) {
     if player.loadout == null return;
 
     loadout_mark_seen(player);
+
+    if !player.loadout_new_session_active {
+        // Snapshot the unseen-new roles so banners stay visible for this
+        // viewing session, then persist seen so the ! badge clears next open.
+        player.loadout_new_session_mask = rg_compute_new_unseen_mask(player);
+        player.loadout_new_session_active = true;
+        rg_mark_all_new_seen(player);
+    }
 
     // Strip any equipped roles the player no longer owns. Idempotent — safe to
     // run every frame. Ownership is reliably observable by the time the user
@@ -917,6 +946,20 @@ draw_loadout :: proc(player: Player) {
     UIK.panel_end(); // body
     UIK.panel_end(); // shell
     UIK.end();
+
+    // ---- Diagonal NEW! ribbons (drawn after UIK so rotation works) ----
+    if player.loadout_new_session_mask != 0 {
+        UI.push_layer(1100);
+        screen := UI.get_screen_rect();
+        for i: 0..card_handles.count - 1 {
+            rid := card_role_ids[i];
+            if (player.loadout_new_session_mask & (1 << rid)) == 0 continue;
+            r := UIK.resolve(card_handles[i]).rect;
+            if r.max.y < screen.min.y || r.min.y > screen.max.y continue;
+            loadout_draw_new_ribbon(r);
+        }
+        UI.pop_layer();
+    }
 
     // ---- Resolve handles ----
     if UIK.clicked(exit_handle) {
@@ -1587,6 +1630,69 @@ loadout_draw_collection_card :: proc(player: Player, role_idx: int, handles: ref
     }
 
     UIK.panel_end(); // cell
+}
+
+// Draw a static diagonal red ribbon labeled "NEW!" anchored to the top-left
+// corner of the given card. Uses UI.* immediate-mode after UIK.end() so the
+// rotation actually works (UIK panels can't rotate). Scissor-clipped so the
+// ribbon doesn't escape the card's bounds.
+loadout_draw_new_ribbon :: proc(card_rect: Rect) {
+    BANNER_W :: 230.0;
+    BANNER_H :: 44.0;
+    CORNER_OFFSET :: 52.0;
+
+    // Card rect is in screen pixels - scale our hardcoded sizes so the ribbon
+    // matches the cards at any resolution / UI scale.
+    sf := UI.get_current_scale_factor();
+    half_w := BANNER_W * 0.5 * sf;
+    half_h := BANNER_H * 0.5 * sf;
+    corner := CORNER_OFFSET * sf;
+
+    // card_rect comes from UIK.resolve which gives layout coords where larger
+    // Y is the visual top of the card. UI immediate-mode draws in screen-down
+    // coords, so we flip to anchor at the visual top-left.
+    top_y  := card_rect.max.y;
+    left_x := card_rect.min.x;
+
+    cx := left_x + corner;
+    cy := top_y  - corner;
+
+    banner: Rect;
+    banner.min = v2.{cx - half_w, cy - half_h};
+    banner.max = v2.{cx + half_w, cy + half_h};
+
+    UI.push_scissor(card_rect);
+    UI.push_matrix(Matrix4.rotate_about_point(banner.center(), 45));
+
+    border := 2.0 * sf;
+
+    // Outline (dark border)
+    outline: Rect;
+    outline.min = v2.{banner.min.x - border, banner.min.y - border};
+    outline.max = v2.{banner.max.x + border, banner.max.y + border};
+    UI.quad(outline, core_globals.white_sprite, v4.{0.10, 0.0, 0.0, 1});
+
+    // Main red ribbon
+    UI.quad(banner, core_globals.white_sprite, v4.{0.96, 0.20, 0.20, 1});
+
+    // Top highlight stripe for a slight 3D feel
+    hi: Rect;
+    hi.min = banner.min;
+    hi.max = v2.{banner.max.x, banner.min.y + half_h * 2.0 * 0.32};
+    UI.quad(hi, core_globals.white_sprite, v4.{1, 1, 1, 0.18});
+
+    ts := UI.default_text_settings();
+    ts.size              = 44;
+    ts.halign            = .CENTER;
+    ts.valign            = .CENTER;
+    ts.color             = v4.{1, 1, 1, 1};
+    ts.do_outline        = true;
+    ts.outline_thickness = 3;
+    ts.outline_color     = v4.{0.25, 0, 0, 1};
+    UI.text(banner, ts, "NEW!");
+
+    UI.pop_matrix();
+    UI.pop_scissor();
 }
 
 // ---- Shared: horizontal stars row ----
