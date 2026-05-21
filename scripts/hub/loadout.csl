@@ -865,8 +865,8 @@ draw_loadout :: proc(player: Player) {
     exit_handle := UIK.title_area(UIK.title_area_desc("LOADOUT"));
 
     // ---- Header row: tabs + collection count ----
-    tab_handles: [..]UIK.Interact_Handle;
-    boost_shop_handle: UIK.Interact_Handle;
+    tab_handles: [..]Interact_Result;
+    boost_shop_handle: Interact_Result;
 
     header := UIK.layout_row();
     header.width        = UIK.flex(1);
@@ -901,7 +901,7 @@ draw_loadout :: proc(player: Player) {
     UIK.text_set_color(&coll_ts, v4.{0.85, 0.85, 0.85, 1});
     UIK.text(format_string("Collection (%0/%)", {un, tot}), coll_ts);
 
-    shop_desc := UIK.widget_desc_button_default(.BUTTON_BASIC_YELLOW1);
+    shop_desc := UIK.widget_desc_button_default(.BUTTON_BASIC_YELLOW);
     shop_desc.panel.height = UIK.pixels(64);
     shop_desc.panel.padding = v4.{12, 20, 12, 20};
     UIK.text_set_word_wrap(&shop_desc.label_text, false);
@@ -910,7 +910,7 @@ draw_loadout :: proc(player: Player) {
     UIK.panel_end(); // header
 
     // ---- Body row: left sidebar + right grid ----
-    card_handles: [..]UIK.Interact_Handle;
+    card_handles: [..]Interact_Result;
     card_role_ids: [..]int;
 
     body := UIK.layout_row();
@@ -928,8 +928,8 @@ draw_loadout :: proc(player: Player) {
     left.gap     = 6;
     UIK.panel_begin(left);
     extra_unlock_present: bool;
-    extra_unlock_handle:  UIK.Interact_Handle;
-    slot_handles:  [..]UIK.Interact_Handle;
+    extra_unlock_handle:  Interact_Result;
+    slot_handles:  [..]Interact_Result;
     slot_role_ids: [..]int;
     loadout_draw_equipped_list(player, ref extra_unlock_present, ref extra_unlock_handle, ref slot_handles, ref slot_role_ids);
     UIK.panel_end();
@@ -954,7 +954,7 @@ draw_loadout :: proc(player: Player) {
         for i: 0..card_handles.count - 1 {
             rid := card_role_ids[i];
             if (player.loadout_new_session_mask & (1 << rid)) == 0 continue;
-            r := UIK.resolve(card_handles[i]).rect;
+            r := card_handles[i].rect;
             if r.max.y < screen.min.y || r.min.y > screen.max.y continue;
             loadout_draw_new_ribbon(r);
         }
@@ -1016,7 +1016,7 @@ role_boost_card_bg :: proc(tab: int) -> UIK.Panel_Background_Kind {
     return .BUTTON_BASIC_GREY;
 }
 
-role_boost_draw_shop_card :: proc(player: Player, tab: int, handles: ref [..]UIK.Interact_Handle, tabs: ref [..]int) {
+role_boost_draw_shop_card :: proc(player: Player, tab: int, handles: ref [..]Interact_Result, tabs: ref [..]int) {
     pid := role_boost_product_id(tab);
     if pid == "" return;
 
@@ -1092,7 +1092,7 @@ role_boost_draw_shop_card :: proc(player: Player, tab: int, handles: ref [..]UIK
     buy_bar.padding = v4.{8, 16, 8, 16};
     buy_bar.main_align = .CENTER;
     buy_bar.cross_align = .CENTER;
-    buy_bar.background = .BUTTON_BASIC_YELLOW1;
+    buy_bar.background = .BUTTON_BASIC_YELLOW;
     buy_bar.show_background = true;
     UIK.panel_begin(buy_bar);
 
@@ -1120,7 +1120,7 @@ draw_role_boost_shop :: proc(player: Player) {
 
     UIK.spacer(UIK.pixels(1), UIK.pixels(18));
 
-    card_handles: [..]UIK.Interact_Handle;
+    card_handles: [..]Interact_Result;
     card_tabs: [..]int;
 
     if player.device_kind == .PHONE {
@@ -1246,7 +1246,7 @@ draw_role_boost_hud :: proc(player: Player) {
 
 // ---- Left sidebar: equipped list ----
 
-loadout_draw_equipped_list :: proc(player: Player, unlock_present: ref bool, unlock_handle: ref UIK.Interact_Handle, slot_handles: ref [..]UIK.Interact_Handle, slot_role_ids: ref [..]int) {
+loadout_draw_equipped_list :: proc(player: Player, unlock_present: ref bool, unlock_handle: ref Interact_Result, slot_handles: ref [..]Interact_Result, slot_role_ids: ref [..]int) {
     tab := player.loadout_tab;
 
     // Header line: "Equipped Roles   X/Y"
@@ -1458,7 +1458,7 @@ LOADOUT_GRID_COLS :: 3;
 LOADOUT_CARD_H    :: 200.0;
 LOADOUT_CARD_GAP  :: 12.0;
 
-loadout_draw_collection :: proc(player: Player, handles: ref [..]UIK.Interact_Handle, role_ids: ref [..]int) {
+loadout_draw_collection :: proc(player: Player, handles: ref [..]Interact_Result, role_ids: ref [..]int) {
     team_roles: [..]int;
     loadout_get_team_roles(player.loadout_tab, ref team_roles);
 
@@ -1500,7 +1500,7 @@ loadout_draw_collection :: proc(player: Player, handles: ref [..]UIK.Interact_Ha
     UIK.list_end();
 }
 
-loadout_draw_collection_card :: proc(player: Player, role_idx: int, handles: ref [..]UIK.Interact_Handle, role_ids: ref [..]int) {
+loadout_draw_collection_card :: proc(player: Player, role_idx: int, handles: ref [..]Interact_Result, role_ids: ref [..]int) {
     is_locked   := rg_is_role_locked(player, role_idx);
     is_equipped := loadout_is_equipped(player, player.loadout_tab, role_idx);
 
