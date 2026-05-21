@@ -399,6 +399,7 @@ Player_Role :: enum {
 	MOVIE_STAR;
 	CORONER;
 	PORTAL_MAKER;
+	HUNTER;
 	//Anarchist Roles
 	PRANKSTER;
 	PYROMANIAC;
@@ -421,6 +422,7 @@ rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
 		case .MOVIE_STAR:   return Player_Type.CIVILIAN;
 		case .CORONER:      return Player_Type.CIVILIAN;
 		case .PORTAL_MAKER: return Player_Type.CIVILIAN;
+		case .HUNTER:       return Player_Type.CIVILIAN;
 		case .PRANKSTER:    return Player_Type.ANARCHIST;
 		case .PYROMANIAC:   return Player_Type.ANARCHIST;
 		case .HACKER:       return Player_Type.ANARCHIST;
@@ -444,6 +446,7 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .MOVIE_STAR:   return "movie_star";
 		case .CORONER:      return "coroner";
 		case .PORTAL_MAKER: return "portal_maker";
+		case .HUNTER:       return "hunter";
 		case .PRANKSTER:    return "prankster";
 		case .PYROMANIAC:   return "pyromaniac";
 		case .HACKER:       return "hacker";
@@ -480,6 +483,7 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	if name == "movie_star"                                    return Player_Role.MOVIE_STAR, true;
 	if name == "coroner"                                       return Player_Role.CORONER, true;
 	if name == "portal_maker" || name == "warper"              return Player_Role.PORTAL_MAKER, true;
+	if name == "hunter"                                        return Player_Role.HUNTER, true;
 	if name == "prankster"                                     return Player_Role.PRANKSTER, true;
 	if name == "pyromaniac" || name == "pyro"                  return Player_Role.PYROMANIAC, true;
 	if name == "hacker"                                        return Player_Role.HACKER, true;
@@ -3544,6 +3548,7 @@ assign_players_to_types :: proc() {
 	append(ref civilian_roles_master, Player_Role.MOVIE_STAR);
 	append(ref civilian_roles_master, Player_Role.CORONER);
 	append(ref civilian_roles_master, Player_Role.PORTAL_MAKER);
+	append(ref civilian_roles_master, Player_Role.HUNTER);
 	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
 	append(ref anarchist_roles_master, Player_Role.PYROMANIAC);
 	append(ref anarchist_roles_master, Player_Role.HACKER);
@@ -3599,6 +3604,7 @@ assign_players_to_types :: proc() {
 	// per-player resets so previous-round artifacts can't survive a reroll.
 	rr_bc_round_global_cleanup();
 	rr_hacker_round_global_cleanup();
+	rr_hunter_round_global_cleanup();
 
 	// Assign role-specific tasks / objectives
 	for i: 0..players.elements.count-1 {
@@ -3769,6 +3775,9 @@ assign_players_to_types :: proc() {
 
 		// Lily
 		rr_lily_round_start(p);
+
+		// Hunter
+		rr_hunter_round_start(p);
 
 		if p.player_role == Player_Role.PYROMANIAC {
 			// Pyro objectives replace normal tasks.

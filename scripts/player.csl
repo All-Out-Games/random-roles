@@ -541,6 +541,9 @@ Player :: class : Player_Base {
 		// Lily per-frame update (transform, strings, RLGL, tea party, dollhouse).
 		rr_lily_update(this, delta_time);
 
+		// Hunter per-frame update (campfire buff aura, scent footprints).
+		rr_hunter_update(this, delta_time);
+
 		// Deathbraid camera — runs for ALL players so everyone sees the cinematic.
 		rr_lily_update_deathbraid_camera(this);
 
@@ -1060,6 +1063,14 @@ Player :: class : Player_Base {
 						draw_ability_button(this, Blue_Portal_Ability, abilityIndex);
 						abilityIndex += 1;
 					}
+					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.HUNTER {
+						draw_ability_button(this, Hunter_Cripple_Ability, abilityIndex);
+						abilityIndex += 1;
+						draw_ability_button(this, Hunter_Campfire_Ability, abilityIndex);
+						abilityIndex += 1;
+						draw_ability_button(this, Hunter_Kill_Shot_Ability, abilityIndex);
+						abilityIndex += 1;
+					}
 					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PRANKSTER {
 						draw_ability_button(this, Prank_Ability, abilityIndex);
 						abilityIndex += 1;
@@ -1297,6 +1308,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .MOVIE_STAR: return "MOVIE STAR";
 		case .CORONER:    return "CORONER";
 		case .PORTAL_MAKER: return "WARPER";
+		case .HUNTER:     return "HUNTER";
 		case .PRANKSTER:  return "PRANKSTER";
 		case .PYROMANIAC: return "PYROMANIAC";
 		case .HACKER:     return "HACKER";
@@ -3216,6 +3228,46 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 
 	}
 
+	// Hunter player-rig state machine states.
+	rr_sm_setup_hunter :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		// Pierced victim: impact one-shot then enters a "pained" idle/walking loop.
+		hunter_impaled_var := sm.create_variable("hunter_impaled", State_Machine_Variable.Kind.TRIGGER);
+		hunter_impaled_state := layer.create_state("004RAND_hunter/impaled_by_crossbow_bolt", false, 0.417);
+		layer.create_global_transition(hunter_impaled_state, false).create_trigger_condition(hunter_impaled_var);
+
+		// Pained loop state machine (bool-driven so we can swap idle/walking based on motion).
+		hunter_pained_var := sm.create_variable("hunter_pained", State_Machine_Variable.Kind.BOOL);
+		hunter_pained_moving_var := sm.create_variable("hunter_pained_moving", State_Machine_Variable.Kind.BOOL);
+
+		hunter_pained_idle_state := layer.create_state("004RAND_hunter/pained_idle", true, 0.0);
+		hunter_pained_walk_state := layer.create_state("004RAND_hunter/pained_walked", true, 0.0);
+
+		// impale -> pained idle
+		layer.create_transition(hunter_impaled_state, hunter_pained_idle_state, true);
+
+		// Global transitions: enter pained idle/walk whenever the pained flag is on
+		// (so it survives ability triggers/RESET while the pierce effect is active).
+		to_pained_idle := layer.create_global_transition(hunter_pained_idle_state, false);
+		to_pained_idle.create_bool_condition(hunter_pained_var, true);
+		to_pained_idle.create_bool_condition(hunter_pained_moving_var, false);
+
+		to_pained_walk := layer.create_global_transition(hunter_pained_walk_state, false);
+		to_pained_walk.create_bool_condition(hunter_pained_var, true);
+		to_pained_walk.create_bool_condition(hunter_pained_moving_var, true);
+
+		// Exit pained when flag clears.
+		exit_pained_idle := layer.create_transition(hunter_pained_idle_state, idle_state, false);
+		exit_pained_idle.create_bool_condition(hunter_pained_var, false);
+		exit_pained_walk := layer.create_transition(hunter_pained_walk_state, idle_state, false);
+		exit_pained_walk.create_bool_condition(hunter_pained_var, false);
+
+		// Killed-by-crossbow death animation (used as kill-shot kill anim on victim).
+		hunter_killed_var := sm.create_variable("hunter_killed_by_crossbow", State_Machine_Variable.Kind.TRIGGER);
+		hunter_killed_state := layer.create_state("004RAND_hunter/killed_by_crossbow_bolt", false, 1.833);
+		layer.create_global_transition(hunter_killed_state, false).create_trigger_condition(hunter_killed_var);
+		// No transition back — handled by death/corpse swap.
+	}
+
 	// Big Charlie player-rig state machine states.
 	rr_sm_setup_big_charlie :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		// Transform to monster (one-shot, 1s) -> back to Idle.
@@ -3475,6 +3527,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		rr_mimicer_setup_player_state_machine(sm, layer, idle_state);
 		rr_sm_setup_big_charlie(sm, layer, idle_state);
 		rr_sm_setup_lily(sm, layer, idle_state);
+		rr_sm_setup_hunter(sm, layer, idle_state);
 		rr_sm_setup_drag_body(sm, layer, idle_state);
 
 		sm_inited = true;
@@ -5070,6 +5123,12 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 		rr_intro_copy_player_skins(player);
 		player.intro_role_spine.refresh_skins();
 		player.intro_role_spine.set_animation("Portal_Maker/portal_falling_start", false, 0);
+	} else if role == Player_Role.HUNTER {
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Hunter/RAND004_Hunter.spine"));
+		player.intro_role_spine.enable_skin("weapons/crossbow");
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_hunter/intro_animation", false, 0);
 	} else {
 		player.intro_role_spine.destroy();
 		player.intro_role_spine_ready = false;
