@@ -1,7 +1,7 @@
 You will be developing a multiplayer game in a custom scripting language (.csl)
 
 ## Networking
-> **NEVER wrap gameplay logic in `Game.is_server()`.** The engine uses client-side prediction with automatic server reconciliation. Gameplay code **must** run on both client and server for smooth behavior.
+> **NEVER USE`Game.is_server()`.** The engine uses client-side prediction with automatic server reconciliation. Gameplay code **must** run on both client and server for smooth behavior.
 
 - All gameplay state is automatically synced. You do not need to write RPCs or manually replicate state.
 - The client runs the same gameplay code as the server. The server's authoritative result is reconciled automatically — you get correctness **and** responsiveness for free, but **only if the code runs on both sides**.
@@ -92,10 +92,10 @@ for entity: entity_iterator() {
 visit :: proc(entity: Entity) {
     // logic
 
-    current := entity.first_child;
+    current := entity.get_first_child();
     while current != null {
         visit(current);
-        current = current.next_sibling;
+        current = current.get_next_sibling();
     }
 }
 
@@ -260,7 +260,7 @@ Round based games should reset economy on ao_start with Economy.delete_save_data
 
 ## Best Practices
 - Do not write your own input. Movement is handled by default (speed = 300). If you need to consume it use player.agent.inputs_this_frame and ability buttons.
-- When unsure about an API signature find the appropriate skill. If no results are found you may grep api_references/core/ao/[core/generated].csl_engine.
+- When unsure about an API signature find the appropriate skill. If no results are found you may grep api_references/core/ao/core.csl_engine.
 - You MUST fundamentally design your games to account for multiple players. No global tycoons, everything must either be plot based (tycoons) or round based (shooters)
 - Brainrots refer to a special class of character you can find by using the get_remote_assets_that_work_well_with tool with catalogId 05604152b758f509 (these are usually collection based games where brainrots obtained in a user defined way generate money over time you can collect by walking up to them when placed in your base)
 - All games with plots must have a UIK button to teleport to their own plot.

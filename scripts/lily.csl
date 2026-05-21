@@ -810,6 +810,7 @@ rr_lily_remove_all_strings :: proc(player: Player) {
 			target.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
 			target.remove_freeze_reason(LILY_TEA_SLEEP_REASON);
 			target.remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
+			target.input_override = v2.{0, 0};
 			target.remove_freeze_reason(LILY_PULL_REASON);
 			target.remove_disable_movement_input_reason(LILY_CAFFEINE_REASON);
 		}
@@ -2705,11 +2706,7 @@ Lily_Mind_Control_Puppet :: class : Component {
 		// Legless (lily_crawling) is fine — the player can still move (just slower), so we still control them.
 		target_immobile := rr_lily_is_target_immobile(p) && !p.lily_crawling;
 		if !target_immobile {
-			input := lily.agent.input_this_frame;
-			p.agent.input_this_frame = input;
-			if length_squared(input) > 0.01 {
-				p.set_facing_right(input.x >= 0.0);
-			}
+			p.input_override = lily.input_this_frame;
 		}
 
 		// Lily stays put — only the puppet moves
@@ -2772,6 +2769,7 @@ Lily_Mind_Control_Puppet :: class : Component {
 		p := entity.get_component(Player);
 		if p != null {
 			p.remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
+			p.input_override = v2.{0, 0};
 		}
 	}
 }
@@ -3291,6 +3289,10 @@ rr_lily_start_mind_control :: proc(player: Player, target: Player) {
 	// Block target's own input — Lily's input is forwarded via the Puppet component
 	target.add_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
 
+	// Route the puppet's prediction through Lily (the caster) so input_override
+	// forwarded from Lily reconciles cleanly. Cleared in rr_lily_end_mind_control.
+	target.player_for_prediction = player;
+
 	// Add input forwarding component
 	existing := target.entity.get_component(Lily_Mind_Control_Puppet);
 	if existing == null {
@@ -3439,6 +3441,8 @@ rr_lily_end_mind_control :: proc(player: Player) {
 	target := get_player_by_entity_id(lm.mind_control_target_id);
 	if target != null {
 		target.remove_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
+		target.input_override = v2.{0, 0};
+		target.player_for_prediction = null;
 
 		// Remove braid visual — component lives on a child entity
 		child := target.entity.get_first_child();
