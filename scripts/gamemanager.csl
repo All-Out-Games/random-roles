@@ -400,6 +400,7 @@ Player_Role :: enum {
 	CORONER;
 	PORTAL_MAKER;
 	HUNTER;
+	GUARDIAN;
 	//Anarchist Roles
 	PRANKSTER;
 	PYROMANIAC;
@@ -412,6 +413,7 @@ Player_Role :: enum {
 	MIMICER;
 	BIG_CHARLIE;
 	LILY_LOVEBRAIDS;
+	THE_MECH;
 }
 
 rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
@@ -423,6 +425,7 @@ rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
 		case .CORONER:      return Player_Type.CIVILIAN;
 		case .PORTAL_MAKER: return Player_Type.CIVILIAN;
 		case .HUNTER:       return Player_Type.CIVILIAN;
+		case .GUARDIAN:     return Player_Type.CIVILIAN;
 		case .PRANKSTER:    return Player_Type.ANARCHIST;
 		case .PYROMANIAC:   return Player_Type.ANARCHIST;
 		case .HACKER:       return Player_Type.ANARCHIST;
@@ -433,6 +436,7 @@ rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
 		case .MIMICER:       return Player_Type.TRAITOR;
 		case .BIG_CHARLIE:   return Player_Type.ANARCHIST;
 		case .LILY_LOVEBRAIDS: return Player_Type.TRAITOR;
+		case .THE_MECH:      return Player_Type.TRAITOR;
 		case .NONE:          return Player_Type.CIVILIAN;
 	}
 	return Player_Type.CIVILIAN;
@@ -447,6 +451,7 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .CORONER:      return "coroner";
 		case .PORTAL_MAKER: return "portal_maker";
 		case .HUNTER:       return "hunter";
+		case .GUARDIAN:     return "guardian";
 		case .PRANKSTER:    return "prankster";
 		case .PYROMANIAC:   return "pyromaniac";
 		case .HACKER:       return "hacker";
@@ -457,6 +462,7 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .MIMICER:       return "mimicer";
 		case .BIG_CHARLIE:   return "big_charlie";
 		case .LILY_LOVEBRAIDS: return "lily";
+		case .THE_MECH:      return "the_mech";
 		case .NONE:          return "none";
 	}
 	return "none";
@@ -484,6 +490,7 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	if name == "coroner"                                       return Player_Role.CORONER, true;
 	if name == "portal_maker" || name == "warper"              return Player_Role.PORTAL_MAKER, true;
 	if name == "hunter"                                        return Player_Role.HUNTER, true;
+	if name == "guardian"                                      return Player_Role.GUARDIAN, true;
 	if name == "prankster"                                     return Player_Role.PRANKSTER, true;
 	if name == "pyromaniac" || name == "pyro"                  return Player_Role.PYROMANIAC, true;
 	if name == "hacker"                                        return Player_Role.HACKER, true;
@@ -494,6 +501,7 @@ rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	if name == "mimicer" || name == "mim"                        return Player_Role.MIMICER, true;
 	if name == "big_charlie" || name == "bigcharlie" || name == "charlie" return Player_Role.BIG_CHARLIE, true;
 	if name == "lily" return Player_Role.LILY_LOVEBRAIDS, true;
+	if name == "the_mech" || name == "mech" || name == "mecha" return Player_Role.THE_MECH, true;
 	return Player_Role.NONE, false;
 }
 
@@ -3555,6 +3563,7 @@ assign_players_to_types :: proc() {
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 	append(ref traitor_roles_master, Player_Role.HITMAN);
 	append(ref traitor_roles_master, Player_Role.WEREWOLF);
+	append(ref traitor_roles_master, Player_Role.THE_MECH);
 	// Purchase-gated roles: add to master if any connected player owns the product.
 	if rp_any_player_owns(ref players, GGG_PRODUCT_ID) {
 		append(ref traitor_roles_master, Player_Role.GOO_GOO_GAGA);
@@ -3600,11 +3609,31 @@ assign_players_to_types :: proc() {
 		p.forced_role_next_round = Player_Role.NONE;
 	}
 
+	// If The Mech rolled this round, guarantee one living civilian counter-role.
+	has_mech := false;
+	has_guardian := false;
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if p.player_role == Player_Role.THE_MECH { has_mech = true; }
+		if p.player_role == Player_Role.GUARDIAN { has_guardian = true; }
+	}
+	if has_mech && !has_guardian {
+		for i: 0..players.elements.count-1 {
+			p := players.elements[i];
+			if p == null continue;
+			if p.player_type != Player_Type.CIVILIAN continue;
+			p.player_role = Player_Role.GUARDIAN;
+			break;
+		}
+	}
+
 	// Big Charlie: nuke any leftover scene entities (cocoons, nuggets) before
 	// per-player resets so previous-round artifacts can't survive a reroll.
 	rr_bc_round_global_cleanup();
 	rr_hacker_round_global_cleanup();
 	rr_hunter_round_global_cleanup();
+	rr_mech_round_global_cleanup();
 
 	// Assign role-specific tasks / objectives
 	for i: 0..players.elements.count-1 {
@@ -3618,6 +3647,13 @@ assign_players_to_types :: proc() {
 				dm = p.entity.add_component(Doctor_Module);
 			}
 			dm.resurrects_used = 0;
+		}
+		if p.player_role == Player_Role.GUARDIAN {
+			guard := p.entity.get_component(Guardian_Module);
+			if guard == null {
+				guard = p.entity.add_component(Guardian_Module);
+			}
+			rr_guardian_reset_module(guard);
 		}
 		// Sheriff: 1 bullet per round (Shoot ability will disable after firing).
 		if p.player_role == Player_Role.SHERIFF {
@@ -3679,6 +3715,14 @@ assign_players_to_types :: proc() {
 			wwm.transform_ends_at = 0.0;
 			wwm.speed_boost_active = false;
 			wwm.speed_original = 0.0;
+		}
+
+		if p.player_role == Player_Role.THE_MECH {
+			mech := p.entity.get_component(Mech_Module);
+			if mech == null {
+				mech = p.entity.add_component(Mech_Module);
+			}
+			rr_mech_reset_module(mech);
 		}
 
 		// Goo Goo Gaga

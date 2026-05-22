@@ -157,7 +157,11 @@ Kill_Ability :: class : Ability_Base {
             if closest_alive_player != null {
 				// Face the victim and play the base kill animation on the player rig.
 				player.set_facing_right(closest_alive_player.entity.world_position.x > player.entity.world_position.x);
-				player.set_trigger("traitor_kill");
+				if rr_mech_is_transformed(player) {
+					rr_mech_play_avatar_anim(player, "009SG/Kill", false);
+				} else {
+					player.set_trigger("traitor_kill");
+				}
 
                 closest_alive_player.kill_with_killer(player.entity.id);
 
@@ -1590,7 +1594,8 @@ Resurrect_Ability :: class : Ability_Base {
             if p.player_state != Player_State.ALIVE continue;
             has_spew := p.mimicer_blinded || p.mimicer_distorted_until > 0.0;
             has_cocoon := p.bc_cocooned;
-            if !has_spew && !has_cocoon && !rr_lily_is_player_strung_by_any(p) continue;
+            has_mech_conversion := rr_mech_is_minion_active(p);
+            if !has_spew && !has_cocoon && !has_mech_conversion && !rr_lily_is_player_strung_by_any(p) continue;
             finder.check(p, p.entity.world_position);
         }
         return finder.closest;
@@ -1641,6 +1646,11 @@ Resurrect_Ability :: class : Ability_Base {
                         instance.player.Notify(format_string("Cut strings on %!", .{spew_victim.entity.get_name()}));
                         spew_victim.Notify("The Doctor freed you from Lily's strings!");
                     }
+					if rr_mech_is_minion_active(spew_victim) {
+						rr_mech_revert_minion(spew_victim);
+						instance.player.Notify(format_string("Restored %!", .{spew_victim.entity.get_name()}));
+						spew_victim.Notify("The Doctor restored you!");
+					}
                     instance.current_cooldown = 1.0;
                 }
                 return;

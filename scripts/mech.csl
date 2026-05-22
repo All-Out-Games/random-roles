@@ -1,0 +1,1843 @@
+import "core:ao"
+
+MECH_RIG :: "anims/roles/Mech Guardian/004RAND_Mech.spine";
+MECH_HARPOON_RIG :: "anims/roles/Mech Guardian/Harpoon/Harpoon.spine";
+MECH_HELMET_RIG :: "anims/roles/Mech Guardian/Helmet/Helmet_trap.spine";
+
+MECH_INVIS_REASON :: "mech_transform";
+MECH_LOCK_REASON :: "mech_lock";
+MECH_STUN_REASON :: "mech_stun";
+MECH_CARRY_REASON :: "mech_carry";
+MECH_COMPONENT_POWER_CELL :: 1;
+MECH_COMPONENT_CIRCUIT :: 2;
+MECH_COMPONENT_SCHEMATIC :: 3;
+MECH_COMPONENT_GEAR :: 4;
+
+MECH_SMASH_RANGE :: 3.0;
+MECH_LOOT_RANGE :: 3.0;
+MECH_MELEE_RANGE :: 2.6;
+MECH_THROW_DISTANCE :: 10.0;
+MECH_STUN_SECONDS :: 3.0;
+MECH_RAM_SECONDS :: 1.15;
+MECH_RAM_SPEED :: 18.0;
+MECH_APEX_RAM_TURN_RATE :: 9.0;
+MECH_MAGNET_PULL_SECONDS :: 6.0;
+MECH_MAGNET_RADIUS :: 5.0;
+MECH_SHOWDOWN_SECONDS :: 5.0;
+MECH_THROW_STEP :: 0.55;
+MECH_THROW_WALL_TOLERANCE :: 0.65;
+MECH_AIM_CAMERA_SIZE :: 15.0;
+
+mech_workbench_entity: Entity;
+
+rr_mech_play_sfx_at :: proc(path: string, pos: v2, volume: float) {
+	sfx := SFX.default_sfx_desc();
+	sfx.set_position(pos);
+	sfx.volume = volume;
+	sfx.volume_perturb = 0.06;
+	sfx.speed_perturb = 0.06;
+	rr_play_sfx(path, sfx);
+}
+
+rr_mech_anim_duration :: proc(anim_name: string) -> float {
+	if anim_name == "009SG/APEX_transform" return 3.3;
+	if anim_name == "009SG/APEX_transform_grounded" return 4.1;
+	if anim_name == "009SG/Smash_Task" return 1.35;
+	if anim_name == "009SG/Loot_Body" return 1.05;
+	if anim_name == "009SG/Kill" return 0.9;
+	if anim_name == "009SG/cm_pick_up" return 0.9;
+	if anim_name == "009SG/Throw_Player_AL" return 0.5;
+	if anim_name == "009SG/Magnet_Cannon_Shoot" return 0.7;
+	if anim_name == "009SG/Missile_Fire" return 0.75;
+	if anim_name == "009SG/Transform_Truck_In" return 0.45;
+	if anim_name == "009SG/Transform_Truck_out" return 0.38;
+	if anim_name == "009SG/Convert" return 1.18;
+	if anim_name == "009SG/Showdown_Start" return 1.6;
+	if anim_name == "009SG/Showdown_Win" return 0.85;
+	if anim_name == "009SG/Showdown_Lose_Death" return 1.1;
+	if anim_name == "009SG/Showdown_Lose_Survive" return 1.15;
+	if anim_name == "009SG/Warp_Appear" return 0.6;
+	return 0.45;
+}
+
+rr_mech_spawn_flash :: proc(pos: v2, scale: float, color: v4, duration: float) {
+	e := Scene.create_entity();
+	e.set_local_position(pos);
+	e.set_local_scale(v2.{scale, scale});
+	sr := e.add_component(Sprite_Renderer);
+	sr.set_texture(get_asset(Texture_Asset, "$AO/white.png"));
+	sr.color = color;
+	sr.layer = -7;
+	vfx := e.add_component(Mech_Flash_Vfx);
+	vfx.start_scale = scale;
+	vfx.end_scale = scale * 2.2;
+	vfx.color = color;
+	vfx.duration = duration;
+}
+
+rr_mech_add_screenshake :: proc(player: Player, intensity: float, seconds: float) {
+	if player == null return;
+	shake := player.entity.get_component(Mech_Screenshake_Status);
+	if shake == null { shake = player.entity.add_component(Mech_Screenshake_Status); }
+	shake.arm(intensity, seconds);
+}
+
+rr_mech_reset_module :: proc(mech: Mech_Module) {
+	if mech == null return;
+	if mech.creature_entity != null && #alive(mech.creature_entity) {
+		mech.creature_entity.destroy();
+	}
+	mech.is_mech_form = false;
+	mech.is_apex = false;
+	mech.apex_used = false;
+	mech.apex_lost = false;
+	mech.power_cores = 0;
+	mech.power_cells = 0;
+	mech.circuits = 0;
+	mech.schematics = 0;
+	mech.gears = 0;
+	mech.helmet_trap_unlocked = false;
+	mech.ram_charge_unlocked = false;
+	mech.magnet_cannon_unlocked = false;
+	mech.missile_barrage_unlocked = false;
+	mech.wreckage_warp_unlocked = false;
+	mech.endgame_unlocked = false;
+	mech.conversion_used = false;
+	mech.carried_player_id = 0;
+	mech.carried_corpse_id = 0;
+	mech.warp_index = 0;
+	mech.showdown_active = false;
+	mech.showdown_opponent_id = 0;
+	mech.showdown_mashes = 0;
+	mech.showdown_ends_at = 0.0;
+	mech.creature_entity = null;
+	mech.creature_animator = null;
+	mech.creature_visible = false;
+	mech.last_anim = "";
+	mech.anim_lock_until = 0.0;
+}
+
+rr_guardian_reset_module :: proc(guard: Guardian_Module) {
+	if guard == null return;
+	if guard.creature_entity != null && #alive(guard.creature_entity) {
+		guard.creature_entity.destroy();
+	}
+	guard.is_guardian_form = false;
+	guard.carried_player_id = 0;
+	guard.showdown_active = false;
+	guard.showdown_opponent_id = 0;
+	guard.showdown_mashes = 0;
+	guard.showdown_ends_at = 0.0;
+	guard.creature_entity = null;
+	guard.creature_animator = null;
+	guard.creature_visible = false;
+	guard.last_anim = "";
+	guard.anim_lock_until = 0.0;
+}
+
+rr_mech_round_global_cleanup :: proc() {
+	if mech_workbench_entity != null && #alive(mech_workbench_entity) {
+		mech_workbench_entity.destroy();
+	}
+	mech_workbench_entity = null;
+	for w: component_iterator(Mech_Wreckage) {
+		if w != null && #alive(w.entity) { w.entity.destroy(); }
+	}
+	for h: component_iterator(Mech_Helmet_Trap) {
+		if h != null && #alive(h.entity) { h.entity.destroy(); }
+	}
+	for m: component_iterator(Mech_Magnet_Node) {
+		if m != null && #alive(m.entity) { m.entity.destroy(); }
+	}
+	for p: component_iterator(Player) {
+		if p == null continue;
+		if !#alive(p.entity) continue;
+		remove_effect(p.entity, Mech_Minion_Effect, false);
+	}
+	rr_mech_spawn_workbench_if_needed();
+}
+
+rr_mech_spawn_workbench_if_needed :: proc() {
+	has_mech := false;
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p != null && p.player_role == Player_Role.THE_MECH {
+			has_mech = true;
+			break;
+		}
+	}
+	if !has_mech return;
+
+	pos := v2.{0, 0};
+	for i: 0..rr_task_destination_entries.elements.count-1 {
+		entry := rr_task_destination_entries.elements[i];
+		if entry == null continue;
+		if entry.task_id == "build_a_robot" || entry.task_id == "calibrate_teleporter" {
+			pos = entry.pos + v2.{1.35, 0.0};
+			break;
+		}
+	}
+	mech_workbench_entity = Scene.create_entity();
+	mech_workbench_entity.set_local_position(pos);
+	mech_workbench_entity.set_local_scale(v2.{1.0, 1.0});
+	sr := mech_workbench_entity.add_component(Sprite_Renderer);
+	sr.set_texture(get_asset(Texture_Asset, "sprites/tasks/build_a_robot/background.png"));
+	sr.layer = -1;
+	mech_workbench_entity.add_component(Mech_Workbench_Interactable);
+}
+
+rr_mech_get_owner :: proc(player: Player) -> Player {
+	if player == null return null;
+	if player.player_role == Player_Role.THE_MECH return player;
+	minion := rr_mech_get_minion_effect(player);
+	if minion != null && minion.converted_by_mech_id != 0 {
+		return get_player_by_entity_id(minion.converted_by_mech_id);
+	}
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p != null && p.player_role == Player_Role.THE_MECH {
+			return p;
+		}
+	}
+	return null;
+}
+
+rr_mech_is_minion_active :: proc(player: Player) -> bool {
+	minion := rr_mech_get_minion_effect(player);
+	return minion != null && minion.converted_by_mech_id != 0;
+}
+
+rr_mech_get_minion_effect :: proc(player: Player) -> Mech_Minion_Effect {
+	if player == null return null;
+	if !#alive(player.entity) return null;
+	e, _ := get_effect(player.entity, Mech_Minion_Effect);
+	return e;
+}
+
+rr_mech_is_transformed :: proc(player: Player) -> bool {
+	if player == null return false;
+	mech := player.entity.get_component(Mech_Module);
+	if mech != null return mech.is_mech_form || mech.is_apex;
+	guard := player.entity.get_component(Guardian_Module);
+	if guard != null return guard.is_guardian_form;
+	return false;
+}
+
+rr_mech_enable_player_hidden :: proc(player: Player, hidden: bool) {
+	if player == null return;
+	if hidden {
+		player.add_invisibility_reason(MECH_INVIS_REASON);
+		player.add_name_invisibility_reason(MECH_INVIS_REASON);
+	} else {
+		player.remove_invisibility_reason(MECH_INVIS_REASON);
+		player.remove_name_invisibility_reason(MECH_INVIS_REASON);
+	}
+}
+
+rr_mech_ensure_avatar :: proc(player: Player) {
+	if player == null return;
+	mech := player.entity.get_component(Mech_Module);
+	guard := player.entity.get_component(Guardian_Module);
+	if mech == null && guard == null return;
+	if mech != null && mech.creature_entity != null && #alive(mech.creature_entity) return;
+	if guard != null && guard.creature_entity != null && #alive(guard.creature_entity) return;
+
+	e := Scene.create_entity();
+	e.set_parent(player.entity, false);
+	e.set_local_position(v2.{0, 0});
+	e.set_local_rotation(0.0);
+	e.set_local_scale(v2.{1, 1});
+
+	anim := e.add_component(Spine_Animator);
+	anim.awaken();
+	if anim.instance != null {
+		anim.instance.set_skeleton(get_asset(Spine_Asset, MECH_RIG));
+		anim.instance.set_animation("009SG/Idle", true, 0);
+		rr_apply_shadow_mask(anim.instance);
+	}
+	e.set_local_enabled(false);
+
+	if mech != null {
+		mech.creature_entity = e;
+		mech.creature_animator = anim;
+		mech.creature_visible = false;
+	}
+	if guard != null {
+		guard.creature_entity = e;
+		guard.creature_animator = anim;
+		guard.creature_visible = false;
+	}
+}
+
+rr_mech_apply_avatar_skins :: proc(player: Player) {
+	if player == null return;
+	mech := player.entity.get_component(Mech_Module);
+	guard := player.entity.get_component(Guardian_Module);
+	anim: Spine_Animator = null;
+	if mech != null { anim = mech.creature_animator; }
+	if guard != null { anim = guard.creature_animator; }
+	if anim == null || anim.instance == null return;
+
+	anim.instance.disable_all_skins();
+	if guard != null {
+		anim.instance.enable_skin("Full/Guardian");
+		if guard.creature_entity != null {
+			guard.creature_entity.set_local_scale(v2.{1.18, 1.18});
+		}
+	} else if mech != null {
+		if mech.is_apex {
+			anim.instance.enable_skin("Full/Mecha_APEX");
+			if mech.creature_entity != null { mech.creature_entity.set_local_scale(v2.{1.55, 1.55}); }
+		} else {
+			anim.instance.enable_skin("Full/Mecha_skeleton");
+			anim.instance.enable_skin("Head");
+			anim.instance.enable_skin("Arms");
+			anim.instance.enable_skin("Chest_empty");
+			if mech.ram_charge_unlocked || mech.power_cells > 0 { anim.instance.enable_skin("Chest_full"); }
+			if mech.magnet_cannon_unlocked || mech.schematics > 0 { anim.instance.enable_skin("Full/Mecha"); }
+			if mech.missile_barrage_unlocked || mech.circuits > 0 { anim.instance.enable_skin("Missiles"); }
+			if mech.helmet_trap_unlocked || mech.gears > 0 { anim.instance.enable_skin("Legs"); }
+			upgrades := 0;
+			if mech.power_cells > 0 || mech.ram_charge_unlocked { upgrades += 1; }
+			if mech.schematics > 0 || mech.magnet_cannon_unlocked { upgrades += 1; }
+			if mech.circuits > 0 || mech.missile_barrage_unlocked { upgrades += 1; }
+			if mech.gears > 0 || mech.helmet_trap_unlocked { upgrades += 1; }
+			scale := 1.06 + upgrades.(float) * 0.08;
+			if mech.creature_entity != null { mech.creature_entity.set_local_scale(v2.{scale, scale}); }
+		}
+	}
+	anim.instance.refresh_skins();
+}
+
+rr_mech_show_avatar :: proc(player: Player, show: bool) {
+	rr_mech_ensure_avatar(player);
+	mech := player.entity.get_component(Mech_Module);
+	guard := player.entity.get_component(Guardian_Module);
+	e: Entity = null;
+	if mech != null { e = mech.creature_entity; mech.creature_visible = show; }
+	if guard != null { e = guard.creature_entity; guard.creature_visible = show; }
+	if e != null && #alive(e) { e.set_local_enabled(show); }
+	rr_mech_enable_player_hidden(player, show);
+	if show { rr_mech_apply_avatar_skins(player); }
+}
+
+rr_mech_play_avatar_anim :: proc(player: Player, anim_name: string, loop: bool) {
+	if player == null return;
+	mech := player.entity.get_component(Mech_Module);
+	guard := player.entity.get_component(Guardian_Module);
+	anim: Spine_Animator = null;
+	if mech != null {
+		anim = mech.creature_animator;
+		mech.last_anim = anim_name;
+		if !loop { mech.anim_lock_until = get_time() + rr_mech_anim_duration(anim_name); }
+	}
+	if guard != null {
+		anim = guard.creature_animator;
+		guard.last_anim = anim_name;
+		if !loop { guard.anim_lock_until = get_time() + rr_mech_anim_duration(anim_name); }
+	}
+	if anim == null || anim.instance == null return;
+	anim.instance.set_animation(anim_name, loop, 0);
+}
+
+rr_mech_update_avatar_locomotion :: proc(player: Player) {
+	if player == null return;
+	if !rr_mech_is_transformed(player) return;
+	mech := player.entity.get_component(Mech_Module);
+	guard := player.entity.get_component(Guardian_Module);
+	moving := length(player.agent.velocity) > 0.25;
+	target_anim := "009SG/Idle";
+	if guard != null {
+		if get_time() < guard.anim_lock_until return;
+		if guard.carried_player_id != 0 {
+			target_anim = "009SG/Carry_Player_AL";
+			if guard.last_anim != target_anim { rr_mech_play_avatar_anim(player, target_anim, true); }
+			return;
+		}
+		if moving { target_anim = "009SG/Run_guardian"; }
+		if guard.last_anim != target_anim {
+			rr_mech_play_avatar_anim(player, target_anim, true);
+		}
+	} else if mech != null {
+		if get_time() < mech.anim_lock_until return;
+		if mech.carried_player_id != 0 || mech.carried_corpse_id != 0 {
+			target_anim = "009SG/Carry_Player_AL";
+			if mech.last_anim != target_anim { rr_mech_play_avatar_anim(player, target_anim, true); }
+			return;
+		}
+		if mech.is_apex {
+			target_anim = moving ? "009SG/Fly_Run" : "009SG/Fly_Idle";
+		} else {
+			target_anim = moving ? "009SG/Run_mech" : "009SG/Idle";
+		}
+		if mech.last_anim != target_anim {
+			rr_mech_play_avatar_anim(player, target_anim, true);
+		}
+	}
+}
+
+rr_mech_update :: proc(player: Player, dt: float) {
+	if player == null return;
+	mech := player.entity.get_component(Mech_Module);
+	guard := player.entity.get_component(Guardian_Module);
+	if mech != null {
+		if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
+			if mech.creature_visible { rr_mech_show_avatar(player, false); }
+			mech.carried_player_id = 0;
+			mech.carried_corpse_id = 0;
+			mech.showdown_active = false;
+			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+		} else {
+			if mech.is_mech_form || mech.is_apex {
+				rr_mech_show_avatar(player, true);
+			}
+			rr_mech_update_carried(player, mech.carried_player_id, mech.carried_corpse_id);
+			rr_mech_update_showdown_for_mech(player, mech);
+		}
+	}
+	if guard != null {
+		if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
+			if guard.creature_visible { rr_mech_show_avatar(player, false); }
+			guard.carried_player_id = 0;
+			guard.showdown_active = false;
+			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+		} else {
+			if guard.is_guardian_form {
+				rr_mech_show_avatar(player, true);
+			}
+			rr_mech_update_carried(player, guard.carried_player_id, 0);
+			rr_mech_update_showdown_for_guardian(player, guard);
+		}
+	}
+	rr_mech_update_avatar_locomotion(player);
+}
+
+rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_corpse_id: u64) {
+	if carrier == null return;
+	offset := v2.{0, 1.05};
+	if carried_player_id != 0 {
+		target := get_player_by_entity_id(carried_player_id);
+		if target != null && target.player_state == Player_State.ALIVE {
+			target.entity.set_local_position(carrier.entity.world_position + offset);
+			target.agent.velocity = v2.{0, 0};
+			target.add_disable_movement_input_reason(MECH_CARRY_REASON);
+		}
+	}
+	if carried_corpse_id != 0 {
+		c := rr_drag_body_find_corpse_by_entity_id(carried_corpse_id);
+		if c != null {
+			c.entity.set_local_position(carrier.entity.world_position + offset);
+		}
+	}
+}
+
+rr_mech_find_melee_target :: proc(player: Player, allow_traitor: bool) -> Player {
+	finder := make_finder(Player, player.entity.world_position, MECH_MELEE_RANGE);
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if p == player continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if !#alive(p.entity) continue;
+		if !allow_traitor && p.player_type == Player_Type.TRAITOR continue;
+		finder.check(p, p.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_mech_find_pickup_target :: proc(player: Player) -> Player {
+	finder := make_finder(Player, player.entity.world_position, MECH_MELEE_RANGE);
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if p == player continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if !#alive(p.entity) continue;
+		if rr_mech_is_transformed(p) continue;
+		finder.check(p, p.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_mech_find_nearby_corpse :: proc(player: Player) -> Corpse {
+	finder := make_finder(Corpse, player.entity.world_position, MECH_LOOT_RANGE);
+	for corpse: component_iterator(Corpse) {
+		if corpse == null continue;
+		if !#alive(corpse.entity) continue;
+		if corpse.mech_core_looted continue;
+		finder.check(corpse, corpse.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_mech_task_component_kind :: proc(task_id: string) -> int {
+	if task_id == "reroute_power" return MECH_COMPONENT_POWER_CELL;
+	if task_id == "guide_the_electron" return MECH_COMPONENT_CIRCUIT;
+	if task_id == "anagram_puzzle" return MECH_COMPONENT_SCHEMATIC;
+	if task_id == "calibrate_teleporter" return MECH_COMPONENT_GEAR;
+	return 0;
+}
+
+rr_mech_add_component_part :: proc(player: Player, kind: int) {
+	if player == null return;
+	mech := player.entity.get_component(Mech_Module);
+	minion := rr_mech_get_minion_effect(player);
+	if mech != null {
+		if kind == MECH_COMPONENT_POWER_CELL { mech.power_cells += 1; }
+		if kind == MECH_COMPONENT_CIRCUIT { mech.circuits += 1; }
+		if kind == MECH_COMPONENT_SCHEMATIC { mech.schematics += 1; }
+		if kind == MECH_COMPONENT_GEAR { mech.gears += 1; }
+		rr_mech_apply_avatar_skins(player);
+		return;
+	}
+	if minion != null {
+		if kind == MECH_COMPONENT_POWER_CELL { minion.power_cells += 1; }
+		if kind == MECH_COMPONENT_CIRCUIT { minion.circuits += 1; }
+		if kind == MECH_COMPONENT_SCHEMATIC { minion.schematics += 1; }
+		if kind == MECH_COMPONENT_GEAR { minion.gears += 1; }
+	}
+}
+
+rr_mech_component_name :: proc(kind: int) -> string {
+	if kind == MECH_COMPONENT_POWER_CELL return "Power Cell";
+	if kind == MECH_COMPONENT_CIRCUIT return "Circuit";
+	if kind == MECH_COMPONENT_SCHEMATIC return "Schematic";
+	if kind == MECH_COMPONENT_GEAR return "Gear";
+	return "Component";
+}
+
+rr_mech_find_smashable_task :: proc(player: Player) -> Task_Interactable {
+	finder := make_finder(Task_Interactable, player.entity.world_position, MECH_SMASH_RANGE);
+	for t: component_iterator(Task_Interactable) {
+		if t == null continue;
+		if !#alive(t.entity) continue;
+		if t.mech_smashed continue;
+		if rr_mech_task_component_kind(t.get_task_id()) == 0 continue;
+		finder.check(t, t.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_mech_smash_task :: proc(player: Player, task: Task_Interactable) {
+	if player == null || task == null return;
+	kind := rr_mech_task_component_kind(task.get_task_id());
+	if kind == 0 return;
+	task.mech_smashed = true;
+	rr_mech_add_component_part(player, kind);
+
+	w := Scene.create_entity();
+	w.set_local_position(task.entity.world_position);
+	w.set_local_scale(v2.{0.9, 0.9});
+	sr := w.add_component(Sprite_Renderer);
+	sr.set_texture(get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_table/body.png"));
+	sr.layer = -2;
+	wreck := w.add_component(Mech_Wreckage);
+	wreck.owner_id = player.entity.id;
+	task.mech_wreckage_entity = w;
+
+	player.set_trigger("punch");
+	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false);
+	rr_mech_spawn_flash(task.entity.world_position, 0.95, v4.{1.0, 0.55, 0.08, 0.65}, 0.28);
+	rr_mech_add_screenshake(player, 0.08, 0.2);
+	rr_mech_play_sfx_at("sfx/ggg_explode.wav", task.entity.world_position, 0.28);
+	player.Notify(format_string("+1 %", .{rr_mech_component_name(kind)}));
+}
+
+rr_mech_count_component_pool :: proc(owner: Player, kind: int) -> int {
+	if owner == null return 0;
+	total := 0;
+	mech := owner.entity.get_component(Mech_Module);
+	if mech != null {
+		if kind == MECH_COMPONENT_POWER_CELL { total += mech.power_cells; }
+		if kind == MECH_COMPONENT_CIRCUIT { total += mech.circuits; }
+		if kind == MECH_COMPONENT_SCHEMATIC { total += mech.schematics; }
+		if kind == MECH_COMPONENT_GEAR { total += mech.gears; }
+	}
+	for p: component_iterator(Player) {
+		if p == null continue;
+		minion := rr_mech_get_minion_effect(p);
+		if minion == null continue;
+		if minion.converted_by_mech_id != owner.entity.id continue;
+		if kind == MECH_COMPONENT_POWER_CELL { total += minion.power_cells; }
+		if kind == MECH_COMPONENT_CIRCUIT { total += minion.circuits; }
+		if kind == MECH_COMPONENT_SCHEMATIC { total += minion.schematics; }
+		if kind == MECH_COMPONENT_GEAR { total += minion.gears; }
+	}
+	return total;
+}
+
+rr_mech_total_component_pool :: proc(owner: Player) -> int {
+	return rr_mech_count_component_pool(owner, MECH_COMPONENT_POWER_CELL) +
+		rr_mech_count_component_pool(owner, MECH_COMPONENT_CIRCUIT) +
+		rr_mech_count_component_pool(owner, MECH_COMPONENT_SCHEMATIC) +
+		rr_mech_count_component_pool(owner, MECH_COMPONENT_GEAR);
+}
+
+rr_mech_spend_component_pool :: proc(owner: Player, kind: int, count: int) -> bool {
+	if owner == null return false;
+	if rr_mech_count_component_pool(owner, kind) < count return false;
+	remaining := count;
+	mech := owner.entity.get_component(Mech_Module);
+	if mech != null {
+		while remaining > 0 {
+			if kind == MECH_COMPONENT_POWER_CELL && mech.power_cells > 0 { mech.power_cells -= 1; remaining -= 1; continue; }
+			if kind == MECH_COMPONENT_CIRCUIT && mech.circuits > 0 { mech.circuits -= 1; remaining -= 1; continue; }
+			if kind == MECH_COMPONENT_SCHEMATIC && mech.schematics > 0 { mech.schematics -= 1; remaining -= 1; continue; }
+			if kind == MECH_COMPONENT_GEAR && mech.gears > 0 { mech.gears -= 1; remaining -= 1; continue; }
+			break;
+		}
+	}
+	for p: component_iterator(Player) {
+		if remaining <= 0 break;
+		minion := rr_mech_get_minion_effect(p);
+		if minion == null continue;
+		if minion.converted_by_mech_id != owner.entity.id continue;
+		while remaining > 0 {
+			if kind == MECH_COMPONENT_POWER_CELL && minion.power_cells > 0 { minion.power_cells -= 1; remaining -= 1; continue; }
+			if kind == MECH_COMPONENT_CIRCUIT && minion.circuits > 0 { minion.circuits -= 1; remaining -= 1; continue; }
+			if kind == MECH_COMPONENT_SCHEMATIC && minion.schematics > 0 { minion.schematics -= 1; remaining -= 1; continue; }
+			if kind == MECH_COMPONENT_GEAR && minion.gears > 0 { minion.gears -= 1; remaining -= 1; continue; }
+			break;
+		}
+	}
+	return true;
+}
+
+rr_mech_spend_any_components :: proc(owner: Player, count: int) -> bool {
+	if rr_mech_total_component_pool(owner) < count return false;
+	remaining := count;
+	for kind: MECH_COMPONENT_POWER_CELL..MECH_COMPONENT_GEAR {
+		while remaining > 0 && rr_mech_count_component_pool(owner, kind) > 0 {
+			rr_mech_spend_component_pool(owner, kind, 1);
+			remaining -= 1;
+		}
+	}
+	return true;
+}
+
+rr_mech_unlock_next_at_workbench :: proc(player: Player) {
+	mech := player.entity.get_component(Mech_Module);
+	if mech == null return;
+	if !mech.helmet_trap_unlocked && rr_mech_spend_component_pool(player, MECH_COMPONENT_GEAR, 1) {
+		mech.helmet_trap_unlocked = true; player.Notify("Unlocked Helmet Trap."); rr_mech_apply_avatar_skins(player); return;
+	}
+	if !mech.ram_charge_unlocked && rr_mech_spend_component_pool(player, MECH_COMPONENT_POWER_CELL, 1) {
+		mech.ram_charge_unlocked = true; player.Notify("Unlocked Ram Charge."); rr_mech_apply_avatar_skins(player); return;
+	}
+	if !mech.magnet_cannon_unlocked && rr_mech_spend_component_pool(player, MECH_COMPONENT_SCHEMATIC, 1) {
+		mech.magnet_cannon_unlocked = true; player.Notify("Unlocked Magnet Cannon."); rr_mech_apply_avatar_skins(player); return;
+	}
+	if !mech.missile_barrage_unlocked && rr_mech_spend_component_pool(player, MECH_COMPONENT_CIRCUIT, 1) {
+		mech.missile_barrage_unlocked = true; player.Notify("Unlocked Missile Barrage."); rr_mech_apply_avatar_skins(player); return;
+	}
+	if !mech.wreckage_warp_unlocked && rr_mech_spend_any_components(player, 2) {
+		mech.wreckage_warp_unlocked = true; player.Notify("Unlocked Wreckage Warp."); return;
+	}
+	player.Notify("No upgrade is affordable.");
+}
+
+rr_mech_can_awaken_apex :: proc(player: Player) -> bool {
+	mech := player.entity.get_component(Mech_Module);
+	if mech == null return false;
+	if mech.apex_used || mech.apex_lost || mech.is_apex return false;
+	if !mech.helmet_trap_unlocked || !mech.ram_charge_unlocked || !mech.magnet_cannon_unlocked || !mech.missile_barrage_unlocked return false;
+	return mech.power_cores >= 2;
+}
+
+rr_mech_convert_target :: proc(mech_player: Player, target: Player) {
+	if mech_player == null || target == null return;
+	mech := mech_player.entity.get_component(Mech_Module);
+	if mech == null return;
+	if target.player_role == Player_Role.GUARDIAN {
+		mech_player.Notify("TARGET INVALID");
+		mech_player.Notify(format_string("% is Guardian.", .{target.entity.get_name()}));
+		return;
+	}
+	if target.player_type == Player_Type.TRAITOR {
+		mech_player.Notify("TARGET INVALID");
+		return;
+	}
+	if rr_mech_is_minion_active(target) return;
+	minion := new(Mech_Minion_Effect);
+	minion.converted_by_mech_id = mech_player.entity.id;
+	minion.original_role = target.player_role;
+	minion.original_type = target.player_type;
+	minion.saved_skins.clear();
+	if target.animator != null && target.animator.instance != null {
+		skins := target.animator.instance.get_skins();
+		for i: 0..skins.count-1 {
+			minion.saved_skins.append(skins[i]);
+		}
+	}
+	minion.saved_color = target.avatar_color;
+	mech.conversion_used = true;
+	target.entity.add_passive_effect(minion);
+	rr_mech_play_avatar_anim(mech_player, "009SG/Convert", false);
+	rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 0.75, v4.{0.35, 0.9, 1.0, 0.7}, 0.32);
+	mech_player.Notify(format_string("Converted %.", .{target.entity.get_name()}));
+	rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position, 0.35);
+}
+
+rr_mech_revert_minion :: proc(target: Player) {
+	if target == null return;
+	remove_effect(target.entity, Mech_Minion_Effect, false);
+}
+
+rr_mech_get_throw_direction :: proc(player: Player) -> v2 {
+	dir := player.last_aim_direction;
+	if length_squared(dir) < 0.01 {
+		dir = v2.{1, 0};
+	}
+	return normalize(dir);
+}
+
+rr_mech_is_near_magnet_node :: proc(pos: v2) -> bool {
+	for m: component_iterator(Mech_Magnet_Node) {
+		if m == null || !#alive(m.entity) continue;
+		if in_range(m.entity.world_position - pos, 1.15) return true;
+	}
+	return false;
+}
+
+rr_mech_find_throw_path_hit :: proc(carrier: Player, target: Player, start_pos: v2, dir: v2, end_pos: ref v2, killer_id: u64) -> bool {
+	traveled := MECH_THROW_STEP;
+	last_valid := start_pos;
+	while traveled <= MECH_THROW_DISTANCE {
+		sample := start_pos + dir * traveled;
+		nav_point: v2;
+		tri_hint: s64;
+		if !try_find_closest_point_on_navmesh(sample, ref nav_point, ref tri_hint) || length(nav_point - sample) > MECH_THROW_WALL_TOLERANCE {
+			end_pos = last_valid;
+			rr_mech_apply_stun(target, MECH_STUN_SECONDS);
+			rr_mech_spawn_flash(end_pos, 0.55, v4.{1.0, 0.7, 0.3, 0.55}, 0.22);
+			rr_mech_play_sfx_at("minigame/bonk_staff_77864c.wav", end_pos, 0.24);
+			return true;
+		}
+		last_valid = sample;
+
+		for m: component_iterator(Mech_Magnet_Node) {
+			if m == null || !#alive(m.entity) continue;
+			if !in_range(m.entity.world_position - sample, 1.15) continue;
+			end_pos = m.entity.world_position;
+			rr_mech_apply_stun(target, MECH_MAGNET_PULL_SECONDS);
+			rr_mech_spawn_flash(end_pos, 0.7, v4.{0.3, 0.8, 1.0, 0.6}, 0.28);
+			rr_mech_play_sfx_at("sfx/zap.wav", end_pos, 0.34);
+			return true;
+		}
+
+		for w: component_iterator(Mech_Wreckage) {
+			if w == null || !#alive(w.entity) continue;
+			if !in_range(w.entity.world_position - sample, 1.25) continue;
+			end_pos = w.entity.world_position;
+			w.entity.destroy();
+			target.kill_with_killer(killer_id);
+			rr_mech_spawn_flash(end_pos, 1.2, v4.{1.0, 0.32, 0.08, 0.75}, 0.32);
+			rr_mech_play_sfx_at("sfx/ggg_explode.wav", end_pos, 0.5);
+			return true;
+		}
+
+		for p: component_iterator(Player) {
+			if p == null || p == target || p == carrier continue;
+			if p.player_state != Player_State.ALIVE continue;
+			if !in_range(p.entity.world_position - sample, 1.15) continue;
+			end_pos = p.entity.world_position;
+			target_helmet := target.entity.get_component(Mech_Helmeted_Status);
+			if target_helmet != null && target_helmet.active {
+				p.kill_with_killer(killer_id);
+				rr_mech_spawn_flash(end_pos, 0.85, v4.{1.0, 0.2, 0.1, 0.65}, 0.25);
+				rr_mech_play_sfx_at("sfx/other_death.wav", end_pos, 0.36);
+			} else {
+				rr_mech_apply_stun(p, MECH_STUN_SECONDS);
+				rr_mech_apply_stun(target, MECH_STUN_SECONDS);
+				rr_mech_spawn_flash(end_pos, 0.75, v4.{1.0, 0.85, 0.35, 0.55}, 0.22);
+				rr_mech_play_sfx_at("minigame/bonk_staff_77864c.wav", end_pos, 0.22);
+			}
+			return true;
+		}
+
+		traveled += MECH_THROW_STEP;
+	}
+	return false;
+}
+
+rr_mech_throw_player :: proc(carrier: Player, target: Player, killer_id: u64) {
+	if carrier == null || target == null return;
+	target.remove_disable_movement_input_reason(MECH_CARRY_REASON);
+	dir := rr_mech_get_throw_direction(carrier);
+	start_pos := carrier.entity.world_position + dir * 0.8;
+	end_pos := carrier.entity.world_position + dir * MECH_THROW_DISTANCE;
+	path_hit := rr_mech_find_throw_path_hit(carrier, target, start_pos, dir, ref end_pos, killer_id);
+	target.entity.set_local_position(end_pos);
+	if path_hit {
+		target.agent.velocity = v2.{0, 0};
+	} else {
+		target.agent.velocity = dir * 8.0;
+	}
+	target.set_trigger("hitman_fly_forward");
+	rr_mech_play_avatar_anim(carrier, "009SG/Throw_Player_AL", false);
+	rr_mech_play_sfx_at("sfx/killer_transform.wav", carrier.entity.world_position, 0.2);
+	rr_mech_add_screenshake(carrier, 0.09, 0.18);
+	if path_hit return;
+
+	hit_wreckage := false;
+	for w: component_iterator(Mech_Wreckage) {
+		if w == null || !#alive(w.entity) continue;
+		if in_range(w.entity.world_position - end_pos, 1.3) {
+			w.entity.destroy();
+			target.kill_with_killer(killer_id);
+			rr_mech_play_sfx_at("sfx/ggg_explode.wav", end_pos, 0.45);
+			hit_wreckage = true;
+			break;
+		}
+	}
+	if hit_wreckage return;
+
+	for p: component_iterator(Player) {
+		if p == null || p == target || p == carrier continue;
+		if p.player_state != Player_State.ALIVE continue;
+		if !in_range(p.entity.world_position - end_pos, 1.2) continue;
+		target_helmet := target.entity.get_component(Mech_Helmeted_Status);
+		if target_helmet != null && target_helmet.active {
+			p.kill_with_killer(killer_id);
+		} else {
+			rr_mech_apply_stun(p, MECH_STUN_SECONDS);
+			rr_mech_apply_stun(target, MECH_STUN_SECONDS);
+		}
+		return;
+	}
+	rr_mech_apply_stun(target, MECH_STUN_SECONDS);
+}
+
+rr_mech_apply_stun :: proc(target: Player, seconds: float) {
+	if target == null return;
+	stun := target.entity.get_component(Mech_Stun_Status);
+	if stun == null { stun = target.entity.add_component(Mech_Stun_Status); }
+	stun.arm(seconds);
+}
+
+rr_mech_release_guardian_pickup_if_needed :: proc(target: Player) {
+	if target == null return;
+	guard := target.entity.get_component(Guardian_Module);
+	if guard == null return;
+	if guard.carried_player_id != 0 {
+		carried := get_player_by_entity_id(guard.carried_player_id);
+		if carried != null {
+			carried.remove_disable_movement_input_reason(MECH_CARRY_REASON);
+		}
+		guard.carried_player_id = 0;
+		target.Notify("Ram Charge broke your hold!");
+	}
+}
+
+rr_mech_get_next_wreckage :: proc(player: Player, idx: ref int) -> Mech_Wreckage, bool {
+	count := 0;
+	for w: component_iterator(Mech_Wreckage) {
+		if w == null || !#alive(w.entity) continue;
+		count += 1;
+	}
+	if count == 0 return null, false;
+	if idx >= count { idx = 0; }
+	i := 0;
+	for w: component_iterator(Mech_Wreckage) {
+		if w == null || !#alive(w.entity) continue;
+		if i == idx {
+			idx += 1;
+			return w, true;
+		}
+		i += 1;
+	}
+	return null, false;
+}
+
+rr_mech_draw_abilities :: proc(player: Player, idx: int) -> int {
+	abilityIndex := idx;
+	mech := player.entity.get_component(Mech_Module);
+	if mech == null return abilityIndex;
+	if mech.showdown_active {
+		draw_ability_button(player, Mech_Showdown_Mash_Ability, abilityIndex);
+		return abilityIndex + 1;
+	}
+	draw_ability_button(player, Kill_Ability, abilityIndex); abilityIndex += 1;
+	draw_ability_button(player, Mech_Transform_Ability, abilityIndex); abilityIndex += 1;
+	if !mech.is_mech_form && !mech.is_apex {
+		draw_ability_button(player, Drag_Body_Ability, abilityIndex); abilityIndex += 1;
+		if mech.helmet_trap_unlocked { draw_ability_button(player, Mech_Helmet_Trap_Ability, abilityIndex); abilityIndex += 1; }
+		return abilityIndex;
+	}
+	draw_ability_button(player, Mech_Smash_Task_Ability, abilityIndex); abilityIndex += 1;
+	draw_ability_button(player, Mech_Pickup_Throw_Ability, abilityIndex); abilityIndex += 1;
+	if !mech.conversion_used { draw_ability_button(player, Mech_Conversion_Ability, abilityIndex); abilityIndex += 1; }
+	if mech.ram_charge_unlocked { draw_ability_button(player, Mech_Ram_Charge_Ability, abilityIndex); abilityIndex += 1; }
+	if mech.magnet_cannon_unlocked { draw_ability_button(player, Mech_Magnet_Cannon_Ability, abilityIndex); abilityIndex += 1; }
+	if mech.missile_barrage_unlocked { draw_ability_button(player, Mech_Missile_Barrage_Ability, abilityIndex); abilityIndex += 1; }
+	if mech.wreckage_warp_unlocked { draw_ability_button(player, Mech_Wreckage_Warp_Ability, abilityIndex); abilityIndex += 1; }
+	if rr_mech_can_awaken_apex(player) { draw_ability_button(player, Mech_Apex_Awakening_Ability, abilityIndex); abilityIndex += 1; }
+	if mech.endgame_unlocked { draw_ability_button(player, Mech_End_Game_Ability, abilityIndex); abilityIndex += 1; }
+	return abilityIndex;
+}
+
+rr_minion_draw_abilities :: proc(player: Player, idx: int) -> int {
+	abilityIndex := idx;
+	draw_ability_button(player, Mech_Smash_Task_Ability, abilityIndex); abilityIndex += 1;
+	draw_ability_button(player, Drag_Body_Ability, abilityIndex); abilityIndex += 1;
+	owner := rr_mech_get_owner(player);
+	if owner != null {
+		mech := owner.entity.get_component(Mech_Module);
+		if mech != null && mech.wreckage_warp_unlocked {
+			draw_ability_button(player, Mech_Wreckage_Warp_Ability, abilityIndex); abilityIndex += 1;
+		}
+	}
+	return abilityIndex;
+}
+
+rr_guardian_draw_abilities :: proc(player: Player, idx: int) -> int {
+	abilityIndex := idx;
+	guard := player.entity.get_component(Guardian_Module);
+	if guard == null return abilityIndex;
+	draw_ability_button(player, Guardian_Transform_Ability, abilityIndex); abilityIndex += 1;
+	if guard.showdown_active {
+		draw_ability_button(player, Guardian_Showdown_Ability, abilityIndex); abilityIndex += 1;
+		return abilityIndex;
+	}
+	if guard.is_guardian_form {
+		draw_ability_button(player, Guardian_Pickup_Throw_Ability, abilityIndex); abilityIndex += 1;
+		if rr_guardian_can_showdown(player) { draw_ability_button(player, Guardian_Showdown_Ability, abilityIndex); abilityIndex += 1; }
+	}
+	return abilityIndex;
+}
+
+Mech_Workbench_Interactable :: class : Interactable {
+	ao_start :: method() {
+		this.set_listener(this);
+		this.set_text("Workbench");
+		this.set_hold_text("Building...");
+		required_hold_time = 0.75;
+		radius = 3.0;
+	}
+	can_use :: method(player: Player) -> bool {
+		return player != null && player.player_role == Player_Role.THE_MECH && player.player_state == Player_State.ALIVE;
+	}
+	on_interact :: method(player: Player) {
+		rr_mech_unlock_next_at_workbench(player);
+		rr_mech_spawn_flash(entity.world_position + v2.{0, 0.55}, 0.75, v4.{0.25, 0.8, 1.0, 0.55}, 0.28);
+		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", entity.world_position, 0.35);
+	}
+}
+
+Mech_Loot_Corpse_Interactable :: class : Interactable {
+	ao_start :: method() {
+		this.set_listener(this);
+		this.set_text("Loot Core");
+		this.set_hold_text("Extracting...");
+		required_hold_time = 0.5;
+		radius = 3.0;
+		priority = 70;
+	}
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if player.player_role != Player_Role.THE_MECH return false;
+		if player.player_state != Player_State.ALIVE return false;
+		corpse := entity.get_component(Corpse);
+		if corpse == null return false;
+		return !corpse.mech_core_looted;
+	}
+	on_interact :: method(player: Player) {
+		corpse := entity.get_component(Corpse);
+		if corpse == null || corpse.mech_core_looted return;
+		mech := player.entity.get_component(Mech_Module);
+		if mech == null return;
+		corpse.mech_core_looted = true;
+		mech.power_cores += 1;
+		rr_mech_play_avatar_anim(player, "009SG/Loot_Body", false);
+		rr_mech_spawn_flash(entity.world_position + v2.{0, 0.55}, 0.55, v4.{1.0, 0.15, 0.08, 0.65}, 0.35);
+		rr_mech_play_sfx_at("sfx/pick_up_item_a973cc.wav", entity.world_position, 0.32);
+		player.Notify(format_string("+1 Power Core (% total)", .{mech.power_cores}));
+	}
+}
+
+Mech_Flash_Vfx :: class : Component {
+	start_time: float;
+	duration: float;
+	start_scale: float;
+	end_scale: float;
+	color: v4;
+	ao_start :: method() {
+		start_time = get_time();
+		if duration <= 0.0 { duration = 0.2; }
+	}
+	ao_update :: method(dt: float) {
+		t := clamp((get_time() - start_time) / duration, 0.0, 1.0);
+		scale := lerp(start_scale, end_scale, t);
+		entity.set_local_scale(v2.{scale, scale});
+		sr := entity.get_component(Sprite_Renderer);
+		if sr != null {
+			sr.color = v4.{color.x, color.y, color.z, color.w * (1.0 - t)};
+		}
+		if t >= 1.0 {
+			entity.destroy();
+		}
+	}
+}
+
+Mech_Screenshake_Status :: class : Component {
+	start_time: float;
+	ends_at: float;
+	intensity: float;
+	arm :: proc(using this: Mech_Screenshake_Status, amount: float, seconds: float) {
+		start_time = get_time();
+		ends_at = start_time + seconds;
+		intensity = max(intensity, amount);
+	}
+	ao_update :: method(dt: float) {
+		p := entity.get_component(Player);
+		if p == null || !p.is_local() return;
+		if get_time() >= ends_at {
+			intensity = 0.0;
+			return;
+		}
+		duration := ends_at - start_time;
+		if duration <= 0.0 return;
+		remaining := (ends_at - get_time()) / duration;
+		amp := intensity * remaining;
+		p.camera.position = p.entity.world_position + v2.{sin(get_time() * 80.0) * amp, cos(get_time() * 101.0) * amp * 0.7};
+	}
+}
+
+Mech_Wreckage :: class : Component {
+	owner_id: u64;
+	last_warp_at: float;
+	ao_update :: method(dt: float) {
+		UI.push_world_draw_context();
+		defer UI.pop_draw_context();
+		UI.push_z(entity.world_position.y);
+		defer UI.pop_z();
+		rect := Rect{entity.world_position + v2.{0, 0.72}, entity.world_position + v2.{0, 0.72}}.grow(0.18, 1.0, 0.18, 1.0);
+		ts := UI.default_text_settings();
+		ts.size = 0.24;
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 2;
+		UI.text(rect, ts, "Wreckage");
+	}
+}
+
+rr_mech_draw_wreckage_warp_minimap_buttons :: proc(player: Player, map_rect: Rect) {
+	owner := rr_mech_get_owner(player);
+	if owner == null return;
+	mech := owner.entity.get_component(Mech_Module);
+	if mech == null || !mech.wreckage_warp_unlocked return;
+	if player.player_state != Player_State.ALIVE return;
+	if player.player_role == Player_Role.THE_MECH && !mech.is_mech_form && !mech.is_apex return;
+	if player.player_role != Player_Role.THE_MECH && !rr_mech_is_minion_active(player) return;
+
+	icon := get_asset(Texture_Asset, "sprites/icons/mech/Wreckage_Warp_Icon.png");
+	size := map_rect.height() * 0.045;
+	if size < 24.0 { size = 24.0; }
+	if size > 58.0 { size = 58.0; }
+
+	for w: component_iterator(Mech_Wreckage) {
+		if w == null continue;
+		if !#alive(w.entity) continue;
+		p_ui := rr_minimap_world_to_ui(map_rect, w.entity.world_position);
+		r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
+		UI.push_id(format_string("mech_warp_%", .{w.entity.id}));
+		warp_bs: Button_Settings = .{};
+		rr_ui_apply_button_click_sound(ref warp_bs);
+		interact := UI.button(r, warp_bs, .{}, "");
+		if icon != null {
+			UI.quad(r.fit_aspect(icon.get_aspect()), icon, v4.{0.3, 0.85, 1.0, 1.0});
+		} else {
+			UI.quad(r, core_globals.white_sprite, v4.{0.3, 0.85, 1.0, 0.85});
+		}
+		cooldown_left := (w.last_warp_at + 10.0) - get_time();
+		if cooldown_left > 0.0 {
+			UI.quad(r, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.45});
+		}
+		if interact.clicked && cooldown_left <= 0.0 {
+			pos := w.entity.world_position + v2.{0, 0.7};
+			player.entity.set_local_position(pos);
+			w.last_warp_at = get_time();
+			player.show_minimap = false;
+			rr_mech_play_avatar_anim(player, "009SG/Warp_Appear", false);
+			rr_mech_spawn_flash(pos, 0.7, v4.{0.3, 0.8, 1.0, 0.55}, 0.28);
+			rr_mech_play_sfx_at("sfx/warp_a5b988.wav", pos, 0.32);
+		}
+		UI.pop_id();
+	}
+}
+
+Mech_Stun_Status :: class : Component {
+	active: bool;
+	ends_at: float;
+	arm :: proc(using this: Mech_Stun_Status, seconds: float) {
+		active = true;
+		ends_at = get_time() + seconds;
+		p := entity.get_component(Player);
+		if p != null {
+			p.add_disable_movement_input_reason(MECH_STUN_REASON);
+			p.set_trigger("hitman_broken_leg_idle");
+		}
+	}
+	ao_update :: method(dt: float) {
+		if !active return;
+		p := entity.get_component(Player);
+		if p == null || p.player_state != Player_State.ALIVE || get_time() >= ends_at {
+			if p != null {
+				p.remove_disable_movement_input_reason(MECH_STUN_REASON);
+				p.set_trigger("RESET");
+			}
+			active = false;
+		}
+	}
+}
+
+Mech_Helmeted_Status :: class : Component {
+	active: bool;
+	ao_start :: method() {
+		active = true;
+		if entity.get_component(Mech_Helmet_Remove_Interactable) == null {
+			entity.add_component(Mech_Helmet_Remove_Interactable);
+		}
+	}
+	ao_update :: method(dt: float) {
+		p := entity.get_component(Player);
+		if p == null || p.player_state != Player_State.ALIVE {
+			active = false;
+			return;
+		}
+		if p.is_local() {
+			UI.push_screen_draw_context();
+			defer UI.pop_draw_context();
+			UI.push_layer(9800);
+			defer UI.pop_layer();
+			UI.quad(UI.get_screen_rect(), get_asset(Texture_Asset, "$AO/white.png"), v4.{0, 0, 0, 0.82});
+		}
+	}
+}
+
+Mech_Helmet_Remove_Interactable :: class : Interactable {
+	ao_start :: method() {
+		this.set_listener(this);
+		this.set_text("Remove Helmet");
+		this.set_hold_text("Removing...");
+		required_hold_time = 0.65;
+		radius = 2.2;
+		priority = 85;
+	}
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if player.entity == entity return false;
+		if player.player_state != Player_State.ALIVE return false;
+		status := entity.get_component(Mech_Helmeted_Status);
+		return status != null && status.active;
+	}
+	on_interact :: method(player: Player) {
+		status := entity.get_component(Mech_Helmeted_Status);
+		if status == null return;
+		status.active = false;
+		victim := entity.get_component(Player);
+		if victim != null { victim.Notify("Helmet removed."); }
+		rr_mech_spawn_flash(entity.world_position + v2.{0, 0.65}, 0.45, v4.{0.7, 0.9, 1.0, 0.5}, 0.22);
+		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", entity.world_position, 0.22);
+	}
+}
+
+Mech_Helmet_Trap :: class : Component {
+	owner_id: u64;
+	armed: bool;
+	ao_start :: method() {
+		armed = true;
+		spine := entity.get_component(Spine_Animator);
+		if spine != null {
+			spine.awaken();
+			spine.instance.set_skeleton(get_asset(Spine_Asset, MECH_HELMET_RIG));
+			spine.instance.set_animation("appear", false, 0);
+		}
+	}
+	ao_update :: method(dt: float) {
+		if !armed return;
+		for p: component_iterator(Player) {
+			if p == null continue;
+			if p.entity.id == owner_id continue;
+			if p.player_type == Player_Type.TRAITOR continue;
+			if p.player_state != Player_State.ALIVE continue;
+			if !in_range(p.entity.world_position - entity.world_position, 0.75) continue;
+			status := p.entity.get_component(Mech_Helmeted_Status);
+			if status == null { status = p.entity.add_component(Mech_Helmeted_Status); }
+			status.active = true;
+			armed = false;
+			spine := entity.get_component(Spine_Animator);
+			if spine != null && spine.instance != null { spine.instance.set_animation("activate", false, 0); }
+			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.75}, 0.55, v4.{0.7, 0.9, 1.0, 0.65}, 0.22);
+			rr_mech_play_sfx_at("sfx/zap.wav", p.entity.world_position, 0.28);
+			break;
+		}
+	}
+}
+
+Mech_Magnet_Node :: class : Component {
+	owner_id: u64;
+	ends_at: float;
+	land_time: float;
+	active_idle_set: bool;
+	ao_start :: method() {
+		ends_at = get_time() + MECH_MAGNET_PULL_SECONDS;
+		land_time = get_time();
+		spine := entity.get_component(Spine_Animator);
+		if spine != null {
+			spine.awaken();
+			spine.instance.set_skeleton(get_asset(Spine_Asset, MECH_HARPOON_RIG));
+			spine.instance.set_animation("Land", false, 0);
+		}
+		rr_mech_spawn_flash(entity.world_position, 0.65, v4.{0.25, 0.8, 1.0, 0.55}, 0.25);
+	}
+	ao_update :: method(dt: float) {
+		if get_time() >= ends_at {
+			entity.destroy();
+			return;
+		}
+		if !active_idle_set && get_time() > land_time + 0.7 {
+			spine := entity.get_component(Spine_Animator);
+			if spine != null && spine.instance != null {
+				spine.instance.set_animation("Active_idle", true, 0);
+			}
+			active_idle_set = true;
+		}
+		for p: component_iterator(Player) {
+			if p == null continue;
+			if p.player_state != Player_State.ALIVE continue;
+			if p.entity.id == owner_id continue;
+			if p.player_type == Player_Type.TRAITOR continue;
+			helmet := p.entity.get_component(Mech_Helmeted_Status);
+			global_pull := helmet != null && helmet.active;
+			if !global_pull && !in_range(p.entity.world_position - entity.world_position, MECH_MAGNET_RADIUS) continue;
+			dir := entity.world_position - p.entity.world_position;
+			if length_squared(dir) > 0.04 {
+				p.agent.velocity = normalize(dir) * 8.0;
+			}
+			if in_range(p.entity.world_position - entity.world_position, 0.85) {
+				rr_mech_apply_stun(p, 1.0);
+			}
+		}
+	}
+}
+
+Mech_Ram_Charge_Status :: class : Component {
+	owner_id: u64;
+	dir: v2;
+	ends_at: float;
+	hit: bool;
+	active: bool;
+	arm :: proc(using this: Mech_Ram_Charge_Status, direction: v2, seconds: float) {
+		dir = direction;
+		if length_squared(dir) < 0.01 { dir = v2.{1, 0}; }
+		dir = normalize(dir);
+		ends_at = get_time() + seconds;
+		hit = false;
+		active = true;
+		p := entity.get_component(Player);
+		if p != null {
+			p.add_disable_movement_input_reason(MECH_LOCK_REASON);
+			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_In", false);
+			rr_mech_add_screenshake(p, 0.06, 0.2);
+		}
+	}
+	ao_update :: method(dt: float) {
+		if !active return;
+		p := entity.get_component(Player);
+		if p == null { return; }
+		if get_time() >= ends_at || p.player_state != Player_State.ALIVE {
+			p.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_out", false);
+			hit = true;
+			active = false;
+			return;
+		}
+		mech := p.entity.get_component(Mech_Module);
+		if mech != null && mech.is_apex && length_squared(p.last_aim_direction) > 0.01 {
+			desired := normalize(p.last_aim_direction);
+			dir = normalize(lerp(dir, desired, clamp(dt * MECH_APEX_RAM_TURN_RATE, 0.0, 1.0)));
+		}
+		p.agent.velocity = dir * MECH_RAM_SPEED;
+		for target: component_iterator(Player) {
+			if target == null || target == p continue;
+			if target.player_state != Player_State.ALIVE continue;
+			if target.player_type == Player_Type.TRAITOR continue;
+			if !in_range(target.entity.world_position - p.entity.world_position, 1.0) continue;
+			rr_mech_release_guardian_pickup_if_needed(target);
+			target.kill_with_killer(p.entity.id);
+			rr_mech_spawn_flash(target.entity.world_position, 1.0, v4.{1.0, 0.3, 0.08, 0.75}, 0.28);
+			rr_mech_add_screenshake(p, 0.12, 0.22);
+			rr_mech_play_sfx_at("sfx/other_death.wav", target.entity.world_position, 0.38);
+			ends_at = get_time();
+			break;
+		}
+	}
+}
+
+Mech_Missile :: class : Component {
+	owner_id: u64;
+	target_id: u64;
+	speed: float;
+	next_trail_at: float;
+	ao_start :: method() {
+		speed = 10.0;
+		next_trail_at = get_time();
+		sr := entity.get_component(Sprite_Renderer);
+		if sr != null {
+			sr.set_texture(get_asset(Texture_Asset, "$AO/white.png"));
+			sr.color = v4.{1.0, 0.35, 0.08, 1.0};
+			sr.layer = -4;
+		}
+	}
+	ao_update :: method(dt: float) {
+		target := get_player_by_entity_id(target_id);
+		owner := get_player_by_entity_id(owner_id);
+		if target == null || target.player_state != Player_State.ALIVE {
+			entity.destroy();
+			return;
+		}
+		dir := target.entity.world_position - entity.world_position;
+		if length_squared(dir) > 0.01 {
+			entity.set_local_position(entity.world_position + normalize(dir) * speed * dt);
+		}
+		if get_time() >= next_trail_at {
+			rr_mech_spawn_flash(entity.world_position, 0.18, v4.{1.0, 0.55, 0.1, 0.35}, 0.18);
+			next_trail_at = get_time() + 0.08;
+		}
+		if in_range(target.entity.world_position - entity.world_position, 0.55) {
+			if rr_mech_is_near_magnet_node(target.entity.world_position) {
+				target.kill_with_killer(owner_id);
+			} else {
+				rr_mech_apply_stun(target, MECH_STUN_SECONDS);
+			}
+			rr_mech_spawn_flash(target.entity.world_position, 0.9, v4.{1.0, 0.35, 0.05, 0.7}, 0.25);
+			if owner != null { rr_mech_add_screenshake(owner, 0.08, 0.18); }
+			rr_mech_play_sfx_at("sfx/ggg_explode.wav", target.entity.world_position, 0.25);
+			entity.destroy();
+		}
+	}
+}
+
+Mech_Transform_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Transform_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/transform_evil.png"); }
+	can_use :: method() -> bool { return player.player_role == Player_Role.THE_MECH && player.player_state == Player_State.ALIVE; }
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			mech := player.entity.get_component(Mech_Module);
+			if mech == null return;
+			mech.is_mech_form = !mech.is_mech_form;
+			if mech.is_apex { mech.is_mech_form = true; }
+			rr_mech_show_avatar(player, mech.is_mech_form || mech.is_apex);
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.32);
+			color := mech.is_mech_form ? v4.{1.0, 0.32, 0.12, 0.7} : v4.{0.6, 0.85, 1.0, 0.6};
+			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.95, color, 0.3);
+			rr_mech_add_screenshake(player, 0.07, 0.2);
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Transform_Ability, rect: Rect) { draw_ability_name_label(rect, "Transform"); }
+}
+
+Guardian_Transform_Ability :: class : Ability_Base {
+	on_init :: proc(a: Guardian_Transform_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/transform_good.png"); }
+	can_use :: method() -> bool { return player.player_role == Player_Role.GUARDIAN && player.player_state == Player_State.ALIVE; }
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			guard := player.entity.get_component(Guardian_Module);
+			if guard == null return;
+			guard.is_guardian_form = !guard.is_guardian_form;
+			rr_mech_show_avatar(player, guard.is_guardian_form);
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.3);
+			color := guard.is_guardian_form ? v4.{0.85, 0.95, 0.3, 0.7} : v4.{0.6, 0.85, 1.0, 0.6};
+			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.9, color, 0.28);
+			rr_mech_add_screenshake(player, 0.06, 0.18);
+		}
+	}
+	on_draw_button :: proc(instance: Guardian_Transform_Ability, rect: Rect) { draw_ability_name_label(rect, "Transform"); }
+}
+
+Mech_Smash_Task_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Smash_Task_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Smash_Task_Icon.png"); }
+	can_use :: method() -> bool {
+		if player.player_state != Player_State.ALIVE || player.has_task_in_progress() return false;
+		if player.player_role == Player_Role.THE_MECH {
+			mech := player.entity.get_component(Mech_Module);
+			if mech == null || (!mech.is_mech_form && !mech.is_apex) return false;
+		} else if !rr_mech_is_minion_active(player) {
+			return false;
+		}
+		return rr_mech_find_smashable_task(player) != null;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			task := rr_mech_find_smashable_task(player);
+			rr_mech_smash_task(player, task);
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Smash_Task_Ability, rect: Rect) { draw_ability_name_label(rect, "Smash"); }
+}
+
+Mech_Helmet_Trap_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Helmet_Trap_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Helmet_Trap_Icon.png"); }
+	can_use :: method() -> bool {
+		mech := player.entity.get_component(Mech_Module);
+		return mech != null && mech.helmet_trap_unlocked && !mech.is_mech_form && !mech.is_apex && player.player_state == Player_State.ALIVE;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			e := Scene.create_entity();
+			e.set_local_position(player.entity.world_position);
+			e.add_component(Spine_Animator);
+			trap := e.add_component(Mech_Helmet_Trap);
+			trap.owner_id = player.entity.id;
+			rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", player.entity.world_position, 0.22);
+			current_cooldown = 60.0;
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Helmet_Trap_Ability, rect: Rect) { draw_ability_name_label(rect, "Helmet"); }
+}
+
+Mech_Conversion_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Conversion_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Convert_Player_Icon.png"); }
+	can_use :: method() -> bool {
+		mech := player.entity.get_component(Mech_Module);
+		if mech == null || mech.conversion_used || (!mech.is_mech_form && !mech.is_apex) return false;
+		return rr_mech_find_melee_target(player, true) != null;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			target := rr_mech_find_melee_target(player, true);
+			rr_mech_convert_target(player, target);
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Conversion_Ability, rect: Rect) { draw_ability_name_label(rect, "Convert"); }
+}
+
+Mech_Pickup_Throw_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Pickup_Throw_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Loot_Icon.png"); }
+	can_use :: method() -> bool {
+		mech := player.entity.get_component(Mech_Module);
+		if mech == null || (!mech.is_mech_form && !mech.is_apex) return false;
+		if mech.carried_player_id != 0 || mech.carried_corpse_id != 0 return true;
+		if rr_mech_find_pickup_target(player) != null return true;
+		return rr_drag_body_get_closest_draggable_corpse(player) != null;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			mech := player.entity.get_component(Mech_Module);
+			if mech.carried_player_id != 0 {
+				target := get_player_by_entity_id(mech.carried_player_id);
+				mech.carried_player_id = 0;
+				rr_mech_throw_player(player, target, player.entity.id);
+				current_cooldown = 30.0;
+				return;
+			}
+			if mech.carried_corpse_id != 0 {
+				c := rr_drag_body_find_corpse_by_entity_id(mech.carried_corpse_id);
+				if c != null { c.entity.set_local_position(player.entity.world_position + rr_mech_get_throw_direction(player) * MECH_THROW_DISTANCE); }
+				mech.carried_corpse_id = 0;
+				current_cooldown = 30.0;
+				return;
+			}
+			target := rr_mech_find_pickup_target(player);
+			if target != null {
+				mech.carried_player_id = target.entity.id;
+				target.add_disable_movement_input_reason(MECH_CARRY_REASON);
+				rr_mech_play_avatar_anim(player, "009SG/cm_pick_up", false);
+				return;
+			}
+			corpse := rr_drag_body_get_closest_draggable_corpse(player);
+			if corpse != null { mech.carried_corpse_id = corpse.entity.id; }
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Pickup_Throw_Ability, rect: Rect) { draw_ability_name_label(rect, "Grab"); }
+}
+
+Mech_Ram_Charge_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Ram_Charge_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Ram_Icon.png"); a.is_aimed_ability = true; }
+	can_use :: method() -> bool {
+		mech := player.entity.get_component(Mech_Module);
+		return mech != null && mech.ram_charge_unlocked && (mech.is_mech_form || mech.is_apex);
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
+		if activation.activate && params.can_use {
+			st := player.entity.get_component(Mech_Ram_Charge_Status);
+			if st == null { st = player.entity.add_component(Mech_Ram_Charge_Status); }
+			st.owner_id = player.entity.id;
+			st.arm(activation.direction, MECH_RAM_SECONDS);
+			rr_mech_play_sfx_at("sfx/killer_transform.wav", player.entity.world_position, 0.35);
+			current_cooldown = 60.0;
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Ram_Charge_Ability, rect: Rect) { draw_ability_name_label(rect, "Ram"); }
+}
+
+Mech_Magnet_Cannon_Ability :: class : Ability_Base {
+	was_targeting: bool;
+	camera_original_size: float;
+	on_init :: proc(a: Mech_Magnet_Cannon_Ability) {
+		a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Magnet_Cannon_Icon.png");
+		a.is_aimed_ability = true;
+	}
+	can_use :: method() -> bool {
+		mech := player.entity.get_component(Mech_Module);
+		return mech != null && mech.magnet_cannon_unlocked && (mech.is_mech_form || mech.is_apex);
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		if targeted.targeting {
+			if !was_targeting {
+				camera_original_size = player.camera.size;
+				rr_mech_play_avatar_anim(player, "009SG/Magnet_Cannon_Aim", true);
+			}
+			was_targeting = true;
+			if player.is_local() { player.camera.size = max(player.camera.size, MECH_AIM_CAMERA_SIZE); }
+		} else if was_targeting {
+			if player.is_local() { player.camera.size = camera_original_size; }
+			was_targeting = false;
+		}
+		if targeted.targeting && params.clicked && params.can_use {
+			count := 1;
+			mech := player.entity.get_component(Mech_Module);
+			if mech != null && mech.is_apex { count = 3; }
+			base := get_mouse_world_position();
+			for i: 0..count-1 {
+				e := Scene.create_entity();
+				e.set_local_position(base + v2.{(i-1).(float) * 1.2, 0});
+				e.add_component(Spine_Animator);
+				node := e.add_component(Mech_Magnet_Node);
+				node.owner_id = player.entity.id;
+			}
+			rr_mech_play_avatar_anim(player, "009SG/Magnet_Cannon_Shoot", false);
+			rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position, 0.28);
+			rr_mech_add_screenshake(player, 0.06, 0.2);
+			current_cooldown = 45.0;
+			player.active_ability = null;
+			if player.is_local() { player.camera.size = camera_original_size; }
+			was_targeting = false;
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Magnet_Cannon_Ability, rect: Rect) { draw_ability_name_label(rect, "Magnet"); }
+}
+
+Mech_Missile_Barrage_Ability :: class : Ability_Base {
+	was_targeting: bool;
+	camera_original_size: float;
+	on_init :: proc(a: Mech_Missile_Barrage_Ability) {
+		a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Missile_Barrage_Icon.png");
+		a.is_aimed_ability = true;
+	}
+	can_use :: method() -> bool {
+		mech := player.entity.get_component(Mech_Module);
+		return mech != null && mech.missile_barrage_unlocked && (mech.is_mech_form || mech.is_apex);
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		if targeted.targeting {
+			if !was_targeting { camera_original_size = player.camera.size; }
+			was_targeting = true;
+			if player.is_local() { player.camera.size = max(player.camera.size, MECH_AIM_CAMERA_SIZE); }
+		} else if was_targeting {
+			if player.is_local() { player.camera.size = camera_original_size; }
+			was_targeting = false;
+		}
+		if targeted.targeting && params.clicked && params.can_use {
+			mech := player.entity.get_component(Mech_Module);
+			count := 3;
+			if mech != null && mech.is_apex { count = 6; }
+			for i: 0..count-1 {
+				target := rr_mech_choose_missile_target(player, i);
+				if target == null continue;
+				e := Scene.create_entity();
+				e.set_local_position(player.entity.world_position + v2.{0, 1.2});
+				e.set_local_scale(v2.{0.25, 0.25});
+				e.add_component(Sprite_Renderer);
+				m := e.add_component(Mech_Missile);
+				m.owner_id = player.entity.id;
+				m.target_id = target.entity.id;
+			}
+			rr_mech_play_avatar_anim(player, "009SG/Missile_Fire", false);
+			rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position, 0.35);
+			rr_mech_add_screenshake(player, 0.1, 0.22);
+			current_cooldown = 75.0;
+			player.active_ability = null;
+			if player.is_local() { player.camera.size = camera_original_size; }
+			was_targeting = false;
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Missile_Barrage_Ability, rect: Rect) { draw_ability_name_label(rect, "Missile"); }
+}
+
+rr_mech_choose_missile_target :: proc(player: Player, skip: int) -> Player {
+	helmet_target: Player = null;
+	for p: component_iterator(Player) {
+		if p == null || p.player_state != Player_State.ALIVE || p.player_type == Player_Type.TRAITOR continue;
+		helmet := p.entity.get_component(Mech_Helmeted_Status);
+		if helmet != null && helmet.active { helmet_target = p; break; }
+	}
+	if helmet_target != null return helmet_target;
+	seen := 0;
+	for p: component_iterator(Player) {
+		if p == null || p == player || p.player_state != Player_State.ALIVE || p.player_type == Player_Type.TRAITOR continue;
+		if seen == skip { return p; }
+		seen += 1;
+	}
+	finder := make_finder(Player, player.entity.world_position, 999.0);
+	for p: component_iterator(Player) {
+		if p == null || p == player || p.player_state != Player_State.ALIVE || p.player_type == Player_Type.TRAITOR continue;
+		finder.check(p, p.entity.world_position);
+	}
+	return finder.closest;
+}
+
+Mech_Wreckage_Warp_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Wreckage_Warp_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Wreckage_Warp_Icon.png"); }
+	can_use :: method() -> bool {
+		owner := rr_mech_get_owner(player);
+		if owner == null return false;
+		mech := owner.entity.get_component(Mech_Module);
+		if mech == null || !mech.wreckage_warp_unlocked return false;
+		if player.player_role == Player_Role.THE_MECH && !mech.is_mech_form && !mech.is_apex return false;
+		return true;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			mech := player.entity.get_component(Mech_Module);
+			minion := rr_mech_get_minion_effect(player);
+			idx := 0;
+			if mech != null { idx = mech.warp_index; }
+			if minion != null { idx = minion.warp_index; }
+			wreckage, ok := rr_mech_get_next_wreckage(player, ref idx);
+			if ok && wreckage != null {
+				cooldown_left := (wreckage.last_warp_at + 10.0) - get_time();
+				if cooldown_left > 0.0 {
+					if mech != null { mech.warp_index = idx; }
+					if minion != null { minion.warp_index = idx; }
+					return;
+				}
+				pos := wreckage.entity.world_position + v2.{0, 0.7};
+				player.entity.set_local_position(pos);
+				wreckage.last_warp_at = get_time();
+				rr_mech_play_avatar_anim(player, "009SG/Warp_Appear", false);
+				rr_mech_spawn_flash(pos, 0.7, v4.{0.3, 0.8, 1.0, 0.55}, 0.28);
+				rr_mech_play_sfx_at("sfx/warp_a5b988.wav", pos, 0.32);
+				current_cooldown = 10.0;
+			}
+			if mech != null { mech.warp_index = idx; }
+			if minion != null { minion.warp_index = idx; }
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Wreckage_Warp_Ability, rect: Rect) { draw_ability_name_label(rect, "Warp"); }
+}
+
+Mech_Apex_Awakening_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Apex_Awakening_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Apex_Awakening_Icon.png"); }
+	can_use :: method() -> bool { return rr_mech_can_awaken_apex(player); }
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			mech := player.entity.get_component(Mech_Module);
+			if mech == null return;
+			mech.power_cores -= 2;
+			mech.is_apex = true;
+			mech.is_mech_form = true;
+			mech.apex_used = true;
+			rr_mech_show_avatar(player, true);
+			rr_mech_apply_avatar_skins(player);
+			rr_mech_play_avatar_anim(player, "009SG/APEX_transform", false);
+			rr_mech_spawn_flash(player.entity.world_position, 1.5, v4.{1.0, 0.25, 0.08, 0.75}, 0.45);
+			rr_mech_add_screenshake(player, 0.18, 0.45);
+			rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", player.entity.world_position, 0.45);
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Apex_Awakening_Ability, rect: Rect) { draw_ability_name_label(rect, "APEX"); }
+}
+
+Mech_Showdown_Mash_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Showdown_Mash_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Showdown_Icon.png"); }
+	can_use :: method() -> bool {
+		mech := player.entity.get_component(Mech_Module);
+		return mech != null && mech.showdown_active;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			mech := player.entity.get_component(Mech_Module);
+			if mech != null { mech.showdown_mashes += 1; }
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Showdown_Mash_Ability, rect: Rect) { draw_ability_name_label(rect, "MASH"); }
+}
+
+Mech_End_Game_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_End_Game_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Missile_Barrage_Icon.png"); }
+	can_use :: method() -> bool {
+		mech := player.entity.get_component(Mech_Module);
+		return mech != null && mech.endgame_unlocked && (mech.is_mech_form || mech.is_apex);
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			rr_mech_play_avatar_anim(player, "009SG/Missile_Fire", false);
+			rr_mech_spawn_flash(player.entity.world_position, 1.7, v4.{1.0, 0.18, 0.05, 0.75}, 0.42);
+			rr_mech_add_screenshake(player, 0.2, 0.5);
+			rr_mech_play_sfx_at("sfx/ggg_explode.wav", player.entity.world_position, 0.45);
+			for p: component_iterator(Player) {
+				if p == null || p == player continue;
+				if p.player_state != Player_State.ALIVE continue;
+				if p.player_type == Player_Type.TRAITOR continue;
+				p.kill_with_killer(player.entity.id);
+			}
+			winners: List(Player);
+			append(ref winners, player);
+			end_game_with_winners(Player_Type.TRAITOR, winners);
+		}
+	}
+	on_draw_button :: proc(instance: Mech_End_Game_Ability, rect: Rect) { draw_ability_name_label(rect, "End"); }
+}
+
+Guardian_Pickup_Throw_Ability :: class : Ability_Base {
+	on_init :: proc(a: Guardian_Pickup_Throw_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Loot_Icon.png"); }
+	can_use :: method() -> bool {
+		guard := player.entity.get_component(Guardian_Module);
+		if guard == null || !guard.is_guardian_form return false;
+		if guard.carried_player_id != 0 return true;
+		target := rr_mech_find_melee_target(player, true);
+		if target == null return false;
+		tm := target.entity.get_component(Mech_Module);
+		if tm != null && tm.is_apex return false;
+		return true;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			guard := player.entity.get_component(Guardian_Module);
+			if guard.carried_player_id != 0 {
+				target := get_player_by_entity_id(guard.carried_player_id);
+				guard.carried_player_id = 0;
+				rr_mech_throw_player(player, target, player.entity.id);
+				current_cooldown = 30.0;
+				return;
+			}
+			target := rr_mech_find_melee_target(player, true);
+			if target != null {
+				tm := target.entity.get_component(Mech_Module);
+				if tm != null && tm.is_apex return;
+				guard.carried_player_id = target.entity.id;
+				target.add_disable_movement_input_reason(MECH_CARRY_REASON);
+				rr_mech_play_avatar_anim(player, "009SG/cm_pick_up", false);
+			}
+		}
+	}
+	on_draw_button :: proc(instance: Guardian_Pickup_Throw_Ability, rect: Rect) { draw_ability_name_label(rect, "Grab"); }
+}
+
+rr_guardian_can_showdown :: proc(player: Player) -> bool {
+	guard := player.entity.get_component(Guardian_Module);
+	if guard == null || !guard.is_guardian_form return false;
+	for p: component_iterator(Player) {
+		if p == null || p.player_state != Player_State.ALIVE continue;
+		mech := p.entity.get_component(Mech_Module);
+		if mech == null || !mech.is_apex continue;
+		if in_range(p.entity.world_position - player.entity.world_position, MECH_MELEE_RANGE) return true;
+	}
+	return false;
+}
+
+rr_guardian_find_apex :: proc(player: Player) -> Player {
+	finder := make_finder(Player, player.entity.world_position, MECH_MELEE_RANGE);
+	for p: component_iterator(Player) {
+		if p == null || p.player_state != Player_State.ALIVE continue;
+		mech := p.entity.get_component(Mech_Module);
+		if mech == null || !mech.is_apex continue;
+		finder.check(p, p.entity.world_position);
+	}
+	return finder.closest;
+}
+
+Guardian_Showdown_Ability :: class : Ability_Base {
+	on_init :: proc(a: Guardian_Showdown_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Showdown_Icon.png"); }
+	can_use :: method() -> bool {
+		guard := player.entity.get_component(Guardian_Module);
+		if guard == null return false;
+		if guard.showdown_active return true;
+		return rr_guardian_can_showdown(player);
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			guard := player.entity.get_component(Guardian_Module);
+			if guard == null return;
+			if guard.showdown_active {
+				guard.showdown_mashes += 1;
+				return;
+			}
+			apex := rr_guardian_find_apex(player);
+			if apex == null return;
+			mech := apex.entity.get_component(Mech_Module);
+			if mech == null return;
+			guard.showdown_active = true;
+			guard.showdown_opponent_id = apex.entity.id;
+			guard.showdown_mashes = 0;
+			guard.showdown_ends_at = get_time() + MECH_SHOWDOWN_SECONDS;
+			mech.showdown_active = true;
+			mech.showdown_opponent_id = player.entity.id;
+			mech.showdown_mashes = 0;
+			mech.showdown_ends_at = guard.showdown_ends_at;
+			player.add_disable_movement_input_reason(MECH_LOCK_REASON);
+			apex.add_disable_movement_input_reason(MECH_LOCK_REASON);
+			rr_mech_play_avatar_anim(player, "009SG/Showdown_Start", false);
+			rr_mech_play_avatar_anim(apex, "009SG/Showdown_Start", false);
+			rr_mech_play_sfx_at("sfx/roar_f23931.wav", player.entity.world_position, 0.38);
+		}
+	}
+	on_draw_button :: proc(instance: Guardian_Showdown_Ability, rect: Rect) { draw_ability_name_label(rect, "Showdown"); }
+}
+
+rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Module) {
+	if guard == null || !guard.showdown_active return;
+	player.add_disable_movement_input_reason(MECH_LOCK_REASON);
+	if get_time() < guard.showdown_ends_at return;
+	mech_player := get_player_by_entity_id(guard.showdown_opponent_id);
+	mech_mashes := 0;
+	if mech_player != null {
+		mech := mech_player.entity.get_component(Mech_Module);
+		if mech != null { mech_mashes = mech.showdown_mashes; }
+	}
+	if guard.showdown_mashes >= mech_mashes {
+		if mech_player != null {
+			mech := mech_player.entity.get_component(Mech_Module);
+			if mech != null {
+				mech.is_apex = false;
+				mech.apex_lost = true;
+				mech.showdown_active = false;
+				rr_mech_apply_avatar_skins(mech_player);
+				rr_mech_play_avatar_anim(mech_player, "009SG/Showdown_Lose_Survive", false);
+				mech_player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+			}
+		}
+		rr_mech_play_avatar_anim(player, "009SG/Showdown_Win", false);
+	} else if mech_player != null {
+		mech := mech_player.entity.get_component(Mech_Module);
+		if mech != null {
+			mech.endgame_unlocked = true;
+			mech.showdown_active = false;
+			mech_player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+			mech_player.Notify("End Game Ability unlocked.");
+		}
+		rr_mech_play_avatar_anim(player, "009SG/Showdown_Lose_Death", false);
+	}
+	guard.showdown_active = false;
+	player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+}
+
+rr_mech_update_showdown_for_mech :: proc(player: Player, mech: Mech_Module) {
+	if mech == null || !mech.showdown_active return;
+	player.add_disable_movement_input_reason(MECH_LOCK_REASON);
+	if get_time() >= mech.showdown_ends_at {
+		// Guardian updater resolves the result. If it is gone, fail open to Mech.
+		guardian := get_player_by_entity_id(mech.showdown_opponent_id);
+		if guardian == null {
+			mech.endgame_unlocked = true;
+			mech.showdown_active = false;
+			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+		}
+	}
+}
