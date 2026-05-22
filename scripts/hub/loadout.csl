@@ -3,7 +3,7 @@
 // values at role assignment time, the min/max + save scaffolding here will already be ready.
 
 LOADOUT_SAVE_KEY :: "loadout_v2";
-LOADOUT_DATA_VERSION :: 3;
+LOADOUT_DATA_VERSION :: 4;
 
 LOADOUT_EXTRA_TRAITOR_PRODUCT_ID   :: "69f0deeaf910103de110f1cb";
 LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID  :: "69f0deecf910103de110f1cc";
@@ -205,6 +205,7 @@ loadout_role_id_for_idx :: proc(role_idx: int) -> string {
         case 14: return "mimicer";
         case 15: return "big_charlie";
         case 16: return "lily_lovebraids";
+        case 18: return "hunter";
     }
     return "";
 }
@@ -226,6 +227,7 @@ loadout_idx_for_role_id :: proc(id: string) -> int {
     if id == "mimicer"        return 14;
     if id == "big_charlie"    return 15;
     if id == "lily_lovebraids" return 16;
+    if id == "hunter"          return 18;
     return -1;
 }
 
@@ -288,6 +290,7 @@ loadout_get_role_small_icon :: proc(role_idx: int) -> string {
         case 14: return "ui/roles_small/mimicer_icon.png";
         case 15: return "ui/roles_small/charlie_icon (1).png";
         case 16: return "ui/roles_small/lily_icon (1).png";
+        case 18: return "ui/roles_small/hunter_icon.png";
     }
     return "";
 }
@@ -309,6 +312,7 @@ loadout_get_team_roles :: proc(tab: int, results: ref [..]int) {
     switch tab {
         case LOADOUT_TAB_CIVILIAN: {
             for i: 1..6 append(ref results, i);
+            append(ref results, 18);
         }
         case LOADOUT_TAB_ANARCHIST: {
             append(ref results, 7);
@@ -587,6 +591,12 @@ _loadout_validate_data :: proc(player: Player, data: Loadout_Data) {
     if data.version < 3 && !_loadout_data_contains(data, LOADOUT_TAB_ANARCHIST, "hacker") {
         if _loadout_data_count(data, LOADOUT_TAB_ANARCHIST) < loadout_max_slots(player, LOADOUT_TAB_ANARCHIST) {
             append(ref data.anarchists, "hacker");
+        }
+    }
+
+    if data.version < 4 && !_loadout_data_contains(data, LOADOUT_TAB_CIVILIAN, "hunter") {
+        if _loadout_data_count(data, LOADOUT_TAB_CIVILIAN) < loadout_max_slots(player, LOADOUT_TAB_CIVILIAN) {
+            append(ref data.civilians, "hunter");
         }
     }
 
