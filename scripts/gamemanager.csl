@@ -1071,15 +1071,16 @@ rr_try_start_power_outage :: proc(caller: Player) {
 		rr_power_outage_add_generator_task_to_player(p);
 	}
 
-	// Notify everyone — traitors see "Lights Out!", others see the sabotage name.
+	// Notify everyone with role-specific copy. Use the targeted overload to avoid
+	// per-player broadcast fanout.
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
 		if p.player_type == Player_Type.TRAITOR {
-			p.Notify("Lights Out!");
+			Notifier.notify(p, "Lights Out!");
 		} else {
-			p.Notify("Sabotage: Power Outage!");
+			Notifier.notify(p, "Sabotage: Power Outage!");
 		}
 	}
 }
@@ -1152,13 +1153,8 @@ rr_try_start_comms_outage :: proc(caller: Player) {
 
 	rr_update_comms_lever_visuals();
 
-	// Notify everyone
-	for i: 0..players.elements.count-1 {
-		p := players.elements[i];
-		if p == null continue;
-		if !#alive(p.entity) continue;
-		p.Notify("Sabotage: Comms Down!");
-	}
+	// Notify everyone once. Avoid per-player broadcast fanout.
+	Notifier.notify("Sabotage: Comms Down!");
 }
 
 rr_try_start_lockdown :: proc(caller: Player) {
@@ -1198,13 +1194,8 @@ rr_try_start_lockdown :: proc(caller: Player) {
 	sfx.volume_perturb *= 0.25;
 	rr_play_sfx("sfx/door_sabotage.wav", sfx);
 
-	// Notify everyone
-	for i: 0..players.elements.count-1 {
-		p := players.elements[i];
-		if p == null continue;
-		if !#alive(p.entity) continue;
-		p.Notify("Sabotage: Door Lockdown!");
-	}
+	// Notify everyone once. Avoid per-player broadcast fanout.
+	Notifier.notify("Sabotage: Door Lockdown!");
 }
 
 rr_update_lockdown :: proc() {
@@ -1228,12 +1219,7 @@ rr_update_lockdown :: proc() {
 		open_all_doors();
 	}
 
-	for i: 0..players.elements.count-1 {
-		p := players.elements[i];
-		if p == null continue;
-		if !#alive(p.entity) continue;
-		p.Notify("Door Lockdown ended.");
-	}
+	Notifier.notify("Door Lockdown ended.");
 }
 
 rr_end_comms_outage :: proc(fixer: Player) {

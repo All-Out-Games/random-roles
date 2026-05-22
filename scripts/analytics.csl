@@ -111,7 +111,7 @@ rr_analytics_draw_cell :: proc(text: string, desc: UIK.Text_Desc, width: UIK.Siz
 	UIK.panel_end();
 }
 
-rr_analytics_draw_type_row :: proc(t: Player_Type, total_rounds: s64) {
+rr_analytics_draw_type_row :: proc(t: Player_Type, completed_rounds: s64) {
 	wins := Save.get_game_int(rr_analytics_type_wins_key(t), 0);
 
 	row := UIK.panel_styled(.BUTTON_BASIC_BLACK);
@@ -126,9 +126,28 @@ rr_analytics_draw_type_row :: proc(t: Player_Type, total_rounds: s64) {
 	yellow := v4.{1.0, 0.85, 0.2, 1.0};
 
 	rr_analytics_draw_cell(rr_analytics_type_display(t), rr_analytics_make_text(1.0, white, .LEFT), UIK.flex(1));
-	rr_analytics_draw_cell(format_string("% / %", {wins, total_rounds}), rr_analytics_make_text(1.0, white, .RIGHT), UIK.pixels(140));
+	rr_analytics_draw_cell(format_string("% / %", {wins, completed_rounds}), rr_analytics_make_text(1.0, white, .RIGHT), UIK.pixels(140));
 	UIK.spacer(UIK.pixels(16), UIK.pixels(1));
-	rr_analytics_draw_cell(rr_analytics_format_pct(wins, total_rounds), rr_analytics_make_text(1.0, yellow, .RIGHT), UIK.pixels(80));
+	rr_analytics_draw_cell(rr_analytics_format_pct(wins, completed_rounds), rr_analytics_make_text(1.0, yellow, .RIGHT), UIK.pixels(80));
+
+	UIK.panel_end();
+}
+
+rr_analytics_draw_unfinished_row :: proc(unfinished: s64, total: s64) {
+	row := UIK.panel_styled(.BUTTON_BASIC_BLACK);
+	row.axis = .HORIZONTAL;
+	row.width = UIK.flex(1);
+	row.height = UIK.pixels(36);
+	row.padding = v4.{6, 16, 6, 16};
+	row.cross_align = .CENTER;
+	UIK.panel_begin(row);
+
+	dim := v4.{0.7, 0.7, 0.7, 1.0};
+
+	rr_analytics_draw_cell("Unfinished", rr_analytics_make_text(1.0, dim, .LEFT), UIK.flex(1));
+	rr_analytics_draw_cell(format_string("% / %", {unfinished, total}), rr_analytics_make_text(1.0, dim, .RIGHT), UIK.pixels(140));
+	UIK.spacer(UIK.pixels(16), UIK.pixels(1));
+	rr_analytics_draw_cell(rr_analytics_format_pct(unfinished, total), rr_analytics_make_text(1.0, dim, .RIGHT), UIK.pixels(80));
 
 	UIK.panel_end();
 }
@@ -173,6 +192,12 @@ rr_analytics_draw_ui :: proc(player: Player) {
 	exit_handle := UIK.title_area(UIK.title_area_desc("Analytics"));
 
 	total := Save.get_game_int(RR_ANALYTICS_TOTAL_ROUNDS_KEY, 0);
+	civ_wins := Save.get_game_int(rr_analytics_type_wins_key(Player_Type.CIVILIAN), 0);
+	an_wins  := Save.get_game_int(rr_analytics_type_wins_key(Player_Type.ANARCHIST), 0);
+	tr_wins  := Save.get_game_int(rr_analytics_type_wins_key(Player_Type.TRAITOR), 0);
+	completed := civ_wins + an_wins + tr_wins;
+	unfinished := total - completed;
+	if unfinished < 0 unfinished = 0;
 
 	content := UIK.layout_column();
 	content.width = UIK.flex(1);
@@ -181,16 +206,17 @@ rr_analytics_draw_ui :: proc(player: Player) {
 	content.gap = 4;
 	UIK.list_begin("analytics_scroll", content);
 
-	UIK.text(format_string("Total Rounds: %", {total}), UIK.text_title());
+	UIK.text(format_string("Total Rounds: %  (Completed: %)", {total, completed}), UIK.text_title());
 	UIK.spacer(UIK.pixels(1), UIK.pixels(8));
 
 	UIK.text("Team Win Rates", UIK.text_title());
 	UIK.divider(1.0, v4.{1, 1, 1, 0.2});
 	UIK.spacer(UIK.pixels(1), UIK.pixels(4));
 
-	rr_analytics_draw_type_row(Player_Type.CIVILIAN, total);
-	rr_analytics_draw_type_row(Player_Type.ANARCHIST, total);
-	rr_analytics_draw_type_row(Player_Type.TRAITOR, total);
+	rr_analytics_draw_type_row(Player_Type.CIVILIAN, completed);
+	rr_analytics_draw_type_row(Player_Type.ANARCHIST, completed);
+	rr_analytics_draw_type_row(Player_Type.TRAITOR, completed);
+	rr_analytics_draw_unfinished_row(unfinished, total);
 
 	UIK.spacer(UIK.pixels(1), UIK.pixels(14));
 

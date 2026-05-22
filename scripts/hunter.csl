@@ -78,14 +78,6 @@ Hunter_Pierce_Effect :: class : Component {
     orig_speed: float;
     orig_speed_valid: bool;
 
-    // Cached last values pushed to the spine state machine. Avoids re-calling
-    // set_bool() with the same value every frame, which keeps the state machine
-    // churn (and the engine's per-instance animation-name allocator) bounded.
-    sm_pained_valid: bool;
-    sm_pained: bool;
-    sm_pained_moving_valid: bool;
-    sm_pained_moving: bool;
-
     arm :: proc(using this: Hunter_Pierce_Effect, hunter: Player) {
         if hunter == null return;
         if active {
@@ -113,7 +105,9 @@ Hunter_Pierce_Effect :: class : Component {
             }
             // Drive the impaled + pained-loop state machine.
             p.set_trigger("hunter_impaled");
-            push_pained(this, p, true);
+            if p.animator != null && p.animator.instance != null && p.animator.instance.state_machine != null {
+                p.animator.instance.state_machine.set_bool("hunter_pained", true);
+            }
         }
     }
 
@@ -127,31 +121,12 @@ Hunter_Pierce_Effect :: class : Component {
             if orig_speed_valid {
                 p.agent.movement_speed = orig_speed;
             }
-            push_pained(this, p, false);
-            push_pained_moving(this, p, false);
+            if p.animator != null && p.animator.instance != null && p.animator.instance.state_machine != null {
+                p.animator.instance.state_machine.set_bool("hunter_pained", false);
+                p.animator.instance.state_machine.set_bool("hunter_pained_moving", false);
+            }
         }
         orig_speed_valid = false;
-    }
-
-    // Only call set_bool when the value actually changes; redundant pushes
-    // would otherwise re-arm global transitions on the state machine and
-    // accumulate allocations in the engine's animation-name storage.
-    push_pained :: proc(using this: Hunter_Pierce_Effect, p: Player, value: bool) {
-        if sm_pained_valid && sm_pained == value return;
-        if p == null return;
-        if p.animator == null || p.animator.instance == null || p.animator.instance.state_machine == null return;
-        p.animator.instance.state_machine.set_bool("hunter_pained", value);
-        sm_pained = value;
-        sm_pained_valid = true;
-    }
-
-    push_pained_moving :: proc(using this: Hunter_Pierce_Effect, p: Player, value: bool) {
-        if sm_pained_moving_valid && sm_pained_moving == value return;
-        if p == null return;
-        if p.animator == null || p.animator.instance == null || p.animator.instance.state_machine == null return;
-        p.animator.instance.state_machine.set_bool("hunter_pained_moving", value);
-        sm_pained_moving = value;
-        sm_pained_moving_valid = true;
     }
 
     ao_update :: proc(using this: Hunter_Pierce_Effect, dt: float) {
@@ -175,9 +150,12 @@ Hunter_Pierce_Effect :: class : Component {
         }
 
         // Drive pained idle/walking based on motion.
-        moving := length_squared(p.agent.velocity) > 0.01;
-        push_pained(this, p, true);
-        push_pained_moving(this, p, moving);
+        if p.animator != null && p.animator.instance != null && p.animator.instance.state_machine != null {
+            sm := p.animator.instance.state_machine;
+            moving := length_squared(p.agent.velocity) > 0.01;
+            sm.set_bool("hunter_pained", true);
+            sm.set_bool("hunter_pained_moving", moving);
+        }
 
         if get_time() >= end_time {
             this.clear();
