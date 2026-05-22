@@ -1068,8 +1068,11 @@ Player :: class : Player_Base {
 						abilityIndex += 1;
 						draw_ability_button(this, Hunter_Campfire_Ability, abilityIndex);
 						abilityIndex += 1;
-						draw_ability_button(this, Hunter_Kill_Shot_Ability, abilityIndex);
-						abilityIndex += 1;
+						// Kill Shot only appears once the Hunter has a pierced victim.
+						if rr_hunter_has_pierced_victim(this) {
+							draw_ability_button(this, Hunter_Kill_Shot_Ability, abilityIndex);
+							abilityIndex += 1;
+						}
 					}
 					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PRANKSTER {
 						draw_ability_button(this, Prank_Ability, abilityIndex);
@@ -3619,6 +3622,9 @@ rr_player_clear_gun_state :: proc(player: Player) {
 	if player == null return;
 	player.set_mouse_ik_enabled(false);
 	rr_set_player_gun_skin(player, "");
+	// Also clear the post-fire visibility window so the gun/crossbow can't
+	// briefly re-show after the round ends (e.g. in lobby/voting).
+	player.gun_visible_until = 0.0;
 }
 
 rr_drag_body_force_drop_for_player :: proc(player: Player) {
