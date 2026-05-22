@@ -2054,6 +2054,11 @@ all_civilians_completed_tasks :: proc() -> bool {
 }
 
 end_game_with_winners :: proc(victor: Player_Type, winners: List(Player)) {
+	// Record win analytics BEFORE on_player_go_passive runs — passive transition
+	// itself doesn't clear player_role, but keeping this early keeps the order
+	// obvious if that ever changes.
+	rr_analytics_record_round_end(victor, winners);
+
 	// Show victory popup with winning players
 	victory_popup.show(victor, winners);
 	game_state = Game_State.ANIM_VICTORY;
@@ -3607,6 +3612,9 @@ assign_players_to_types :: proc() {
 		p.player_role = p.forced_role_next_round;
 		p.forced_role_next_round = Player_Role.NONE;
 	}
+
+	// Record round-start analytics now that every player has a final role.
+	rr_analytics_record_round_start();
 
 	// Big Charlie: nuke any leftover scene entities (cocoons, nuggets) before
 	// per-player resets so previous-round artifacts can't survive a reroll.
