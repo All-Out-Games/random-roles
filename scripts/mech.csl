@@ -106,6 +106,7 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.carried_player_id = 0;
 	mech.carried_corpse_id = 0;
 	mech.warp_index = 0;
+	mech.workbench_ui_open = false;
 	mech.showdown_active = false;
 	mech.showdown_opponent_id = 0;
 	mech.showdown_mashes = 0;
@@ -115,6 +116,7 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.creature_visible = false;
 	mech.last_anim = "";
 	mech.anim_lock_until = 0.0;
+	mech.transform_anim_ends_at = 0.0;
 }
 
 rr_guardian_reset_module :: proc(guard: Guardian_Module) {
@@ -133,6 +135,7 @@ rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 	guard.creature_visible = false;
 	guard.last_anim = "";
 	guard.anim_lock_until = 0.0;
+	guard.transform_anim_ends_at = 0.0;
 }
 
 rr_mech_round_global_cleanup :: proc() {
@@ -148,6 +151,9 @@ rr_mech_round_global_cleanup :: proc() {
 	}
 	for m: component_iterator(Mech_Magnet_Node) {
 		if m != null && #alive(m.entity) { m.entity.destroy(); }
+	}
+	for cp: component_iterator(Mech_Component_Pickup) {
+		if cp != null && #alive(cp.entity) { cp.entity.destroy(); }
 	}
 	for p: component_iterator(Player) {
 		if p == null continue;
@@ -169,21 +175,34 @@ rr_mech_spawn_workbench_if_needed :: proc() {
 	if !has_mech return;
 
 	pos := v2.{0, 0};
+	found := false;
 	for i: 0..rr_task_destination_entries.elements.count-1 {
 		entry := rr_task_destination_entries.elements[i];
 		if entry == null continue;
-		if entry.task_id == "build_a_robot" || entry.task_id == "calibrate_teleporter" {
+		if entry.task_id == "build_a_robot" {
 			pos = entry.pos + v2.{1.35, 0.0};
+			found = true;
 			break;
+		}
+	}
+	if !found {
+		for i: 0..rr_task_destination_entries.elements.count-1 {
+			entry := rr_task_destination_entries.elements[i];
+			if entry == null continue;
+			if entry.task_id == "calibrate_teleporter" {
+				pos = entry.pos + v2.{1.35, 0.0};
+				break;
+			}
 		}
 	}
 	mech_workbench_entity = Scene.create_entity();
 	mech_workbench_entity.set_local_position(pos);
-	mech_workbench_entity.set_local_scale(v2.{1.0, 1.0});
+	mech_workbench_entity.set_local_scale(v2.{1.6, 1.6});
 	sr := mech_workbench_entity.add_component(Sprite_Renderer);
-	sr.set_texture(get_asset(Texture_Asset, "sprites/tasks/build_a_robot/background.png"));
-	sr.layer = -1;
+	sr.set_texture(get_asset(Texture_Asset, "sprites/blueprint.png"));
+	sr.layer = 10;
 	mech_workbench_entity.add_component(Mech_Workbench_Interactable);
+	mech_workbench_entity.add_component(Mech_Workbench_Beacon);
 }
 
 rr_mech_get_owner :: proc(player: Player) -> Player {
@@ -388,8 +407,12 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			mech.showdown_active = false;
 			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 		} else {
-			if mech.is_mech_form || mech.is_apex {
-				rr_mech_show_avatar(player, true);
+			// Enforce visibility invariant each frame so server reconciliation
+			// can't leave the schleem body invisible after toggling form.
+			// Keep the mech avatar visible while a transform-out anim is still playing.
+			target_visible := mech.is_mech_form || mech.is_apex || get_time() < mech.transform_anim_ends_at;
+			if mech.creature_visible != target_visible {
+				rr_mech_show_avatar(player, target_visible);
 			}
 			rr_mech_update_carried(player, mech.carried_player_id, mech.carried_corpse_id);
 			rr_mech_update_showdown_for_mech(player, mech);
@@ -402,8 +425,9 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			guard.showdown_active = false;
 			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 		} else {
-			if guard.is_guardian_form {
-				rr_mech_show_avatar(player, true);
+			target_visible := guard.is_guardian_form || get_time() < guard.transform_anim_ends_at;
+			if guard.creature_visible != target_visible {
+				rr_mech_show_avatar(player, target_visible);
 			}
 			rr_mech_update_carried(player, guard.carried_player_id, 0);
 			rr_mech_update_showdown_for_guardian(player, guard);
@@ -506,6 +530,55 @@ rr_mech_component_name :: proc(kind: int) -> string {
 	return "Component";
 }
 
+rr_mech_component_sprite_path :: proc(kind: int) -> string {
+	if kind == MECH_COMPONENT_POWER_CELL return "sprites/power_cell.png";
+	if kind == MECH_COMPONENT_CIRCUIT return "sprites/cables.png";
+	if kind == MECH_COMPONENT_SCHEMATIC return "sprites/blueprint.png";
+	if kind == MECH_COMPONENT_GEAR return "sprites/gears.png";
+	return "sprites/power_cell.png";
+}
+
+rr_mech_component_tint :: proc(kind: int) -> v4 {
+	if kind == MECH_COMPONENT_POWER_CELL return v4.{1.0, 0.3, 0.25, 0.7};
+	if kind == MECH_COMPONENT_CIRCUIT return v4.{1.0, 0.85, 0.2, 0.65};
+	if kind == MECH_COMPONENT_SCHEMATIC return v4.{0.3, 0.7, 1.0, 0.65};
+	if kind == MECH_COMPONENT_GEAR return v4.{0.85, 0.85, 0.9, 0.7};
+	return v4.{1.0, 1.0, 1.0, 0.65};
+}
+
+rr_mech_is_valid_pickup_collector :: proc(p: Player) -> bool {
+	if p == null return false;
+	if !#alive(p.entity) return false;
+	if p.player_state != Player_State.ALIVE return false;
+	if p.player_role == Player_Role.THE_MECH return true;
+	if rr_mech_is_minion_active(p) return true;
+	return false;
+}
+
+rr_mech_find_nearest_collector :: proc(pos: v2, max_range: float) -> Player {
+	finder := make_finder(Player, pos, max_range);
+	for p: component_iterator(Player) {
+		if !rr_mech_is_valid_pickup_collector(p) continue;
+		finder.check(p, p.entity.world_position);
+	}
+	return finder.closest;
+}
+
+rr_mech_spawn_component_pickup :: proc(pos: v2, kind: int) {
+	if kind == 0 return;
+	e := Scene.create_entity();
+	e.set_local_position(pos + v2.{0, 0.55});
+	e.set_local_scale(v2.{0.7, 0.7});
+	sr := e.add_component(Sprite_Renderer);
+	sr.set_texture(get_asset(Texture_Asset, rr_mech_component_sprite_path(kind)));
+	sr.layer = -3;
+	pickup := e.add_component(Mech_Component_Pickup);
+	pickup.kind = kind;
+	pickup.spawn_pos = pos + v2.{0, 0.55};
+	pickup.spawn_time = get_time();
+	rr_mech_spawn_flash(pos + v2.{0, 0.5}, 0.7, rr_mech_component_tint(kind), 0.32);
+}
+
 rr_mech_find_smashable_task :: proc(player: Player) -> Task_Interactable {
 	finder := make_finder(Task_Interactable, player.entity.world_position, MECH_SMASH_RANGE);
 	for t: component_iterator(Task_Interactable) {
@@ -523,7 +596,6 @@ rr_mech_smash_task :: proc(player: Player, task: Task_Interactable) {
 	kind := rr_mech_task_component_kind(task.get_task_id());
 	if kind == 0 return;
 	task.mech_smashed = true;
-	rr_mech_add_component_part(player, kind);
 
 	w := Scene.create_entity();
 	w.set_local_position(task.entity.world_position);
@@ -535,12 +607,13 @@ rr_mech_smash_task :: proc(player: Player, task: Task_Interactable) {
 	wreck.owner_id = player.entity.id;
 	task.mech_wreckage_entity = w;
 
+	rr_mech_spawn_component_pickup(task.entity.world_position, kind);
+
 	player.set_trigger("punch");
 	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false);
 	rr_mech_spawn_flash(task.entity.world_position, 0.95, v4.{1.0, 0.55, 0.08, 0.65}, 0.28);
 	rr_mech_add_screenshake(player, 0.08, 0.2);
 	rr_mech_play_sfx_at("sfx/ggg_explode.wav", task.entity.world_position, 0.28);
-	player.Notify(format_string("+1 %", .{rr_mech_component_name(kind)}));
 }
 
 rr_mech_count_component_pool :: proc(owner: Player, kind: int) -> int {
@@ -613,6 +686,68 @@ rr_mech_spend_any_components :: proc(owner: Player, count: int) -> bool {
 		}
 	}
 	return true;
+}
+
+MECH_UPGRADE_HELMET_TRAP :: 1;
+MECH_UPGRADE_RAM_CHARGE :: 2;
+MECH_UPGRADE_MAGNET_CANNON :: 3;
+MECH_UPGRADE_MISSILE_BARRAGE :: 4;
+MECH_UPGRADE_WRECKAGE_WARP :: 5;
+
+rr_mech_upgrade_owned :: proc(mech: Mech_Module, upgrade_id: int) -> bool {
+	if mech == null return false;
+	if upgrade_id == MECH_UPGRADE_HELMET_TRAP return mech.helmet_trap_unlocked;
+	if upgrade_id == MECH_UPGRADE_RAM_CHARGE return mech.ram_charge_unlocked;
+	if upgrade_id == MECH_UPGRADE_MAGNET_CANNON return mech.magnet_cannon_unlocked;
+	if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE return mech.missile_barrage_unlocked;
+	if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP return mech.wreckage_warp_unlocked;
+	return false;
+}
+
+rr_mech_upgrade_can_afford :: proc(player: Player, upgrade_id: int) -> bool {
+	if upgrade_id == MECH_UPGRADE_HELMET_TRAP return rr_mech_count_component_pool(player, MECH_COMPONENT_GEAR) >= 1;
+	if upgrade_id == MECH_UPGRADE_RAM_CHARGE return rr_mech_count_component_pool(player, MECH_COMPONENT_POWER_CELL) >= 1;
+	if upgrade_id == MECH_UPGRADE_MAGNET_CANNON return rr_mech_count_component_pool(player, MECH_COMPONENT_SCHEMATIC) >= 1;
+	if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE return rr_mech_count_component_pool(player, MECH_COMPONENT_CIRCUIT) >= 1;
+	if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP return rr_mech_total_component_pool(player) >= 2;
+	return false;
+}
+
+rr_mech_buy_upgrade :: proc(player: Player, upgrade_id: int) {
+	if player == null return;
+	mech := player.entity.get_component(Mech_Module);
+	if mech == null return;
+	if rr_mech_upgrade_owned(mech, upgrade_id) return;
+	bought := false;
+	if upgrade_id == MECH_UPGRADE_HELMET_TRAP && rr_mech_spend_component_pool(player, MECH_COMPONENT_GEAR, 1) {
+		mech.helmet_trap_unlocked = true;
+		player.Notify("Unlocked Helmet Trap.");
+		rr_mech_apply_avatar_skins(player);
+		bought = true;
+	} else if upgrade_id == MECH_UPGRADE_RAM_CHARGE && rr_mech_spend_component_pool(player, MECH_COMPONENT_POWER_CELL, 1) {
+		mech.ram_charge_unlocked = true;
+		player.Notify("Unlocked Ram Charge.");
+		rr_mech_apply_avatar_skins(player);
+		bought = true;
+	} else if upgrade_id == MECH_UPGRADE_MAGNET_CANNON && rr_mech_spend_component_pool(player, MECH_COMPONENT_SCHEMATIC, 1) {
+		mech.magnet_cannon_unlocked = true;
+		player.Notify("Unlocked Magnet Cannon.");
+		rr_mech_apply_avatar_skins(player);
+		bought = true;
+	} else if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE && rr_mech_spend_component_pool(player, MECH_COMPONENT_CIRCUIT, 1) {
+		mech.missile_barrage_unlocked = true;
+		player.Notify("Unlocked Missile Barrage.");
+		rr_mech_apply_avatar_skins(player);
+		bought = true;
+	} else if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP && rr_mech_spend_any_components(player, 2) {
+		mech.wreckage_warp_unlocked = true;
+		player.Notify("Unlocked Wreckage Warp.");
+		bought = true;
+	}
+	if bought {
+		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", player.entity.world_position, 0.4);
+		rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.7}, 0.9, v4.{0.4, 0.85, 1.0, 0.6}, 0.32);
+	}
 }
 
 rr_mech_unlock_next_at_workbench :: proc(player: Player) {
@@ -909,18 +1044,67 @@ rr_guardian_draw_abilities :: proc(player: Player, idx: int) -> int {
 Mech_Workbench_Interactable :: class : Interactable {
 	ao_start :: method() {
 		this.set_listener(this);
-		this.set_text("Workbench");
-		this.set_hold_text("Building...");
-		required_hold_time = 0.75;
-		radius = 3.0;
+		this.set_text("R&D Workbench");
+		this.set_hold_text("Opening...");
+		required_hold_time = 0.3;
+		radius = 3.5;
+		prompt_offset = v2.{0, 1.4};
+		priority = 200;
 	}
 	can_use :: method(player: Player) -> bool {
-		return player != null && player.player_role == Player_Role.THE_MECH && player.player_state == Player_State.ALIVE;
+		if player == null return false;
+		if player.player_role != Player_Role.THE_MECH return false;
+		if player.player_state != Player_State.ALIVE return false;
+		return true;
 	}
 	on_interact :: method(player: Player) {
-		rr_mech_unlock_next_at_workbench(player);
+		mech := player.entity.get_component(Mech_Module);
+		if mech != null { mech.workbench_ui_open = true; }
 		rr_mech_spawn_flash(entity.world_position + v2.{0, 0.55}, 0.75, v4.{0.25, 0.8, 1.0, 0.55}, 0.28);
 		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", entity.world_position, 0.35);
+	}
+}
+
+// Visual beacon that pulses the workbench sprite and draws a world-space
+// "R&D WORKBENCH" label visible only to the Mech / Minions.
+Mech_Workbench_Beacon :: class : Component {
+	start_time: float;
+	ao_start :: method() {
+		start_time = get_time();
+	}
+	ao_update :: method(dt: float) {
+		// Subtle bob + scale pulse so the workbench reads as interactive.
+		t := get_time() - start_time;
+		bob := sin(t * 2.4) * 0.05;
+		pulse := 1.6 + sin(t * 2.4) * 0.06;
+		entity.set_local_scale(v2.{pulse, pulse});
+		sr := entity.get_component(Sprite_Renderer);
+		if sr != null {
+			glow := 0.85 + sin(t * 3.0) * 0.15;
+			sr.color = v4.{glow, glow, 1.0, 1.0};
+		}
+
+		local_player, ok := Game.get_local_player();
+		if !ok return;
+		show_label := local_player.player_role == Player_Role.THE_MECH ||
+		              rr_mech_is_minion_active(local_player);
+		if !show_label return;
+
+		UI.push_world_draw_context();
+		defer UI.pop_draw_context();
+		UI.push_z(entity.world_position.y);
+		defer UI.pop_z();
+		label_pos := entity.world_position + v2.{0, 2.0 + bob};
+		rect := Rect{label_pos, label_pos}.grow(0.6, 1.2, 0.6, 1.2);
+		ts := UI.default_text_settings();
+		ts.size = 0.32;
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 3;
+		ts.outline_color = v4.{0, 0, 0, 1};
+		ts.color = v4.{0.45, 0.85, 1.0, 1.0};
+		UI.text(rect, ts, "R&D WORKBENCH");
 	}
 }
 
@@ -1019,6 +1203,67 @@ Mech_Wreckage :: class : Component {
 		ts.do_outline = true;
 		ts.outline_thickness = 2;
 		UI.text(rect, ts, "Wreckage");
+	}
+}
+
+MECH_PICKUP_BOB_AMPLITUDE :: 0.12;
+MECH_PICKUP_BOB_SPEED :: 3.4;
+MECH_PICKUP_SEEK_RANGE :: 1.8;
+MECH_PICKUP_ARC_DURATION :: 0.4;
+MECH_PICKUP_ARC_HEIGHT :: 0.8;
+
+Mech_Component_Pickup :: class : Component {
+	kind: int;
+	spawn_pos: v2;
+	spawn_time: float;
+	target_id: u64;
+	arc_start_pos: v2;
+	arc_start_time: float;
+	arcing: bool;
+
+	ao_update :: method(dt: float) {
+		if kind == 0 { entity.destroy(); return; }
+
+		if arcing {
+			target := get_player_by_entity_id(target_id);
+			if !rr_mech_is_valid_pickup_collector(target) {
+				arcing = false;
+				target_id = 0;
+				spawn_pos = entity.world_position;
+				spawn_time = get_time();
+				return;
+			}
+			t := clamp((get_time() - arc_start_time) / MECH_PICKUP_ARC_DURATION, 0.0, 1.0);
+			ease := 1.0 - (1.0 - t) * (1.0 - t);
+			to := target.entity.world_position + v2.{0, 0.7};
+			pos := lerp(arc_start_pos, to, ease);
+			pos.y += sin(t * PI) * MECH_PICKUP_ARC_HEIGHT;
+			scale := lerp(0.7, 0.35, ease);
+			entity.set_local_position(pos);
+			entity.set_local_scale(v2.{scale, scale});
+			if t >= 1.0 {
+				rr_mech_add_component_part(target, kind);
+				target.Notify(format_string("+1 %", .{rr_mech_component_name(kind)}));
+				rr_mech_spawn_flash(to, 0.7, rr_mech_component_tint(kind), 0.28);
+				rr_mech_play_sfx_at("sfx/pick_up_item_a973cc.wav", to, 0.3);
+				entity.destroy();
+			}
+			return;
+		}
+
+		bob := sin((get_time() - spawn_time) * MECH_PICKUP_BOB_SPEED) * MECH_PICKUP_BOB_AMPLITUDE;
+		entity.set_local_position(spawn_pos + v2.{0, bob});
+
+		// Brief grace period so it's visible before it homes in.
+		if get_time() - spawn_time < 0.25 return;
+
+		collector := rr_mech_find_nearest_collector(entity.world_position, MECH_PICKUP_SEEK_RANGE);
+		if collector == null return;
+		target_id = collector.entity.id;
+		arc_start_pos = entity.world_position;
+		arc_start_time = get_time();
+		arcing = true;
+		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", entity.world_position, 0.18);
 	}
 }
 
@@ -1329,7 +1574,14 @@ Mech_Transform_Ability :: class : Ability_Base {
 			if mech == null return;
 			mech.is_mech_form = !mech.is_mech_form;
 			if mech.is_apex { mech.is_mech_form = true; }
-			rr_mech_show_avatar(player, mech.is_mech_form || mech.is_apex);
+			showing := mech.is_mech_form || mech.is_apex;
+			anim_name := showing ? "009SG/Transform_Truck_In" : "009SG/Transform_Truck_out";
+			anim_duration := rr_mech_anim_duration(anim_name);
+			// Keep avatar visible through the whole anim, even when transforming back.
+			mech.transform_anim_ends_at = get_time() + anim_duration;
+			rr_mech_show_avatar(player, true);
+			rr_mech_play_avatar_anim(player, anim_name, false);
+			mech.anim_lock_until = get_time() + anim_duration;
 			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.32);
 			color := mech.is_mech_form ? v4.{1.0, 0.32, 0.12, 0.7} : v4.{0.6, 0.85, 1.0, 0.6};
 			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.95, color, 0.3);
@@ -1347,7 +1599,12 @@ Guardian_Transform_Ability :: class : Ability_Base {
 			guard := player.entity.get_component(Guardian_Module);
 			if guard == null return;
 			guard.is_guardian_form = !guard.is_guardian_form;
-			rr_mech_show_avatar(player, guard.is_guardian_form);
+			anim_name := guard.is_guardian_form ? "009SG/Transform_Truck_In" : "009SG/Transform_Truck_out";
+			anim_duration := rr_mech_anim_duration(anim_name);
+			guard.transform_anim_ends_at = get_time() + anim_duration;
+			rr_mech_show_avatar(player, true);
+			rr_mech_play_avatar_anim(player, anim_name, false);
+			guard.anim_lock_until = get_time() + anim_duration;
 			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.3);
 			color := guard.is_guardian_form ? v4.{0.85, 0.95, 0.3, 0.7} : v4.{0.6, 0.85, 1.0, 0.6};
 			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.9, color, 0.28);
@@ -1840,4 +2097,167 @@ rr_mech_update_showdown_for_mech :: proc(player: Player, mech: Mech_Module) {
 			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 		}
 	}
+}
+
+// =====================================================================
+// Workbench UI (UIK modal). Opened by the Mech_Workbench_Interactable.
+// =====================================================================
+
+rr_mech_apex_status_text :: proc(player: Player, mech: Mech_Module) -> string {
+	if mech.is_apex return "APEX ACTIVE — weapons upgraded.";
+	if mech.apex_lost return "Lost in Showdown — cannot reawaken.";
+	if mech.apex_used return "Already awakened this game.";
+	if rr_mech_can_awaken_apex(player) return "READY — use the APEX ability in Mech form.";
+	missing := 0;
+	if !mech.helmet_trap_unlocked     missing += 1;
+	if !mech.ram_charge_unlocked      missing += 1;
+	if !mech.magnet_cannon_unlocked   missing += 1;
+	if !mech.missile_barrage_unlocked missing += 1;
+	cores_needed := 2 - mech.power_cores;
+	if cores_needed < 0 { cores_needed = 0; }
+	if missing > 0 && cores_needed > 0 return format_string("Need % more weapons + % Power Cores.", .{missing, cores_needed});
+	if missing > 0 return format_string("Need % more weapons.", .{missing});
+	return format_string("Need % more Power Cores.", .{cores_needed});
+}
+
+rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id: int) -> UIK.Interact_Handle {
+	name := "";
+	cost_label := "";
+	icon_path := "";
+	tint := v4.{1, 1, 1, 1};
+
+	if upgrade_id == MECH_UPGRADE_HELMET_TRAP {
+		name = "Helmet Trap"; cost_label = "1 Gear";
+		icon_path = "sprites/icons/mech/Helmet_Trap_Icon.png";
+		tint = v4.{0.85, 0.85, 0.9, 1};
+	} else if upgrade_id == MECH_UPGRADE_RAM_CHARGE {
+		name = "Ram Charge"; cost_label = "1 Power Cell";
+		icon_path = "sprites/icons/mech/Ram_Icon.png";
+		tint = v4.{1.0, 0.32, 0.25, 1};
+	} else if upgrade_id == MECH_UPGRADE_MAGNET_CANNON {
+		name = "Magnet Cannon"; cost_label = "1 Schematic";
+		icon_path = "sprites/icons/mech/Magnet_Cannon_Icon.png";
+		tint = v4.{0.3, 0.7, 1.0, 1};
+	} else if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE {
+		name = "Missile Barrage"; cost_label = "1 Circuit";
+		icon_path = "sprites/icons/mech/Missile_Barrage_Icon.png";
+		tint = v4.{1.0, 0.85, 0.2, 1};
+	} else if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP {
+		name = "Wreckage Warp"; cost_label = "2 Any Components";
+		icon_path = "sprites/icons/mech/Wreckage_Warp_Icon.png";
+		tint = v4.{0.5, 0.9, 0.5, 1};
+	}
+
+	owned := rr_mech_upgrade_owned(mech, upgrade_id);
+	affordable := rr_mech_upgrade_can_afford(player, upgrade_id);
+
+	display_tint := tint;
+	if owned {
+		display_tint = v4.{0.3, 0.85, 0.45, 1};
+	} else if !affordable {
+		display_tint = v4.{0.35, 0.35, 0.4, 1};
+	}
+
+	card_desc := UIK.card_desc(UIK.flex(1), UIK.flex(1), display_tint, .PORTRAIT, 0.45, 0.18, 0.30);
+	UIK.card_begin(format_string("mech_wb_card_%", .{upgrade_id}), card_desc);
+
+	UIK.card_zone(.MEDIA);
+	UIK.image_fitted(get_asset(Texture_Asset, icon_path), UIK.image_desc(.CONTAIN));
+	UIK.card_zone_end();
+
+	UIK.card_zone(.HEADER);
+	UIK.text(name, UIK.text_button());
+	UIK.card_zone_end();
+
+	UIK.card_zone(.FOOTER);
+	footer_text := cost_label;
+	if owned {
+		footer_text = "OWNED";
+	} else if !affordable {
+		footer_text = format_string("Need %", .{cost_label});
+	}
+	UIK.text(footer_text, UIK.text_body());
+	UIK.card_zone_end();
+
+	return UIK.card_end();
+}
+
+rr_mech_draw_workbench_ui :: proc(player: Player) {
+	if player == null return;
+	mech := player.entity.get_component(Mech_Module);
+	if mech == null return;
+	if !mech.workbench_ui_open return;
+	if game_state != Game_State.INGAME { mech.workbench_ui_open = false; return; }
+	if player.player_state != Player_State.ALIVE { mech.workbench_ui_open = false; return; }
+
+	UIK.begin(UIK.modal(UIK.rect_window(), 20));
+
+	shell := UIK.panel_modal(.BLUE_WITH_FOOTER);
+	shell.padding = v4{16, 16, 16, 16};
+	shell.gap = 10;
+	UIK.panel_begin(shell);
+
+	exit_handle := UIK.title_area(UIK.title_area_desc("R&D WORKBENCH"));
+
+	// Component counts strip.
+	counts_row := UIK.layout_row();
+	counts_row.width = UIK.flex(1);
+	counts_row.height = UIK.pixels(56);
+	counts_row.gap = 18;
+	counts_row.cross_align = .CENTER;
+	UIK.panel_begin(counts_row);
+
+	UIK.currency(get_asset(Texture_Asset, "sprites/power_cell.png"), rr_mech_count_component_pool(player, MECH_COMPONENT_POWER_CELL), UIK.text_body());
+	UIK.currency(get_asset(Texture_Asset, "sprites/cables.png"),     rr_mech_count_component_pool(player, MECH_COMPONENT_CIRCUIT), UIK.text_body());
+	UIK.currency(get_asset(Texture_Asset, "sprites/blueprint.png"),  rr_mech_count_component_pool(player, MECH_COMPONENT_SCHEMATIC), UIK.text_body());
+	UIK.currency(get_asset(Texture_Asset, "sprites/gears.png"),      rr_mech_count_component_pool(player, MECH_COMPONENT_GEAR), UIK.text_body());
+	UIK.spacer(UIK.flex(1), UIK.pixels(1));
+	UIK.currency(get_asset(Texture_Asset, "sprites/icons/mech/Loot_Icon.png"), mech.power_cores, UIK.text_body());
+
+	UIK.panel_end(); // counts_row
+
+	UIK.divider(1.0, v4.{1, 1, 1, 0.25});
+
+	// APEX status banner (top of tree).
+	apex_panel := UIK.panel_styled(.MODAL_TRANSP_BLACK);
+	apex_panel.width = UIK.flex(1);
+	apex_panel.height = UIK.pixels(86);
+	apex_panel.padding = v4{14, 10, 14, 10};
+	apex_panel.gap = 4;
+	UIK.panel_begin(apex_panel);
+	UIK.text("APEX AWAKENING", UIK.text_title());
+	UIK.text(rr_mech_apex_status_text(player, mech), UIK.text_body());
+	UIK.panel_end();
+
+	// 4 weapon cards row (the leaves that feed APEX).
+	weapons_row := UIK.layout_row();
+	weapons_row.width = UIK.flex(1);
+	weapons_row.height = UIK.flex(1);
+	weapons_row.gap = 10;
+	UIK.panel_begin(weapons_row);
+
+	h_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_HELMET_TRAP);
+	r_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_RAM_CHARGE);
+	m_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_MAGNET_CANNON);
+	ms_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_MISSILE_BARRAGE);
+
+	UIK.panel_end(); // weapons_row
+
+	// Wreckage Warp (independent utility, separate from APEX tree).
+	warp_row := UIK.layout_row();
+	warp_row.width = UIK.flex(1);
+	warp_row.height = UIK.pixels(150);
+	UIK.panel_begin(warp_row);
+	w_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_WRECKAGE_WARP);
+	UIK.panel_end();
+
+	UIK.panel_end(); // shell
+	UIK.end();
+
+	if UIK.clicked(exit_handle) { mech.workbench_ui_open = false; }
+	if UIK.clicked(h_handle)  { rr_mech_buy_upgrade(player, MECH_UPGRADE_HELMET_TRAP); }
+	if UIK.clicked(r_handle)  { rr_mech_buy_upgrade(player, MECH_UPGRADE_RAM_CHARGE); }
+	if UIK.clicked(m_handle)  { rr_mech_buy_upgrade(player, MECH_UPGRADE_MAGNET_CANNON); }
+	if UIK.clicked(ms_handle) { rr_mech_buy_upgrade(player, MECH_UPGRADE_MISSILE_BARRAGE); }
+	if UIK.clicked(w_handle)  { rr_mech_buy_upgrade(player, MECH_UPGRADE_WRECKAGE_WARP); }
 }
