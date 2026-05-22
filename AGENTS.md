@@ -270,13 +270,14 @@ Round based games should reset economy on ao_start with Economy.delete_save_data
 - When the prompt requires building a game world do so using the allout MCP scene editing tools instead of scripts. 
 
 ### Guidelines for text / copy
-- Don't use text in UI if an icon would suffice. Players won't spend time reading huge blobs of text.
-- If you use text in UI make CERTAIN it fits within its container. UIK does not wrap automatically and you have a tendancy to overflow container bounds. Pay attention. Keep it short, and use resize as appropriate. 
-- Don't "explain" the game with UI. Put effort into making the game clear via INTUITIVE GAMEPLAY. 
+- Don't use text in UI if a texture icon would suffice. Players won't spend time reading huge blobs of text.
+- If you use text in UI make CERTAIN it fits within its container. UIK does not wrap automatically and you have a tendancy to overflow container bounds. Meticulously check that everything fits with screenshot tests. 
+- Don't explain the game with UI/text. Put effort into making the game clear via INTUITIVE GAMEPLAY. 
 
 ### Guidelines for maps
 - Follow all directions carefully from the world building skill
 - Every map must be a large comprehensive game **world**, not a demo. There should be no blue editor backing showing behind anything and the players must have space to explore. 
+- Layer 0 is best for most items like towers, world props, trees, etc... since it naturally layers with the player. 
 
 After you make script changes run the All Out MCP compile tool.
 Do exactly what the users asks for and nothing more.

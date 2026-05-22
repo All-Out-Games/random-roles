@@ -25,9 +25,9 @@
     "texture": "sprites/pedestal_light.png",
     "depth_offset": -1,
     "tint": {
-      "Y": 0.9568627476692200,
+      "Y": 0,
       "Z": 0,
-      "W": 0.3058823645114899
+      "W": 0.1883809864521027
     }
   }
 }
