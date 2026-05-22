@@ -1653,6 +1653,7 @@ setup_lobby :: proc() {
 	rr_ggg_clear_decoys();
 	rr_ggg_clear_nest();
 	rr_pyro_extinguish_all_fires();
+	rr_hunter_round_global_cleanup();
 	// Clear all Mimicer Void Pillars
 	for p: component_iterator(Player) {
 		rr_mimicer_clear_void_pillars(p);
@@ -2056,7 +2057,12 @@ end_game_with_winners :: proc(victor: Player_Type, winners: List(Player)) {
 	// Show victory popup with winning players
 	victory_popup.show(victor, winners);
 	game_state = Game_State.ANIM_VICTORY;
-	
+
+	// Wipe Hunter campfires now so they don't linger through the victory
+	// cinematic + lobby. setup_lobby() also runs this, but only after the
+	// popup ends — clear here for an immediate end-of-game reset.
+	rr_hunter_round_global_cleanup();
+
 	// Properly transition all players to passive (removes ghost reasons, restores speed, etc.).
 	for i: 0..players.elements.count-1 {
 		on_player_go_passive(players.elements[i]);
@@ -3548,7 +3554,6 @@ assign_players_to_types :: proc() {
 	append(ref civilian_roles_master, Player_Role.MOVIE_STAR);
 	append(ref civilian_roles_master, Player_Role.CORONER);
 	append(ref civilian_roles_master, Player_Role.PORTAL_MAKER);
-	append(ref civilian_roles_master, Player_Role.HUNTER);
 	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
 	append(ref anarchist_roles_master, Player_Role.PYROMANIAC);
 	append(ref anarchist_roles_master, Player_Role.HACKER);
@@ -3567,6 +3572,9 @@ assign_players_to_types :: proc() {
 	}
 	if rp_any_player_owns(ref players, LILY_PRODUCT_ID) {
 		append(ref traitor_roles_master, Player_Role.LILY_LOVEBRAIDS);
+	}
+	if rp_any_player_owns(ref players, HUNTER_PRODUCT_ID) {
+		append(ref civilian_roles_master, Player_Role.HUNTER);
 	}
 
 	civ_players: List(Player);
