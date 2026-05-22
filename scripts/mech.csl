@@ -445,6 +445,12 @@ rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_
 			target.entity.set_local_position(carrier.entity.world_position + offset);
 			target.agent.velocity = v2.{0, 0};
 			target.add_disable_movement_input_reason(MECH_CARRY_REASON);
+
+			// Guardian-only: draw protective shield (allies) or restraint (enemies)
+			// so it's visually obvious whether the held player is being saved or subdued.
+			if carrier.player_role == Player_Role.GUARDIAN {
+				rr_guardian_draw_carry_aura(carrier, target);
+			}
 		}
 	}
 	if carried_corpse_id != 0 {
@@ -453,6 +459,49 @@ rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_
 			c.entity.set_local_position(carrier.entity.world_position + offset);
 		}
 	}
+}
+
+// True while `target` is being carried by a (alive) Guardian. Used by the
+// kill path to make Civilian allies invincible inside the Guardian's arms
+// (matches spec: "Allies: invincible while held").
+rr_guardian_is_protecting :: proc(target: Player) -> bool {
+	if target == null return false;
+	if !#alive(target.entity) return false;
+	// Only Civilians ride the protection rail — Traitors are "subdued", not invincible.
+	if target.player_type != Player_Type.CIVILIAN return false;
+	for g: component_iterator(Guardian_Module) {
+		if g == null continue;
+		if !#alive(g.entity) continue;
+		if g.carried_player_id != target.entity.id continue;
+		carrier := g.entity.get_component(Player);
+		if carrier == null continue;
+		if carrier.player_state != Player_State.ALIVE continue;
+		return true;
+	}
+	return false;
+}
+
+// Draws the world-space aura on the held player.
+// Allies: pulsing green shield. Enemies: red restraint glow.
+rr_guardian_draw_carry_aura :: proc(carrier: Player, target: Player) {
+	if target == null || !#alive(target.entity) return;
+	ally := target.player_type == Player_Type.CIVILIAN;
+	pos := target.entity.world_position + v2.{0, 0.55};
+	pulse := 0.85 + sin(get_time() * 6.0) * 0.15;
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+	UI.push_z(target.entity.world_position.y - 0.02);
+	defer UI.pop_z();
+
+	color := ally ? v4.{0.45, 1.0, 0.55, 0.55 * pulse} : v4.{1.0, 0.32, 0.32, 0.55 * pulse};
+	size := ally ? 1.3 : 1.15;
+	r := Rect{pos, pos}.grow(size, size, size, size);
+	UI.quad(r, core_globals.white_sprite, color);
+
+	// Inner ring of the same hue, slightly brighter.
+	inner_color := ally ? v4.{0.7, 1.0, 0.8, 0.35} : v4.{1.0, 0.55, 0.5, 0.35};
+	UI.quad(r.grow(-0.35, -0.35, -0.35, -0.35), core_globals.white_sprite, inner_color);
 }
 
 rr_mech_find_melee_target :: proc(player: Player, allow_traitor: bool) -> Player {
@@ -786,6 +835,14 @@ rr_mech_convert_target :: proc(mech_player: Player, target: Player) {
 	if target.player_role == Player_Role.GUARDIAN {
 		mech_player.Notify("TARGET INVALID");
 		mech_player.Notify(format_string("% is Guardian.", .{target.entity.get_name()}));
+		// "Denied" reject: shield bounce SFX + error sting, golden shield burst over the
+		// target. Conveys that the conversion attempt itself was repelled (and tips the
+		// Mech off, per spec — no charge consumed).
+		rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", target.entity.world_position, 0.42);
+		rr_mech_play_sfx_at("sfx/ui_error.wav", mech_player.entity.world_position, 0.32);
+		rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 1.05, v4.{1.0, 0.95, 0.45, 0.75}, 0.3);
+		rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 0.55, v4.{1.0, 1.0, 0.85, 0.85}, 0.2);
+		rr_mech_add_screenshake(mech_player, 0.08, 0.2);
 		return;
 	}
 	if target.player_type == Player_Type.TRAITOR {
@@ -1605,10 +1662,19 @@ Guardian_Transform_Ability :: class : Ability_Base {
 			rr_mech_show_avatar(player, true);
 			rr_mech_play_avatar_anim(player, anim_name, false);
 			guard.anim_lock_until = get_time() + anim_duration;
-			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.3);
-			color := guard.is_guardian_form ? v4.{0.85, 0.95, 0.3, 0.7} : v4.{0.6, 0.85, 1.0, 0.6};
-			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.9, color, 0.28);
-			rr_mech_add_screenshake(player, 0.06, 0.18);
+			// Heroic stinger when transforming INTO Guardian; soft poof when reverting.
+			if guard.is_guardian_form {
+				rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", player.entity.world_position, 0.35);
+				rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.28);
+				rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 1.25, v4.{0.85, 0.95, 0.3, 0.75}, 0.42);
+				// A bright inner pop layered on top sells the "reveal".
+				rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.55, v4.{1.0, 1.0, 0.8, 0.85}, 0.22);
+				rr_mech_add_screenshake(player, 0.12, 0.28);
+			} else {
+				rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.3);
+				rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.9, v4.{0.6, 0.85, 1.0, 0.6}, 0.28);
+				rr_mech_add_screenshake(player, 0.05, 0.16);
+			}
 		}
 	}
 	on_draw_button :: proc(instance: Guardian_Transform_Ability, rect: Rect) { draw_ability_name_label(rect, "Transform"); }
@@ -1920,7 +1986,14 @@ Mech_Showdown_Mash_Ability :: class : Ability_Base {
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
 			mech := player.entity.get_component(Mech_Module);
-			if mech != null { mech.showdown_mashes += 1; }
+			if mech != null {
+				mech.showdown_mashes += 1;
+				if player.is_local() {
+					rr_mech_play_sfx_at("sfx/task_click_tile.wav", player.entity.world_position, 0.22);
+					rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.8}, 0.35, v4.{1.0, 0.35, 0.15, 0.75}, 0.12);
+					rr_mech_add_screenshake(player, 0.04, 0.08);
+				}
+			}
 		}
 	}
 	on_draw_button :: proc(instance: Mech_Showdown_Mash_Ability, rect: Rect) { draw_ability_name_label(rect, "MASH"); }
@@ -1970,7 +2043,7 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 			if guard.carried_player_id != 0 {
 				target := get_player_by_entity_id(guard.carried_player_id);
 				guard.carried_player_id = 0;
-				rr_mech_throw_player(player, target, player.entity.id);
+				rr_guardian_throw_player(player, target, player.entity.id);
 				current_cooldown = 30.0;
 				return;
 			}
@@ -1981,10 +2054,31 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 				guard.carried_player_id = target.entity.id;
 				target.add_disable_movement_input_reason(MECH_CARRY_REASON);
 				rr_mech_play_avatar_anim(player, "009SG/cm_pick_up", false);
+				// Tactile grab: ally-tinted vs enemy-tinted flash at the target + SFX.
+				ally := target.player_type == Player_Type.CIVILIAN;
+				color := ally ? v4.{0.45, 1.0, 0.55, 0.7} : v4.{1.0, 0.42, 0.32, 0.7};
+				rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 0.9, color, 0.28);
+				rr_mech_play_sfx_at("sfx/swing_net_catch.wav", target.entity.world_position, 0.32);
+				rr_mech_play_sfx_at("sfx/pick_up_item_a973cc.wav", player.entity.world_position, 0.3);
+				rr_mech_add_screenshake(player, 0.08, 0.18);
+				if target.is_local() {
+					target.Notify(ally ? "Guardian has you safe!" : "Subdued by the Guardian!");
+				}
 			}
 		}
 	}
 	on_draw_button :: proc(instance: Guardian_Pickup_Throw_Ability, rect: Rect) { draw_ability_name_label(rect, "Grab"); }
+}
+
+// Heroic Guardian throw — same physics/path as the Mech's throw, but with a
+// brighter color flash and SFX appropriate to a protector hurling someone clear.
+rr_guardian_throw_player :: proc(carrier: Player, target: Player, killer_id: u64) {
+	if carrier == null || target == null return;
+	rr_mech_play_sfx_at("sfx/swing_net.wav", carrier.entity.world_position, 0.4);
+	rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", carrier.entity.world_position, 0.25);
+	rr_mech_spawn_flash(carrier.entity.world_position + v2.{0, 0.7}, 0.7, v4.{0.85, 0.95, 0.3, 0.65}, 0.22);
+	rr_mech_add_screenshake(carrier, 0.12, 0.22);
+	rr_mech_throw_player(carrier, target, killer_id);
 }
 
 rr_guardian_can_showdown :: proc(player: Player) -> bool {
@@ -2024,6 +2118,12 @@ Guardian_Showdown_Ability :: class : Ability_Base {
 			if guard == null return;
 			if guard.showdown_active {
 				guard.showdown_mashes += 1;
+				// Mash tick — a quick spark and a small shake every press to sell intensity.
+				if player.is_local() {
+					rr_mech_play_sfx_at("sfx/task_click_tile.wav", player.entity.world_position, 0.22);
+					rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.8}, 0.35, v4.{1.0, 0.95, 0.35, 0.7}, 0.12);
+					rr_mech_add_screenshake(player, 0.04, 0.08);
+				}
 				return;
 			}
 			apex := rr_guardian_find_apex(player);
@@ -2042,7 +2142,16 @@ Guardian_Showdown_Ability :: class : Ability_Base {
 			apex.add_disable_movement_input_reason(MECH_LOCK_REASON);
 			rr_mech_play_avatar_anim(player, "009SG/Showdown_Start", false);
 			rr_mech_play_avatar_anim(apex, "009SG/Showdown_Start", false);
-			rr_mech_play_sfx_at("sfx/roar_f23931.wav", player.entity.world_position, 0.38);
+			// Big square-up clash: dual roars, twin clash flash between the fighters,
+			// heavy screenshake on both sides.
+			clash_pos := (player.entity.world_position + apex.entity.world_position) * 0.5;
+			rr_mech_play_sfx_at("sfx/roar_f23931.wav", player.entity.world_position, 0.45);
+			rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", clash_pos, 0.42);
+			rr_mech_play_sfx_at("sfx/killer_transform.wav", clash_pos, 0.32);
+			rr_mech_spawn_flash(clash_pos, 1.8, v4.{1.0, 0.95, 0.35, 0.78}, 0.5);
+			rr_mech_spawn_flash(clash_pos, 0.9, v4.{1.0, 1.0, 0.9, 0.9}, 0.28);
+			rr_mech_add_screenshake(player, 0.22, 0.55);
+			rr_mech_add_screenshake(apex, 0.22, 0.55);
 		}
 	}
 	on_draw_button :: proc(instance: Guardian_Showdown_Ability, rect: Rect) { draw_ability_name_label(rect, "Showdown"); }
@@ -2051,6 +2160,7 @@ Guardian_Showdown_Ability :: class : Ability_Base {
 rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Module) {
 	if guard == null || !guard.showdown_active return;
 	player.add_disable_movement_input_reason(MECH_LOCK_REASON);
+	rr_guardian_draw_showdown_ui(player, guard);
 	if get_time() < guard.showdown_ends_at return;
 	mech_player := get_player_by_entity_id(guard.showdown_opponent_id);
 	mech_mashes := 0;
@@ -2058,6 +2168,8 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 		mech := mech_player.entity.get_component(Mech_Module);
 		if mech != null { mech_mashes = mech.showdown_mashes; }
 	}
+	clash_pos := player.entity.world_position;
+	if mech_player != null { clash_pos = (player.entity.world_position + mech_player.entity.world_position) * 0.5; }
 	if guard.showdown_mashes >= mech_mashes {
 		if mech_player != null {
 			mech := mech_player.entity.get_component(Mech_Module);
@@ -2068,9 +2180,18 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 				rr_mech_apply_avatar_skins(mech_player);
 				rr_mech_play_avatar_anim(mech_player, "009SG/Showdown_Lose_Survive", false);
 				mech_player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+				mech_player.Notify("APEX form lost!");
 			}
 		}
 		rr_mech_play_avatar_anim(player, "009SG/Showdown_Win", false);
+		// Heroic victory burst.
+		rr_mech_play_sfx_at("sfx/end_game_victory.wav", player.entity.world_position, 0.4);
+		rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", clash_pos, 0.45);
+		rr_mech_spawn_flash(clash_pos, 2.0, v4.{0.85, 0.95, 0.3, 0.8}, 0.5);
+		rr_mech_spawn_flash(clash_pos, 1.0, v4.{1.0, 1.0, 0.85, 0.95}, 0.32);
+		rr_mech_add_screenshake(player, 0.18, 0.45);
+		if mech_player != null { rr_mech_add_screenshake(mech_player, 0.18, 0.45); }
+		player.Notify("You broke APEX!");
 	} else if mech_player != null {
 		mech := mech_player.entity.get_component(Mech_Module);
 		if mech != null {
@@ -2080,9 +2201,109 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 			mech_player.Notify("End Game Ability unlocked.");
 		}
 		rr_mech_play_avatar_anim(player, "009SG/Showdown_Lose_Death", false);
+		// Brutal defeat burst.
+		rr_mech_play_sfx_at("sfx/ggg_explode.wav", clash_pos, 0.45);
+		rr_mech_play_sfx_at("sfx/other_death.wav", player.entity.world_position, 0.4);
+		rr_mech_spawn_flash(clash_pos, 2.0, v4.{1.0, 0.22, 0.08, 0.85}, 0.5);
+		rr_mech_spawn_flash(clash_pos, 1.0, v4.{1.0, 0.6, 0.3, 0.95}, 0.32);
+		rr_mech_add_screenshake(player, 0.22, 0.55);
+		rr_mech_add_screenshake(mech_player, 0.22, 0.55);
+		player.Notify("APEX overpowered you...");
 	}
 	guard.showdown_active = false;
 	player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+}
+
+// Draws a big world-space "MASH!" indicator + mash-count gauge above the Guardian
+// during a showdown. Visible to all players nearby so the cinematic reads on screen.
+rr_guardian_draw_showdown_ui :: proc(player: Player, guard: Guardian_Module) {
+	if player == null || guard == null return;
+	if !guard.showdown_active return;
+
+	mech_player := get_player_by_entity_id(guard.showdown_opponent_id);
+	mech_mashes := 0;
+	if mech_player != null {
+		mech := mech_player.entity.get_component(Mech_Module);
+		if mech != null { mech_mashes = mech.showdown_mashes; }
+	}
+
+	clash_pos := player.entity.world_position;
+	if mech_player != null { clash_pos = (player.entity.world_position + mech_player.entity.world_position) * 0.5; }
+
+	UI.push_world_draw_context();
+	defer UI.pop_draw_context();
+	UI.push_z(clash_pos.y + 10.0);
+	defer UI.pop_z();
+
+	time_left := guard.showdown_ends_at - get_time();
+	if time_left < 0.0 { time_left = 0.0; }
+	pulse := 1.0 + sin(get_time() * 14.0) * 0.18;
+
+	// Big "MASH!" banner above the clash.
+	banner_pos := clash_pos + v2.{0, 2.6};
+	banner_rect := Rect{banner_pos, banner_pos}.grow(2.4, 0.7, 2.4, 0.7);
+	ts := UI.default_text_settings();
+	ts.size = 0.85 * pulse;
+	ts.halign = .CENTER;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 6;
+	ts.outline_color = v4.{0, 0, 0, 1};
+	ts.color = v4.{1.0, 0.95, 0.25, 1.0};
+	UI.text(banner_rect, ts, "MASH!");
+
+	// Per-side bars + counts.
+	bar_h := 0.18;
+	bar_w := 2.0;
+	max_mashes := max(max(guard.showdown_mashes, mech_mashes), 1);
+
+	// Guardian (green, left).
+	g_pos := clash_pos + v2.{-1.4, 1.8};
+	g_back := Rect{g_pos, g_pos}.grow(bar_w * 0.5, bar_h * 0.5, bar_w * 0.5, bar_h * 0.5);
+	UI.quad(g_back, core_globals.white_sprite, v4.{0, 0, 0, 0.55});
+	g_frac := guard.showdown_mashes.(float) / max_mashes.(float);
+	g_fill := Rect{
+		v2.{g_back.min.x, g_back.min.y},
+		v2.{g_back.min.x + (g_back.max.x - g_back.min.x) * g_frac, g_back.max.y},
+	};
+	UI.quad(g_fill, core_globals.white_sprite, v4.{0.45, 1.0, 0.45, 0.95});
+	g_count_ts := UI.default_text_settings();
+	g_count_ts.size = 0.32;
+	g_count_ts.halign = .CENTER;
+	g_count_ts.valign = .CENTER;
+	g_count_ts.do_outline = true;
+	g_count_ts.outline_thickness = 3;
+	g_count_ts.outline_color = v4.{0, 0, 0, 1};
+	g_count_ts.color = v4.{0.85, 1.0, 0.85, 1.0};
+	g_text_rect := Rect{g_pos + v2.{0, 0.35}, g_pos + v2.{0, 0.35}}.grow(1.0, 0.25, 1.0, 0.25);
+	UI.text(g_text_rect, g_count_ts, format_string("GUARDIAN  %", .{guard.showdown_mashes}));
+
+	// Mech (red, right).
+	m_pos := clash_pos + v2.{1.4, 1.8};
+	m_back := Rect{m_pos, m_pos}.grow(bar_w * 0.5, bar_h * 0.5, bar_w * 0.5, bar_h * 0.5);
+	UI.quad(m_back, core_globals.white_sprite, v4.{0, 0, 0, 0.55});
+	m_frac := mech_mashes.(float) / max_mashes.(float);
+	m_fill := Rect{
+		v2.{m_back.max.x - (m_back.max.x - m_back.min.x) * m_frac, m_back.min.y},
+		v2.{m_back.max.x, m_back.max.y},
+	};
+	UI.quad(m_fill, core_globals.white_sprite, v4.{1.0, 0.32, 0.22, 0.95});
+	m_count_ts := g_count_ts;
+	m_count_ts.color = v4.{1.0, 0.85, 0.85, 1.0};
+	m_text_rect := Rect{m_pos + v2.{0, 0.35}, m_pos + v2.{0, 0.35}}.grow(1.0, 0.25, 1.0, 0.25);
+	UI.text(m_text_rect, m_count_ts, format_string("APEX  %", .{mech_mashes}));
+
+	// Countdown numeral below the banner.
+	cd_ts := UI.default_text_settings();
+	cd_ts.size = 0.5;
+	cd_ts.halign = .CENTER;
+	cd_ts.valign = .CENTER;
+	cd_ts.do_outline = true;
+	cd_ts.outline_thickness = 4;
+	cd_ts.outline_color = v4.{0, 0, 0, 1};
+	cd_ts.color = v4.{1.0, 1.0, 1.0, 1.0};
+	cd_rect := Rect{clash_pos + v2.{0, 1.25}, clash_pos + v2.{0, 1.25}}.grow(1.0, 0.32, 1.0, 0.32);
+	UI.text(cd_rect, cd_ts, format_string("% s", .{format_float(time_left, decimals=1)}));
 }
 
 rr_mech_update_showdown_for_mech :: proc(player: Player, mech: Mech_Module) {
