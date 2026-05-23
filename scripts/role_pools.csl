@@ -26,6 +26,8 @@ LILY_PRODUCT_ID        :: "69e7ceac7c51b1e14b7a5611";
 LILY_USAGE_KEY         :: "purchase_usage_69e7ceac7c51b1e14b7a5611";
 BIG_CHARLIE_PRODUCT_ID :: "69fe2c16961587c2b549b47b";
 BIG_CHARLIE_USAGE_KEY  :: "purchase_usage_69fe2c16961587c2b549b47b";
+HUNTER_PRODUCT_ID      :: "6a10ba8b21358247f838dd3d";
+HUNTER_USAGE_KEY       :: "purchase_usage_6a10ba8b21358247f838dd3d";
 
 // ── Boost tiers ─────────────────────────────────────────────────────
 RP_BOOST_GUARANTEED      :: 1.0;
@@ -93,6 +95,7 @@ rp_is_purchase_gated :: proc(role: Player_Role) -> bool {
     if role == Player_Role.MIMICER return true;
     if role == Player_Role.LILY_LOVEBRAIDS return true;
     if role == Player_Role.BIG_CHARLIE return true;
+    if role == Player_Role.HUNTER return true;
     return false;
 }
 
@@ -109,6 +112,9 @@ rp_is_role_locked :: proc(player: Player, role: Player_Role) -> bool {
     }
     if role == Player_Role.BIG_CHARLIE {
         return !Purchasing.owns_product(player, BIG_CHARLIE_PRODUCT_ID);
+    }
+    if role == Player_Role.HUNTER {
+        return !Purchasing.owns_product(player, HUNTER_PRODUCT_ID);
     }
     return false;
 }
@@ -165,6 +171,17 @@ rp_collect_player_boost_candidates :: proc(player: Player, out: ref [..]Role_Boo
             c: Role_Boost_Info;
             c.role      = Player_Role.BIG_CHARLIE;
             c.role_type = Player_Type.ANARCHIST;
+            c.chance    = chance;
+            out.append(c);
+        }
+    }
+    if Purchasing.owns_product(player, HUNTER_PRODUCT_ID) {
+        usage  := Save.get_int(player, HUNTER_USAGE_KEY, 0);
+        chance := rp_get_boost_chance(usage.(int));
+        if chance > 0.0 {
+            c: Role_Boost_Info;
+            c.role      = Player_Role.HUNTER;
+            c.role_type = Player_Type.CIVILIAN;
             c.chance    = chance;
             out.append(c);
         }
@@ -237,6 +254,18 @@ rp_get_player_boost :: proc(player: Player) -> Role_Boost_Info {
         }
     }
 
+    // ── Hunter ──
+    if Purchasing.owns_product(player, HUNTER_PRODUCT_ID) {
+        usage := Save.get_int(player, HUNTER_USAGE_KEY, 0);
+        chance := rp_get_boost_chance(usage.(int));
+        if chance > info.chance {
+            info.has_boost = true;
+            info.role      = Player_Role.HUNTER;
+            info.role_type = Player_Type.CIVILIAN;
+            info.chance    = chance;
+        }
+    }
+
     return info;
 }
 
@@ -292,6 +321,10 @@ rp_record_boost_used :: proc(player: Player, role: Player_Role) {
     if role == Player_Role.BIG_CHARLIE {
         current := Save.get_int(player, BIG_CHARLIE_USAGE_KEY, 0);
         Save.set_int(player, BIG_CHARLIE_USAGE_KEY, current + 1);
+    }
+    if role == Player_Role.HUNTER {
+        current := Save.get_int(player, HUNTER_USAGE_KEY, 0);
+        Save.set_int(player, HUNTER_USAGE_KEY, current + 1);
     }
 }
 
@@ -730,8 +763,9 @@ my_boost :: proc(player: Player) {
     found_any := false;
     rp_check_boost(player, "Goo Goo Gaga", GGG_PRODUCT_ID, GGG_USAGE_KEY, ref found_any);
     rp_check_boost(player, "Mimicer", MIMICER_PRODUCT_ID, MIMICER_USAGE_KEY, ref found_any);
-    rp_check_boost(player, "Lily Lovebraids", LILY_PRODUCT_ID, LILY_USAGE_KEY, ref found_any);
-    rp_check_boost(player, "Big Charlie", BIG_CHARLIE_PRODUCT_ID, BIG_CHARLIE_USAGE_KEY, ref found_any);
+    rp_check_boost(player, "Lily", LILY_PRODUCT_ID, LILY_USAGE_KEY, ref found_any);
+    rp_check_boost(player, "Charlie", BIG_CHARLIE_PRODUCT_ID, BIG_CHARLIE_USAGE_KEY, ref found_any);
+    rp_check_boost(player, "Hunter", HUNTER_PRODUCT_ID, HUNTER_USAGE_KEY, ref found_any);
     if !found_any {
         Chat.server_send_message("You don't own any purchasable roles.", player);
     }
@@ -743,7 +777,7 @@ rp_check_boost :: proc(player: Player, name: string, product_id: string, usage_k
     usage := Save.get_int(player, usage_key, 0);
     chance := rp_get_boost_chance(usage.(int));
     if chance <= 0.0 {
-        Chat.server_send_message(format_string("% — Uses: %. Boost: EXHAUSTED (normal odds).", {name, usage}), player);
+        Chat.server_send_message(format_string("% — Uses: %. Boost: EXHAUSTED.", {name, usage}), player);
     } else {
         Chat.server_send_message(format_string("% — Uses: %. Boost: %0%%.", {name, usage, format_float(chance * 100.0, decimals=0)}), player);
     }
@@ -764,7 +798,7 @@ is_boost :: proc(player: Player, product_id: string) {
     chance := rp_get_boost_chance(usage.(int));
 
     if chance <= 0.0 {
-        Chat.server_send_message(format_string("Owned. Uses: %. Boost: EXHAUSTED (normal odds).", {usage}), player);
+        Chat.server_send_message(format_string("Owned. Uses: %. Boost: EXHAUSTED.", {usage}), player);
     } else {
         Chat.server_send_message(format_string("Owned. Uses: %. Boost: %0%%.", {usage, format_float(chance * 100.0, decimals=0)}), player);
     }

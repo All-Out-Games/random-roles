@@ -1,0 +1,1295 @@
+import "core:ao"
+
+// =============================================================================
+// Hunter (Civilian role)
+//
+// Abilities:
+//   * Cripple   — aimed crossbow bolt that pierces a victim, applying a 50%
+//                 movespeed slow until the round ends.
+//   * Campfire  — placeable bonfire that grants schleem-form players a 25%
+//                 movespeed buff and casts a warm light that pierces darkness
+//                 (e.g. the Hacker's power outage) via its LOS_Caster.
+//   * Kill Shot — aimed crossbow bolt that only hurts already-pierced victims;
+//                 passes harmlessly through anyone else.
+//
+// Passive:
+//   * Tracker   — Hunter sees scent footprints left behind by any schleem
+//                 (transformed) player while they move.
+// =============================================================================
+
+// --- Tuning ---
+HUNTER_CRIPPLE_COOLDOWN_SECONDS    :: 25.0;
+HUNTER_KILL_SHOT_COOLDOWN_SECONDS  :: 60.0;
+HUNTER_CAMPFIRE_COOLDOWN_SECONDS   :: 60.0;
+
+HUNTER_BOLT_SPEED                  :: 12.0;
+HUNTER_BOLT_LIFETIME               :: 0.9;
+HUNTER_BOLT_HIT_RADIUS             :: 0.55;
+HUNTER_BOLT_SPRITE_SCALE           :: 1.7;  // visual scale-up so the bolt reads bigger
+HUNTER_KILL_SHOT_BOLT_SCALE        :: 2.0;  // killshot bolt is extra chunky
+HUNTER_KILL_SHOT_CAMERA_SIZE       :: 4.0;  // tighter camera while the killshot bolt is in flight
+
+HUNTER_CAMPFIRE_LOW_TIME_THRESHOLD :: 15.0; // countdown shown above campfire under this much remaining
+
+HUNTER_KILLSHOT_EMBERS_SPINE_PATH  :: "anims/hunter_killshot_embers/embers.spine";
+HUNTER_KILLSHOT_EMBERS_BEHIND      :: 0.20; // world-units the embers ride behind the bolt
+
+HUNTER_PIERCE_SPEED_MULTIPLIER     :: 0.5;
+HUNTER_PIERCE_DURATION_SECONDS     :: 30.0; // safety expiry so a stuck pierce can't last forever
+
+HUNTER_CAMPFIRE_BUFF_RADIUS        :: 4.0;
+HUNTER_CAMPFIRE_BUFF_MULTIPLIER    :: 1.25;
+HUNTER_CAMPFIRE_LIFETIME_SECONDS   :: 120.0;
+HUNTER_CAMPFIRE_PLACE_DISTANCE     :: 4.0; // max distance the placement reticle can extend from the Hunter
+
+HUNTER_FOOTPRINT_EMIT_INTERVAL     :: 0.25; // seconds between scent drops
+HUNTER_FOOTPRINT_MOVE_THRESHOLD    :: 0.25; // meters of motion required before next drop
+HUNTER_FOOTPRINT_LIFETIME_SECONDS  :: 6.0;
+HUNTER_FOOTPRINT_FADE_SECONDS      :: 1.5;
+HUNTER_FOOTPRINT_REVEAL_RADIUS     :: 30.0; // very large — works anywhere the Hunter is
+
+HUNTER_BOLT_SPRITE_PATH            :: "sprites/hunter/crossbow_bolt.png";
+HUNTER_CROSSBOW_SKIN               :: "weapons/crossbow";
+HUNTER_CROSSBOW_VISIBLE_SECONDS    :: 1.0; // hide crossbow shortly after the shot finishes
+HUNTER_CAMPFIRE_SPINE_PATH         :: "anims/roles/Hunter/Campfire/Campfire.spine";
+HUNTER_FOOTPRINT_SPINE_PATH        :: "anims/roles/Hunter/footsprint/004RAND_footstep_scent.spine";
+
+HUNTER_CAMPFIRE_BUFF_REASON        :: "hunter_campfire_buff";
+
+// --- Module (lives on the Hunter player) ---
+Hunter_Module :: class : Component {
+    // Per-tracked-player footprint emit state (local to this Hunter client).
+    footprint_emit_inited: bool;
+    footprint_emit_player_ids: [..]u64;
+    footprint_emit_last_times: [..]float;
+    footprint_emit_last_positions: [..]v2;
+}
+
+// =============================================================================
+// Hunter_Pierce_Effect — applied to any player struck by a Cripple bolt.
+// Persists across frames; client-prediction friendly (no Game.is_server() gates
+// on speed application — only the initial arm() runs server-side).
+// =============================================================================
+
+Hunter_Pierce_Effect :: class : Component {
+    active: bool;
+    pierced_by_id: u64;
+    end_time: float;
+    orig_speed: float;
+    orig_speed_valid: bool;
+
+    arm :: proc(using this: Hunter_Pierce_Effect, hunter: Player) {
+        if hunter == null return;
+        if active {
+            // Refresh timer + attribution if re-pierced.
+            end_time = get_time() + HUNTER_PIERCE_DURATION_SECONDS;
+            pierced_by_id = hunter.entity.id;
+            return;
+        }
+        active = true;
+        pierced_by_id = hunter.entity.id;
+        end_time = get_time() + HUNTER_PIERCE_DURATION_SECONDS;
+
+        p := entity.get_component(Player);
+        if p != null {
+            if !orig_speed_valid {
+                // Capture baseline so pierce slow is independent of any
+                // transient buffs/debuffs active at the moment of impact
+                // (e.g. hunter campfire boost, pyro on-fire buff).
+                if p.baseline_movement_speed_saved {
+                    orig_speed = p.baseline_movement_speed;
+                } else {
+                    orig_speed = p.agent.movement_speed;
+                }
+                orig_speed_valid = true;
+            }
+            // Drive the impaled + pained-loop state machine.
+            p.set_trigger("hunter_impaled");
+            if p.animator != null && p.animator.instance != null && p.animator.instance.state_machine != null {
+                p.animator.instance.state_machine.set_bool("hunter_pained", true);
+            }
+        }
+    }
+
+    clear :: proc(using this: Hunter_Pierce_Effect) {
+        active = false;
+        end_time = 0.0;
+        pierced_by_id = 0;
+
+        p := entity.get_component(Player);
+        if p != null {
+            if orig_speed_valid {
+                p.agent.movement_speed = orig_speed;
+            }
+            if p.animator != null && p.animator.instance != null && p.animator.instance.state_machine != null {
+                p.animator.instance.state_machine.set_bool("hunter_pained", false);
+                p.animator.instance.state_machine.set_bool("hunter_pained_moving", false);
+            }
+        }
+        orig_speed_valid = false;
+    }
+
+    ao_update :: proc(using this: Hunter_Pierce_Effect, dt: float) {
+        if !active return;
+
+        p := entity.get_component(Player);
+        if p == null {
+            active = false;
+            return;
+        }
+
+        // Safety: clear if the round ends or the player dies.
+        if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
+            this.clear();
+            return;
+        }
+
+        // Continuously re-apply 50% speed (camera/agent state can be reconciled).
+        if orig_speed_valid {
+            p.agent.movement_speed = orig_speed * HUNTER_PIERCE_SPEED_MULTIPLIER;
+        }
+
+        // Drive pained idle/walking based on motion.
+        if p.animator != null && p.animator.instance != null && p.animator.instance.state_machine != null {
+            sm := p.animator.instance.state_machine;
+            moving := length_squared(p.agent.velocity) > 0.01;
+            sm.set_bool("hunter_pained", true);
+            sm.set_bool("hunter_pained_moving", moving);
+        }
+
+        if get_time() >= end_time {
+            this.clear();
+        }
+    }
+
+    ao_end :: proc(using this: Hunter_Pierce_Effect) {
+        if !active return;
+        this.clear();
+    }
+}
+
+rr_hunter_is_player_pierced :: proc(target: Player) -> bool {
+    if target == null return false;
+    if !#alive(target.entity) return false;
+    eff := target.entity.get_component(Hunter_Pierce_Effect);
+    return eff != null && eff.active;
+}
+
+// True if any alive player is currently pierced by this hunter.
+rr_hunter_has_pierced_victim :: proc(hunter: Player) -> bool {
+    if hunter == null return false;
+    if !#alive(hunter.entity) return false;
+    hunter_id := hunter.entity.id;
+    for target: component_iterator(Player) {
+        if target == null continue;
+        if !#alive(target.entity) continue;
+        if target.player_state != Player_State.ALIVE continue;
+        if target.entity.id == hunter_id continue;
+        eff := target.entity.get_component(Hunter_Pierce_Effect);
+        if eff != null && eff.active && eff.pierced_by_id == hunter_id {
+            return true;
+        }
+    }
+    return false;
+}
+
+// =============================================================================
+// Hunter_Crossbow_Bolt projectile (custom — RR_Projectile auto-kills civilians,
+// which Cripple/Kill_Shot must NOT do).
+// =============================================================================
+
+Hunter_Crossbow_Bolt :: class : Component {
+    velocity: v2;
+    lifetime: float;
+    spawn_time: float;
+    owner: Entity;
+    is_kill_shot: bool;
+    spent: bool;
+    triangle_hint: s64;
+    embers_vfx_entity: Entity; // killshot ember puff trailing the bolt
+    camera_follow_active: bool;
+    saved_camera_size: float;
+    saved_camera_size_valid: bool;
+
+    ao_start :: proc(using this: Hunter_Crossbow_Bolt) {
+        spawn_time = get_time();
+    }
+
+    ao_end :: proc(using this: Hunter_Crossbow_Bolt) {
+        if embers_vfx_entity != null && #alive(embers_vfx_entity) {
+            embers_vfx_entity.destroy();
+        }
+        rr_hunter_bolt_restore_camera(this);
+    }
+
+    ao_update :: proc(using this: Hunter_Crossbow_Bolt, dt: float) {
+        if spent return;
+
+        // Face the direction of travel.
+        bolt_angle_deg := to_degrees(atan2(velocity.y, velocity.x));
+        entity.set_local_rotation(bolt_angle_deg);
+        entity.add_local_position(velocity * dt);
+
+        // Embers float "world-upward" no matter which direction the bolt is
+        // travelling, so counter-rotate them to cancel the parent's rotation.
+        if embers_vfx_entity != null && #alive(embers_vfx_entity) {
+            embers_vfx_entity.set_local_rotation(-bolt_angle_deg);
+        }
+
+        destroy_self := false;
+        elapsed := get_time() - spawn_time;
+
+        owner_alive := owner != null && #alive(owner);
+        owner_player: Player = null;
+        if owner_alive {
+            owner_player = owner.get_component(Player);
+        }
+
+        // Killshot: pin the local owner's camera onto the bolt while it flies.
+        // Camera is local-only, so guard with is_local() and re-apply every frame
+        // (server reconciliation can otherwise stomp our overrides).
+        if is_kill_shot && owner_player != null && owner_player.is_local() {
+            if !camera_follow_active {
+                if !saved_camera_size_valid {
+                    saved_camera_size = owner_player.camera.size;
+                    saved_camera_size_valid = true;
+                }
+                camera_follow_active = true;
+            }
+            owner_player.camera.follow_player = false;
+            owner_player.camera.position = entity.world_position;
+            owner_player.camera.size = HUNTER_KILL_SHOT_CAMERA_SIZE;
+        }
+
+        // Collision with players.
+        for target: component_iterator(Player) {
+            if target == null continue;
+            if !#alive(target.entity) continue;
+            if target.player_state != Player_State.ALIVE continue;
+            if owner_alive && target.entity == owner continue;
+
+            if !in_range(target.entity.world_position - entity.world_position, HUNTER_BOLT_HIT_RADIUS) {
+                continue;
+            }
+
+            if is_kill_shot {
+                // Kill Shot: only hurts already-pierced targets; otherwise pass through.
+                if !rr_hunter_is_player_pierced(target) {
+                    continue;
+                }
+                killer_id: u64 = 0;
+                if owner_alive killer_id = owner.id;
+                target.set_trigger("hunter_killed_by_crossbow");
+                target.kill_with_killer(killer_id);
+
+                // False Fire (mirrors Sheriff): killing an innocent civilian also kills the Hunter.
+                target_is_civilian := target.player_type == Player_Type.CIVILIAN;
+                if owner_player != null && target_is_civilian {
+                    owner_player.Notify("False Fire! You shot an innocent!");
+                    owner_player.kill_with_killer(killer_id);
+                }
+
+                sfx := SFX.default_sfx_desc();
+                sfx.set_position(target.entity.world_position);
+                sfx.volume = 0.8;
+                sfx.volume_perturb = 0.1;
+                sfx.speed_perturb = 0.08;
+                sfx.volume *= 0.25;
+                sfx.volume_perturb *= 0.25;
+                rr_play_sfx("sfx/imposter_knife_stab_18fcdc.wav", sfx);
+
+                destroy_self = true;
+                break;
+            } else {
+                // Cripple: apply Pierce on both client+server so client prediction
+                // matches the server-reconciled state (per CLAUDE.md guidance).
+                if owner_player != null {
+                    eff := target.entity.get_component(Hunter_Pierce_Effect);
+                    if eff == null {
+                        eff = target.entity.add_component(Hunter_Pierce_Effect);
+                    }
+                    eff.arm(owner_player);
+
+                    sfx := SFX.default_sfx_desc();
+                    sfx.set_position(target.entity.world_position);
+                    sfx.volume = 0.7;
+                    sfx.volume_perturb = 0.08;
+                    sfx.speed_perturb = 0.06;
+                    sfx.volume *= 0.25;
+                    sfx.volume_perturb *= 0.25;
+                    rr_play_sfx("sfx/imposter_knife_stab_18fcdc.wav", sfx);
+
+                    if Game.is_server() {
+                        owner_player.Notify(format_string("Pierced %!", .{target.entity.get_name()}));
+                        target.Notify("You've been pierced by a crossbow bolt!");
+                    }
+                }
+                destroy_self = true;
+                break;
+            }
+        }
+
+        // Lifetime / navmesh boundary destroy.
+        if !destroy_self {
+            if elapsed >= lifetime {
+                destroy_self = true;
+            } else {
+                point: v2;
+                if try_find_closest_point_on_navmesh(entity.world_position, ref point, ref triangle_hint) {
+                    if !in_range(point - entity.world_position, 0.02) {
+                        destroy_self = true;
+                    }
+                }
+            }
+        }
+
+        if destroy_self {
+            spent = true;
+            entity.destroy();
+        }
+    }
+}
+
+rr_hunter_shoot_bolt :: proc(hunter: Player, direction: v2, is_kill_shot: bool) {
+    if hunter == null return;
+    e := Scene.create_entity();
+    e.set_local_position(hunter.entity.world_position);
+    e.set_local_rotation(to_degrees(atan2(direction.y, direction.x)));
+
+    scale := HUNTER_BOLT_SPRITE_SCALE;
+    if is_kill_shot { scale = HUNTER_KILL_SHOT_BOLT_SCALE; }
+    e.set_local_scale(v2.{scale, scale});
+
+    sprite := e.add_component(Sprite_Renderer);
+    sprite.set_texture(get_asset(Texture_Asset, HUNTER_BOLT_SPRITE_PATH));
+    sprite.layer = 5;
+
+    bolt := e.add_component(Hunter_Crossbow_Bolt);
+    bolt.velocity = direction * HUNTER_BOLT_SPEED;
+    bolt.lifetime = HUNTER_BOLT_LIFETIME;
+    bolt.owner = hunter.entity;
+    bolt.is_kill_shot = is_kill_shot;
+
+    // Killshot: drifting cinder/ember puff that rides behind the bolt.
+    // Local position (-d, 0) in the bolt's frame = "d units behind the bolt"
+    // in world space, since the bolt's local +x always faces motion.
+    if is_kill_shot {
+        embers := Scene.create_entity();
+        embers.set_parent(e, false);
+        embers.set_local_position(v2.{-HUNTER_KILLSHOT_EMBERS_BEHIND, 0.0});
+        embers.set_local_rotation(90);
+        embers.set_local_scale(v2.{0.55, 0.55});
+
+        embers_spine := embers.add_component(Spine_Animator);
+        embers_spine.awaken();
+        embers_spine.layer = 4; // behind the bolt sprite (layer 5)
+        embers_spine.depth_offset = 0.05;
+        if embers_spine.instance != null {
+            embers_spine.instance.set_skeleton(get_asset(Spine_Asset, HUNTER_KILLSHOT_EMBERS_SPINE_PATH));
+            embers_spine.instance.set_animation("burning", true, 0);
+            embers_spine.instance.color_multiplier = v4.{1.0, 0.85, 0.45, 1.0};
+        }
+        bolt.embers_vfx_entity = embers;
+    }
+}
+
+// Restore the local owner's camera after a killshot bolt finishes flying.
+rr_hunter_bolt_restore_camera :: proc(using bolt: Hunter_Crossbow_Bolt) {
+    if !camera_follow_active return;
+    if owner == null || !#alive(owner) {
+        camera_follow_active = false;
+        saved_camera_size_valid = false;
+        return;
+    }
+    owner_player := owner.get_component(Player);
+    if owner_player == null {
+        camera_follow_active = false;
+        saved_camera_size_valid = false;
+        return;
+    }
+    if owner_player.is_local() {
+        owner_player.camera.follow_player = true;
+        if saved_camera_size_valid {
+            owner_player.camera.size = saved_camera_size;
+        }
+    }
+    camera_follow_active = false;
+    saved_camera_size_valid = false;
+}
+
+// =============================================================================
+// Hunter_Campfire — placeable bonfire (anti-stealth + schleem speed aura).
+// =============================================================================
+
+Hunter_Campfire :: class : Component {
+    owner_entity_id: u64;
+    spawn_time: float;
+    switched_to_loop: bool;
+    inited: bool;
+    light_entity: Entity;
+
+    ao_start :: proc(using this: Hunter_Campfire) {
+        spawn_time = get_time();
+        switched_to_loop = false;
+
+        spine := entity.get_component(Spine_Animator);
+        if spine == null {
+            spine = entity.add_component(Spine_Animator);
+        }
+        spine.awaken();
+        if spine.instance != null {
+            spine.instance.set_skeleton(get_asset(Spine_Asset, HUNTER_CAMPFIRE_SPINE_PATH));
+            spine.instance.set_animation("in", false, 0);
+        }
+        spine.depth_offset = -0.2;
+
+        // Warm orange world light so the campfire actually lights the area for everyone.
+        if light_entity == null || !#alive(light_entity) {
+            light_entity = Scene.create_entity();
+            light_entity.set_parent(entity, false);
+            light_entity.set_local_position(v2.{0.0, 0.2});
+            light_entity.set_local_rotation(0.0);
+            light_entity.set_local_scale(v2.{1.0, 1.0});
+
+            l := light_entity.add_component(Light);
+            l.color = v4.{1.0, 0.7, 0.35, 1.0};
+            l.intensity = 0.9;
+            l.radii = v2.{HUNTER_CAMPFIRE_BUFF_RADIUS * 0.6, HUNTER_CAMPFIRE_BUFF_RADIUS * 1.1};
+
+            // LOS_Caster so the campfire's light actually punches through fog
+            // of war / power outage — anyone with vision touching the fire's
+            // glow gets to see what it lights up.
+            caster := light_entity.add_component(LOS_Caster);
+            caster.radii = l.radii;
+        }
+
+        // Light + ignite SFX.
+        sfx := SFX.default_sfx_desc();
+        sfx.entity_to_follow = entity.id;
+        sfx.volume = 0.55;
+        sfx.volume_perturb = 0.05;
+        sfx.speed_perturb = 0.03;
+        sfx.volume *= 0.25;
+        sfx.volume_perturb *= 0.25;
+        rr_play_sfx("sfx/ambience_v3.wav", sfx); // soft ambience for the fire
+
+        inited = true;
+    }
+
+    ao_update :: proc(using this: Hunter_Campfire, dt: float) {
+        time_alive := get_time() - spawn_time;
+
+        // Cosmetic: switch to looped flame after the intro plays.
+        if !switched_to_loop && time_alive > 1.2 {
+            spine := entity.get_component(Spine_Animator);
+            if spine != null && spine.instance != null {
+                spine.instance.set_animation("loop", true, 0);
+            }
+            switched_to_loop = true;
+        }
+
+        // Auto-extinguish after lifetime. Entity destroy is server-authoritative
+        // and replicates to clients.
+        if time_alive >= HUNTER_CAMPFIRE_LIFETIME_SECONDS {
+            if Game.is_server() {
+                entity.destroy();
+            }
+            return;
+        }
+    }
+
+    ao_end :: proc(using this: Hunter_Campfire) {
+        if light_entity != null && #alive(light_entity) {
+            light_entity.destroy();
+        }
+    }
+}
+
+// True iff `p` is currently standing in any hunter campfire's buff radius.
+rr_hunter_is_player_in_campfire_buff_range :: proc(p: Player) -> bool {
+    if p == null return false;
+    if !#alive(p.entity) return false;
+    pos := p.entity.world_position;
+    for cf: component_iterator(Hunter_Campfire) {
+        if cf == null continue;
+        if !#alive(cf.entity) continue;
+        d := pos - cf.entity.world_position;
+        if length_squared(d) <= HUNTER_CAMPFIRE_BUFF_RADIUS * HUNTER_CAMPFIRE_BUFF_RADIUS {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Passive effect: holds the campfire speed buff for its entire lifetime.
+// Self-removes the moment any precondition fails (left the light, transformed,
+// pierced, died, round ended). effect_end always restores the speed we
+// captured at start, so we can't leak the multiplier into the lobby.
+Hunter_Campfire_Buff_Effect :: class : Effect_Base {
+    orig_speed: float;
+    orig_speed_valid: bool;
+
+    effect_start :: method() {
+        if player == null return;
+        if !player.baseline_movement_speed_saved return;
+        orig_speed = player.agent.movement_speed;
+        orig_speed_valid = true;
+        player.agent.movement_speed = player.baseline_movement_speed * HUNTER_CAMPFIRE_BUFF_MULTIPLIER;
+    }
+
+    effect_update :: method(dt: float) {
+        if player == null                                            { remove_effect(false); return; }
+        if !#alive(player.entity)                                    { remove_effect(false); return; }
+        if game_state != Game_State.INGAME                           { remove_effect(false); return; }
+        if player.player_state != Player_State.ALIVE                 { remove_effect(false); return; }
+        if rr_hunter_player_is_transformed(player)                   { remove_effect(false); return; }
+
+        pierce := player.entity.get_component(Hunter_Pierce_Effect);
+        if pierce != null && pierce.active                           { remove_effect(false); return; }
+
+        if !rr_hunter_is_player_in_campfire_buff_range(player)       { remove_effect(false); return; }
+
+        // Re-apply each frame so server reconciliation / other systems
+        // can't quietly stomp the buff while we're standing in light.
+        if player.baseline_movement_speed_saved {
+            player.agent.movement_speed = player.baseline_movement_speed * HUNTER_CAMPFIRE_BUFF_MULTIPLIER;
+        }
+    }
+
+    effect_end :: method(interrupt: bool) {
+        if player == null return;
+        if !#alive(player.entity) return;
+        if !orig_speed_valid return;
+        // Only restore if we still own the speed — if some other system
+        // already overrode it (pierce, transform), don't fight them.
+        if game_state == Game_State.INGAME && player.player_state == Player_State.ALIVE {
+            player.agent.movement_speed = orig_speed;
+        }
+        orig_speed_valid = false;
+    }
+}
+
+// Per-player update — every frame, ensure the schleem-only campfire buff effect
+// is present iff the player should be receiving it. The Effect_Base lifecycle
+// handles cleanup: as soon as ANY precondition fails (light, transform, pierce,
+// game state, alive), the effect removes itself and restores the prior speed.
+rr_hunter_update_campfire_buff_for_player :: proc(p: Player) {
+    if p == null return;
+    if !#alive(p.entity) return;
+    if game_state != Game_State.INGAME return;
+    if p.player_state != Player_State.ALIVE return;
+    if !p.baseline_movement_speed_saved return;
+
+    // Schleem-form only.
+    if rr_hunter_player_is_transformed(p) return;
+
+    // Pierce slow takes priority over the buff.
+    pierce := p.entity.get_component(Hunter_Pierce_Effect);
+    if pierce != null && pierce.active return;
+
+    if !rr_hunter_is_player_in_campfire_buff_range(p) return;
+
+    // Already buffed — the effect will keep itself alive.
+    if has_effect(p.entity, Hunter_Campfire_Buff_Effect) return;
+
+    eff := new(Hunter_Campfire_Buff_Effect);
+    p.entity.add_passive_effect(eff);
+}
+
+// True iff the player is in any monster/creature form.
+rr_hunter_player_is_transformed :: proc(p: Player) -> bool {
+    if p == null return false;
+    if !#alive(p.entity) return false;
+
+    wm := p.entity.get_component(Werewolf_Module);
+    if wm != null && wm.is_wolf_form return true;
+
+    mm := p.entity.get_component(Mimicer_Module);
+    if mm != null && mm.is_monster_form return true;
+
+    bcm := p.entity.get_component(Big_Charlie_Module);
+    if bcm != null && bcm.is_big_charlie_form return true;
+
+    lm := p.entity.get_component(Lily_Module);
+    if lm != null && lm.is_lily_form return true;
+
+    gm := p.entity.get_component(GGG_Module);
+    if gm != null && gm.is_creature_form return true;
+
+    return false;
+}
+
+// =============================================================================
+// Hunter_Scent_Footprint — local visual driven by the Hunter's per-frame loop.
+// =============================================================================
+
+Hunter_Scent_Footprint :: class : Component {
+    spawn_time: float;
+
+    ao_start :: proc(using this: Hunter_Scent_Footprint) {
+        spawn_time = get_time();
+    }
+
+    // Client-side visibility filter: only the Hunter (and dead players who
+    // can see everything) should see the scent footprints.
+    ao_on_state_sync :: method() {
+        local_player, ok := Game.get_local_player();
+        if !ok return;
+
+        should_show := local_player.player_role == Player_Role.HUNTER || local_player.player_state == Player_State.DEAD;
+
+        spine := entity.get_component(Spine_Animator);
+        if spine != null {
+            spine.set_enabled(should_show);
+        }
+    }
+
+    ao_update :: proc(using this: Hunter_Scent_Footprint, dt: float) {
+        elapsed := get_time() - spawn_time;
+        if elapsed >= HUNTER_FOOTPRINT_LIFETIME_SECONDS {
+            entity.destroy();
+            return;
+        }
+
+        // Fade-out tail.
+        spine := entity.get_component(Spine_Animator);
+        if spine != null && spine.instance != null {
+            alpha := 1.0;
+            fade_start := HUNTER_FOOTPRINT_LIFETIME_SECONDS - HUNTER_FOOTPRINT_FADE_SECONDS;
+            if elapsed >= fade_start {
+                alpha = clamp(1.0 - (elapsed - fade_start) / HUNTER_FOOTPRINT_FADE_SECONDS, 0.0, 1.0);
+            }
+            spine.instance.color_multiplier = v4.{0.55, 0.95, 0.55, alpha};
+        }
+    }
+}
+
+rr_hunter_pick_footprint_skin_for_dir :: proc(dir: v2) -> string {
+    // The rig ships with: east, south_east, south, north_east, north (+ default).
+    // Mirror handles the western half via flip_x at spawn time.
+    angle := atan2(dir.y, dir.x); // -PI..PI, 0 = east, PI/2 = north
+    deg := to_degrees(angle);
+    a := deg;
+    if a < 0.0 { a += 360.0; }
+    // a in [0, 360)  — 0 = east, 90 = north, 180 = west, 270 = south
+    if a >= 337.5 || a < 22.5  return "east";
+    if a >= 22.5  && a < 67.5  return "north_east";
+    if a >= 67.5  && a < 112.5 return "north";
+    if a >= 112.5 && a < 157.5 return "north_east"; // mirrored to NW
+    if a >= 157.5 && a < 202.5 return "east";       // mirrored to W
+    if a >= 202.5 && a < 247.5 return "south_east"; // mirrored to SW
+    if a >= 247.5 && a < 292.5 return "south";
+    if a >= 292.5 && a < 337.5 return "south_east";
+    return "south";
+}
+
+rr_hunter_spawn_footprint :: proc(pos: v2, dir: v2) {
+    e := Scene.create_entity();
+    e.set_local_position(pos);
+
+    skin := rr_hunter_pick_footprint_skin_for_dir(dir);
+
+    // Mirror for the western half-circle.
+    angle := atan2(dir.y, dir.x);
+    deg := to_degrees(angle);
+    if deg < 0.0 { deg += 360.0; }
+    facing_west := deg >= 112.5 && deg < 247.5;
+    sx := 1.0;
+    if facing_west { sx = -1.0; }
+    e.set_local_scale(v2.{sx, 1.0});
+
+    spine := e.add_component(Spine_Animator);
+    spine.awaken();
+    if spine.instance != null {
+        spine.instance.set_skeleton(get_asset(Spine_Asset, HUNTER_FOOTPRINT_SPINE_PATH));
+        spine.instance.set_skin(skin);
+        spine.instance.refresh_skins();
+        spine.instance.set_animation("Footprint_Scent _Loop", true, 0);
+        spine.instance.color_multiplier = v4.{0.55, 0.95, 0.55, 1.0};
+    }
+    spine.depth_offset = -0.05;
+
+    e.add_component(Hunter_Scent_Footprint);
+}
+
+// Runs on local + server (server-authoritative spawn that gets reconciled).
+// Visibility is filtered per-client by Hunter_Scent_Footprint.ao_on_state_sync.
+rr_hunter_update_footprints :: proc(hunter: Player, dt: float) {
+    if hunter == null return;
+    if !hunter.is_local_or_server() return;
+    if hunter.player_role != Player_Role.HUNTER return;
+    if hunter.player_state != Player_State.ALIVE return;
+    if game_state != Game_State.INGAME return;
+
+    hm := hunter.entity.get_component(Hunter_Module);
+    if hm == null return;
+
+    if !hm.footprint_emit_inited {
+        hm.footprint_emit_inited = true;
+        hm.footprint_emit_player_ids.clear();
+        hm.footprint_emit_last_times.clear();
+        hm.footprint_emit_last_positions.clear();
+    }
+
+    now := get_time();
+    hunter_pos := hunter.entity.world_position;
+
+    for p: component_iterator(Player) {
+        if p == null continue;
+        if !#alive(p.entity) continue;
+        if p == hunter continue;
+        if p.player_state != Player_State.ALIVE continue;
+        if !rr_hunter_player_is_transformed(p) continue;
+
+        // Limit to a reasonable radius so we don't blanket the whole map.
+        d := p.entity.world_position - hunter_pos;
+        if length_squared(d) > HUNTER_FOOTPRINT_REVEAL_RADIUS * HUNTER_FOOTPRINT_REVEAL_RADIUS continue;
+
+        // Find / create per-player tracking slot.
+        pid := p.entity.id;
+        idx := -1;
+        for i: 0..hm.footprint_emit_player_ids.count-1 {
+            if hm.footprint_emit_player_ids[i] == pid { idx = i; break; }
+        }
+        if idx < 0 {
+            hm.footprint_emit_player_ids.append(pid);
+            hm.footprint_emit_last_times.append(now);
+            hm.footprint_emit_last_positions.append(p.entity.world_position);
+            continue;
+        }
+
+        last_pos := hm.footprint_emit_last_positions[idx];
+        last_time := hm.footprint_emit_last_times[idx];
+        delta := p.entity.world_position - last_pos;
+        moved_sq := length_squared(delta);
+
+        if (now - last_time) < HUNTER_FOOTPRINT_EMIT_INTERVAL continue;
+        if moved_sq < HUNTER_FOOTPRINT_MOVE_THRESHOLD * HUNTER_FOOTPRINT_MOVE_THRESHOLD continue;
+
+        dir := normalize(delta);
+        rr_hunter_spawn_footprint(p.entity.world_position, dir);
+        hm.footprint_emit_last_times[idx] = now;
+        hm.footprint_emit_last_positions[idx] = p.entity.world_position;
+    }
+}
+
+// =============================================================================
+// World-space HUD: campfire buff icon + low-time countdown.
+// =============================================================================
+
+// Draw a small flame icon above any player currently receiving the campfire
+// speed buff. Called once per frame from the local viewer so the icon shows
+// for ALL nearby buffed schleems, not just the local player.
+rr_hunter_draw_campfire_buff_icons :: proc(viewer: Player) {
+    if viewer == null return;
+    if game_state != Game_State.INGAME return;
+
+    icon := get_asset(Texture_Asset, "sprites/icons/hunter/speed_boost.png");
+    if icon == null return;
+
+    UI.push_world_draw_context();
+    defer UI.pop_draw_context();
+
+    for p: component_iterator(Player) {
+        if p == null continue;
+        if !#alive(p.entity) continue;
+        if p.player_state != Player_State.ALIVE continue;
+        if !has_effect(p.entity, Hunter_Campfire_Buff_Effect) continue;
+
+        pos := p.entity.world_position;
+        // Sit above the nameplate (FNPLATE_Y_OFFSET = 1.45) so we don't cover the name.
+        icon_pos := v2.{pos.x, pos.y + 2.2};
+
+        UI.push_z(pos.y - 0.0001);
+
+        UI.begin_world_space_ui(p.entity);
+
+        size := 0.55;
+        icon_rect := Rect.{ v2.{icon_pos.x - size * 0.5, icon_pos.y - size * 0.5},
+                            v2.{icon_pos.x + size * 0.5, icon_pos.y + size * 0.5} };
+        UI.quad(icon_rect.fit_aspect(icon.get_aspect()), icon, v4.{1.0, 1.0, 1.0, 1.0});
+
+        UI.end_world_space_ui();
+        UI.pop_z();
+    }
+}
+
+// Draw a countdown above any campfire whose remaining lifetime is below
+// HUNTER_CAMPFIRE_LOW_TIME_THRESHOLD. Uses the same world-space pill-and-
+// text style as rr_draw_stun_timers so the HUD reads consistently.
+rr_hunter_draw_campfire_low_time_countdown :: proc(viewer: Player) {
+    if viewer == null return;
+    if game_state != Game_State.INGAME return;
+
+    UI.push_world_draw_context();
+    defer UI.pop_draw_context();
+
+    now := get_time();
+    for cf: component_iterator(Hunter_Campfire) {
+        if cf == null continue;
+        if !#alive(cf.entity) continue;
+
+        time_alive := now - cf.spawn_time;
+        remaining := HUNTER_CAMPFIRE_LIFETIME_SECONDS - time_alive;
+        if remaining > HUNTER_CAMPFIRE_LOW_TIME_THRESHOLD continue;
+        if remaining < 0.0 remaining = 0.0;
+
+        // Ceiling so 0.x doesn't display "0".
+        secs_i := remaining.(int);
+        frac := remaining - secs_i.(float);
+        if frac > 0.001 { secs_i += 1; }
+        if secs_i < 1 { secs_i = 1; }
+
+        pos := cf.entity.world_position;
+
+        UI.push_z(pos.y);
+        defer UI.pop_z();
+
+        // Mirror rr_draw_stun_timers: black pill background + outlined text.
+        label_pos := pos + v2.{0.0, 1.8};
+
+        bg_rect := Rect{label_pos, label_pos}.grow(0.18, 0.45, 0.18, 0.45);
+        UI.quad(bg_rect, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.55});
+
+        // Lerp white → red as time decreases (5s reference, same as stun timers).
+        t := clamp(remaining / 5.0, 0.0, 1.0);
+        col := v4.{1.0, t, t, 1.0};
+
+        ts := UI.default_text_settings();
+        ts.size = 0.30;
+        ts.color = col;
+        ts.halign = .CENTER;
+        ts.valign = .CENTER;
+        ts.do_outline = true;
+        ts.outline_thickness = 0.05;
+        ts.outline_color = v4.{0.0, 0.0, 0.0, 1.0};
+
+        text_rect := Rect{label_pos, label_pos}.grow(0.16, 0.43, 0.16, 0.43);
+        UI.text(text_rect, ts, format_string("%s", .{secs_i}));
+    }
+}
+
+// =============================================================================
+// Per-player Hunter update entry point (called from Player.ao_update).
+// =============================================================================
+
+rr_hunter_update :: proc(p: Player, dt: float) {
+    if p == null return;
+    if !#alive(p.entity) return;
+
+    // Anyone in a campfire's buff radius gets a schleem speed boost.
+    rr_hunter_update_campfire_buff_for_player(p);
+
+    // Hunter-only updates (local client).
+    if p.player_role == Player_Role.HUNTER {
+        rr_hunter_update_footprints(p, dt);
+    }
+}
+
+rr_hunter_round_start :: proc(p: Player) {
+    if p == null return;
+    // Clear any stale pierce state on every player at round start.
+    eff := p.entity.get_component(Hunter_Pierce_Effect);
+    if eff != null {
+        if eff.active {
+            eff.clear();
+        }
+        // Even if not active, nuke any leaked orig_speed/end_time fields so a
+        // new arm() this round starts from a clean slate.
+        eff.active = false;
+        eff.pierced_by_id = 0;
+        eff.end_time = 0.0;
+        eff.orig_speed = 0.0;
+        eff.orig_speed_valid = false;
+    }
+
+    // Force-clear any campfire buff effect carrying over from a previous round.
+    // The effect's own update would also catch this on its next tick, but
+    // removing it here ensures no one-frame stale buff between rounds.
+    remove_effect(p.entity, Hunter_Campfire_Buff_Effect, false);
+
+    if p.player_role != Player_Role.HUNTER return;
+    hm := p.entity.get_component(Hunter_Module);
+    if hm == null {
+        hm = p.entity.add_component(Hunter_Module);
+    }
+    hm.footprint_emit_inited = false;
+    hm.footprint_emit_player_ids.clear();
+    hm.footprint_emit_last_times.clear();
+    hm.footprint_emit_last_positions.clear();
+}
+
+// Server-authoritative cleanup for any stray campfires from a previous round.
+rr_hunter_round_global_cleanup :: proc() {
+    if !Game.is_server() return;
+    fires: [..]Entity;
+    for cf: component_iterator(Hunter_Campfire) {
+        if cf == null continue;
+        if cf.entity == null || !#alive(cf.entity) continue;
+        fires.append(cf.entity);
+    }
+    for i: 0..fires.count-1 {
+        if fires[i] != null && #alive(fires[i]) fires[i].destroy();
+    }
+}
+
+// =============================================================================
+// Abilities
+// =============================================================================
+
+// True iff the player currently has any active stun the Hunter abilities
+// should respect (locking out cooldown progress + blocking activation).
+rr_hunter_is_stunned :: proc(p: Player) -> bool {
+    if p == null return false;
+    if !#alive(p.entity) return false;
+
+    hs := p.entity.get_component(Hacker_Electrocuted_Stun);
+    if hs != null && hs.active return true;
+
+    hm := p.entity.get_component(Hitman_Mine_Stun);
+    if hm != null && hm.active return true;
+
+    bcs := p.entity.get_component(BC_Shockwave_Stun);
+    if bcs != null && bcs.active return true;
+
+    pe := p.entity.get_component(Pranked_Effect);
+    if pe != null && pe.phase == 1 return true;
+
+    sa := p.entity.get_component(Stunned_By_Autograph_Effect);
+    if sa != null && sa.active return true;
+
+    ws := p.entity.get_component(Werewolf_Infection_Stun);
+    if ws != null && ws.active return true;
+
+    ms := p.entity.get_component(Mimicer_Stun);
+    if ms != null && ms.active return true;
+
+    return false;
+}
+
+// Pause the cooldown tick while the Hunter is stunned, so the cooldown
+// doesn't quietly drain during a Hacker electrocution, mine stun, etc.
+// `update_ability_cooldowns` runs before on_update and already subtracted
+// dt — we snapshot the cooldown on the first stunned frame and restore it
+// every subsequent stunned frame.
+rr_hunter_pause_cooldown_if_stunned :: proc(ability: Ability_Base, paused_cd: ref float) -> bool {
+    if ability == null return false;
+    if ability.player == null return false;
+    if !rr_hunter_is_stunned(ability.player) {
+        paused_cd = -1.0;
+        return false;
+    }
+    if paused_cd < 0.0 {
+        paused_cd = ability.current_cooldown;
+    } else {
+        ability.current_cooldown = paused_cd;
+    }
+    return true;
+}
+
+Hunter_Cripple_Ability :: class : Ability_Base {
+    NAME :: "Cripple";
+    stun_paused_cd: float = -1.0;
+
+    on_init :: proc(instance: Hunter_Cripple_Ability) {
+        instance.icon = get_asset(Texture_Asset, "sprites/icons/hunter/cripple.png");
+        instance.is_aimed_ability = true;
+    }
+
+    can_use :: method() -> bool {
+        if game_state != Game_State.INGAME return false;
+        if player.player_state != Player_State.ALIVE return false;
+        if player.has_task_in_progress() return false;
+        if get_time() < post_meeting_kill_lockout_ends_at return false;
+        if rr_hunter_is_stunned(player) return false;
+        if !rr_player_has_civilian_power(player, Player_Role.HUNTER) return false;
+        return true;
+    }
+
+    on_update :: method(params: ref Ability_Update_Params) {
+        if rr_hunter_pause_cooldown_if_stunned(this.(Ability_Base), ref stun_paused_cd) {
+            // Still surface the crossbow visuals if we were aiming when stunned.
+            rr_hunter_update_crossbow_visibility(player, this.(Ability_Base));
+            return;
+        }
+
+        lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+        if lockout_remaining < 0.0 lockout_remaining = 0.0;
+        current_cooldown = max(current_cooldown, lockout_remaining);
+
+        activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+
+        // Show the crossbow skin while aiming + briefly after firing.
+        rr_hunter_update_crossbow_visibility(player, this.(Ability_Base));
+
+        if params.can_use && activation.activate {
+            // Set cooldown first so the overlay locks in immediately on the
+            // local client, even if any subsequent call short-circuits.
+            current_cooldown = HUNTER_CRIPPLE_COOLDOWN_SECONDS;
+
+            player.set_facing_right(activation.direction.x > 0);
+            player.set_trigger("shoot_gun");
+            player.set_aim_target(player.entity.world_position + activation.direction * 5.0);
+            player.gun_visible_until = get_time() + HUNTER_CROSSBOW_VISIBLE_SECONDS;
+
+            rr_hunter_shoot_bolt(player, activation.direction, false);
+
+            sfx := SFX.default_sfx_desc();
+            sfx.set_position(player.entity.world_position);
+            sfx.volume = 0.5;
+            sfx.volume_perturb = 0.1;
+            sfx.speed_perturb = 0.1;
+            sfx.volume *= 0.25;
+            sfx.volume_perturb *= 0.25;
+            rr_play_sfx("sfx/shoot.wav", sfx);
+        }
+    }
+
+    on_draw_button :: proc(instance: Hunter_Cripple_Ability, rect: Rect) {
+        rr_hunter_draw_aiming_overlay(instance.(Ability_Base), rect);
+        draw_ability_name_label(rect, Hunter_Cripple_Ability.NAME);
+    }
+}
+
+// Bright "AIMING" indicator drawn over the Hunter's currently-selected aimed
+// ability button (Cripple vs Kill Shot), since the existing dim-the-others
+// cue is too subtle to tell which crossbow shot is queued up.
+rr_hunter_draw_aiming_overlay :: proc(ability: Ability_Base, rect: Rect) {
+    if ability == null return;
+    p := ability.player;
+    if p == null return;
+    if p.active_ability != ability return;
+
+    bg := get_asset(Texture_Asset, "$AO/white.png");
+    ring := get_asset(Texture_Asset, "$AO/ui/kit/Game UI/Additional Elements/Circle Portholes/gold_ring.png");
+    border_color := v4.{1.0, 0.85, 0.2, 1.0};
+
+    UI.quad(rect, ring, v4.{1, 1, 1, 1});
+
+    pill_rect := rect.inset(10).cut_top(28);
+    UI.quad(pill_rect, bg, border_color);
+
+    ts := UI.default_text_settings();
+    ts.size = 18;
+    ts.color = v4.{0, 0, 0, 1};
+    ts.halign = .CENTER;
+    ts.valign = .CENTER;
+    ts.do_outline = true;
+    ts.outline_thickness = 1;
+    ts.outline_color = v4.{0, 0, 0, 0.6};
+    UI.text(pill_rect, ts, "AIMING");
+}
+
+// Toggle the merged-rig "weapons/crossbow" skin + mouse-IK aim while a Hunter
+// ability is aiming or just-fired (reuses Player.gun_visible_until like Sheriff).
+rr_hunter_update_crossbow_visibility :: proc(player: Player, ability: Ability_Base) {
+    if player == null return;
+    targeting := player.active_ability == ability;
+    visible := targeting || get_time() < player.gun_visible_until;
+    if visible {
+        rr_set_player_gun_skin(player, HUNTER_CROSSBOW_SKIN);
+    } else if player.gun_skin_active == HUNTER_CROSSBOW_SKIN {
+        rr_set_player_gun_skin(player, "");
+    }
+    if targeting {
+        player.set_mouse_ik_enabled(true);
+        player.set_aim_target(player.entity.world_position + player.last_aim_direction * 5.0);
+    } else {
+        player.set_mouse_ik_enabled(false);
+    }
+}
+
+Hunter_Kill_Shot_Ability :: class : Ability_Base {
+    NAME :: "Kill Shot";
+    stun_paused_cd: float = -1.0;
+
+    on_init :: proc(instance: Hunter_Kill_Shot_Ability) {
+        instance.icon = get_asset(Texture_Asset, "sprites/icons/hunter/killshot.png");
+        instance.is_aimed_ability = true;
+    }
+
+    can_use :: method() -> bool {
+        if game_state != Game_State.INGAME return false;
+        if player.player_state != Player_State.ALIVE return false;
+        if player.has_task_in_progress() return false;
+        if get_time() < post_meeting_kill_lockout_ends_at return false;
+        if rr_hunter_is_stunned(player) return false;
+        if !rr_player_has_civilian_power(player, Player_Role.HUNTER) return false;
+        if !rr_hunter_has_pierced_victim(player) return false;
+        return true;
+    }
+
+    on_update :: method(params: ref Ability_Update_Params) {
+        if rr_hunter_pause_cooldown_if_stunned(this.(Ability_Base), ref stun_paused_cd) {
+            rr_hunter_update_crossbow_visibility(player, this.(Ability_Base));
+            return;
+        }
+
+        lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+        if lockout_remaining < 0.0 lockout_remaining = 0.0;
+        current_cooldown = max(current_cooldown, lockout_remaining);
+
+        activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+
+        rr_hunter_update_crossbow_visibility(player, this.(Ability_Base));
+
+        if params.can_use && activation.activate {
+            current_cooldown = HUNTER_KILL_SHOT_COOLDOWN_SECONDS;
+
+            player.set_facing_right(activation.direction.x > 0);
+            player.set_trigger("shoot_gun");
+            player.set_aim_target(player.entity.world_position + activation.direction * 5.0);
+            player.gun_visible_until = get_time() + HUNTER_CROSSBOW_VISIBLE_SECONDS;
+
+            rr_hunter_shoot_bolt(player, activation.direction, true);
+
+            sfx := SFX.default_sfx_desc();
+            sfx.set_position(player.entity.world_position);
+            sfx.volume = 0.65;
+            sfx.volume_perturb = 0.1;
+            sfx.speed_perturb = 0.08;
+            sfx.volume *= 0.25;
+            sfx.volume_perturb *= 0.25;
+            rr_play_sfx("sfx/shoot.wav", sfx);
+        }
+    }
+
+    on_draw_button :: proc(instance: Hunter_Kill_Shot_Ability, rect: Rect) {
+        rr_hunter_draw_aiming_overlay(instance.(Ability_Base), rect);
+        draw_ability_name_label(rect, Hunter_Kill_Shot_Ability.NAME);
+    }
+}
+
+// Server-authoritative spawn. Pulled out of the ability so it can be reused
+// (e.g. from the placement flow or any future trigger).
+rr_hunter_place_campfire :: proc(owner: Player, world_pos: v2) {
+    if owner == null return;
+    if !Game.is_server() return;
+
+    // Snap to navmesh so the campfire can't be placed inside a wall.
+    snapped := world_pos;
+    nav_point: v2;
+    triangle_hint: s64;
+    if try_find_closest_point_on_navmesh(world_pos, ref nav_point, ref triangle_hint) {
+        snapped = nav_point;
+    }
+
+    e := Scene.create_entity();
+    e.set_local_position(snapped);
+    cf := e.add_component(Hunter_Campfire);
+    cf.owner_entity_id = owner.entity.id;
+
+    sfx := SFX.default_sfx_desc();
+    sfx.set_position(snapped);
+    sfx.volume = 0.7;
+    sfx.volume_perturb = 0.08;
+    sfx.speed_perturb = 0.05;
+    sfx.volume *= 0.25;
+    sfx.volume_perturb *= 0.25;
+    rr_play_sfx("sfx/ambience_v3.wav", sfx);
+}
+
+Hunter_Campfire_Ability :: class : Ability_Base {
+    NAME :: "Campfire";
+    stun_paused_cd: float = -1.0;
+
+    was_targeting: bool;
+    activated_this_session: bool;
+
+    on_init :: proc(instance: Hunter_Campfire_Ability) {
+        instance.icon = get_asset(Texture_Asset, "sprites/icons/hunter/campfire.png");
+        instance.is_aimed_ability = true;
+    }
+
+    can_use :: method() -> bool {
+        if game_state != Game_State.INGAME return false;
+        if player.player_state != Player_State.ALIVE return false;
+        if player.has_task_in_progress() return false;
+        if rr_hunter_is_stunned(player) return false;
+        if !rr_player_has_civilian_power(player, Player_Role.HUNTER) return false;
+        return true;
+    }
+
+    cleanup_targeting :: method() {
+        was_targeting = false;
+        activated_this_session = false;
+    }
+
+    on_update :: method(params: ref Ability_Update_Params) {
+        if rr_hunter_pause_cooldown_if_stunned(this.(Ability_Base), ref stun_paused_cd) {
+            cleanup_targeting();
+            return;
+        }
+
+        // Same targeting-then-aim pattern as GGG's Chocolate Trap.
+        targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+        targeting := targeted.targeting;
+
+        if targeting && !params.can_use {
+            player.active_ability = null;
+            cleanup_targeting();
+            return;
+        }
+
+        if targeting && !was_targeting {
+            activated_this_session = false;
+            was_targeting = true;
+        }
+        if !targeting {
+            if was_targeting {
+                cleanup_targeting();
+            }
+            return;
+        }
+
+        aiming := Ability_Utilities.update_aiming_ability(player, ref params);
+        if aiming.cancel {
+            player.active_ability = null;
+            cleanup_targeting();
+            return;
+        }
+
+        target_pos := get_mouse_world_position();
+        {
+            origin := player.entity.world_position;
+            delta := target_pos - origin;
+            max_r := HUNTER_CAMPFIRE_PLACE_DISTANCE;
+            if length_squared(delta) > max_r * max_r {
+                if length_squared(delta) < 0.001 {
+                    delta = v2.{1, 0};
+                } else {
+                    delta = normalize(delta);
+                }
+                target_pos = origin + delta * max_r;
+            }
+        }
+
+        if player.is_local() {
+            UI.push_world_draw_context();
+            defer UI.pop_draw_context();
+            UI.push_z(target_pos.y);
+            defer UI.pop_z();
+            reticle := get_asset(Texture_Asset, GROUND_RETICLE_TEXTURE_PATH);
+            reticle_rect := Rect{target_pos, target_pos}.grow(0.85, 0.85, 0.85, 0.85);
+            UI.quad(reticle_rect.fit_aspect(reticle.get_aspect()), reticle, v4.{1.0, 0.75, 0.35, 0.95});
+            cf_preview := get_asset(Texture_Asset, "sprites/icons/hunter/campfire.png");
+            preview_rect := Rect{target_pos, target_pos}.grow(0.65, 0.65, 0.65, 0.65);
+            UI.quad(preview_rect.fit_aspect(cf_preview.get_aspect()), cf_preview, v4.{1.0, 0.85, 0.5, 0.55});
+        }
+
+        if activated_this_session return;
+
+        if aiming.activate && params.can_use {
+            activated_this_session = true;
+            current_cooldown = HUNTER_CAMPFIRE_COOLDOWN_SECONDS;
+            rr_hunter_place_campfire(player, target_pos);
+            player.Notify("Campfire placed!");
+            player.active_ability = null;
+            cleanup_targeting();
+        }
+    }
+
+    on_draw_button :: proc(instance: Hunter_Campfire_Ability, rect: Rect) {
+        draw_ability_name_label(rect, Hunter_Campfire_Ability.NAME);
+    }
+}

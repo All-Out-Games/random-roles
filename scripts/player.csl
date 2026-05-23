@@ -66,6 +66,7 @@ Player :: class : Player_Base {
 
 	// Local UI state
 	show_minimap: bool;
+	show_analytics: bool;
 	chat_mode_inited: bool;
 	chat_mode_last_applied: Chat.Mode;
 	task_list_inited: bool;
@@ -160,25 +161,10 @@ Player :: class : Player_Base {
 
 	// --- Werewolf (Traitor role) ---
 	// Gameplay fields (kills, wolf form, speed) live in Werewolf_Module (only on werewolf player).
-	werewolf_infected: bool;          // infected "small werewolf" curse
+	// Cosmetic/transform-timing fields live in Werewolf_Look_Effect, attached only to
+	// the actual werewolf and to infected civilians.
+	werewolf_infected: bool;          // infected "small werewolf" curse — synced fast-check flag
 	werewolf_infected_from_id: u64;   // original werewolf entity id (0 = unknown)
-	// When infected, we temporarily replace the player's task list with a single objective.
-	werewolf_saved_tasks_active: bool;
-	werewolf_saved_tasks: List(Task_Base);
-	// Cosmetic: skin switching timing (used for transform animations — cross-player due to infection).
-	werewolf_skin_enable_at: float;   // 0 = none, otherwise game-time to enable werewolf skin
-	werewolf_skin_disable_at: float;  // 0 = none, otherwise game-time to disable werewolf skin
-	werewolf_skin_active: bool;       // cached flag – avoids get_skins() every frame
-	// Saved cosmetic skins before wolf form (restored on revert).
-	werewolf_saved_cosmetic_skins: [..]string;
-	// Round-start cosmetic baseline (captured once each round).
-	werewolf_round_start_cosmetic_skins: [..]string;
-	werewolf_saved_avatar_color: Color_Replace_Color;
-	werewolf_round_start_avatar_color: Color_Replace_Color;
-	// Delayed infected transform: game-time at which to fire the "werewolf_infected_transform" trigger.
-	// 0 = no pending trigger.
-	werewolf_infected_transform_trigger_at: float;
-	werewolf_infection_expires_at: float;  // 0 = no expiry, otherwise game-time when infection auto-reverts
 
 	// --- Goo Goo Gaga (Traitor role) ---
 	// All GGG fields live in GGG_Module (only on GGG player).
@@ -306,7 +292,7 @@ Player :: class : Player_Base {
 
     Notify :: proc(using this: Player, message: string) {
         if this.is_local_or_server() {
-            Notifier.notify(message);
+            Notifier.notify(this, message);
         }
     }
     
@@ -482,6 +468,10 @@ Player :: class : Player_Base {
 				// Draw fake nameplates (mimicer clones, etc.)
 				fake_nameplate_draw_all(this);
 				rr_hacker_draw_task_rings(this);
+				// Hunter: flame badge over any player getting the campfire speed buff
+				// + low-time countdown above any campfire about to extinguish.
+				rr_hunter_draw_campfire_buff_icons(this);
+				rr_hunter_draw_campfire_low_time_countdown(this);
 			}
 			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN || game_state == Game_State.ANIM_BC_MASS_BIRTH || game_state == Game_State.ANIM_HACKER_WIN {
 				this.draw_letterbox_bars();
@@ -523,8 +513,8 @@ Player :: class : Player_Base {
 		// GGG update: runs on all clients for smooth prediction.
 		rr_ggg_update(this, delta_time);
 
-		// Cosmetic: apply scheduled skin toggles on all clients.
-		rr_werewolf_update_skins(this);
+		// Werewolf cosmetic state machine runs in Werewolf_Look_Effect.effect_update,
+		// which only fires for players who actually have the effect attached.
 
 		// GGG creature animation controller (runs on all clients).
 		rr_ggg_update_creature_anims(this, delta_time);
@@ -540,6 +530,9 @@ Player :: class : Player_Base {
 
 		// Lily per-frame update (transform, strings, RLGL, tea party, dollhouse).
 		rr_lily_update(this, delta_time);
+
+		// Hunter per-frame update (campfire buff aura, scent footprints).
+		rr_hunter_update(this, delta_time);
 
 		// Deathbraid camera — runs for ALL players so everyone sees the cinematic.
 		rr_lily_update_deathbraid_camera(this);
@@ -1017,7 +1010,7 @@ Player :: class : Player_Base {
 					// Mini-werewolf infection: suppress ALL normal abilities until they pass the bite.
 					// Only show after the transformation has revealed (skin active = wolf look applied).
 					// During the 10s delay the player keeps their normal abilities so nothing looks different.
-					if this.werewolf_infected && this.werewolf_skin_active {
+					if this.werewolf_infected && rr_werewolf_skin_active(this) {
 						draw_ability_button(this, Werewolf_Pass_Bite_Ability, 0);
 						return;
 					}
@@ -1059,6 +1052,17 @@ Player :: class : Player_Base {
 						abilityIndex += 1;
 						draw_ability_button(this, Blue_Portal_Ability, abilityIndex);
 						abilityIndex += 1;
+					}
+					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.HUNTER {
+						draw_ability_button(this, Hunter_Cripple_Ability, abilityIndex);
+						abilityIndex += 1;
+						draw_ability_button(this, Hunter_Campfire_Ability, abilityIndex);
+						abilityIndex += 1;
+						// Kill Shot only appears once the Hunter has a pierced victim.
+						if rr_hunter_has_pierced_victim(this) {
+							draw_ability_button(this, Hunter_Kill_Shot_Ability, abilityIndex);
+							abilityIndex += 1;
+						}
 					}
 					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PRANKSTER {
 						draw_ability_button(this, Prank_Ability, abilityIndex);
@@ -1209,6 +1213,10 @@ Player :: class : Player_Base {
 			// Apply eye-machine camera AFTER ability buttons fire this frame, so the
 			// spawn frame's camera/zoom takes effect immediately (no 1-frame lag).
 			rr_lily_apply_eye_machine_camera(this);
+
+			if show_analytics {
+				rr_analytics_draw_ui(this);
+			}
         }
     }
 
@@ -1268,9 +1276,14 @@ Player :: class : Player_Base {
 		this.werewolf_infected = false;
 		this.werewolf_infected_from_id = 0;
 		// Ensure visuals revert immediately.
-		this.werewolf_skin_enable_at = 0.0;
-		this.werewolf_skin_disable_at = get_time();
-		this.werewolf_infected_transform_trigger_at = 0.0;
+		{
+			eff := rr_werewolf_get_look_effect(this);
+			if eff != null {
+				eff.skin_enable_at = 0.0;
+				eff.skin_disable_at = get_time();
+				eff.infected_transform_trigger_at = 0.0;
+			}
+		}
 
 		// Track death for the next meeting's recap UI.
 		rr_register_player_death(this.entity.id);
@@ -1297,6 +1310,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .MOVIE_STAR: return "MOVIE STAR";
 		case .CORONER:    return "CORONER";
 		case .PORTAL_MAKER: return "WARPER";
+		case .HUNTER:     return "HUNTER";
 		case .PRANKSTER:  return "PRANKSTER";
 		case .PYROMANIAC: return "PYROMANIAC";
 		case .HACKER:     return "HACKER";
@@ -1375,9 +1389,12 @@ rr_get_stun_remaining :: proc(p: Player) -> float {
 	}
 
 	// Werewolf infection countdown (time until auto-revert) — only after transform reveals.
-	if p.werewolf_infected && p.werewolf_infection_expires_at > 0.0 && p.werewolf_skin_active {
-		r := p.werewolf_infection_expires_at - now;
-		if r > best { best = r; }
+	if p.werewolf_infected {
+		eff := rr_werewolf_get_look_effect(p);
+		if eff != null && eff.infection_expires_at > 0.0 && eff.skin_active {
+			r := eff.infection_expires_at - now;
+			if r > best { best = r; }
+		}
 	}
 
 	// Big Charlie cocoon — fresh shows time until victim is auto-freed; hardened shows time until hatch.
@@ -2450,16 +2467,7 @@ draw_lily_role_hud :: proc(player: Player) {
 }
 
 // --- Werewolf transform (ability-driven, server authoritative) ---
-// Constants defined in abilities.csl: WEREWOLF_TRANSFORM_MAX_DURATION_SECONDS, WEREWOLF_TRANSFORM_COOLDOWN_SECONDS
-
-// --- Werewolf skins (merged player rig) ---
-WEREWOLF_SKIN_NAME :: "004RAND/werewolf";
-WEREWOLF_NAME_INVIS_REASON :: "werewolf_transform";
-WEREWOLF_WOLF_FORM_SPEED_MULTIPLIER :: 1.35;
-WEREWOLF_HOWL_TOTAL_SECONDS :: 2.0;
-WEREWOLF_HOWL_HALF_SECONDS :: WEREWOLF_HOWL_TOTAL_SECONDS * 0.5;
-WEREWOLF_INFECTED_TRANSFORM_TOTAL_SECONDS :: 2.0;
-WEREWOLF_INFECTED_TRANSFORM_HALF_SECONDS :: WEREWOLF_INFECTED_TRANSFORM_TOTAL_SECONDS * 0.5;
+// Constants and effect logic live in werewolf.csl.
 
 rr_player_set_skin_enabled :: proc(player: Player, skin: string, enabled: bool) {
 	if player == null return;
@@ -2498,21 +2506,6 @@ rr_player_has_skin :: proc(player: Player, skin: string) -> bool {
 		if skins[i] == skin return true;
 	}
 	return false;
-}
-
-rr_werewolf_capture_round_start_look :: proc(player: Player) {
-	if player == null return;
-	if player.animator == null return;
-	if player.animator.instance == null return;
-
-	player.werewolf_round_start_cosmetic_skins.clear();
-	skins := player.animator.instance.get_skins();
-	for i: 0..skins.count-1 {
-		if skins[i] != WEREWOLF_SKIN_NAME {
-			player.werewolf_round_start_cosmetic_skins.append(skins[i]);
-		}
-	}
-	player.werewolf_round_start_avatar_color = player.avatar_color;
 }
 
 // Traitor ability drawing (extracted from ao_late_update to reduce register pressure).
@@ -2678,244 +2671,6 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 	return abilityIndex;
 }
 
-// Enables the full werewolf look: saves current cosmetic skins, strips them, enables only the
-// werewolf skin, and forces dark brown color.
-rr_werewolf_enable_wolf_look :: proc(player: Player) {
-	if player == null return;
-	if player.animator == null return;
-	if player.animator.instance == null return;
-	// Idempotence guard: avoid clobbering the saved skin snapshot if a stale schedule
-	// causes enable to run again while wolf look is already active.
-	if player.werewolf_skin_active return;
-
-	// Save current skins so we can restore later.
-	player.werewolf_saved_cosmetic_skins.clear();
-	skins := player.animator.instance.get_skins();
-	for i: 0..skins.count-1 {
-		if skins[i] != WEREWOLF_SKIN_NAME {
-			player.werewolf_saved_cosmetic_skins.append(skins[i]);
-		}
-	}
-	player.werewolf_saved_avatar_color = player.avatar_color;
-
-	// Extra safety: refresh our long-lived fallback baseline whenever we enter
-	// werewolf look from a valid non-werewolf snapshot.
-	if player.werewolf_saved_cosmetic_skins.count > 0 {
-		player.werewolf_round_start_cosmetic_skins.clear();
-		for i: 0..player.werewolf_saved_cosmetic_skins.count-1 {
-			player.werewolf_round_start_cosmetic_skins.append(player.werewolf_saved_cosmetic_skins[i]);
-		}
-		player.werewolf_round_start_avatar_color = player.werewolf_saved_avatar_color;
-	}
-
-	player.animator.mask_in_shadow = true;
-	rr_apply_shadow_mask(player.animator.instance);
-
-	// Strip all skins and enable only the werewolf skin.
-	player.animator.instance.disable_all_skins();
-	player.animator.instance.enable_skin(WEREWOLF_SKIN_NAME);
-	player.animator.instance.refresh_skins();
-
-	// Force dark color (server-only so it replicates to all clients).
-	if Game.is_server() {
-		player.animator.instance.set_color_replace_color(Color_Replace_Color.BLACK);
-	}
-
-	// Hide the player's name tag while in wolf form.
-	player.add_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
-
-	player.werewolf_skin_active = true;
-}
-
-// Restores the player's original cosmetic skins and avatar color after wolf form ends.
-rr_werewolf_disable_wolf_look :: proc(player: Player) {
-	if player == null return;
-	if player.animator == null return;
-	if player.animator.instance == null return;
-
-	// Safety: if wolf look was never enabled, don't strip skins (nothing to restore from).
-	if !player.werewolf_skin_active return;
-
-	// Remove shadow mask material first so the material swap doesn't clobber the color we set below.
-	player.animator.instance.set_material(null, false);
-
-	// Disable werewolf skin and restore saved cosmetics.
-	// Safety: if the per-transform snapshot is unexpectedly empty, fall back to the
-	// round-start baseline captured at game start.
-	if player.werewolf_saved_cosmetic_skins.count > 0 {
-		player.animator.instance.disable_all_skins();
-		for i: 0..player.werewolf_saved_cosmetic_skins.count-1 {
-			player.animator.instance.enable_skin(player.werewolf_saved_cosmetic_skins[i]);
-		}
-		player.animator.instance.refresh_skins();
-	} else if player.werewolf_round_start_cosmetic_skins.count > 0 {
-		player.animator.instance.disable_all_skins();
-		for i: 0..player.werewolf_round_start_cosmetic_skins.count-1 {
-			player.animator.instance.enable_skin(player.werewolf_round_start_cosmetic_skins[i]);
-		}
-		player.animator.instance.refresh_skins();
-	} else {
-		log_warning("rr_werewolf_disable_wolf_look: missing both saved and round-start cosmetic snapshots for player %.", {player.entity.id});
-	}
-
-	// Restore original avatar color (server-only so it replicates to all clients).
-	if Game.is_server() {
-		restore_color := player.werewolf_saved_avatar_color;
-		if player.werewolf_saved_cosmetic_skins.count <= 0 {
-			restore_color = player.werewolf_round_start_avatar_color;
-		}
-		player.animator.instance.set_color_replace_color(restore_color);
-	}
-
-	// Restore name tag visibility.
-	player.remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
-
-	player.werewolf_skin_active = false;
-	player.werewolf_saved_cosmetic_skins.clear();
-}
-
-rr_werewolf_should_look_werewolf :: proc(player: Player) -> bool {
-	if player == null return false;
-	if player.entity == null return false;
-	if !#alive(player.entity) return false;
-	if player.player_state != Player_State.ALIVE return false;
-	// Keep wolf look during meeting animations (revert deferred to teleport in setup_voting).
-	is_gameplay_or_meeting_anim :=
-		game_state == Game_State.INGAME ||
-		game_state == Game_State.ANIM_BODY_FOUND ||
-		game_state == Game_State.ANIM_MEETING_CALLED;
-	if !is_gameplay_or_meeting_anim return false;
-	// Infected players look werewolf only during gameplay / meeting anim.
-	if player.werewolf_infected return true;
-	// Werewolf player looks werewolf only during wolf form.
-	if player.player_role == Player_Role.WEREWOLF && player.player_type == Player_Type.TRAITOR {
-		wm := player.entity.get_component(Werewolf_Module);
-		if wm != null return wm.is_wolf_form;
-	}
-	return false;
-}
-
-rr_werewolf_update_skins :: proc(player: Player) {
-	if player == null return;
-	if player.entity == null return;
-	if !#alive(player.entity) return;
-
-	now := get_time();
-
-	// Process delayed infected-transform animation trigger.
-	// This is the moment the infection "reveals" — everything before this is invisible.
-	if player.werewolf_infected_transform_trigger_at > 0.0 && now >= player.werewolf_infected_transform_trigger_at {
-		player.werewolf_infected_transform_trigger_at = 0.0;
-		player.set_trigger("werewolf_infected_transform");
-
-		// Server-authoritative: apply all the reveal effects now (notification, task swap, stun).
-		if Game.is_server() {
-			player.Notify("You were bitten! Pass it on to return to normal.");
-			rr_werewolf_apply_infected_task_override(player);
-
-			stun := player.entity.get_component(Werewolf_Infection_Stun);
-			if stun == null {
-				stun = player.entity.add_component(Werewolf_Infection_Stun);
-			}
-			stun.arm(WEREWOLF_INFECTION_STUN_SECONDS);
-		}
-	}
-
-	// Hard-forces back to schleem look if we're not supposed to be werewolf-looking.
-	if !rr_werewolf_should_look_werewolf(player) {
-		player.werewolf_skin_enable_at = 0.0;
-		player.werewolf_skin_disable_at = 0.0;
-		player.werewolf_infected_transform_trigger_at = 0.0;
-		if player.werewolf_skin_active {
-			rr_werewolf_disable_wolf_look(player);
-		}
-		// Always clear name invisibility even if skin wasn't active (safety for lobby/reset).
-		player.remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
-		return;
-	}
-
-	// Process scheduled disable first (explicit "back to schleem immediately").
-	if player.werewolf_skin_disable_at > 0.0 && now >= player.werewolf_skin_disable_at {
-		player.werewolf_skin_disable_at = 0.0;
-		player.werewolf_skin_enable_at = 0.0;
-		rr_werewolf_disable_wolf_look(player);
-		return;
-	}
-
-	// Process scheduled enable (strips cosmetics, forces dark brown + werewolf-only skin).
-	if player.werewolf_skin_enable_at > 0.0 && now >= player.werewolf_skin_enable_at {
-		player.werewolf_skin_enable_at = 0.0;
-		rr_werewolf_enable_wolf_look(player);
-	}
-
-	// Safety: if we should look werewolf but no enable is pending and skin isn't on, force it on.
-	if player.werewolf_skin_enable_at <= 0.0 && !player.werewolf_skin_active {
-		rr_werewolf_enable_wolf_look(player);
-	}
-}
-
-rr_werewolf_update_transform :: proc(player: Player, dt: float) {
-	if player == null return;
-	now := get_time();
-
-	// Non-werewolf: just manage skin schedules for infected civilians.
-	if player.player_role != Player_Role.WEREWOLF || player.player_type != Player_Type.TRAITOR {
-		// Auto-revert infection after timer expires.
-		if player.werewolf_infected && player.werewolf_infection_expires_at > 0.0 && now >= player.werewolf_infection_expires_at {
-			if Game.is_server() {
-				rr_werewolf_clear_infection(player);
-			}
-		}
-		if !player.werewolf_infected {
-			player.werewolf_skin_enable_at = 0.0;
-			player.werewolf_skin_disable_at = now;
-		}
-		return;
-	}
-
-	wm := player.entity.get_component(Werewolf_Module);
-	if wm == null return;
-
-	prev_is_wolf := wm.is_wolf_form;
-
-	// Dead werewolves revert.
-	if player.player_state != Player_State.ALIVE {
-		if prev_is_wolf {
-			player.set_trigger("RESET");
-		}
-		wm.is_wolf_form = false;
-		wm.transform_ends_at = 0.0;
-		player.werewolf_skin_enable_at = 0.0;
-		player.werewolf_skin_disable_at = now;
-		return;
-	}
-
-	// Meetings / cutscenes: stop updating but defer visual revert until teleport
-	// (setup_voting handles the actual revert so nearby players don't see it)
-	if game_state != Game_State.INGAME {
-		return;
-	}
-
-	// Check if wolf form duration expired.
-	if wm.is_wolf_form && wm.transform_ends_at > 0.0 && now >= wm.transform_ends_at {
-		wm.is_wolf_form = false;
-		wm.transform_ends_at = 0.0;
-		player.set_trigger("RESET");
-		player.werewolf_skin_enable_at = 0.0;
-		player.werewolf_skin_disable_at = now;
-	}
-
-	// Speed boost: apply on enter, remove on exit.
-	if wm.is_wolf_form && !wm.speed_boost_active {
-		wm.speed_original = player.agent.movement_speed;
-		wm.speed_boost_active = true;
-		player.agent.movement_speed = wm.speed_original * WEREWOLF_WOLF_FORM_SPEED_MULTIPLIER;
-	} else if !wm.is_wolf_form && wm.speed_boost_active {
-		player.agent.movement_speed = wm.speed_original;
-		wm.speed_boost_active = false;
-	}
-}
-
     revive :: method() {
         this.set_trigger("RESET");
     }
@@ -2923,13 +2678,18 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 	// Immediately restores werewolf visuals + clears all skin/transform state.
 	// Safe to call even if the player is not in wolf form (no-ops if skin not active).
 	reset_werewolf_visuals :: method() {
-		rr_werewolf_disable_wolf_look(this);
-		this.remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
 		this.werewolf_infected = false;
 		this.werewolf_infected_from_id = 0;
-		this.werewolf_skin_enable_at = 0.0;
-		this.werewolf_skin_disable_at = 0.0;
-		this.werewolf_infected_transform_trigger_at = 0.0;
+		// Drop the look effect entirely. effect_end restores visuals as part of
+		// the teardown — and because the engine flips already_ending first, the
+		// effect's update can't fire afterwards and re-enable wolf look.
+		eff := rr_werewolf_get_look_effect(this);
+		if eff != null {
+			eff.remove_effect(true);
+		}
+		// Safety: ensure name visibility is restored even if the player never had
+		// an effect (e.g. lobby reset path).
+		this.remove_name_invisibility_reason(WEREWOLF_NAME_INVIS_REASON);
 		wm := this.entity.get_component(Werewolf_Module);
 		if wm != null {
 			wm.is_wolf_form = false;
@@ -3216,6 +2976,46 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 
 	}
 
+	// Hunter player-rig state machine states.
+	rr_sm_setup_hunter :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		// Pierced victim: impact one-shot then enters a "pained" idle/walking loop.
+		hunter_impaled_var := sm.create_variable("hunter_impaled", State_Machine_Variable.Kind.TRIGGER);
+		hunter_impaled_state := layer.create_state("004RAND_hunter/impaled_by_crossbow_bolt", false, 0.417);
+		layer.create_global_transition(hunter_impaled_state, false).create_trigger_condition(hunter_impaled_var);
+
+		// Pained loop state machine (bool-driven so we can swap idle/walking based on motion).
+		hunter_pained_var := sm.create_variable("hunter_pained", State_Machine_Variable.Kind.BOOL);
+		hunter_pained_moving_var := sm.create_variable("hunter_pained_moving", State_Machine_Variable.Kind.BOOL);
+
+		hunter_pained_idle_state := layer.create_state("004RAND_hunter/pained_idle", true, 0.0);
+		hunter_pained_walk_state := layer.create_state("004RAND_hunter/pained_walked", true, 0.0);
+
+		// impale -> pained idle
+		layer.create_transition(hunter_impaled_state, hunter_pained_idle_state, true);
+
+		// Global transitions: enter pained idle/walk whenever the pained flag is on
+		// (so it survives ability triggers/RESET while the pierce effect is active).
+		to_pained_idle := layer.create_global_transition(hunter_pained_idle_state, false);
+		to_pained_idle.create_bool_condition(hunter_pained_var, true);
+		to_pained_idle.create_bool_condition(hunter_pained_moving_var, false);
+
+		to_pained_walk := layer.create_global_transition(hunter_pained_walk_state, false);
+		to_pained_walk.create_bool_condition(hunter_pained_var, true);
+		to_pained_walk.create_bool_condition(hunter_pained_moving_var, true);
+
+		// Exit pained when flag clears.
+		exit_pained_idle := layer.create_transition(hunter_pained_idle_state, idle_state, false);
+		exit_pained_idle.create_bool_condition(hunter_pained_var, false);
+		exit_pained_walk := layer.create_transition(hunter_pained_walk_state, idle_state, false);
+		exit_pained_walk.create_bool_condition(hunter_pained_var, false);
+
+		// Killed-by-crossbow death animation (used as kill-shot kill anim on victim).
+		hunter_killed_var := sm.create_variable("hunter_killed_by_crossbow", State_Machine_Variable.Kind.TRIGGER);
+		hunter_killed_state := layer.create_state("004RAND_hunter/killed_by_crossbow_bolt", false, 1.833);
+		layer.create_global_transition(hunter_killed_state, false).create_trigger_condition(hunter_killed_var);
+		// No transition back — handled by death/corpse swap.
+	}
+
 	// Big Charlie player-rig state machine states.
 	rr_sm_setup_big_charlie :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
 		// Transform to monster (one-shot, 1s) -> back to Idle.
@@ -3475,6 +3275,7 @@ rr_werewolf_update_transform :: proc(player: Player, dt: float) {
 		rr_mimicer_setup_player_state_machine(sm, layer, idle_state);
 		rr_sm_setup_big_charlie(sm, layer, idle_state);
 		rr_sm_setup_lily(sm, layer, idle_state);
+		rr_sm_setup_hunter(sm, layer, idle_state);
 		rr_sm_setup_drag_body(sm, layer, idle_state);
 
 		sm_inited = true;
@@ -3566,6 +3367,9 @@ rr_player_clear_gun_state :: proc(player: Player) {
 	if player == null return;
 	player.set_mouse_ik_enabled(false);
 	rr_set_player_gun_skin(player, "");
+	// Also clear the post-fire visibility window so the gun/crossbow can't
+	// briefly re-show after the round ends (e.g. in lobby/voting).
+	player.gun_visible_until = 0.0;
 }
 
 rr_drag_body_force_drop_for_player :: proc(player: Player) {
@@ -5070,6 +4874,12 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 		rr_intro_copy_player_skins(player);
 		player.intro_role_spine.refresh_skins();
 		player.intro_role_spine.set_animation("Portal_Maker/portal_falling_start", false, 0);
+	} else if role == Player_Role.HUNTER {
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Hunter/RAND004_Hunter.spine"));
+		player.intro_role_spine.enable_skin("weapons/crossbow");
+		rr_intro_copy_player_skins(player);
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("004RAND_hunter/intro_animation", false, 0);
 	} else {
 		player.intro_role_spine.destroy();
 		player.intro_role_spine_ready = false;

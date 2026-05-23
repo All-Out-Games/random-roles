@@ -1,0 +1,247 @@
+// analytics.csl
+// Per-round win tracking + admin /analytics UI.
+// Counts are stored as game-level integers via Save.increment_game_int so they
+// persist published-game-wide.
+
+RR_ANALYTICS_TOTAL_ROUNDS_KEY :: "rr_analytics_total_rounds";
+
+rr_analytics_type_key :: proc(t: Player_Type) -> string {
+	switch t {
+		case .CIVILIAN:  return "civilian";
+		case .ANARCHIST: return "anarchist";
+		case .TRAITOR:   return "traitor";
+	}
+	return "unknown";
+}
+
+rr_analytics_type_display :: proc(t: Player_Type) -> string {
+	switch t {
+		case .CIVILIAN:  return "Civilian";
+		case .ANARCHIST: return "Anarchist";
+		case .TRAITOR:   return "Traitor";
+	}
+	return "Unknown";
+}
+
+rr_analytics_type_wins_key :: proc(t: Player_Type) -> string {
+	return format_string("rr_analytics_type_wins_%", {rr_analytics_type_key(t)});
+}
+
+rr_analytics_role_played_key :: proc(r: Player_Role) -> string {
+	return format_string("rr_analytics_role_played_%", {rr_get_role_display_name(r)});
+}
+
+rr_analytics_role_wins_key :: proc(r: Player_Role) -> string {
+	return format_string("rr_analytics_role_wins_%", {rr_get_role_display_name(r)});
+}
+
+// Full role list (excludes NONE). Mirrors the master pools in assign_players_to_types.
+rr_analytics_all_roles :: proc() -> List(Player_Role) {
+	out: List(Player_Role);
+	append(ref out, Player_Role.SHERIFF);
+	append(ref out, Player_Role.DOCTOR);
+	append(ref out, Player_Role.PRESIDENT);
+	append(ref out, Player_Role.MOVIE_STAR);
+	append(ref out, Player_Role.CORONER);
+	append(ref out, Player_Role.PORTAL_MAKER);
+	append(ref out, Player_Role.HUNTER);
+	append(ref out, Player_Role.PRANKSTER);
+	append(ref out, Player_Role.PYROMANIAC);
+	append(ref out, Player_Role.HACKER);
+	append(ref out, Player_Role.BIG_CHARLIE);
+	append(ref out, Player_Role.PIRATE);
+	append(ref out, Player_Role.HITMAN);
+	append(ref out, Player_Role.WEREWOLF);
+	append(ref out, Player_Role.GOO_GOO_GAGA);
+	append(ref out, Player_Role.MIMICER);
+	append(ref out, Player_Role.LILY_LOVEBRAIDS);
+	return out;
+}
+
+// Called once per round, after roles have been assigned.
+rr_analytics_record_round_start :: proc() {
+	if !Game.is_server() return;
+	Save.increment_game_int(RR_ANALYTICS_TOTAL_ROUNDS_KEY, 1);
+	for i: 0..players.elements.count-1 {
+		p := players.elements[i];
+		if p == null continue;
+		if p.player_role == Player_Role.NONE continue;
+		Save.increment_game_int(rr_analytics_role_played_key(p.player_role), 1);
+	}
+}
+
+// Called once per round, when the round ends with a victor.
+rr_analytics_record_round_end :: proc(victor: Player_Type, winners: List(Player)) {
+	if !Game.is_server() return;
+	Save.increment_game_int(rr_analytics_type_wins_key(victor), 1);
+	for i: 0..winners.elements.count-1 {
+		w := winners.elements[i];
+		if w == null continue;
+		if w.player_role == Player_Role.NONE continue;
+		Save.increment_game_int(rr_analytics_role_wins_key(w.player_role), 1);
+	}
+}
+
+rr_analytics_format_pct :: proc(wins: s64, played: s64) -> string {
+	if played <= 0 return "—";
+	pct := (wins.(float) / played.(float)) * 100.0;
+	return format_string("%0%%", {format_float(pct, decimals=1)});
+}
+
+rr_analytics_make_text :: proc(size_mult: float, color: v4, halign: Text_Settings.Horizontal_Alignment) -> UIK.Text_Desc {
+	t := UIK.text_body();
+	UIK.text_set_size_mult(&t, size_mult);
+	UIK.text_set_word_wrap(&t, false);
+	UIK.text_set_valign(&t, .CENTER);
+	UIK.text_set_halign(&t, halign);
+	t.color = color;
+	t.override_flags |= UIK.Text_Override_COLOR;
+	return t;
+}
+
+rr_analytics_draw_cell :: proc(text: string, desc: UIK.Text_Desc, width: UIK.Size) {
+	cell := UIK.layout_column();
+	cell.width = width;
+	cell.height = UIK.flex(1);
+	cell.cross_align = .CENTER;
+	cell.main_align = .CENTER;
+	cell.show_background = false;
+	UIK.panel_begin(cell);
+	UIK.text(text, desc);
+	UIK.panel_end();
+}
+
+rr_analytics_draw_type_row :: proc(t: Player_Type, completed_rounds: s64) {
+	wins := Save.get_game_int(rr_analytics_type_wins_key(t), 0);
+
+	row := UIK.panel_styled(.BUTTON_BASIC_BLACK);
+	row.axis = .HORIZONTAL;
+	row.width = UIK.flex(1);
+	row.height = UIK.pixels(36);
+	row.padding = v4.{6, 16, 6, 16};
+	row.cross_align = .CENTER;
+	UIK.panel_begin(row);
+
+	white := v4.{1, 1, 1, 1};
+	yellow := v4.{1.0, 0.85, 0.2, 1.0};
+
+	rr_analytics_draw_cell(rr_analytics_type_display(t), rr_analytics_make_text(1.0, white, .LEFT), UIK.flex(1));
+	rr_analytics_draw_cell(format_string("% / %", {wins, completed_rounds}), rr_analytics_make_text(1.0, white, .RIGHT), UIK.pixels(140));
+	UIK.spacer(UIK.pixels(16), UIK.pixels(1));
+	rr_analytics_draw_cell(rr_analytics_format_pct(wins, completed_rounds), rr_analytics_make_text(1.0, yellow, .RIGHT), UIK.pixels(80));
+
+	UIK.panel_end();
+}
+
+rr_analytics_draw_unfinished_row :: proc(unfinished: s64, total: s64) {
+	row := UIK.panel_styled(.BUTTON_BASIC_BLACK);
+	row.axis = .HORIZONTAL;
+	row.width = UIK.flex(1);
+	row.height = UIK.pixels(36);
+	row.padding = v4.{6, 16, 6, 16};
+	row.cross_align = .CENTER;
+	UIK.panel_begin(row);
+
+	dim := v4.{0.7, 0.7, 0.7, 1.0};
+
+	rr_analytics_draw_cell("Unfinished", rr_analytics_make_text(1.0, dim, .LEFT), UIK.flex(1));
+	rr_analytics_draw_cell(format_string("% / %", {unfinished, total}), rr_analytics_make_text(1.0, dim, .RIGHT), UIK.pixels(140));
+	UIK.spacer(UIK.pixels(16), UIK.pixels(1));
+	rr_analytics_draw_cell(rr_analytics_format_pct(unfinished, total), rr_analytics_make_text(1.0, dim, .RIGHT), UIK.pixels(80));
+
+	UIK.panel_end();
+}
+
+rr_analytics_draw_role_row :: proc(r: Player_Role) {
+	played := Save.get_game_int(rr_analytics_role_played_key(r), 0);
+	wins := Save.get_game_int(rr_analytics_role_wins_key(r), 0);
+
+	row := UIK.panel_styled(.BUTTON_BASIC_BLACK);
+	row.axis = .HORIZONTAL;
+	row.width = UIK.flex(1);
+	row.height = UIK.pixels(32);
+	row.padding = v4.{4, 16, 4, 16};
+	row.cross_align = .CENTER;
+	UIK.panel_begin(row);
+
+	// Tint label by team type for quick scanning.
+	t := rr_get_role_type(r);
+	label_color := v4.{1, 1, 1, 1};
+	if t == Player_Type.TRAITOR   { label_color = v4.{1.0, 0.55, 0.55, 1.0}; }
+	if t == Player_Type.ANARCHIST { label_color = v4.{1.0, 0.85, 0.45, 1.0}; }
+	if t == Player_Type.CIVILIAN  { label_color = v4.{0.65, 0.9, 1.0, 1.0}; }
+
+	white := v4.{1, 1, 1, 1};
+	yellow := v4.{1.0, 0.85, 0.2, 1.0};
+
+	rr_analytics_draw_cell(rr_get_role_display_name(r), rr_analytics_make_text(0.85, label_color, .LEFT), UIK.flex(1));
+	rr_analytics_draw_cell(format_string("% / %", {wins, played}), rr_analytics_make_text(0.85, white, .RIGHT), UIK.pixels(140));
+	UIK.spacer(UIK.pixels(16), UIK.pixels(1));
+	rr_analytics_draw_cell(rr_analytics_format_pct(wins, played), rr_analytics_make_text(0.85, yellow, .RIGHT), UIK.pixels(80));
+
+	UIK.panel_end();
+}
+
+rr_analytics_draw_ui :: proc(player: Player) {
+	UIK.begin(UIK.modal(UIK.rect_window_large(), 15));
+
+	shell := UIK.panel_modal(.BLUE_WITH_FOOTER);
+	shell.gap = 0;
+	UIK.panel_begin(shell);
+
+	exit_handle := UIK.title_area(UIK.title_area_desc("Analytics"));
+
+	total := Save.get_game_int(RR_ANALYTICS_TOTAL_ROUNDS_KEY, 0);
+	civ_wins := Save.get_game_int(rr_analytics_type_wins_key(Player_Type.CIVILIAN), 0);
+	an_wins  := Save.get_game_int(rr_analytics_type_wins_key(Player_Type.ANARCHIST), 0);
+	tr_wins  := Save.get_game_int(rr_analytics_type_wins_key(Player_Type.TRAITOR), 0);
+	completed := civ_wins + an_wins + tr_wins;
+	unfinished := total - completed;
+	if unfinished < 0 unfinished = 0;
+
+	content := UIK.layout_column();
+	content.width = UIK.flex(1);
+	content.height = UIK.flex(1);
+	content.padding = v4.{12, 12, 12, 12};
+	content.gap = 4;
+	UIK.list_begin("analytics_scroll", content);
+
+	UIK.text(format_string("Total Rounds: %  (Completed: %)", {total, completed}), UIK.text_title());
+	UIK.spacer(UIK.pixels(1), UIK.pixels(8));
+
+	UIK.text("Team Win Rates", UIK.text_title());
+	UIK.divider(1.0, v4.{1, 1, 1, 0.2});
+	UIK.spacer(UIK.pixels(1), UIK.pixels(4));
+
+	rr_analytics_draw_type_row(Player_Type.CIVILIAN, completed);
+	rr_analytics_draw_type_row(Player_Type.ANARCHIST, completed);
+	rr_analytics_draw_type_row(Player_Type.TRAITOR, completed);
+	rr_analytics_draw_unfinished_row(unfinished, total);
+
+	UIK.spacer(UIK.pixels(1), UIK.pixels(14));
+
+	UIK.text("Role Win Rates", UIK.text_title());
+	UIK.divider(1.0, v4.{1, 1, 1, 0.2});
+	UIK.spacer(UIK.pixels(1), UIK.pixels(4));
+
+	all_roles := rr_analytics_all_roles();
+	for i: 0..all_roles.elements.count-1 {
+		rr_analytics_draw_role_row(all_roles.elements[i]);
+	}
+
+	UIK.list_end();
+	UIK.panel_end();
+	UIK.end();
+
+	if UIK.clicked(exit_handle) {
+		player.show_analytics = false;
+	}
+}
+
+// Chat command: /analytics
+// Admin-only by default (no @any/@vip/@youtuber annotation). Toggles the
+// per-player analytics panel.
+analytics :: proc(player: Player) {
+	if player == null return;
+	player.show_analytics = !player.show_analytics;
+} @chat_command

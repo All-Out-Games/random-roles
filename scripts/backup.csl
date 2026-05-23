@@ -24,6 +24,7 @@
 BACKUP_POLL_INTERVAL :: 0.5;
 RR_BACKUP_SAVE_KEY :: "rr_backup_snapshot";
 RR_BACKUP_SCHEMA_VERSION :: 5;
+RR_BACKUP_MAX_SAVE_BYTES :: 200000;
 
 // Enums serialized as ints — JSON support for enums is unspecified, ints are
 // portable. Schema version bump guards against enum reordering.
@@ -189,7 +190,17 @@ rr_backup_save_to_disk :: proc() {
 	if rr_backup_snapshot == null return;
 	rr_backup_snapshot.version = RR_BACKUP_SCHEMA_VERSION;
 	json := JSON.serialize(ref rr_backup_snapshot);
+	if json.count > RR_BACKUP_MAX_SAVE_BYTES {
+		// Keep this dev snapshot system from ever writing a payload large enough
+		// to make the next load expensive or arena-heavy.
+		rr_backup_last_saved_bytes = json.count;
+		return;
+	}
 	payload := rr_backup_encode_for_save(json);
+	if payload.count > RR_BACKUP_MAX_SAVE_BYTES {
+		rr_backup_last_saved_bytes = payload.count;
+		return;
+	}
 	rr_backup_last_saved_bytes = payload.count;
 	Save.set_game_string(RR_BACKUP_SAVE_KEY, payload);
 }
@@ -197,6 +208,13 @@ rr_backup_save_to_disk :: proc() {
 rr_backup_load_from_disk :: proc() -> bool {
 	payload := Save.get_game_string(RR_BACKUP_SAVE_KEY, "");
 	if payload.count == 0 return false;
+	if payload.count > RR_BACKUP_MAX_SAVE_BYTES {
+		// Dev-tool guard: a stale/corrupt game-level snapshot can become huge.
+		// Decoding it uses repeated string concatenation and can exhaust the
+		// engine arena. Ignore oversized payloads instead of loading them during
+		// gameplay startup.
+		return false;
+	}
 
 	json := rr_backup_decode_from_save(payload);
 	loaded: Backup_Snapshot;
@@ -427,8 +445,8 @@ rr_backup_state_changed :: proc() -> bool {
 }
 
 rr_backup_maybe_auto :: proc() {
-	rr_backup_ensure_loaded();
 	if !rr_backup_enabled return;
+	rr_backup_ensure_loaded();
 	if game_state != Game_State.INGAME return;
 
 	now := get_time();
@@ -645,18 +663,15 @@ rr_backup_apply_to_player :: proc(p: Player, e: Backup_Player_Entry) {
 
 // /backup — toggles auto-snapshot. Captures once immediately on enable.
 backup :: proc(player: Player) {
-	rr_backup_ensure_loaded();
 	rr_backup_enabled = !rr_backup_enabled;
 
 	if rr_backup_enabled {
 		rr_backup_last_poll_at = 0.0;
 		rr_backup_capture();
-		// Read back from Save to confirm the write round-tripped.
-		readback := Save.get_game_string(RR_BACKUP_SAVE_KEY, "");
 		Chat.server_send_message(
-			format_string("Backup ENABLED. Captured % players + % corpses. JSON=%b, readback=%b.",
+			format_string("Backup ENABLED. Captured % players + % corpses. JSON=%b.",
 				.{rr_backup_snapshot.entries.count, rr_backup_snapshot.corpses.count,
-				  rr_backup_last_saved_bytes, readback.count}),
+				  rr_backup_last_saved_bytes}),
 			player);
 		return;
 	}
