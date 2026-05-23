@@ -4,51 +4,24 @@ You will be developing a multiplayer game in a custom scripting language (.csl)
 > **NEVER USE`Game.is_server()`.** The engine uses client-side prediction with automatic server reconciliation. Gameplay code **must** run on both client and server for smooth behavior.
 
 - All gameplay state is automatically synced. You do not need to write RPCs or manually replicate state.
-- The client runs the same gameplay code as the server. The server's authoritative result is reconciled automatically — you get correctness **and** responsiveness for free, but **only if the code runs on both sides**.
+- The client runs the same gameplay code as the server. The server's authoritative result pushed to the client every 4 frames — you get correctness **and** responsiveness for free.
 - Do not forget that **multiple players will be connecting**. Avoid global state that will break with multiple players. Store these as fields on the player.
 
-### is_local_or_server() vs is_local()
-Both are **methods on Player_Base** — they are NOT standalone global functions.
-
-- Inside a `Player_Base` subclass method: call as bare `is_local_or_server()`
-- From any other component that has a player reference: call `player_ref.is_local_or_server()`
-
+There are two player methods that control where code runs:
 ```csl
-// ✅ Correct
-Player :: class : Player_Base {
-    ao_late_update :: method(dt: float) {
-        if is_local_or_server() {
-            draw_ability_button(this, Shoot_Ability, 0);
-            UI.text(..., "Waiting for host to start the game...");
-        }
-        if is_local() {
-            // Local only SFX
-        }
-    }
+player.is_local_or_server() {
+    // ONLY/MUST used for UI, and all UI must be drawn in player late_update
 }
 
-// ✅ Correct — from a non-Player component with a player reference
-My_Component :: class : Component {
-    player: Player;
-
-    ao_update :: method(dt: float) {
-        if player == null return;
-        if player.is_local_or_server() {
-            // gameplay logic
-        }
-    }
-}
-
-// ❌ Wrong — is_local_or_server() is not a global free function
-My_Component :: class : Component {
-    ao_update :: method(dt: float) {
-        if is_local_or_server() { } // ERROR: Unresolved identifier
-    }
+player.is_local() {
+    // ONLY used for player specific cosmetic effects like controlling visibility for player specific items. You cannot store any persistent state here, it will be wiped every time the server updates.  
 }
 ```
 
+These are NOT standalone global functions, they must be called from within or on your player class. 
+
 ## Imports
-All imports go in main.csl (in the /scripts folder) only. You only need to import folders, not individual scripts.
+All imports go in main.csl (in the /scripts folder) only. You only import folders, not individual scripts.
 ```csl
 // main.csl
 import "core:ao"
@@ -166,7 +139,6 @@ for player: component_iterator(My_Player) {
 ```
 
 #### Finding components close to the player
-> csl does not have collision callbacks instead get components near them and check distance
 ```csl
 nearby: [..]Enemy;
 Scene.get_all_components_in_range(player_pos, 5.0, ref nearby);
@@ -199,7 +171,6 @@ format_string("pi: %", {format_float(PI, decimals=2)}); // "pi: 3.14"
 my_str.count gets length 
 
 ## Time
-
 ```csl
 current_time := get_time(); // Float seconds since game start
 frame := get_frame_number(); // u64
@@ -214,7 +185,7 @@ desc.delay = 0; // For lining up with animations
 desc.loop = false;
 desc.volume = 0.4;
 desc.speed_perturb = 0.1;
-// For sounds only one player should hear (UI clicks), wrap play calls with is_local
+desc.specific_to_player = player; // For sounds only one player should hear (UI clicks, coin earning, etc):
 sound_id := SFX.play(sound_asset, desc);
 
 SFX.stop(sound_id);
@@ -249,8 +220,8 @@ Round based games should reset economy on ao_start with Economy.delete_save_data
 `sin`, `cos`, `pow`, `sqrt`, `lerp`, `clamp`, `abs`, `min`, `max`, `length`, `length_squared`, `normalize` there are no other math functions. 
 
 ### Player_Base Reference
-- p.is_local_or_server() -> bool // true on the local client and on the server; must be used for UI. 
-- p.is_local() -> bool  // true only on the local client; use for purely cosmetic effects (not UI)
+- p.is_local_or_server() -> bool // true on the local client and on the server; must only be used for UI. 
+- p.is_local() -> bool // true only on the local client; use for purely cosmetic effects (not UI); do not set any persisted state here or it will be wiped. 
 - p.get_username()
 - p.get_user_id() -> string
 - p.avatar_color -> Color_Replace_Color 
@@ -265,7 +236,7 @@ Round based games should reset economy on ao_start with Economy.delete_save_data
 - Brainrots refer to a special class of character you can find by using the get_remote_assets_that_work_well_with tool with catalogId 05604152b758f509 (these are usually collection based games where brainrots obtained in a user defined way generate money over time you can collect by walking up to them when placed in your base)
 - All games with plots must have a UIK button to teleport to their own plot.
 - Only use the Notifyer API for critical messages there is no other way to convey. Skip notifications if there's a more natural way to convey something.  
-- For new-player onboarding, use world-space objective arrows over tutorial text. Reference the `world-space-ui` skill and use `Tutorial_Arrow.default_options()` + `Tutorial_Arrow.draw(player, target_position, options)`.
+- For new-player onboarding use world-space objective arrows insetad of tutorial text. Reference the `world-space-ui` skill and use `Tutorial_Arrow.default_options()` + `Tutorial_Arrow.draw(player, target_position, options)`.
 - Any games involving weapons MUST clone https://github.com/All-Out-Games/reusable-weapons-csl.git repo with curl and follow its README. 
 - When the prompt requires building a game world do so using the allout MCP scene editing tools instead of scripts. 
 
