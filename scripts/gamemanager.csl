@@ -1560,8 +1560,9 @@ on_player_go_passive :: proc(player: Player) {
 	player.player_state = Player_State.PASSIVE;
 	// Immediately restore werewolf visuals (don't defer to next frame — /restart can start
 	// a new round on the same frame, so the deferred cleanup would never run).
+	// reset_werewolf_visuals drops the Werewolf_Look_Effect entirely, so any
+	// saved-tasks state is reclaimed with it.
 	player.reset_werewolf_visuals();
-	player.werewolf_saved_tasks_active = false;
 	world_references.teleport_near_lobby(player);
 	player.remove_ghost_reason("spectator");
 	// Hard-reset to canonical baseline speed — prevents any leaked multipliers.
@@ -1747,9 +1748,12 @@ rr_werewolf_force_revert_for_meeting :: proc(player: Player) {
 	now := get_time();
 	// Revert infected players' wolf look
 	if player.werewolf_infected {
-		player.werewolf_skin_enable_at = 0.0;
-		player.werewolf_skin_disable_at = now;
-		player.werewolf_infected_transform_trigger_at = 0.0;
+		eff := rr_werewolf_get_look_effect(player);
+		if eff != null {
+			eff.skin_enable_at = 0.0;
+			eff.skin_disable_at = now;
+			eff.infected_transform_trigger_at = 0.0;
+		}
 	}
 	// Revert actual werewolf transform
 	if player.player_role != Player_Role.WEREWOLF || player.player_type != Player_Type.TRAITOR return;
@@ -1764,8 +1768,11 @@ rr_werewolf_force_revert_for_meeting :: proc(player: Player) {
 		player.agent.movement_speed = wm.speed_original;
 		wm.speed_boost_active = false;
 	}
-	player.werewolf_skin_enable_at = 0.0;
-	player.werewolf_skin_disable_at = now;
+	eff := rr_werewolf_get_look_effect(player);
+	if eff != null {
+		eff.skin_enable_at = 0.0;
+		eff.skin_disable_at = now;
+	}
 }
 
 // Run immediately after teleport so transform-reverts are masked by the jump
@@ -2337,10 +2344,18 @@ rr_unstuck_player :: proc(player: Player) {
 	if player.werewolf_infected {
 		player.werewolf_infected = false;
 		player.werewolf_infected_from_id = 0;
-		player.werewolf_infection_expires_at = 0.0;
+		eff := rr_werewolf_get_look_effect(player);
+		if eff != null {
+			eff.infection_expires_at = 0.0;
+		}
 		rr_werewolf_clear_infected_task_override(player);
 	}
-	player.werewolf_infected_transform_trigger_at = 0.0;
+	{
+		eff := rr_werewolf_get_look_effect(player);
+		if eff != null {
+			eff.infected_transform_trigger_at = 0.0;
+		}
+	}
 
 	// Clear mimicer blind/distort state.
 	player.mimicer_blinded = false;
@@ -3670,10 +3685,12 @@ assign_players_to_types :: proc() {
 		destroy_pirate_dig_spots_for_player(p.entity.id);
 		// Werewolf — full reset including skin state (guards against /restart race).
 		p.reset_werewolf_visuals();
-		// Capture round-start cosmetics so werewolf cleanup can always restore baseline look.
-		p.capture_werewolf_round_start_look();
 		// Werewolf module: only for actual werewolves.
 		if p.player_role == Player_Role.WEREWOLF {
+			// Capture round-start cosmetics for the actual werewolf only — they
+			// transform repeatedly and need a long-lived fallback baseline. Infected
+			// civilians capture their look on demand at infection time.
+			p.capture_werewolf_round_start_look();
 			wwm := p.entity.get_component(Werewolf_Module);
 			if wwm == null {
 				wwm = p.entity.add_component(Werewolf_Module);

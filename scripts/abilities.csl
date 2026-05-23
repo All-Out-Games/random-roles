@@ -408,11 +408,42 @@ Drag_Body_Ability :: class : Ability_Base {
 
 // --- Werewolf (Traitor role) ---
 WEREWOLF_TRANSFORM_MAX_DURATION_SECONDS :: 30.0;
-WEREWOLF_TRANSFORM_COOLDOWN_SECONDS :: 15.0;
+WEREWOLF_TRANSFORM_COOLDOWN_SECONDS :: 20.0;
 WEREWOLF_TRANSFORM_HOWL_SKIN_DELAY :: 1.0; // half of the howl anim (2s total)
 WEREWOLF_DEVOUR_COOLDOWN_SECONDS :: 60.0;
 WEREWOLF_INFECT_COOLDOWN_SECONDS :: 60.0;
-WEREWOLF_CLAW_COOLDOWN_SECONDS :: 90.0;
+WEREWOLF_CLAW_COOLDOWN_SECONDS :: 70.0;
+// Claw is a melee swipe — each swing rolls a random reach in this band so
+// attacks feel varied, and hits anyone in a forward cone. The slash VFX
+// sweeps forward visually to make the wider reach feel justified.
+WEREWOLF_CLAW_RANGE_MIN :: 4.0;
+WEREWOLF_CLAW_RANGE_MAX :: 5.5;
+// cos(half-angle); 0.95 ≈ 37° total cone — narrow swipe along the aim line.
+WEREWOLF_CLAW_CONE_DOT_THRESHOLD :: 0.95;
+// Forward-traveling slash VFX (purely cosmetic — hit detection is instant).
+// Travel distance (speed * lifetime) ≈ ability hit range so victims can read
+// where the slash will and won't connect.
+WEREWOLF_CLAW_VFX_SPEED :: 12.0;
+WEREWOLF_CLAW_VFX_LIFETIME :: 0.32;
+WEREWOLF_CLAW_VFX_SPINE_PATH :: "slash_projectile_7879c4/slash_projectile.spine";
+// Bite SFX for Devour. Server-authoritative so all clients hear it.
+WEREWOLF_BITE_SFX_PATH :: "sfx/monster_bite.wav";
+
+rr_werewolf_play_bite_sfx :: proc(player: Player) {
+	if !Game.is_server() return;
+	if player == null return;
+	if !#alive(player.entity) return;
+	sfx := SFX.default_sfx_desc();
+	sfx.set_position(player.entity.world_position);
+	sfx.volume = 0.75;
+	sfx.volume_perturb = 0.1;
+	sfx.speed_perturb = 0.08;
+	// Global SFX mix: everything at 25% volume.
+	sfx.volume *= 0.25;
+	sfx.volume_perturb *= 0.25;
+	rr_play_sfx(WEREWOLF_BITE_SFX_PATH, sfx);
+}
+
 
 WEREWOLF_DEVOUR_RANGE :: 2.5;
 WEREWOLF_INFECT_RANGE :: 2.0;
@@ -420,9 +451,6 @@ WEREWOLF_PASS_BITE_RANGE :: 2.0;
 
 WEREWOLF_INFECT_UNLOCK_KILLS :: 1;
 WEREWOLF_CLAW_UNLOCK_KILLS :: 2;
-
-WEREWOLF_CLAW_PROJECTILE_SPEED :: 12.0;
-WEREWOLF_CLAW_PROJECTILE_LIFETIME :: 0.45;
 
 WEREWOLF_DEVOUR_LOCK_REASON :: "werewolf_devour_lock";
 WEREWOLF_DEVOUR_LOCK_SECONDS :: 1.2; // matches Infection_Bite animation duration
@@ -439,10 +467,13 @@ rr_werewolf_apply_infected_task_override :: proc(target: Player) {
 	if target == null return;
 	if !target.werewolf_infected return;
 
+	eff := rr_werewolf_get_or_add_look_effect(target);
+	if eff == null return;
+
 	// Only override once per infection session.
-	if !target.werewolf_saved_tasks_active {
-		target.werewolf_saved_tasks = target.active_tasks;
-		target.werewolf_saved_tasks_active = true;
+	if !eff.saved_tasks_active {
+		eff.saved_tasks = target.active_tasks;
+		eff.saved_tasks_active = true;
 	}
 
 	// Replace with a single objective entry.
@@ -457,11 +488,13 @@ rr_werewolf_apply_infected_task_override :: proc(target: Player) {
 rr_werewolf_clear_infected_task_override :: proc(player: Player) {
 	if player == null return;
 	if player.werewolf_infected return; // still infected
-	if !player.werewolf_saved_tasks_active return;
+	eff := rr_werewolf_get_look_effect(player);
+	if eff == null return;
+	if !eff.saved_tasks_active return;
 
-	player.active_tasks = player.werewolf_saved_tasks;
-	player.werewolf_saved_tasks = List(Task_Base).{};
-	player.werewolf_saved_tasks_active = false;
+	player.active_tasks = eff.saved_tasks;
+	eff.saved_tasks = List(Task_Base).{};
+	eff.saved_tasks_active = false;
 }
 
 // Clears infection state and reverts visuals/tasks. Called on timer expiry or cleanup.
@@ -471,14 +504,19 @@ rr_werewolf_clear_infection :: proc(player: Player) {
 
 	player.werewolf_infected = false;
 	player.werewolf_infected_from_id = 0;
-	player.werewolf_infection_expires_at = 0.0;
+	eff := rr_werewolf_get_look_effect(player);
+	if eff != null {
+		eff.infection_expires_at = 0.0;
+	}
 	rr_werewolf_clear_infected_task_override(player);
 
 	// Revert wolf look.
 	player.set_trigger("RESET");
-	player.werewolf_skin_enable_at = 0.0;
-	player.werewolf_skin_disable_at = get_time();
-	player.werewolf_infected_transform_trigger_at = 0.0;
+	if eff != null {
+		eff.skin_enable_at = 0.0;
+		eff.skin_disable_at = get_time();
+		eff.infected_transform_trigger_at = 0.0;
+	}
 
 	player.Notify("The infection wore off!");
 }
@@ -506,6 +544,44 @@ rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_we
 	return finder.closest;
 }
 
+// Finds the closest valid claw victim within `range` units of the attacker and
+// inside a forward cone around `direction`. Returns null if nothing is in range.
+rr_werewolf_find_claw_target :: proc(attacker: Player, direction: v2, range: float) -> Player {
+	if attacker == null return null;
+	if !#alive(attacker.entity) return null;
+	dir_len_sq := direction.x * direction.x + direction.y * direction.y;
+	if dir_len_sq < 0.0001 return null;
+	dir := direction / sqrt(dir_len_sq);
+	apos := attacker.entity.world_position;
+
+	best: Player = null;
+	best_dist := range + 1.0;
+
+	for i: 0..players.elements.count-1 {
+		target := players.elements[i];
+		if target == null continue;
+		if !#alive(target.entity) continue;
+		if target == attacker continue;
+		if target.player_state != Player_State.ALIVE continue;
+		// Traitors shouldn't be able to melee-kill other traitors.
+		if target.player_type == Player_Type.TRAITOR continue;
+
+		offset := target.entity.world_position - apos;
+		dist := length(offset);
+		if dist > range continue;
+		if dist <= 0.001 continue;
+		// Cone check: dot product against the aim direction.
+		dot := (offset.x * dir.x + offset.y * dir.y) / dist;
+		if dot < WEREWOLF_CLAW_CONE_DOT_THRESHOLD continue;
+
+		if dist < best_dist {
+			best_dist = dist;
+			best = target;
+		}
+	}
+	return best;
+}
+
 rr_werewolf_apply_infection :: proc(infector: Player, target: Player) {
 	if infector == null return;
 	if target == null return;
@@ -519,8 +595,10 @@ rr_werewolf_apply_infection :: proc(infector: Player, target: Player) {
 
 	target.werewolf_infected = true;
 	target.werewolf_infected_from_id = infector.entity.id;
+	target_eff := rr_werewolf_get_or_add_look_effect(target);
+	if target_eff == null return;
 	// Expiry starts from the reveal moment, not the bite.
-	target.werewolf_infection_expires_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS + WEREWOLF_INFECTION_DURATION_SECONDS;
+	target_eff.infection_expires_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS + WEREWOLF_INFECTION_DURATION_SECONDS;
 
 	// Bite animation plays immediately on the infector.
 	infector.set_trigger("werewolf_infection_bite");
@@ -528,9 +606,9 @@ rr_werewolf_apply_infection :: proc(infector: Player, target: Player) {
 	// For the full delay period nothing visible happens to the victim -- no stun, no notification,
 	// no task swap. Everything reveals at the transform moment.
 	// The animation trigger fires 1s before the skin swap so the howl/transform anim leads into it.
-	target.werewolf_infected_transform_trigger_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS - 1.0;
-	target.werewolf_skin_enable_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS;
-	target.werewolf_skin_disable_at = 0.0;
+	target_eff.infected_transform_trigger_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS - 1.0;
+	target_eff.skin_enable_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS;
+	target_eff.skin_disable_at = 0.0;
 	// Notification, task override, and stun are deferred to transform time
 	// (handled in rr_werewolf_update_skins when the transform trigger fires).
 }
@@ -551,25 +629,32 @@ rr_werewolf_pass_infection :: proc(biter: Player, new_target: Player) {
 	from_id := biter.werewolf_infected_from_id;
 	biter.werewolf_infected = false;
 	biter.werewolf_infected_from_id = 0;
-	biter.werewolf_infection_expires_at = 0.0;
+	biter_eff := rr_werewolf_get_look_effect(biter);
+	if biter_eff != null {
+		biter_eff.infection_expires_at = 0.0;
+	}
 	rr_werewolf_clear_infected_task_override(biter);
 
 	new_target.werewolf_infected = true;
 	new_target.werewolf_infected_from_id = from_id;
+	new_target_eff := rr_werewolf_get_or_add_look_effect(new_target);
+	if new_target_eff == null return;
 	// Pass reveal is near-instant (1s skin swap), so expiry starts from reveal.
-	new_target.werewolf_infection_expires_at = get_time() + 1.0 + WEREWOLF_INFECTION_DURATION_SECONDS;
+	new_target_eff.infection_expires_at = get_time() + 1.0 + WEREWOLF_INFECTION_DURATION_SECONDS;
 
 	// Restore the cured player's look.
 	biter.set_trigger("RESET");
-	biter.werewolf_skin_enable_at = 0.0;
-	biter.werewolf_skin_disable_at = get_time();
-	biter.werewolf_infected_transform_trigger_at = 0.0;
+	if biter_eff != null {
+		biter_eff.skin_enable_at = 0.0;
+		biter_eff.skin_disable_at = get_time();
+		biter_eff.infected_transform_trigger_at = 0.0;
+	}
 
 	// Civilian-to-civilian pass is instant â€" no stealth delay.
 	// Fire transform animation now and skin swap 1s later (animation duration).
-	new_target.werewolf_infected_transform_trigger_at = get_time();
-	new_target.werewolf_skin_enable_at = get_time() + 1.0;
-	new_target.werewolf_skin_disable_at = 0.0;
+	new_target_eff.infected_transform_trigger_at = get_time();
+	new_target_eff.skin_enable_at = get_time() + 1.0;
+	new_target_eff.skin_disable_at = 0.0;
 
 	// Apply effects immediately (notification, task override, stun).
 	new_target.Notify("You were bitten! Pass it on to return to normal.");
@@ -717,6 +802,7 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 				// Face the target and play bite animation.
 				player.set_facing_right(target.entity.world_position.x > player.entity.world_position.x);
 				player.set_trigger("werewolf_infection_bite");
+				rr_werewolf_play_bite_sfx(player);
 
 				// Devour consumes the target entirely â€" no corpse left behind.
 				target.kill_with_killer_no_corpse(player.entity.id);
@@ -840,13 +926,36 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 
 		activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
 		if params.can_use && activation.activate {
-			p := shoot_projectile(player.entity.world_position, activation.direction * WEREWOLF_CLAW_PROJECTILE_SPEED, 1, WEREWOLF_CLAW_PROJECTILE_LIFETIME, player.entity);
-			// Slightly bigger hit radius for a "slash" feel.
-			if p != null {
-				proj := p.get_component(RR_Projectile);
-				if proj != null {
-					proj.hit_radius = 0.65;
-				}
+			// Roll a random reach so each swing feels distinct. Seed is derived
+			// from frame + attacker id so client + server roll the same value.
+			rng := rng_seed(rng_root_seed() + get_frame_number() + player.entity.id);
+			range := rng_range_float(ref rng, WEREWOLF_CLAW_RANGE_MIN, WEREWOLF_CLAW_RANGE_MAX);
+
+			target := rr_werewolf_find_claw_target(player, activation.direction, range);
+
+			// Face the swing direction and play the slash animation regardless of
+			// whether we connected — the wolf swings either way.
+			player.set_facing_right(activation.direction.x > 0);
+			player.set_trigger("werewolf_infection_bite");
+
+			// Forward-sweeping slash VFX so the wider reach is readable to everyone.
+			rr_werewolf_spawn_claw_slash_vfx(player, activation.direction);
+
+			// Whoosh SFX, server-authoritative so it replicates.
+			if Game.is_server() {
+				sfx := SFX.default_sfx_desc();
+				sfx.set_position(player.entity.world_position);
+				sfx.volume = 0.6;
+				sfx.volume_perturb = 0.1;
+				sfx.speed_perturb = 0.1;
+				// Global SFX mix: everything at 25% volume.
+				sfx.volume *= 0.25;
+				sfx.volume_perturb *= 0.25;
+				rr_play_sfx("Whoosh_1e3125.wav", sfx);
+			}
+
+			if target != null {
+				target.kill_with_killer(player.entity.id);
 			}
 			current_cooldown = WEREWOLF_CLAW_COOLDOWN_SECONDS;
 		}
@@ -943,8 +1052,11 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 				wm.is_wolf_form = false;
 				wm.transform_ends_at = 0.0;
 				player.set_trigger("RESET");
-				player.werewolf_skin_enable_at = 0.0;
-				player.werewolf_skin_disable_at = get_time();
+				eff := rr_werewolf_get_or_add_look_effect(player);
+				if eff != null {
+					eff.skin_enable_at = 0.0;
+					eff.skin_disable_at = get_time();
+				}
 
 				// Cooldown starts now (full post-transform cooldown).
 				current_cooldown = WEREWOLF_TRANSFORM_COOLDOWN_SECONDS;
@@ -970,8 +1082,11 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 				}
 
 				// Enable werewolf skin halfway through the howl.
-				player.werewolf_skin_enable_at = get_time() + WEREWOLF_TRANSFORM_HOWL_SKIN_DELAY;
-				player.werewolf_skin_disable_at = 0.0;
+				eff := rr_werewolf_get_or_add_look_effect(player);
+				if eff != null {
+					eff.skin_enable_at = get_time() + WEREWOLF_TRANSFORM_HOWL_SKIN_DELAY;
+					eff.skin_disable_at = 0.0;
+				}
 
 				// No cooldown while in wolf form â€" the button stays active to allow reverting.
 				current_cooldown = 0.0;
