@@ -3,6 +3,11 @@ import "core:ao"
 MECH_RIG :: "anims/roles/Mech Guardian/004RAND_Mech.spine";
 MECH_HARPOON_RIG :: "anims/roles/Mech Guardian/Harpoon/Harpoon.spine";
 MECH_HELMET_RIG :: "anims/roles/Mech Guardian/Helmet/Helmet_trap.spine";
+MECH_TRANSFORM_VFX_RIG :: "anims/roles/Mech Guardian/transformVFX/Machine_Transform.spine";
+MECH_TRANSFORM_VFX_DURATION :: 1.55;
+
+MECH_BOLT_PARTS_GOAL :: 4;
+MECH_LOOT_CORES_GOAL :: 2;
 
 MECH_INVIS_REASON :: "mech_transform";
 MECH_LOCK_REASON :: "mech_lock";
@@ -65,7 +70,8 @@ rr_mech_spawn_flash :: proc(pos: v2, scale: float, color: v4, duration: float) {
 	e.set_local_position(pos);
 	e.set_local_scale(v2.{scale, scale});
 	sr := e.add_component(Sprite_Renderer);
-	sr.set_texture(get_asset(Texture_Asset, "$AO/white.png"));
+	// Soft radial gradient reads as a glow burst instead of a flat colored square.
+	sr.set_texture(get_asset(Texture_Asset, "sprites/Shapes/shape_circle_gradient.png"));
 	sr.color = color;
 	sr.layer = -7;
 	vfx := e.add_component(Mech_Flash_Vfx);
@@ -73,6 +79,34 @@ rr_mech_spawn_flash :: proc(pos: v2, scale: float, color: v4, duration: float) {
 	vfx.end_scale = scale * 2.2;
 	vfx.color = color;
 	vfx.duration = duration;
+}
+
+rr_mech_upgrades_owned :: proc(mech: Mech_Module) -> int {
+	if mech == null return 0;
+	count := 0;
+	if mech.helmet_trap_unlocked { count += 1; }
+	if mech.ram_charge_unlocked { count += 1; }
+	if mech.magnet_cannon_unlocked { count += 1; }
+	if mech.missile_barrage_unlocked { count += 1; }
+	return count;
+}
+
+rr_mech_spawn_transform_vfx :: proc(player: Player) {
+	if player == null || !#alive(player.entity) return;
+	e := Scene.create_entity();
+	e.set_parent(player.entity, false);
+	e.set_local_position(v2.{0, 0.55});
+	e.set_local_scale(v2.{1, 1});
+	anim := e.add_component(Spine_Animator);
+	anim.awaken();
+	anim.layer = 10;
+	if anim.instance != null {
+		anim.instance.set_skeleton(get_asset(Spine_Asset, MECH_TRANSFORM_VFX_RIG));
+		anim.instance.set_animation("repairing", false, 0);
+	}
+	vfx := new(Mech_Transform_Vfx_Effect);
+	vfx.set_duration(MECH_TRANSFORM_VFX_DURATION);
+	e.add_passive_effect(vfx);
 }
 
 rr_mech_add_screenshake :: proc(player: Player, intensity: float, seconds: float) {
@@ -117,6 +151,7 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.last_anim = "";
 	mech.anim_lock_until = 0.0;
 	mech.transform_anim_ends_at = 0.0;
+	mech.overlay_clear_at = 0.0;
 }
 
 rr_guardian_reset_module :: proc(guard: Guardian_Module) {
@@ -136,6 +171,7 @@ rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 	guard.last_anim = "";
 	guard.anim_lock_until = 0.0;
 	guard.transform_anim_ends_at = 0.0;
+	guard.overlay_clear_at = 0.0;
 }
 
 rr_mech_round_global_cleanup :: proc() {
@@ -180,7 +216,7 @@ rr_mech_spawn_workbench_if_needed :: proc() {
 		entry := rr_task_destination_entries.elements[i];
 		if entry == null continue;
 		if entry.task_id == "build_a_robot" {
-			pos = entry.pos + v2.{1.35, 0.0};
+			pos = entry.pos;
 			found = true;
 			break;
 		}
@@ -190,19 +226,16 @@ rr_mech_spawn_workbench_if_needed :: proc() {
 			entry := rr_task_destination_entries.elements[i];
 			if entry == null continue;
 			if entry.task_id == "calibrate_teleporter" {
-				pos = entry.pos + v2.{1.35, 0.0};
+				pos = entry.pos;
 				break;
 			}
 		}
 	}
+	// No visible sprite — the Mech walks to the existing build_a_robot workbench
+	// prop and gets the "R&D Workbench" interactable prompt when in range.
 	mech_workbench_entity = Scene.create_entity();
 	mech_workbench_entity.set_local_position(pos);
-	mech_workbench_entity.set_local_scale(v2.{1.6, 1.6});
-	sr := mech_workbench_entity.add_component(Sprite_Renderer);
-	sr.set_texture(get_asset(Texture_Asset, "sprites/blueprint.png"));
-	sr.layer = 10;
 	mech_workbench_entity.add_component(Mech_Workbench_Interactable);
-	mech_workbench_entity.add_component(Mech_Workbench_Beacon);
 }
 
 rr_mech_get_owner :: proc(player: Player) -> Player {
@@ -416,6 +449,7 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			}
 			rr_mech_update_carried(player, mech.carried_player_id, mech.carried_corpse_id);
 			rr_mech_update_showdown_for_mech(player, mech);
+			rr_mech_update_overlay_clear(mech.creature_animator, ref mech.overlay_clear_at);
 		}
 	}
 	if guard != null {
@@ -431,9 +465,21 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			}
 			rr_mech_update_carried(player, guard.carried_player_id, 0);
 			rr_mech_update_showdown_for_guardian(player, guard);
+			rr_mech_update_overlay_clear(guard.creature_animator, ref guard.overlay_clear_at);
 		}
 	}
 	rr_mech_update_avatar_locomotion(player);
+}
+
+// Clears track 1 (the grab overlay) once the scheduled time arrives so the
+// upper-body grab anim doesn't freeze on its last frame over locomotion.
+rr_mech_update_overlay_clear :: proc(anim: Spine_Animator, clear_at: ref float) {
+	if clear_at <= 0.0 return;
+	if get_time() < clear_at return;
+	if anim != null && anim.instance != null {
+		anim.instance.set_animation("__CLEAR_TRACK__", false, 1);
+	}
+	clear_at = 0.0;
 }
 
 rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_corpse_id: u64) {
@@ -482,7 +528,7 @@ rr_guardian_is_protecting :: proc(target: Player) -> bool {
 }
 
 // Draws the world-space aura on the held player.
-// Allies: pulsing green shield. Enemies: red restraint glow.
+// Allies: pulsing green shield bubble. Enemies: red restraint glow.
 rr_guardian_draw_carry_aura :: proc(carrier: Player, target: Player) {
 	if target == null || !#alive(target.entity) return;
 	ally := target.player_type == Player_Type.CIVILIAN;
@@ -494,14 +540,27 @@ rr_guardian_draw_carry_aura :: proc(carrier: Player, target: Player) {
 	UI.push_z(target.entity.world_position.y - 0.02);
 	defer UI.pop_z();
 
-	color := ally ? v4.{0.45, 1.0, 0.55, 0.55 * pulse} : v4.{1.0, 0.32, 0.32, 0.55 * pulse};
-	size := ally ? 1.3 : 1.15;
-	r := Rect{pos, pos}.grow(size, size, size, size);
-	UI.quad(r, core_globals.white_sprite, color);
+	glow := get_asset(Texture_Asset, "sprites/Shapes/shape_circle_gradient.png");
 
-	// Inner ring of the same hue, slightly brighter.
-	inner_color := ally ? v4.{0.7, 1.0, 0.8, 0.35} : v4.{1.0, 0.55, 0.5, 0.35};
-	UI.quad(r.grow(-0.35, -0.35, -0.35, -0.35), core_globals.white_sprite, inner_color);
+	// Outer soft halo.
+	color := ally ? v4.{0.45, 1.0, 0.55, 0.55 * pulse} : v4.{1.0, 0.32, 0.32, 0.55 * pulse};
+	size := ally ? 1.5 : 1.3;
+	r := Rect{pos, pos}.grow(size, size, size, size);
+	UI.quad(r, glow, color);
+
+	// Bright inner core sells the "bubble shield" / restraint cuff feel.
+	inner_color := ally ? v4.{0.85, 1.0, 0.9, 0.7 * pulse} : v4.{1.0, 0.7, 0.55, 0.55 * pulse};
+	UI.quad(r.grow(-0.55, -0.55, -0.55, -0.55), glow, inner_color);
+
+	// Allies get a bubble-shield overlay on top for the obvious "protected" read.
+	if ally {
+		shield := get_asset(Texture_Asset, "minigame/Bubble Shield_16bc73.png");
+		if shield != null {
+			scale := 1.6 + sin(get_time() * 3.0) * 0.08;
+			bubble_r := Rect{pos, pos}.grow(scale, scale, scale, scale);
+			UI.quad(bubble_r, shield, v4.{0.7, 1.0, 0.8, 0.65});
+		}
+	}
 }
 
 rr_mech_find_melee_target :: proc(player: Player, allow_traitor: bool) -> Player {
@@ -613,7 +672,7 @@ rr_mech_find_nearest_collector :: proc(pos: v2, max_range: float) -> Player {
 	return finder.closest;
 }
 
-rr_mech_spawn_component_pickup :: proc(pos: v2, kind: int) {
+rr_mech_spawn_component_pickup :: proc(pos: v2, kind: int, smasher: Player) {
 	if kind == 0 return;
 	e := Scene.create_entity();
 	e.set_local_position(pos + v2.{0, 0.55});
@@ -625,6 +684,19 @@ rr_mech_spawn_component_pickup :: proc(pos: v2, kind: int) {
 	pickup.kind = kind;
 	pickup.spawn_pos = pos + v2.{0, 0.55};
 	pickup.spawn_time = get_time();
+
+	// Immediately home toward the smasher (or any valid collector) so the
+	// component smoothly flies to the mech instead of waiting on the floor.
+	target := smasher;
+	if !rr_mech_is_valid_pickup_collector(target) {
+		target = rr_mech_get_owner(smasher);
+	}
+	if rr_mech_is_valid_pickup_collector(target) {
+		pickup.target_id = target.entity.id;
+		pickup.arc_start_pos = pickup.spawn_pos;
+		pickup.arc_start_time = get_time();
+		pickup.arcing = true;
+	}
 	rr_mech_spawn_flash(pos + v2.{0, 0.5}, 0.7, rr_mech_component_tint(kind), 0.32);
 }
 
@@ -656,7 +728,7 @@ rr_mech_smash_task :: proc(player: Player, task: Task_Interactable) {
 	wreck.owner_id = player.entity.id;
 	task.mech_wreckage_entity = w;
 
-	rr_mech_spawn_component_pickup(task.entity.world_position, kind);
+	rr_mech_spawn_component_pickup(task.entity.world_position, kind, player);
 
 	player.set_trigger("punch");
 	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false);
@@ -1122,49 +1194,6 @@ Mech_Workbench_Interactable :: class : Interactable {
 	}
 }
 
-// Visual beacon that pulses the workbench sprite and draws a world-space
-// "R&D WORKBENCH" label visible only to the Mech / Minions.
-Mech_Workbench_Beacon :: class : Component {
-	start_time: float;
-	ao_start :: method() {
-		start_time = get_time();
-	}
-	ao_update :: method(dt: float) {
-		// Subtle bob + scale pulse so the workbench reads as interactive.
-		t := get_time() - start_time;
-		bob := sin(t * 2.4) * 0.05;
-		pulse := 1.6 + sin(t * 2.4) * 0.06;
-		entity.set_local_scale(v2.{pulse, pulse});
-		sr := entity.get_component(Sprite_Renderer);
-		if sr != null {
-			glow := 0.85 + sin(t * 3.0) * 0.15;
-			sr.color = v4.{glow, glow, 1.0, 1.0};
-		}
-
-		local_player, ok := Game.get_local_player();
-		if !ok return;
-		show_label := local_player.player_role == Player_Role.THE_MECH ||
-		              rr_mech_is_minion_active(local_player);
-		if !show_label return;
-
-		UI.push_world_draw_context();
-		defer UI.pop_draw_context();
-		UI.push_z(entity.world_position.y);
-		defer UI.pop_z();
-		label_pos := entity.world_position + v2.{0, 2.0 + bob};
-		rect := Rect{label_pos, label_pos}.grow(0.6, 1.2, 0.6, 1.2);
-		ts := UI.default_text_settings();
-		ts.size = 0.32;
-		ts.halign = .CENTER;
-		ts.valign = .CENTER;
-		ts.do_outline = true;
-		ts.outline_thickness = 3;
-		ts.outline_color = v4.{0, 0, 0, 1};
-		ts.color = v4.{0.45, 0.85, 1.0, 1.0};
-		UI.text(rect, ts, "R&D WORKBENCH");
-	}
-}
-
 Mech_Loot_Corpse_Interactable :: class : Interactable {
 	ao_start :: method() {
 		this.set_listener(this);
@@ -1217,6 +1246,12 @@ Mech_Flash_Vfx :: class : Component {
 		if t >= 1.0 {
 			entity.destroy();
 		}
+	}
+}
+
+Mech_Transform_Vfx_Effect :: class : Effect_Base {
+	effect_end :: method(interrupt: bool) {
+		if #alive(entity) entity.destroy();
 	}
 }
 
@@ -1588,8 +1623,8 @@ Mech_Missile :: class : Component {
 		next_trail_at = get_time();
 		sr := entity.get_component(Sprite_Renderer);
 		if sr != null {
-			sr.set_texture(get_asset(Texture_Asset, "$AO/white.png"));
-			sr.color = v4.{1.0, 0.35, 0.08, 1.0};
+			sr.set_texture(get_asset(Texture_Asset, "sprites/Shapes/shape_circle_gradient.png"));
+			sr.color = v4.{1.0, 0.45, 0.08, 1.0};
 			sr.layer = -4;
 		}
 	}
@@ -1636,7 +1671,10 @@ Mech_Transform_Ability :: class : Ability_Base {
 			anim_duration := rr_mech_anim_duration(anim_name);
 			// Keep avatar visible through the whole anim, even when transforming back.
 			mech.transform_anim_ends_at = get_time() + anim_duration;
-			rr_mech_show_avatar(player, true);
+			if showing {
+				rr_mech_show_avatar(player, true);
+				rr_mech_spawn_transform_vfx(player);
+			}
 			rr_mech_play_avatar_anim(player, anim_name, false);
 			mech.anim_lock_until = get_time() + anim_duration;
 			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.32);
@@ -1659,7 +1697,10 @@ Guardian_Transform_Ability :: class : Ability_Base {
 			anim_name := guard.is_guardian_form ? "009SG/Transform_Truck_In" : "009SG/Transform_Truck_out";
 			anim_duration := rr_mech_anim_duration(anim_name);
 			guard.transform_anim_ends_at = get_time() + anim_duration;
-			rr_mech_show_avatar(player, true);
+			if guard.is_guardian_form {
+				rr_mech_show_avatar(player, true);
+				rr_mech_spawn_transform_vfx(player);
+			}
 			rr_mech_play_avatar_anim(player, anim_name, false);
 			guard.anim_lock_until = get_time() + anim_duration;
 			// Heroic stinger when transforming INTO Guardian; soft poof when reverting.
@@ -1767,7 +1808,11 @@ Mech_Pickup_Throw_Ability :: class : Ability_Base {
 			if target != null {
 				mech.carried_player_id = target.entity.id;
 				target.add_disable_movement_input_reason(MECH_CARRY_REASON);
-				rr_mech_play_avatar_anim(player, "009SG/cm_pick_up", false);
+				// Play grab on track 1 so locomotion (legs) keeps running on track 0.
+				if mech.creature_animator != null && mech.creature_animator.instance != null {
+					mech.creature_animator.instance.set_animation("009SG/cm_pick_up", false, 1);
+				}
+				mech.overlay_clear_at = get_time() + rr_mech_anim_duration("009SG/cm_pick_up");
 				return;
 			}
 			corpse := rr_drag_body_get_closest_draggable_corpse(player);
@@ -2053,7 +2098,11 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 				if tm != null && tm.is_apex return;
 				guard.carried_player_id = target.entity.id;
 				target.add_disable_movement_input_reason(MECH_CARRY_REASON);
-				rr_mech_play_avatar_anim(player, "009SG/cm_pick_up", false);
+				// Play grab on track 1 so locomotion (idle/run) on track 0 keeps going underneath.
+				if guard.creature_animator != null && guard.creature_animator.instance != null {
+					guard.creature_animator.instance.set_animation("009SG/cm_pick_up", false, 1);
+				}
+				guard.overlay_clear_at = get_time() + rr_mech_anim_duration("009SG/cm_pick_up");
 				// Tactile grab: ally-tinted vs enemy-tinted flash at the target + SFX.
 				ally := target.player_type == Player_Type.CIVILIAN;
 				color := ally ? v4.{0.45, 1.0, 0.55, 0.7} : v4.{1.0, 0.42, 0.32, 0.7};
@@ -2161,6 +2210,20 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 	if guard == null || !guard.showdown_active return;
 	player.add_disable_movement_input_reason(MECH_LOCK_REASON);
 	rr_guardian_draw_showdown_ui(player, guard);
+	// Once the start anim has played out, loop the dedicated Showdown_Loop on
+	// both fighters so the cinematic doesn't sag back to Idle during the mash.
+	if get_time() >= guard.anim_lock_until && guard.last_anim != "009SG/Showdown_Loop" {
+		rr_mech_play_avatar_anim(player, "009SG/Showdown_Loop", true);
+		guard.anim_lock_until = guard.showdown_ends_at;
+	}
+	mech_opp := get_player_by_entity_id(guard.showdown_opponent_id);
+	if mech_opp != null {
+		mech_state := mech_opp.entity.get_component(Mech_Module);
+		if mech_state != null && get_time() >= mech_state.anim_lock_until && mech_state.last_anim != "009SG/Showdown_Loop" {
+			rr_mech_play_avatar_anim(mech_opp, "009SG/Showdown_Loop", true);
+			mech_state.anim_lock_until = mech_state.showdown_ends_at;
+		}
+	}
 	if get_time() < guard.showdown_ends_at return;
 	mech_player := get_player_by_entity_id(guard.showdown_opponent_id);
 	mech_mashes := 0;
@@ -2350,23 +2413,23 @@ rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id:
 	if upgrade_id == MECH_UPGRADE_HELMET_TRAP {
 		name = "Helmet Trap"; cost_label = "1 Gear";
 		icon_path = "sprites/icons/mech/Helmet_Trap_Icon.png";
-		tint = v4.{0.85, 0.85, 0.9, 1};
+		tint = v4.{0.42, 0.42, 0.48, 1};
 	} else if upgrade_id == MECH_UPGRADE_RAM_CHARGE {
 		name = "Ram Charge"; cost_label = "1 Power Cell";
 		icon_path = "sprites/icons/mech/Ram_Icon.png";
-		tint = v4.{1.0, 0.32, 0.25, 1};
+		tint = v4.{0.55, 0.18, 0.14, 1};
 	} else if upgrade_id == MECH_UPGRADE_MAGNET_CANNON {
 		name = "Magnet Cannon"; cost_label = "1 Schematic";
 		icon_path = "sprites/icons/mech/Magnet_Cannon_Icon.png";
-		tint = v4.{0.3, 0.7, 1.0, 1};
+		tint = v4.{0.16, 0.38, 0.6, 1};
 	} else if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE {
 		name = "Missile Barrage"; cost_label = "1 Circuit";
 		icon_path = "sprites/icons/mech/Missile_Barrage_Icon.png";
-		tint = v4.{1.0, 0.85, 0.2, 1};
+		tint = v4.{0.55, 0.45, 0.12, 1};
 	} else if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP {
 		name = "Wreckage Warp"; cost_label = "2 Any Components";
 		icon_path = "sprites/icons/mech/Wreckage_Warp_Icon.png";
-		tint = v4.{0.5, 0.9, 0.5, 1};
+		tint = v4.{0.25, 0.5, 0.28, 1};
 	}
 
 	owned := rr_mech_upgrade_owned(mech, upgrade_id);
@@ -2374,9 +2437,9 @@ rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id:
 
 	display_tint := tint;
 	if owned {
-		display_tint = v4.{0.3, 0.85, 0.45, 1};
+		display_tint = v4.{0.16, 0.45, 0.24, 1};
 	} else if !affordable {
-		display_tint = v4.{0.35, 0.35, 0.4, 1};
+		display_tint = v4.{0.18, 0.18, 0.22, 1};
 	}
 
 	card_desc := UIK.card_desc(UIK.flex(1), UIK.flex(1), display_tint, .PORTRAIT, 0.45, 0.18, 0.30);
@@ -2411,11 +2474,11 @@ rr_mech_draw_workbench_ui :: proc(player: Player) {
 	if game_state != Game_State.INGAME { mech.workbench_ui_open = false; return; }
 	if player.player_state != Player_State.ALIVE { mech.workbench_ui_open = false; return; }
 
-	UIK.begin(UIK.modal(UIK.rect_window(), 20));
+	UIK.begin(UIK.modal(UIK.rect_window_large(), 1000));
 
 	shell := UIK.panel_modal(.BLUE_WITH_FOOTER);
-	shell.padding = v4{16, 16, 16, 16};
-	shell.gap = 10;
+	shell.padding = v4{16, 8, 16, 16};
+	shell.gap = 6;
 	UIK.panel_begin(shell);
 
 	exit_handle := UIK.title_area(UIK.title_area_desc("R&D WORKBENCH"));
@@ -2442,9 +2505,9 @@ rr_mech_draw_workbench_ui :: proc(player: Player) {
 	// APEX status banner (top of tree).
 	apex_panel := UIK.panel_styled(.MODAL_TRANSP_BLACK);
 	apex_panel.width = UIK.flex(1);
-	apex_panel.height = UIK.pixels(86);
-	apex_panel.padding = v4{14, 10, 14, 10};
-	apex_panel.gap = 4;
+	apex_panel.height = UIK.pixels(110);
+	apex_panel.padding = v4{14, 14, 14, 14};
+	apex_panel.gap = 8;
 	UIK.panel_begin(apex_panel);
 	UIK.text("APEX AWAKENING", UIK.text_title());
 	UIK.text(rr_mech_apex_status_text(player, mech), UIK.text_body());
@@ -2481,4 +2544,148 @@ rr_mech_draw_workbench_ui :: proc(player: Player) {
 	if UIK.clicked(m_handle)  { rr_mech_buy_upgrade(player, MECH_UPGRADE_MAGNET_CANNON); }
 	if UIK.clicked(ms_handle) { rr_mech_buy_upgrade(player, MECH_UPGRADE_MISSILE_BARRAGE); }
 	if UIK.clicked(w_handle)  { rr_mech_buy_upgrade(player, MECH_UPGRADE_WRECKAGE_WARP); }
+}
+
+// Side checklist HUD for The Mech — drawn from draw_mech_role_hud in player.csl.
+rr_mech_draw_checklist_panel :: proc(player: Player) {
+	if player == null return;
+	if !player.is_local_or_server() return;
+	if player.player_role != Player_Role.THE_MECH return;
+
+	mech := player.entity.get_component(Mech_Module);
+	if mech == null return;
+	if mech.workbench_ui_open return;
+
+	UI.push_layer(1600);
+	defer UI.pop_layer();
+
+	_pushed_scale := rr_push_mobile_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
+	safe := UI.get_safe_screen_rect();
+	PANEL_W :: 320.0;
+	ROW_H :: 32.0;
+	LIST_PAD :: 10.0;
+	DROPDOWN_SLICE_PX :: 16.0;
+
+	upgrades_owned := rr_mech_upgrades_owned(mech);
+	cores := min(mech.power_cores, MECH_LOOT_CORES_GOAL);
+	apex_ready := rr_mech_can_awaken_apex(player);
+
+	row_count := 5; // Form + bolt parts + cores + components + status
+	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
+
+	header_rect := rr_draw_task_list_header(safe, false, player);
+	if !player.task_list_open return;
+
+	list_rect := header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0);
+	list_bg := get_asset(Texture_Asset, "ui/task list/task_list_dropdown_area.png");
+	checkbox := get_asset(Texture_Asset, "ui/task list/checkbox.png");
+	checkbox_filled := get_asset(Texture_Asset, "ui/task list/checkbox_filled.png");
+
+	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
+
+	base_ts := UI.default_text_settings();
+	base_ts.size = 20;
+	base_ts.halign = .LEFT;
+	base_ts.valign = .CENTER;
+	base_ts.do_outline = true;
+	base_ts.outline_thickness = 3;
+	base_ts.outline_color = v4.{0, 0, 0, 1};
+
+	list_content := list_rect.inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
+
+	// Row 1: form indicator
+	{
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
+		ts := base_ts;
+		if mech.is_apex {
+			ts.color = v4.{1.0, 0.55, 0.2, 1.0};
+			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX TITAN");
+		} else if mech.is_mech_form {
+			ts.color = v4.{1.0, 0.4, 0.3, 1.0};
+			UI.text(entry_content.inset(0, 4, 0, 4), ts, "MECH FORM");
+		} else {
+			ts.color = v4.{0.9, 0.9, 0.9, 1.0};
+			UI.text(entry_content.inset(0, 4, 0, 4), ts, "Schleem");
+		}
+	}
+
+	// Row 2: bolt-on parts (sub-abilities) X/4
+	{
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
+		done := upgrades_owned >= MECH_BOLT_PARTS_GOAL;
+		if done {
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		ts := base_ts;
+		ts.color = done ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content.inset(0, 4, 0, 4), ts,
+			format_string("Bolt on Parts: %/%", .{upgrades_owned, MECH_BOLT_PARTS_GOAL}));
+	}
+
+	// Row 3: power cores X/2
+	{
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		checkbox_slot := entry_content.cut_left(24.0);
+		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
+		done := cores >= MECH_LOOT_CORES_GOAL;
+		if done {
+			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
+		} else {
+			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
+		}
+		ts := base_ts;
+		ts.color = done ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(entry_content.inset(0, 4, 0, 4), ts,
+			format_string("Loot Power Cores: %/%", .{cores, MECH_LOOT_CORES_GOAL}));
+	}
+
+	// Row 4: components stockpile (PC C S G)
+	{
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
+		ts := base_ts;
+		ts.size = 18;
+		ts.color = v4.{0.85, 0.9, 1.0, 1.0};
+		UI.text(entry_content.inset(0, 4, 0, 4), ts,
+			format_string("Parts: PC% C% S% G%", .{mech.power_cells, mech.circuits, mech.schematics, mech.gears}));
+	}
+
+	// Row 5: status callout (APEX state)
+	{
+		entry_rect := list_content.cut_top(ROW_H);
+		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
+		entry_content.cut_left(24.0);
+		ts := base_ts;
+		ts.size = 18;
+		if mech.is_apex {
+			ts.color = v4.{1.0, 0.55, 0.2, 1.0};
+			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX AWAKENED");
+		} else if mech.apex_used {
+			ts.color = v4.{0.7, 0.7, 0.7, 1.0};
+			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX SPENT");
+		} else if mech.apex_lost {
+			ts.color = v4.{0.7, 0.4, 0.4, 1.0};
+			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX LOST");
+		} else if apex_ready {
+			ts.color = v4.{0.6, 1.0, 0.4, 1.0};
+			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX READY!");
+		} else {
+			needed_parts := MECH_BOLT_PARTS_GOAL - upgrades_owned;
+			needed_cores := MECH_LOOT_CORES_GOAL - cores;
+			ts.color = v4.{0.9, 0.9, 0.9, 1.0};
+			UI.text(entry_content.inset(0, 4, 0, 4), ts,
+				format_string("APEX needs % parts, % cores", .{max(needed_parts, 0), max(needed_cores, 0)}));
+		}
+	}
 }
