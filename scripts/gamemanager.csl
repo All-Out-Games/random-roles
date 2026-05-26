@@ -1079,15 +1079,16 @@ rr_try_start_power_outage :: proc(caller: Player) {
 		rr_power_outage_add_generator_task_to_player(p);
 	}
 
-	// Notify everyone — traitors see "Lights Out!", others see the sabotage name.
+	// Notify everyone with role-specific copy. Use the targeted overload to avoid
+	// per-player broadcast fanout.
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
 		if !#alive(p.entity) continue;
 		if p.player_type == Player_Type.TRAITOR {
-			p.Notify("Lights Out!");
+			Notifier.notify(p, "Lights Out!");
 		} else {
-			p.Notify("Sabotage: Power Outage!");
+			Notifier.notify(p, "Sabotage: Power Outage!");
 		}
 	}
 }
@@ -1160,13 +1161,8 @@ rr_try_start_comms_outage :: proc(caller: Player) {
 
 	rr_update_comms_lever_visuals();
 
-	// Notify everyone
-	for i: 0..players.elements.count-1 {
-		p := players.elements[i];
-		if p == null continue;
-		if !#alive(p.entity) continue;
-		p.Notify("Sabotage: Comms Down!");
-	}
+	// Notify everyone once. Avoid per-player broadcast fanout.
+	Notifier.notify("Sabotage: Comms Down!");
 }
 
 rr_try_start_lockdown :: proc(caller: Player) {
@@ -1206,13 +1202,8 @@ rr_try_start_lockdown :: proc(caller: Player) {
 	sfx.volume_perturb *= 0.25;
 	rr_play_sfx("sfx/door_sabotage.wav", sfx);
 
-	// Notify everyone
-	for i: 0..players.elements.count-1 {
-		p := players.elements[i];
-		if p == null continue;
-		if !#alive(p.entity) continue;
-		p.Notify("Sabotage: Door Lockdown!");
-	}
+	// Notify everyone once. Avoid per-player broadcast fanout.
+	Notifier.notify("Sabotage: Door Lockdown!");
 }
 
 rr_update_lockdown :: proc() {
@@ -1236,12 +1227,7 @@ rr_update_lockdown :: proc() {
 		open_all_doors();
 	}
 
-	for i: 0..players.elements.count-1 {
-		p := players.elements[i];
-		if p == null continue;
-		if !#alive(p.entity) continue;
-		p.Notify("Door Lockdown ended.");
-	}
+	Notifier.notify("Door Lockdown ended.");
 }
 
 rr_end_comms_outage :: proc(fixer: Player) {
@@ -1582,8 +1568,9 @@ on_player_go_passive :: proc(player: Player) {
 	player.player_state = Player_State.PASSIVE;
 	// Immediately restore werewolf visuals (don't defer to next frame — /restart can start
 	// a new round on the same frame, so the deferred cleanup would never run).
+	// reset_werewolf_visuals drops the Werewolf_Look_Effect entirely, so any
+	// saved-tasks state is reclaimed with it.
 	player.reset_werewolf_visuals();
-	player.werewolf_saved_tasks_active = false;
 	world_references.teleport_near_lobby(player);
 	player.remove_ghost_reason("spectator");
 	// Hard-reset to canonical baseline speed — prevents any leaked multipliers.
@@ -1661,6 +1648,7 @@ setup_lobby :: proc() {
 	rr_ggg_clear_decoys();
 	rr_ggg_clear_nest();
 	rr_pyro_extinguish_all_fires();
+	rr_hunter_round_global_cleanup();
 	// Clear all Mimicer Void Pillars
 	for p: component_iterator(Player) {
 		rr_mimicer_clear_void_pillars(p);
@@ -1768,9 +1756,12 @@ rr_werewolf_force_revert_for_meeting :: proc(player: Player) {
 	now := get_time();
 	// Revert infected players' wolf look
 	if player.werewolf_infected {
-		player.werewolf_skin_enable_at = 0.0;
-		player.werewolf_skin_disable_at = now;
-		player.werewolf_infected_transform_trigger_at = 0.0;
+		eff := rr_werewolf_get_look_effect(player);
+		if eff != null {
+			eff.skin_enable_at = 0.0;
+			eff.skin_disable_at = now;
+			eff.infected_transform_trigger_at = 0.0;
+		}
 	}
 	// Revert actual werewolf transform
 	if player.player_role != Player_Role.WEREWOLF || player.player_type != Player_Type.TRAITOR return;
@@ -1785,8 +1776,11 @@ rr_werewolf_force_revert_for_meeting :: proc(player: Player) {
 		player.agent.movement_speed = wm.speed_original;
 		wm.speed_boost_active = false;
 	}
-	player.werewolf_skin_enable_at = 0.0;
-	player.werewolf_skin_disable_at = now;
+	eff := rr_werewolf_get_look_effect(player);
+	if eff != null {
+		eff.skin_enable_at = 0.0;
+		eff.skin_disable_at = now;
+	}
 }
 
 // Run immediately after teleport so transform-reverts are masked by the jump
@@ -2061,10 +2055,20 @@ all_civilians_completed_tasks :: proc() -> bool {
 }
 
 end_game_with_winners :: proc(victor: Player_Type, winners: List(Player)) {
+	// Record win analytics BEFORE on_player_go_passive runs — passive transition
+	// itself doesn't clear player_role, but keeping this early keeps the order
+	// obvious if that ever changes.
+	rr_analytics_record_round_end(victor, winners);
+
 	// Show victory popup with winning players
 	victory_popup.show(victor, winners);
 	game_state = Game_State.ANIM_VICTORY;
-	
+
+	// Wipe Hunter campfires now so they don't linger through the victory
+	// cinematic + lobby. setup_lobby() also runs this, but only after the
+	// popup ends — clear here for an immediate end-of-game reset.
+	rr_hunter_round_global_cleanup();
+
 	// Properly transition all players to passive (removes ghost reasons, restores speed, etc.).
 	for i: 0..players.elements.count-1 {
 		on_player_go_passive(players.elements[i]);
@@ -2348,10 +2352,18 @@ rr_unstuck_player :: proc(player: Player) {
 	if player.werewolf_infected {
 		player.werewolf_infected = false;
 		player.werewolf_infected_from_id = 0;
-		player.werewolf_infection_expires_at = 0.0;
+		eff := rr_werewolf_get_look_effect(player);
+		if eff != null {
+			eff.infection_expires_at = 0.0;
+		}
 		rr_werewolf_clear_infected_task_override(player);
 	}
-	player.werewolf_infected_transform_trigger_at = 0.0;
+	{
+		eff := rr_werewolf_get_look_effect(player);
+		if eff != null {
+			eff.infected_transform_trigger_at = 0.0;
+		}
+	}
 
 	// Clear mimicer blind/distort state.
 	player.mimicer_blinded = false;
@@ -2780,7 +2792,9 @@ task_progress :: proc(player: Player, percent: int = 100) {
 } @chat_command @youtuber
 
 ao_update_ingame :: proc(dt: float) {
-	rr_backup_maybe_auto();
+	if rr_backup_enabled {
+		rr_backup_maybe_auto();
+	}
 	update_autograph_traps();
 	update_hitman_mines();
 	update_ggg_traps();
@@ -3556,7 +3570,6 @@ assign_players_to_types :: proc() {
 	append(ref civilian_roles_master, Player_Role.MOVIE_STAR);
 	append(ref civilian_roles_master, Player_Role.CORONER);
 	append(ref civilian_roles_master, Player_Role.PORTAL_MAKER);
-	append(ref civilian_roles_master, Player_Role.HUNTER);
 	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
 	append(ref anarchist_roles_master, Player_Role.PYROMANIAC);
 	append(ref anarchist_roles_master, Player_Role.HACKER);
@@ -3576,6 +3589,9 @@ assign_players_to_types :: proc() {
 	}
 	if rp_any_player_owns(ref players, LILY_PRODUCT_ID) {
 		append(ref traitor_roles_master, Player_Role.LILY_LOVEBRAIDS);
+	}
+	if rp_any_player_owns(ref players, HUNTER_PRODUCT_ID) {
+		append(ref civilian_roles_master, Player_Role.HUNTER);
 	}
 
 	civ_players: List(Player);
@@ -3608,7 +3624,7 @@ assign_players_to_types :: proc() {
 		p.player_role = p.forced_role_next_round;
 		p.forced_role_next_round = Player_Role.NONE;
 	}
-
+	
 	// If The Mech rolled this round, guarantee one living civilian counter-role.
 	has_mech := false;
 	has_guardian := false;
@@ -3627,6 +3643,9 @@ assign_players_to_types :: proc() {
 			break;
 		}
 	}
+	
+	// Record round-start analytics now that every player has a final role.
+	rr_analytics_record_round_start();
 
 	// Big Charlie: nuke any leftover scene entities (cocoons, nuggets) before
 	// per-player resets so previous-round artifacts can't survive a reroll.
@@ -3702,10 +3721,12 @@ assign_players_to_types :: proc() {
 		destroy_pirate_dig_spots_for_player(p.entity.id);
 		// Werewolf — full reset including skin state (guards against /restart race).
 		p.reset_werewolf_visuals();
-		// Capture round-start cosmetics so werewolf cleanup can always restore baseline look.
-		p.capture_werewolf_round_start_look();
 		// Werewolf module: only for actual werewolves.
 		if p.player_role == Player_Role.WEREWOLF {
+			// Capture round-start cosmetics for the actual werewolf only — they
+			// transform repeatedly and need a long-lived fallback baseline. Infected
+			// civilians capture their look on demand at infection time.
+			p.capture_werewolf_round_start_look();
 			wwm := p.entity.get_component(Werewolf_Module);
 			if wwm == null {
 				wwm = p.entity.add_component(Werewolf_Module);

@@ -65,7 +65,7 @@ GGG_Module :: class : Component {
 }
 
 // --- Constants ---
-GGG_KILL_COOLDOWN_SECONDS :: 25.0;
+GGG_KILL_COOLDOWN_SECONDS :: 50.0;
 GGG_CREATURE_KILL_RANGE :: 6.5;
 GGG_TRANSFORM_ANIM_ENTER_SECONDS :: 0.5;
 GGG_CREATURE_SPEED_MULTIPLIER :: 1.20;
@@ -2229,6 +2229,8 @@ GGG_Transform_Ability :: class : Ability_Base {
 GGG_Crawl_Ability :: class : Ability_Base {
 	NAME :: "Crawl";
 
+	unlock_seen: bool;
+
 	on_init :: proc(instance: GGG_Crawl_Ability) {
 		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/crawl_speedup.png");
 	}
@@ -2237,6 +2239,7 @@ GGG_Crawl_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.GOO_GOO_GAGA return false;
 		gm := player.entity.get_component(GGG_Module);
@@ -2248,6 +2251,20 @@ GGG_Crawl_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
+		// Arm full cooldown the first time the unlock condition is satisfied.
+		if !unlock_seen {
+			gm_unlock := player.entity.get_component(GGG_Module);
+			if gm_unlock != null && gm_unlock.nest_points >= GGG_CRAWL_UNLOCK_NEST_POINTS {
+				unlock_seen = true;
+				current_cooldown = max(current_cooldown, GGG_CRAWL_COOLDOWN_SECONDS);
+			}
+		}
+
 		if params.clicked && !params.can_use {
 			gm := player.entity.get_component(GGG_Module);
 			if gm != null && rr_ggg_is_nest_burn_locked(gm) {
@@ -2306,6 +2323,7 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.GOO_GOO_GAGA return false;
 		gm := player.entity.get_component(GGG_Module);
@@ -2321,6 +2339,11 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
 		targeting := targeted.targeting;
 
@@ -2402,6 +2425,7 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 
 	camera_zoom_active: bool;
 	camera_original_size: float;
+	unlock_seen: bool;
 
 	on_init :: proc(instance: GGG_Foil_Whip_Ability) {
 		// TODO: proper foil whip icon
@@ -2413,6 +2437,7 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.GOO_GOO_GAGA return false;
 		gm := player.entity.get_component(GGG_Module);
@@ -2443,6 +2468,20 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
+		// Arm full cooldown the first time the unlock condition is satisfied.
+		if !unlock_seen {
+			gm_unlock := player.entity.get_component(GGG_Module);
+			if gm_unlock != null && gm_unlock.nest_points >= GGG_FOIL_WHIP_UNLOCK_NEST_POINTS {
+				unlock_seen = true;
+				current_cooldown = max(current_cooldown, GGG_FOIL_WHIP_COOLDOWN_SECONDS);
+			}
+		}
+
 		if params.clicked && !params.can_use {
 			gm := player.entity.get_component(GGG_Module);
 			if gm != null && rr_ggg_is_nest_burn_locked(gm) {
@@ -2491,6 +2530,8 @@ GGG_Foil_Whip_Ability :: class : Ability_Base {
 GGG_Swarm_Ability :: class : Ability_Base {
 	NAME :: "Swarm";
 
+	unlock_seen: bool;
+
 	on_init :: proc(instance: GGG_Swarm_Ability) {
 		instance.icon = get_asset(Texture_Asset, "sprites/icons/ggg/swarm.png");
 	}
@@ -2499,6 +2540,7 @@ GGG_Swarm_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.GOO_GOO_GAGA return false;
 		gm := player.entity.get_component(GGG_Module);
@@ -2510,6 +2552,20 @@ GGG_Swarm_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
+		// Arm full cooldown the first time the unlock condition is satisfied.
+		if !unlock_seen {
+			gm_unlock := player.entity.get_component(GGG_Module);
+			if gm_unlock != null && gm_unlock.nest_points >= GGG_SWARM_UNLOCK_NEST_POINTS {
+				unlock_seen = true;
+				current_cooldown = max(current_cooldown, GGG_SWARM_COOLDOWN_SECONDS);
+			}
+		}
+
 		if params.clicked && !params.can_use {
 			gm := player.entity.get_component(GGG_Module);
 			if player != null && player.player_role == Player_Role.GOO_GOO_GAGA && gm != null && gm.is_creature_form {
