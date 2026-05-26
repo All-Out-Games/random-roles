@@ -4,7 +4,13 @@ MECH_RIG :: "anims/roles/Mech Guardian/004RAND_Mech.spine";
 MECH_HARPOON_RIG :: "anims/roles/Mech Guardian/Harpoon/Harpoon.spine";
 MECH_HELMET_RIG :: "anims/roles/Mech Guardian/Helmet/Helmet_trap.spine";
 MECH_TRANSFORM_VFX_RIG :: "anims/roles/Mech Guardian/transformVFX/Machine_Transform.spine";
+MECH_MISSILE_RIG :: "anims/roles/Mech Guardian/Missile/RED013_Rocket.spine";
+MECH_WRECKAGE_RIG :: "anims/roles/Mech Guardian/Wreckage/004RAND_Task_Wreckage.spine";
+MECH_MAGNETISED_RIG :: "anims/roles/Mech Guardian/magnetisedVFX/009SG_magnetised.spine";
 MECH_TRANSFORM_VFX_DURATION :: 1.55;
+MECH_WRECKAGE_APPEAR_DURATION :: 0.45;
+MECH_WRECKAGE_EXPLODE_DURATION :: 0.6;
+MECH_MISSILE_EXPLODE_DURATION :: 0.45;
 
 MECH_BOLT_PARTS_GOAL :: 4;
 MECH_LOOT_CORES_GOAL :: 2;
@@ -721,9 +727,7 @@ rr_mech_smash_task :: proc(player: Player, task: Task_Interactable) {
 	w := Scene.create_entity();
 	w.set_local_position(task.entity.world_position);
 	w.set_local_scale(v2.{0.9, 0.9});
-	sr := w.add_component(Sprite_Renderer);
-	sr.set_texture(get_asset(Texture_Asset, "sprites/tasks/build_a_robot/parts_on_table/body.png"));
-	sr.layer = -2;
+	w.add_component(Spine_Animator);
 	wreck := w.add_component(Mech_Wreckage);
 	wreck.owner_id = player.entity.id;
 	task.mech_wreckage_entity = w;
@@ -991,9 +995,10 @@ rr_mech_find_throw_path_hit :: proc(carrier: Player, target: Player, start_pos: 
 
 		for w: component_iterator(Mech_Wreckage) {
 			if w == null || !#alive(w.entity) continue;
+			if w.exploding continue;
 			if !in_range(w.entity.world_position - sample, 1.25) continue;
 			end_pos = w.entity.world_position;
-			w.entity.destroy();
+			rr_mech_explode_wreckage(w);
 			target.kill_with_killer(killer_id);
 			rr_mech_spawn_flash(end_pos, 1.2, v4.{1.0, 0.32, 0.08, 0.75}, 0.32);
 			rr_mech_play_sfx_at("sfx/ggg_explode.wav", end_pos, 0.5);
@@ -1046,8 +1051,9 @@ rr_mech_throw_player :: proc(carrier: Player, target: Player, killer_id: u64) {
 	hit_wreckage := false;
 	for w: component_iterator(Mech_Wreckage) {
 		if w == null || !#alive(w.entity) continue;
+		if w.exploding continue;
 		if in_range(w.entity.world_position - end_pos, 1.3) {
-			w.entity.destroy();
+			rr_mech_explode_wreckage(w);
 			target.kill_with_killer(killer_id);
 			rr_mech_play_sfx_at("sfx/ggg_explode.wav", end_pos, 0.45);
 			hit_wreckage = true;
@@ -1097,6 +1103,7 @@ rr_mech_get_next_wreckage :: proc(player: Player, idx: ref int) -> Mech_Wreckage
 	count := 0;
 	for w: component_iterator(Mech_Wreckage) {
 		if w == null || !#alive(w.entity) continue;
+		if w.exploding continue;
 		count += 1;
 	}
 	if count == 0 return null, false;
@@ -1104,6 +1111,7 @@ rr_mech_get_next_wreckage :: proc(player: Player, idx: ref int) -> Mech_Wreckage
 	i := 0;
 	for w: component_iterator(Mech_Wreckage) {
 		if w == null || !#alive(w.entity) continue;
+		if w.exploding continue;
 		if i == idx {
 			idx += 1;
 			return w, true;
@@ -1282,20 +1290,52 @@ Mech_Screenshake_Status :: class : Component {
 Mech_Wreckage :: class : Component {
 	owner_id: u64;
 	last_warp_at: float;
-	ao_update :: method(dt: float) {
-		UI.push_world_draw_context();
-		defer UI.pop_draw_context();
-		UI.push_z(entity.world_position.y);
-		defer UI.pop_z();
-		rect := Rect{entity.world_position + v2.{0, 0.72}, entity.world_position + v2.{0, 0.72}}.grow(0.18, 1.0, 0.18, 1.0);
-		ts := UI.default_text_settings();
-		ts.size = 0.24;
-		ts.halign = .CENTER;
-		ts.valign = .CENTER;
-		ts.do_outline = true;
-		ts.outline_thickness = 2;
-		UI.text(rect, ts, "Wreckage");
+	spawn_time: float;
+	loop_started: bool;
+	exploding: bool;
+	expires_at: float;
+
+	ao_start :: method() {
+		spawn_time = get_time();
+		spine := entity.get_component(Spine_Animator);
+		if spine != null {
+			spine.awaken();
+			spine.layer = 0;
+			if spine.instance != null {
+				spine.instance.set_skeleton(get_asset(Spine_Asset, MECH_WRECKAGE_RIG));
+				spine.instance.set_animation("rubble_appear", false, 0);
+			}
+		}
 	}
+
+	explode :: proc(using this: Mech_Wreckage) {
+		if exploding return;
+		exploding = true;
+		expires_at = get_time() + MECH_WRECKAGE_EXPLODE_DURATION;
+		spine := entity.get_component(Spine_Animator);
+		if spine != null && spine.instance != null {
+			spine.instance.set_animation("explode", false, 0);
+		}
+	}
+
+	ao_update :: method(dt: float) {
+		if !loop_started && !exploding && get_time() - spawn_time >= MECH_WRECKAGE_APPEAR_DURATION {
+			spine := entity.get_component(Spine_Animator);
+			if spine != null && spine.instance != null {
+				spine.instance.set_animation("rubble_loop", true, 0);
+			}
+			loop_started = true;
+		}
+		if exploding && get_time() >= expires_at {
+			entity.destroy();
+			return;
+		}
+	}
+}
+
+rr_mech_explode_wreckage :: proc(w: Mech_Wreckage) {
+	if w == null || !#alive(w.entity) return;
+	w.explode();
 }
 
 MECH_PICKUP_BOB_AMPLITUDE :: 0.12;
@@ -1376,6 +1416,7 @@ rr_mech_draw_wreckage_warp_minimap_buttons :: proc(player: Player, map_rect: Rec
 	for w: component_iterator(Mech_Wreckage) {
 		if w == null continue;
 		if !#alive(w.entity) continue;
+		if w.exploding continue;
 		p_ui := rr_minimap_world_to_ui(map_rect, w.entity.world_position);
 		r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
 		UI.push_id(format_string("mech_warp_%", .{w.entity.id}));
@@ -1402,6 +1443,70 @@ rr_mech_draw_wreckage_warp_minimap_buttons :: proc(player: Player, map_rect: Rec
 		}
 		UI.pop_id();
 	}
+}
+
+Mech_Magnetised_Status :: class : Component {
+	spine_entity: Entity;
+	expires_at: float;
+	current_skin: string;
+	active: bool;
+
+	refresh :: proc(using this: Mech_Magnetised_Status, danger: bool) {
+		expires_at = get_time() + 0.25;
+		active = true;
+		ensure_spine(this);
+		desired := danger ? "red" : "blue";
+		if current_skin != desired {
+			if spine_entity != null && #alive(spine_entity) {
+				anim := spine_entity.get_component(Spine_Animator);
+				if anim != null && anim.instance != null {
+					anim.instance.disable_all_skins();
+					anim.instance.enable_skin(desired);
+					anim.instance.refresh_skins();
+				}
+			}
+			current_skin = desired;
+		}
+	}
+
+	ensure_spine :: proc(using this: Mech_Magnetised_Status) {
+		if spine_entity != null && #alive(spine_entity) return;
+		e := Scene.create_entity();
+		e.set_parent(entity, false);
+		e.set_local_position(v2.{0, 0.55});
+		anim := e.add_component(Spine_Animator);
+		anim.awaken();
+		anim.layer = 9;
+		if anim.instance != null {
+			anim.instance.set_skeleton(get_asset(Spine_Asset, MECH_MAGNETISED_RIG));
+			anim.instance.set_animation("Loop", true, 0);
+		}
+		spine_entity = e;
+		current_skin = "";
+	}
+
+	ao_update :: method(dt: float) {
+		if !active return;
+		if get_time() >= expires_at {
+			if spine_entity != null && #alive(spine_entity) { spine_entity.destroy(); }
+			spine_entity = null;
+			current_skin = "";
+			active = false;
+		}
+	}
+
+	ao_end :: method() {
+		if spine_entity != null && #alive(spine_entity) { spine_entity.destroy(); }
+		spine_entity = null;
+	}
+}
+
+rr_mech_mark_magnetised :: proc(player: Player, danger: bool) {
+	if player == null return;
+	if !#alive(player.entity) return;
+	s := player.entity.get_component(Mech_Magnetised_Status);
+	if s == null { s = player.entity.add_component(Mech_Magnetised_Status); }
+	s.refresh(danger);
 }
 
 Mech_Stun_Status :: class : Component {
@@ -1553,6 +1658,7 @@ Mech_Magnet_Node :: class : Component {
 			if length_squared(dir) > 0.04 {
 				p.agent.velocity = normalize(dir) * 8.0;
 			}
+			rr_mech_mark_magnetised(p, global_pull);
 			if in_range(p.entity.world_position - entity.world_position, 0.85) {
 				rr_mech_apply_stun(p, 1.0);
 			}
@@ -1618,17 +1724,26 @@ Mech_Missile :: class : Component {
 	target_id: u64;
 	speed: float;
 	next_trail_at: float;
+	exploding: bool;
+	expires_at: float;
 	ao_start :: method() {
 		speed = 10.0;
 		next_trail_at = get_time();
-		sr := entity.get_component(Sprite_Renderer);
-		if sr != null {
-			sr.set_texture(get_asset(Texture_Asset, "sprites/Shapes/shape_circle_gradient.png"));
-			sr.color = v4.{1.0, 0.45, 0.08, 1.0};
-			sr.layer = -4;
+		spine := entity.get_component(Spine_Animator);
+		if spine != null {
+			spine.awaken();
+			spine.layer = -4;
+			if spine.instance != null {
+				spine.instance.set_skeleton(get_asset(Spine_Asset, MECH_MISSILE_RIG));
+				spine.instance.set_animation("flying_loop", true, 0);
+			}
 		}
 	}
 	ao_update :: method(dt: float) {
+		if exploding {
+			if get_time() >= expires_at { entity.destroy(); }
+			return;
+		}
 		target := get_player_by_entity_id(target_id);
 		owner := get_player_by_entity_id(owner_id);
 		if target == null || target.player_state != Player_State.ALIVE {
@@ -1637,7 +1752,9 @@ Mech_Missile :: class : Component {
 		}
 		dir := target.entity.world_position - entity.world_position;
 		if length_squared(dir) > 0.01 {
-			entity.set_local_position(entity.world_position + normalize(dir) * speed * dt);
+			ndir := normalize(dir);
+			entity.set_local_position(entity.world_position + ndir * speed * dt);
+			entity.set_local_rotation(to_degrees(atan2(ndir.y, ndir.x)));
 		}
 		if get_time() >= next_trail_at {
 			rr_mech_spawn_flash(entity.world_position, 0.18, v4.{1.0, 0.55, 0.1, 0.35}, 0.18);
@@ -1652,7 +1769,12 @@ Mech_Missile :: class : Component {
 			rr_mech_spawn_flash(target.entity.world_position, 0.9, v4.{1.0, 0.35, 0.05, 0.7}, 0.25);
 			if owner != null { rr_mech_add_screenshake(owner, 0.08, 0.18); }
 			rr_mech_play_sfx_at("sfx/ggg_explode.wav", target.entity.world_position, 0.25);
-			entity.destroy();
+			spine := entity.get_component(Spine_Animator);
+			if spine != null && spine.instance != null {
+				spine.instance.set_animation("explode", false, 0);
+			}
+			exploding = true;
+			expires_at = get_time() + MECH_MISSILE_EXPLODE_DURATION;
 		}
 	}
 }
@@ -1920,8 +2042,8 @@ Mech_Missile_Barrage_Ability :: class : Ability_Base {
 				if target == null continue;
 				e := Scene.create_entity();
 				e.set_local_position(player.entity.world_position + v2.{0, 1.2});
-				e.set_local_scale(v2.{0.25, 0.25});
-				e.add_component(Sprite_Renderer);
+				e.set_local_scale(v2.{0.45, 0.45});
+				e.add_component(Spine_Animator);
 				m := e.add_component(Mech_Missile);
 				m.owner_id = player.entity.id;
 				m.target_id = target.entity.id;
