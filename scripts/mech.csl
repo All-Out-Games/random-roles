@@ -490,13 +490,22 @@ rr_mech_update_overlay_clear :: proc(anim: Spine_Animator, clear_at: ref float) 
 
 rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_corpse_id: u64) {
 	if carrier == null return;
-	offset := v2.{0, 1.05};
+	// Float the grabbed entity in front of the carrier (using facing direction),
+	// not directly above. The mech/guardian avatars are wide, so push it out 1.2u.
+	forward := 1.0;
+	if carrier.entity.world_scale.x < 0.0 { forward = -1.0; }
+	offset := v2.{forward * 1.2, 0.7};
 	if carried_player_id != 0 {
 		target := get_player_by_entity_id(carried_player_id);
 		if target != null && target.player_state == Player_State.ALIVE {
 			target.entity.set_local_position(carrier.entity.world_position + offset);
 			target.agent.velocity = v2.{0, 0};
 			target.add_disable_movement_input_reason(MECH_CARRY_REASON);
+
+			// "Held" feedback on the victim: magnetised pose on their own spine
+			// (so all abilities are visually locked out) + magnetised VFX overlay.
+			rr_mech_mark_carried(target);
+			rr_mech_mark_magnetised(target, false);
 
 			// Guardian-only: draw protective shield (allies) or restraint (enemies)
 			// so it's visually obvious whether the held player is being saved or subdued.
@@ -511,6 +520,56 @@ rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_
 			c.entity.set_local_position(carrier.entity.world_position + offset);
 		}
 	}
+}
+
+// Status applied to a player while they're held by a Mech/Guardian. Drives the
+// magnetised player pose and is the single source of truth for "is this player
+// grabbed" — used by the global ability gate (player.csl ao_can_use_ability).
+// Refreshed every frame by rr_mech_update_carried; auto-clears when not refreshed
+// (so throw/cleanup paths don't need to explicitly poke it).
+Mech_Carried_Status :: class : Component {
+	active: bool;
+	expires_at: float;
+
+	refresh :: proc(using this: Mech_Carried_Status) {
+		expires_at = get_time() + 0.2;
+		if active return;
+		active = true;
+		p := entity.get_component(Player);
+		if p != null && p.animator != null && p.animator.state_machine != null {
+			p.animator.state_machine.set_bool("electrocute", true);
+		}
+	}
+
+	clear :: proc(using this: Mech_Carried_Status) {
+		if !active return;
+		active = false;
+		p := entity.get_component(Player);
+		if p != null && p.animator != null && p.animator.state_machine != null {
+			p.animator.state_machine.set_bool("electrocute", false);
+		}
+	}
+
+	ao_update :: method(dt: float) {
+		if !active return;
+		if get_time() < expires_at return;
+		clear(this);
+	}
+
+	ao_end :: method() { clear(this); }
+}
+
+rr_mech_mark_carried :: proc(target: Player) {
+	if target == null || !#alive(target.entity) return;
+	s := target.entity.get_component(Mech_Carried_Status);
+	if s == null { s = target.entity.add_component(Mech_Carried_Status); }
+	s.refresh();
+}
+
+rr_mech_is_carried :: proc(target: Player) -> bool {
+	if target == null || !#alive(target.entity) return false;
+	s := target.entity.get_component(Mech_Carried_Status);
+	return s != null && s.active;
 }
 
 // True while `target` is being carried by a (alive) Guardian. Used by the
@@ -2200,8 +2259,9 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 		if guard.carried_player_id != 0 return true;
 		target := rr_mech_find_melee_target(player, true);
 		if target == null return false;
-		tm := target.entity.get_component(Mech_Module);
-		if tm != null && tm.is_apex return false;
+		// Transformed Mech/Guardian can't be grabbed by the Guardian — the two
+		// titans go through Showdown, not the grab/throw path.
+		if rr_mech_is_transformed(target) return false;
 		return true;
 	}
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -2216,8 +2276,7 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 			}
 			target := rr_mech_find_melee_target(player, true);
 			if target != null {
-				tm := target.entity.get_component(Mech_Module);
-				if tm != null && tm.is_apex return;
+				if rr_mech_is_transformed(target) return;
 				guard.carried_player_id = target.entity.id;
 				target.add_disable_movement_input_reason(MECH_CARRY_REASON);
 				// Play grab on track 1 so locomotion (idle/run) on track 0 keeps going underneath.
