@@ -39,7 +39,7 @@ rr_lily_get_spider_rig_path :: proc() -> string {
 }
 
 // Kill
-LILY_KILL_COOLDOWN :: 25.0;
+LILY_KILL_COOLDOWN :: 40.0;
 LILY_KILL_RANGE_SCHLEEM :: 15.0;
 LILY_KILL_RANGE_LILY :: 30.0; // Extended melee range in Lily form (doubled)
 
@@ -4599,6 +4599,7 @@ Lily_String_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
@@ -4624,6 +4625,11 @@ Lily_String_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			closest := get_closest_string_target(this, player);
 			if closest != null {
@@ -5090,6 +5096,7 @@ Lily_Spider_Attack_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
@@ -5108,6 +5115,11 @@ Lily_Spider_Attack_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			rr_lily_spider_chomp(player);
 		}
@@ -5192,7 +5204,7 @@ rr_lily_draw_spider_timer :: proc(player: Player) {
 	ts.color = v4.{1.0, t, t, 1.0};
 
 	text_rect := Rect{label_pos, label_pos}.grow(0.16, 0.58, 0.16, 0.58);
-	UI.text(text_rect, ts, format_string("Return: %s", .{secs}));
+	UI.text(text_rect, ts, "Return: %s", .{secs});
 }
 
 // =============================================================================
@@ -5943,6 +5955,7 @@ Lily_Steal_Eyes_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
@@ -5956,6 +5969,11 @@ Lily_Steal_Eyes_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			rr_lily_spawn_eye_machine(player);
 			cd_mult := 1.0;
@@ -5983,6 +6001,7 @@ Lily_Eye_Machine_Attack_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
@@ -5995,6 +6014,11 @@ Lily_Eye_Machine_Attack_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			rr_lily_eye_machine_start_attack(player);
 		}
@@ -6047,6 +6071,7 @@ Lily_Steal_Legs_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
@@ -6059,6 +6084,11 @@ Lily_Steal_Legs_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			lm := player.entity.get_component(Lily_Module);
 			if lm == null return;
@@ -6087,6 +6117,7 @@ Lily_Tea_Party_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
@@ -6111,6 +6142,11 @@ Lily_Tea_Party_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			closest := get_closest_tea_target(this, player);
 			if closest != null {
@@ -6149,6 +6185,7 @@ Lily_Mind_Control_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
@@ -6162,6 +6199,11 @@ Lily_Mind_Control_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			lm := player.entity.get_component(Lily_Module);
 			if lm != null {
@@ -6227,6 +6269,7 @@ Lily_Deathbraid_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 
@@ -6240,6 +6283,11 @@ Lily_Deathbraid_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		if params.clicked && params.can_use {
 			tree := find_ready_tree();
 			if tree != null {
@@ -6277,6 +6325,7 @@ Lily_String_Trap_Ability :: class : Ability_Base {
 		if game_state != Game_State.INGAME return false;
 		if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
+		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.LILY_LOVEBRAIDS return false;
 		lm := player.entity.get_component(Lily_Module);
@@ -6293,6 +6342,11 @@ Lily_String_Trap_Ability :: class : Ability_Base {
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
+		// Keep cooldown overlay in sync with post-meeting / initial-round lockout.
+		lockout_remaining := post_meeting_kill_lockout_ends_at - get_time();
+		if lockout_remaining < 0.0 lockout_remaining = 0.0;
+		current_cooldown = max(current_cooldown, lockout_remaining);
+
 		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
 		targeting := targeted.targeting;
 
