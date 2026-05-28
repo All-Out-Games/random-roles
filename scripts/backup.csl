@@ -1,25 +1,5 @@
-// =============================================================================
-// Dev backup / restore (testing aid)
-//
-// `/backup` toggles auto-snapshot. Polls during INGAME and recaptures whenever
-// any tracked field changes. Each capture is JSON-serialized to a game-level
-// save string so the snapshot survives a full process restart.
-//
-// `/restore` applies the latest snapshot to connected players (keyed by
-// user_id). Must be run during INGAME (the target round must exist).
-//
-// Auto-snapshot is NOT persisted across reboots — after a restart you must
-// re-run `/backup` to resume polling. The snapshot itself is persisted.
-//
-// Snapshot contents (per-player, keyed by user_id):
-//   - role / type / alive state / completed task ids
-//   - traitor scalar counters: Werewolf+Hitman+Mimicer kills, Pirate treasure
-//   - Lily: tree planted/pos/fulfilled_count, carrying eyes+legs
-//   - Big Charlie: planted_nugget_total, infection count
-//   - GGG: nest placed/pos/points
-//   - Portal Maker: red+blue portal positions
-//   - Hitman: placed-mine positions
-// =============================================================================
+// Dev backup/restore: /backup toggles INGAME auto-snapshot (JSON to game save, survives restart);
+// /restore applies it to connected players by user_id. Snapshot persists; the enabled flag does not.
 
 BACKUP_POLL_INTERVAL :: 0.5;
 RR_BACKUP_SAVE_KEY :: "rr_backup_snapshot";
@@ -80,9 +60,8 @@ Backup_Corpse_Entry :: class {
 
 Backup_Snapshot :: class {
 	version: int @ao_serialize;
-	// Monotonic seconds-since-boot at capture, rounded down. Stored as int to
-	// avoid CSL's f32 → string conversion emitting precision-junk digits that
-	// trip strict JSON parsers ("9.0666999816894531" instead of "9.067").
+	// Seconds-since-boot at capture, int to avoid f32→string precision junk
+	// that trips strict JSON parsers.
 	captured_at_s: int @ao_serialize;
 	entries: [..]Backup_Player_Entry @ao_serialize;
 	corpses: [..]Backup_Corpse_Entry @ao_serialize;
@@ -134,10 +113,8 @@ rr_backup_count_completed_tasks :: proc(p: Player) -> int {
 rr_backup_last_saved_bytes: int;
 
 
-// JSON.serialize emits pretty-printed output. Strip structural whitespace AND
-// replace all `"` with `'` — the save backend validates strings it stores and
-// rejects raw JSON-like values. Apostrophes are rare in our data (user_ids,
-// task ids), and we swap them back before deserializing on load.
+// Strip structural whitespace and swap `"` -> `'` (save backend rejects raw JSON-like
+// values); apostrophes are rare in our data and we swap them back on load.
 RR_BACKUP_QUOTE_SENTINEL :: "'";
 
 rr_backup_encode_for_save :: proc(s: string) -> string {
@@ -209,10 +186,8 @@ rr_backup_load_from_disk :: proc() -> bool {
 	payload := Save.get_game_string(RR_BACKUP_SAVE_KEY, "");
 	if payload.count == 0 return false;
 	if payload.count > RR_BACKUP_MAX_SAVE_BYTES {
-		// Dev-tool guard: a stale/corrupt game-level snapshot can become huge.
-		// Decoding it uses repeated string concatenation and can exhaust the
-		// engine arena. Ignore oversized payloads instead of loading them during
-		// gameplay startup.
+		// Guard: oversized payloads (stale/corrupt) decode via repeated string
+		// concat and can exhaust the engine arena — ignore them.
 		return false;
 	}
 
@@ -354,9 +329,8 @@ rr_backup_capture :: proc() {
 	rr_backup_save_to_disk();
 }
 
-// Cheap surrogate digest per player — if any of these shift we recapture the
-// full snapshot. Not a rigorous diff; intentionally misses some world-state
-// changes (e.g. mine repositioning) that the next poll will pick up anyway.
+// Cheap per-player surrogate digest — recapture if any tracked field shifts.
+// Not a rigorous diff; misses some world-state the next poll picks up anyway.
 rr_backup_state_changed :: proc() -> bool {
 	if rr_backup_snapshot == null return true;
 	snap := rr_backup_snapshot;
@@ -507,10 +481,8 @@ rr_backup_restore_bc :: proc(p: Player, e: Backup_Player_Entry) {
 	bcm := p.entity.get_component(Big_Charlie_Module);
 	if bcm == null bcm = p.entity.add_component(Big_Charlie_Module);
 	bcm.planted_nugget_total = e.bc_planted_nugget_total;
-	// Infection count is restored as a number; the actual infected_player_ids
-	// list isn't snapshotted (would require serializing entity-id stability).
-	// On restore we leave the list empty — backup is a dev tool, not a perfect
-	// fidelity replay, and the infection slot count is rebuilt from new cocoons.
+	// Infection count isn't snapshotted (needs entity-id stability); leave the
+	// list empty and let new cocoons rebuild it.
 	bcm.infected_player_ids.clear();
 }
 
@@ -574,9 +546,8 @@ rr_backup_restore_corpses :: proc() {
 		world_references.spawn_corpse(owner, 0);
 	}
 
-	// Second pass: the just-spawned corpses are the most recently added Corpse
-	// components. Walk them in order and stamp the saved state onto each. We
-	// pair by index because spawn order matches the snapshot iteration order.
+	// Second pass: stamp saved state onto the just-spawned corpses, pairing by
+	// index since spawn order matches snapshot iteration order.
 	idx := 0;
 	for c: component_iterator(Corpse) {
 		if c == null continue;

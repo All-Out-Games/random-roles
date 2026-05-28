@@ -2,20 +2,8 @@ import "core:ao"
 
 // =============================================================================
 // Big Charlie — Anarchist Role (Nugget Mother)
-// =============================================================================
-//
-// Win condition (solo Anarchist):
-//   - Plant 5 Lil' Nuggets on the map
-//   - Infect 3 different players (Flesh Cocoon -> Incubate -> Hatch)
-//   - Fire Mass Birth -> all infected players become mini Big Charlies and
-//     stampede the map; Big Charlie wins the round.
-//
-// Forms:
-//   - Schleem form: normal player rig & speed; can use Nugget Scouting Network.
-//   - Big Charlie form: visible monster rig at +10% movespeed; can use
-//     Birth Nugget, Flesh Cocoon and (when checklist complete) Mass Birth.
-//     Incubate is an interact prompt on cocooned victims, only visible to Big Charlie.
-//
+// Win: plant 5 Nuggets, infect 3 players (cocoon->incubate->hatch), Mass Birth.
+// Forms: Schleem (normal + Scouting) / Big Charlie (monster +10% speed, abilities).
 // =============================================================================
 
 // --- Tunable constants (NOT serialized — same convention as other roles) ---
@@ -146,11 +134,8 @@ rr_bc_round_start :: proc(p: Player) {
 	p.active_tasks = List(Task_Base).{};
 }
 
-// Belt-and-suspenders global sweep: nukes every BC scene entity (cocoons,
-// nuggets, mini-Charlie creatures) regardless of which Big_Charlie_Module owns
-// them. Called once at round start so a previous Charlie who disconnected or
-// rerolled cannot leak entities into the new round. Per-player cleanup
-// (rr_bc_cleanup) still handles victim flags and Charlie's own state.
+// Global sweep at round start: nukes every BC scene entity (cocoons, nuggets,
+// minis) regardless of owner, so a left/rerolled Charlie can't leak entities.
 rr_bc_round_global_cleanup :: proc() {
 	// Release cocoon victims, then collect entities to destroy after iteration.
 	cocoon_ents: [..]Entity;
@@ -179,10 +164,8 @@ rr_bc_round_global_cleanup :: proc() {
 rr_bc_cleanup :: proc(player: Player) {
 	if player == null return;
 
-	// Victim-side reset — runs for every player, not just last round's Charlie.
-	// A player who was cocooned / infected / mass-birthed in the previous round
-	// must come into the new round with a clean slate, even if the Charlie who
-	// owned them has rerolled to another role and no longer has the module.
+	// Victim-side reset — runs for every player so anyone cocooned/infected/
+	// mass-birthed last round starts clean, even if their Charlie rerolled away.
 	if player.bc_cocooned {
 		rr_bc_release_player_from_cocoon(player);
 	}
@@ -353,13 +336,8 @@ rr_bc_swap_to_player :: proc(player: Player) {
 	player.remove_name_invisibility_reason(BC_NAME_INVIS_REASON);
 }
 
-// Growth Stages: Big Charlie's monster form swells visibly per infection
-// (re-infections of the same victim stack and grow her further).
-// Scale scales linearly with infection count (capped at BC_CHECKLIST_INFECTIONS).
-// At full size (3+), swap to BigCharlie_Stampede skin (pulsing veins) and add a
-// sin-wave breathing scale on top.
-// Scale is re-applied every frame because server->client sync overwrites local
-// transform; skin is only swapped when the target stage crosses the threshold.
+// Monster form scales linearly per infection (capped); at full size (3+) swaps
+// to Stampede skin + sin-wave breathing. Re-applied every frame (server sync).
 rr_bc_apply_growth_visuals :: proc(bc: Big_Charlie_Module, now: float) {
 	if bc == null return;
 	if bc.creature_entity == null || !#alive(bc.creature_entity) return;
@@ -430,13 +408,8 @@ rr_bc_setup_creature_state_machine :: proc(ca: Spine_Animator) {
 	to_cocoon.create_trigger_condition(cocoon_trigger);
 	layer.create_transition(cocoon_state, idle_state, true);
 
-	// Birth Nugget — reuses "Spawn_Nugget" intro birth anim.
-	// The full anim is 1.4s but BigCharlie's skeleton only animates over the
-	// first ~0.55s (the remaining 0.85s is just trailing VFX particles, with
-	// the body locked on its last pose). Speed the state up so the spine track
-	// completes inside the state's runtime — otherwise the body holds its
-	// final frame for ~0.85s before the SM transitions back to Idle.
-	// [ART] If a dedicated "Birth_Nugget_Idle" is added, point this at it.
+	// Birth Nugget — reuses "Spawn_Nugget"; body only animates first ~0.55s
+	// (rest is VFX), so speed the state up to finish the track in 0.55s.
 	birth_state := layer.create_state("Spawn_Nugget", false, 0.55);
 	birth_state.speed = 1.4 / 0.55; // ~2.55x — full anim resolves in 0.55s
 	to_birth := layer.create_global_transition(birth_state, true);
@@ -498,10 +471,8 @@ BC_Lil_Nugget :: class : Component {
 		apply_local_visibility();
 	}
 
-	// Proximity-based local visibility — Big Charlie always sees nuggets;
-	// non-Charlie players only see planted nuggets when close, like Lily trees /
-	// GGG nests. Follower nuggets are always fully visible (they trail an
-	// infected player — proximity-fade would obscure the diegetic warning).
+	// Big Charlie always sees nuggets; others see planted ones only when close.
+	// Follower nuggets are always visible (they trail an infected player).
 	apply_local_visibility :: method() {
 		spine := entity.get_component(Spine_Animator);
 		if spine == null return;
@@ -545,9 +516,8 @@ BC_Lil_Nugget :: class : Component {
 			return;
 		}
 
-		// Mass Birth: each nugget is assigned a slot on the outer ring around
-		// Big Charlie (target updated by BC's update) and switches to the chant
-		// loop once it arrives.
+		// Mass Birth: nugget heads to its outer-ring slot (target set by BC),
+		// then switches to the chant loop on arrival.
 		if is_stampeding {
 			cur := entity.world_position;
 			diff := stampede_target_pos - cur;
@@ -573,9 +543,8 @@ BC_Lil_Nugget :: class : Component {
 			return;
 		}
 
-		// Follower: confidently trail near the infected player without being
-		// glued to one static offset. It keeps a small orbit/range around them,
-		// lags behind movement, and catches up faster if it falls too far back.
+		// Follower: trail near the infected player with a small orbit, lagging
+		// behind movement and catching up faster if it falls too far back.
 		if is_follower {
 			target := get_player_by_entity_id(follower_target_id);
 			if target == null || target.player_state != Player_State.ALIVE {
@@ -597,9 +566,8 @@ BC_Lil_Nugget :: class : Component {
 			orbit_amp_x := 0.45;
 			orbit_amp_y := 0.25;
 			if speed <= 0.2 {
-				// When the host is idle, preserve whichever side/ring the nugget
-				// is already on. Do not reset to the default offset in front/behind
-				// the player; only correct if too close or too far.
+				// Host idle: keep the nugget on its current ring; only correct
+				// position if it is too close or too far.
 				if from_player_dist >= 0.65 && from_player_dist <= 1.25 {
 					return;
 				}
@@ -696,9 +664,8 @@ BC_Lil_Nugget :: class : Component {
 			return;
 		}
 
-		// Planted Nuggets stay exactly where Big Charlie birthed them. This
-		// avoids the old first-frame snap/wander offset and matches the design:
-		// stationary, visible map hazards that players can spend 3s destroying.
+		// Planted Nuggets stay where birthed: stationary, visible map hazards
+		// players can spend 3s destroying.
 		entity.set_local_position(spawn_pos);
 
 		// Reset per-frame break counter (set by Interactable.on_holding).
@@ -1218,10 +1185,8 @@ rr_bc_on_player_died :: proc(dead_player_entity_id: u64) {
 	dead := get_player_by_entity_id(dead_player_entity_id);
 	if dead == null return;
 
-	// Owner-side: if Big Charlie dies during a predicted cocoon/nugget action,
-	// immediately tear down all locally-owned BC state. This prevents stale
-	// client-predicted cocoons from pinning a killer or ticking after the server
-	// reconciles the kill first. rr_bc_cleanup already releases the victim half.
+	// Owner-side: if Big Charlie dies, tear down all locally-owned BC state so
+	// stale client-predicted cocoons can't pin a killer after server reconciles.
 	if dead.player_role == Player_Role.BIG_CHARLIE {
 		rr_bc_cleanup(dead);
 	} else if dead.bc_cocooned {
@@ -1234,10 +1199,8 @@ rr_bc_on_player_died :: proc(dead_player_entity_id: u64) {
 		bc := bc_player.entity.get_component(Big_Charlie_Module);
 		if bc == null continue;
 
-		// Drop every infection slot for this victim (re-infections stack). Each
-		// slot was paid for with one consumed planted Nugget, so decrement the
-		// task-list checklist tally by however many followers this victim was
-		// carrying — Charlie has to re-plant to make up for the lost infection.
+		// Drop every infection slot for this victim (re-infections stack); each
+		// cost one planted Nugget, so decrement the checklist tally to match.
 		removed := 0;
 		i := 0;
 		while i < bc.infected_player_ids.count {
@@ -1416,9 +1379,8 @@ rr_bc_start_transform :: proc(player: Player) {
 		sfx.volume = 0.5;
 		rr_play_sfx(BC_SFX_TRANSFORM, sfx);
 
-		// Layer Charlie's scream on top of the poof so the transform feels
-		// monstrous, not just smoky. Delayed slightly to land on the visible
-		// scream beat in the transform anim.
+		// Layer Charlie's scream on the poof so the transform feels monstrous;
+		// delayed slightly to land on the visible scream beat.
 		scream := SFX.default_sfx_desc();
 		scream.entity_to_follow = player.entity.id;
 		scream.volume = 0.3;
@@ -1457,9 +1419,8 @@ rr_bc_start_revert :: proc(player: Player) {
 // Mass Birth
 // =============================================================================
 
-// Counts alive non-BC players who haven't been infected yet. The Mass Birth
-// goal is "infect everyone" — when this hits 0 (and at least one real victim
-// is in the infected list), the checklist completes.
+// Counts alive non-BC players not yet infected. Hitting 0 (with at least one
+// real victim infected) completes the "infect everyone" checklist goal.
 rr_bc_remaining_to_infect :: proc(bc_player: Player, bc: Big_Charlie_Module) -> int {
 	if bc_player == null || bc == null return 0;
 	remaining := 0;
@@ -1522,17 +1483,13 @@ rr_bc_start_mass_birth :: proc(player: Player) {
 	bc.mass_birth_sync_at = 0.0;
 
 	// Charlie stays planted at her birthing spot — the cinematic camera locks
-	// onto her for everyone, so she must not be able to walk during it. Mirrors
-	// the lily deathbraid pattern (LILY_DEATHBRAID_REASON freezes Lily too).
+	// onto her, so she must not walk (mirrors the lily deathbraid pattern).
 	player.add_freeze_reason(BC_MASS_BIRTH_LOCK_REASON);
 
 	rr_bc_creature_trigger(player, "bellow");
 
-	// Collect unique chasers and assign each one a stable angle on the inner
-	// ring around Big Charlie. Re-infections stack in infected_player_ids so we
-	// de-dupe here. NOTE: at this stage victims keep their HUMAN appearance —
-	// they stampede in as themselves and only transform into mini Big Charlies
-	// when they personally reach the chant ring (see rr_bc_update_mass_birth).
+	// Collect unique chasers, assign each a stable angle on the inner ring.
+	// Victims stay human until they reach the chant ring, then transform.
 	mini_players: [..]Player;
 	for i: 0..bc.infected_player_ids.count-1 {
 		victim := get_player_by_entity_id(bc.infected_player_ids[i]);
@@ -1551,9 +1508,8 @@ rr_bc_start_mass_birth :: proc(player: Player) {
 	for i: 0..mini_count-1 {
 		victim := mini_players[i];
 		angle := (i.(float) / max(mini_count, 1).(float)) * 2.0 * PI;
-		// bc_is_mini_charlie marks this victim as a chaser slot in the
-		// stampede update; the visual / invisibility swap is deferred until
-		// arrival so they appear as humans during the run-in.
+		// Mark as a chaser slot; the visual/invisibility swap is deferred to
+		// arrival so they appear human during the run-in.
 		victim.bc_is_mini_charlie = true;
 		victim.bc_mini_chant_angle = angle;
 		victim.bc_mini_chanting = false;
@@ -1594,9 +1550,8 @@ rr_bc_start_mass_birth :: proc(player: Player) {
 			+ v2.{cos(n.chant_angle), sin(n.chant_angle)} * BC_MASS_BIRTH_NUGGET_RADIUS;
 	}
 
-	// Big Charlie's mass-birth scream — anchored to her so the SFX replicates
-	// to every client (non-positional bellows don't propagate). Volume cranked
-	// + extended range so the cinematic crowd hears it from anywhere on the map.
+	// Mass-birth scream anchored to Charlie so it replicates to every client;
+	// volume + range cranked so the whole map hears it.
 	if Game.is_server() {
 		desc := SFX.default_sfx_desc();
 		desc.entity_to_follow = player.entity.id;
@@ -1638,10 +1593,8 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 		if dup continue;
 		stepped.append(chaser.entity.id);
 
-		// Fire the staggered follow-up scream once its scheduled time hits.
-		// Server-only — bc_mini_second_scream_at is server-stamped at arrival
-		// and replicates to clients only as a flag; the actual SFX play is
-		// kicked off here so engine-side delay limits can't drop it.
+		// Fire the staggered follow-up scream when its scheduled time hits.
+		// Server-stamped at arrival; played here so delay limits can't drop it.
 		if Game.is_server() && chaser.bc_mini_second_scream_at > 0.0 && get_time() >= chaser.bc_mini_second_scream_at {
 			scream2 := SFX.default_sfx_desc();
 			scream2.entity_to_follow = chaser.entity.id;
@@ -1665,11 +1618,8 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 			chaser.set_facing_right(face_diff.x > 0.0);
 			if !chaser.bc_mini_chanting {
 				chaser.bc_mini_chanting = true;
-				// Transform on arrival: spawn the mini-Charlie visual, hide the
-				// human rig + nameplate, and play a higher-pitched poof so each
-				// arrival has its own punctuation. Earlier in the cinematic the
-				// chaser stampedes in as their human self — the transform is
-				// deliberately deferred to this beat.
+				// Transform on arrival: spawn mini-Charlie visual, hide human rig
+				// + nameplate, play a pitched poof (deferred from the run-in).
 				rr_bc_spawn_mini_charlie_visual(chaser);
 				chaser.add_invisibility_reason(BC_INVIS_REASON);
 				chaser.add_name_invisibility_reason(BC_NAME_INVIS_REASON);
@@ -1680,11 +1630,8 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 					sfx.speed = 1.5; // pitched-up — small charlies have small voices
 					rr_play_sfx(BC_SFX_TRANSFORM, sfx);
 
-					// Pitched-up scream #1 plays right after the poof (engine
-					// handles the short delay). Scream #2 is server-scheduled
-					// for a later beat via bc_mini_second_scream_at — long
-					// engine-side delays don't replicate reliably, so we fire
-					// the follow-up explicitly from rr_bc_update_mass_birth.
+					// Scream #1 fires right after the poof; scream #2 is server-
+					// scheduled via bc_mini_second_scream_at (delays don't replicate).
 					rng: u64 = rng_root_seed();
 					first_delay := BC_SFX_TRANSFORM_SCREAM_DELAY + rng_range_float(ref rng, 0.0, 0.4);
 
@@ -1711,10 +1658,8 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 			continue;
 		}
 
-		// Route around walls via the navmesh: ask the agent to path to the slot,
-		// then step toward the returned next waypoint. We can't let the agent
-		// drive itself because chasers have movement input disabled for the
-		// cinematic — set_path_target gives us the routed waypoint, we integrate.
+		// Route around walls via navmesh: set_path_target gives the routed
+		// waypoint, we integrate (chaser input is disabled for the cinematic).
 		path := chaser.agent.set_path_target(slot_pos, BC_MASS_BIRTH_STAMPEDE_SPEED);
 		step_target := slot_pos;
 		if path.success {
@@ -1748,9 +1693,8 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 		n.stampede_target_pos = bc_pos + v2.{cos(n.chant_angle), sin(n.chant_angle)} * BC_MASS_BIRTH_NUGGET_RADIUS;
 	}
 
-	// Stamp the synced-transform timestamp once every chaser has arrived at
-	// the chant ring. This drives the camera screenshake on every client (each
-	// client reads the synced timestamp off the BC module).
+	// Stamp the synced-transform timestamp once every chaser reaches the chant
+	// ring; this drives the camera screenshake on every client.
 	if Game.is_server() && bc.mass_birth_sync_at == 0.0 {
 		any_chaser := false;
 		all_arrived := true;
@@ -1861,9 +1805,8 @@ rr_bc_update :: proc(player: Player, dt: float) {
 	}
 
 
-	// Cleanup any infected players who died — drop their follower & infection
-	// slot. Mirrors rr_bc_on_player_died: each slot represents one consumed
-	// planted Nugget, so the checklist tally decrements alongside.
+	// Cleanup infected players who died: drop their follower & infection slot,
+	// decrementing the checklist tally (each slot cost one planted Nugget).
 	i := 0;
 	while i < bc.infected_player_ids.count {
 		infected_id := bc.infected_player_ids[i];
@@ -1931,9 +1874,8 @@ rr_bc_draw_camera_ui :: proc(player: Player, dt: float) {
 		Post_Processing.film_grain(grain);
 	}
 
-	// Full-screen camera viewfinder overlay — sits above the world but
-	// below the ability buttons (default layer) and HUD so the player's
-	// regular UI stays unobstructed.
+	// Full-screen viewfinder overlay — above the world but below the ability
+	// buttons and HUD so the regular UI stays unobstructed.
 	overlay_tex := get_asset(Texture_Asset, "sprites/ew_UI.png");
 	UI.push_layer(-10);
 	UI.quad(UI.get_screen_rect(), overlay_tex, v4.{1, 1, 1, 1});
@@ -2123,10 +2065,8 @@ rr_bc_draw_checklist_panel :: proc(player: Player) {
 // =============================================================================
 // Endgame cinematic hookup (server-side trigger)
 // =============================================================================
-//
-// Defined in gamemanager.csl: calls back into game-state machinery to freeze
-// the round, play a cinematic, and end with anarchist victory.
-// Implemented here as a forward-declared call to keep BC self-contained.
+// Defined in gamemanager.csl: freezes the round, plays a cinematic, and ends
+// with anarchist victory. Forward-declared call to keep BC self-contained.
 rr_bc_trigger_endgame_cinematic :: proc(player: Player) {
 	start_bc_mass_birth_cinematic(player);
 }
@@ -2374,11 +2314,8 @@ BC_Shockwave_Ability :: class : Ability_Base {
 	}
 }
 
-// Walk the navmesh from `origin` toward `target` in fixed steps; return true if
-// the straight line stays on (or near) the navmesh the whole way — i.e. no
-// wall sits between the two points. The shockwave uses this so the blast
-// stops at obstacles like a Hitman mine's expansion ring. Engine has no
-// raycast API; nearest-point-on-navmesh sampling is the closest analogue.
+// Step along the navmesh from origin to target; true if no wall sits between
+// them. Lets the shockwave stop at obstacles (no raycast API; nav sampling).
 rr_bc_line_clear_on_navmesh :: proc(origin: v2, target: v2) -> bool {
 	diff := target - origin;
 	dist := length(diff);
@@ -2405,11 +2342,8 @@ rr_bc_line_clear_on_navmesh :: proc(origin: v2, target: v2) -> bool {
 	return true;
 }
 
-// Active fling phase — re-applies the outward velocity every frame so the
-// victim travels until they hit a wall (or the timeout expires), like a
-// Hitman mine fling. This is what makes the shockwave throw players to the
-// edge of the room rather than a few studs from Charlie. On collision /
-// timeout, hands off to BC_Shockwave_Stun for the post-knockback stun.
+// Active fling: re-applies outward velocity each frame until the victim hits a
+// wall or times out, then hands off to BC_Shockwave_Stun.
 BC_Shockwave_Knockback :: class : Component {
 	active: bool;
 	end_time: float;
@@ -2428,9 +2362,8 @@ BC_Shockwave_Knockback :: class : Component {
 		p := entity.get_component(Player);
 		if p != null {
 			p.add_disable_movement_input_reason(BC_SHOCKWAVE_FLING_REASON);
-			// Reuse the merged-rig fly-forward state (originally added for the
-			// Hitman mine fling) so the victim looks airborne instead of
-			// jogging while being pushed.
+			// Reuse the fly-forward state so the victim looks airborne instead
+			// of jogging while being pushed.
 			p.set_facing_right(dir.x > 0);
 			p.set_trigger("hitman_fly_forward");
 			p.agent.velocity = dir * speed;
@@ -2495,9 +2428,8 @@ BC_Shockwave_Stun :: class : Component {
 		p := entity.get_component(Player);
 		if p != null {
 			p.add_disable_movement_input_reason(BC_SHOCKWAVE_STUN_REASON);
-			// Fall_To_Ground_Hurt one-shot — anim length (3.4s) matches the
-			// stun window, so the player gets up at the same moment movement
-			// input re-enables.
+			// Fall_To_Ground_Hurt one-shot — its 3.4s length matches the stun
+			// window, so the player rises as movement input re-enables.
 			p.set_trigger("bc_shockwave_stun");
 		}
 	}
@@ -2526,11 +2458,8 @@ BC_Shockwave_Stun :: class : Component {
 	}
 }
 
-// Knock every alive non-cocooned non-self player within BC_SHOCKWAVE_RANGE
-// outward from Charlie's position. The wave is blocked by walls (sampled on
-// the navmesh, like a Hitman mine ring), so players safely behind cover are
-// untouched. Each victim gets a sustained outward fling until they hit a
-// wall, followed by a 2s stun.
+// Knock every alive, non-cocooned player in range outward from Charlie. Walls
+// block the wave (navmesh-sampled); each victim is flung to a wall, then stunned.
 rr_bc_apply_shockwave :: proc(player: Player) {
 	origin := player.entity.world_position;
 	range_sq := BC_SHOCKWAVE_RANGE * BC_SHOCKWAVE_RANGE;

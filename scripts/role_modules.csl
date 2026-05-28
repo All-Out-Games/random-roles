@@ -51,9 +51,15 @@ Mech_Module :: class : Component {
 	last_anim: string;
 	anim_lock_until: float;
 	transform_anim_ends_at: float;
-	// >0 means "clear track 1 at this time so the grab overlay doesn't freeze on
-	// the last frame". 0 means no pending clear.
+	// Carry pose lives on overlay track 1 (locomotion stays on track 0). overlay_clear_at
+	// is when the grab anim ends; last_overlay_anim is track 1's current anim (empty = cleared).
 	overlay_clear_at: float;
+	last_overlay_anim: string;
+
+	// Bitmask of bolt-on parts currently reflected on the avatar (helmet=1, ram=2,
+	// magnet=4, missile=8). Lets rr_mech_update notice a freshly-built part and play the
+	// part-reveal flourish, and keeps the avatar's skins in sync across all clients.
+	shown_upgrade_sig: int;
 }
 
 Guardian_Module :: class : Component {
@@ -71,6 +77,7 @@ Guardian_Module :: class : Component {
 	anim_lock_until: float;
 	transform_anim_ends_at: float;
 	overlay_clear_at: float;
+	last_overlay_anim: string;
 }
 
 Mech_Minion_Effect :: class : Effect_Base {
@@ -85,6 +92,10 @@ Mech_Minion_Effect :: class : Effect_Base {
 	gears: int;
 	warp_index: int;
 
+	// Conversion timestamp — drives the synced one-shot "You are now a Minion" warning
+	// banner (rr_mech_draw_minion_warning), shown for a fixed window from the server stamp.
+	warning_started_at: float;
+
 	effect_start :: method() {
 		if player == null return;
 		player.player_type = Player_Type.TRAITOR;
@@ -92,7 +103,8 @@ Mech_Minion_Effect :: class : Effect_Base {
 			player.animator.instance.enable_skin("body/half_cyborg");
 			player.animator.instance.refresh_skins();
 		}
-		player.Notify("You are The Mech's Minion.");
+		// Show the custom full-screen warning instead of a plain notification.
+		warning_started_at = get_time();
 	}
 
 	effect_update :: method(dt: float) {
@@ -262,9 +274,8 @@ Big_Charlie_Module :: class : Component {
 	skeleton_swap_at: float;
 	bc_form_speed_active: bool;
 
-	// Tracks whether the creature rig currently shows the full-size Stampede
-	// skin (pulsing veins, applied at BC_GROWTH_PULSE_THRESHOLD infections).
-	// Cached so we don't call set_skin/refresh_skins every frame.
+	// Cached flag for whether the creature rig shows the full-size Stampede skin
+	// (applied at BC_GROWTH_PULSE_THRESHOLD infections), to avoid re-skinning every frame.
 	creature_full_size_skin: bool;
 
 	// Nugget tracking (planted + follower nuggets share this list).
@@ -287,9 +298,8 @@ Big_Charlie_Module :: class : Component {
 	// Mass Birth (game-ending ability)
 	mass_birth_active: bool;
 	mass_birth_started_at: float;
-	// Server stamps this when every infected victim has arrived at the chant
-	// ring and transformed into a mini Big Charlie — drives the synced
-	// transform poof + camera screenshake on every client. 0.0 means "not yet".
+	// Server stamps this once all infected victims reach the chant ring and become mini Big
+	// Charlies — drives the synced transform poof + screenshake. 0.0 means "not yet".
 	mass_birth_sync_at: float;
 
 	// Shockwave (Absorb_Expansion knockback) — fires after a windup delay so the
@@ -372,9 +382,8 @@ Lily_Module :: class : Component {
 	// String Trap
 	dragging_live_player_id: u64; // entity ID of trapped player being dragged
 
-	// Remote-body abilities (spider / eye machine): Lily's player entity teleports to
-	// the remote body so voice/SFX emit from there, while her detached creature rig
-	// stays at `ability_origin_pos` as a semi-transparent ghost marker.
+	// Remote-body abilities (spider / eye machine): Lily's entity teleports to the remote
+	// body for voice/SFX; her detached rig stays at `ability_origin_pos` as a ghost marker.
 	ability_origin_pos: v2;
 	ability_body_detached: bool;
 	ability_creature_was_visible: bool;

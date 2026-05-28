@@ -7,6 +7,7 @@ MECH_TRANSFORM_VFX_RIG :: "anims/roles/Mech Guardian/transformVFX/Machine_Transf
 MECH_MISSILE_RIG :: "anims/roles/Mech Guardian/Missile/RED013_Rocket.spine";
 MECH_WRECKAGE_RIG :: "anims/roles/Mech Guardian/Wreckage/004RAND_Task_Wreckage.spine";
 MECH_MAGNETISED_RIG :: "anims/roles/Mech Guardian/magnetisedVFX/009SG_magnetised.spine";
+MECH_TRUCK_RIG :: "anims/roles/Mech Guardian/Car/010WD_Truck.spine";
 MECH_TRANSFORM_VFX_DURATION :: 1.55;
 MECH_WRECKAGE_APPEAR_DURATION :: 0.45;
 MECH_WRECKAGE_EXPLODE_DURATION :: 0.6;
@@ -19,6 +20,7 @@ MECH_INVIS_REASON :: "mech_transform";
 MECH_LOCK_REASON :: "mech_lock";
 MECH_STUN_REASON :: "mech_stun";
 MECH_CARRY_REASON :: "mech_carry";
+MECH_THROW_REASON :: "mech_throw";
 MECH_COMPONENT_POWER_CELL :: 1;
 MECH_COMPONENT_CIRCUIT :: 2;
 MECH_COMPONENT_SCHEMATIC :: 3;
@@ -40,6 +42,7 @@ MECH_THROW_WALL_TOLERANCE :: 0.65;
 MECH_AIM_CAMERA_SIZE :: 15.0;
 
 mech_workbench_entity: Entity;
+mech_convert_interactable_entity: Entity;
 
 rr_mech_play_sfx_at :: proc(path: string, pos: v2, volume: float) {
 	sfx := SFX.default_sfx_desc();
@@ -115,6 +118,96 @@ rr_mech_spawn_transform_vfx :: proc(player: Player) {
 	e.add_passive_effect(vfx);
 }
 
+// Small transform VFX burst over a specific spot on the avatar (used for the per-part
+// reveal flourish), parented to the player so it tracks them.
+rr_mech_spawn_part_transform_vfx :: proc(player: Player, offset: v2, scale: float, duration: float) {
+	if player == null || !#alive(player.entity) return;
+	e := Scene.create_entity();
+	e.set_parent(player.entity, false);
+	e.set_local_position(offset);
+	e.set_local_scale(v2.{scale, scale});
+	anim := e.add_component(Spine_Animator);
+	anim.awaken();
+	anim.layer = 11;
+	if anim.instance != null {
+		anim.instance.set_skeleton(get_asset(Spine_Asset, MECH_TRANSFORM_VFX_RIG));
+		anim.instance.set_animation("repairing", false, 0);
+	}
+	vfx := new(Mech_Transform_Vfx_Effect);
+	vfx.set_duration(duration);
+	e.add_passive_effect(vfx);
+}
+
+// Bitmask of bolt-on parts that visibly attach to the mech avatar (built at the workbench).
+rr_mech_upgrade_sig :: proc(mech: Mech_Module) -> int {
+	if mech == null return 0;
+	sig := 0;
+	if mech.helmet_trap_unlocked     { sig |= 1; }
+	if mech.ram_charge_unlocked      { sig |= 2; }
+	if mech.magnet_cannon_unlocked   { sig |= 4; }
+	if mech.missile_barrage_unlocked { sig |= 8; }
+	return sig;
+}
+
+// Local cosmetic that sequences a part reveal: the transform VFX (spawned by the caller)
+// plays first, then after a short beat the new skin is applied and the avatar does a quick
+// scale-pop. Runs on its own throwaway entity so nothing persists on the player.
+Mech_Part_Reveal :: class : Component {
+	player_id: u64;
+	apply_at: float;
+	settle_at: float;
+	target_scale: float;
+	applied: bool;
+
+	ao_update :: method(dt: float) {
+		p := get_player_by_entity_id(player_id);
+		if p == null || !#alive(p.entity) { entity.destroy(); return; }
+		mech := p.entity.get_component(Mech_Module);
+		if mech == null || mech.creature_entity == null || !#alive(mech.creature_entity) { entity.destroy(); return; }
+
+		if !applied {
+			if get_time() < apply_at return;
+			// Snap the new part on at the peak of the VFX, then punch the scale.
+			rr_mech_apply_avatar_skins(p);
+			target_scale = 1.06 + rr_mech_upgrades_owned(mech).(float) * 0.08;
+			mech.creature_entity.set_local_scale(v2.{target_scale * 1.18, target_scale * 1.18});
+			applied = true;
+			settle_at = get_time() + 0.22;
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position, 0.3);
+			return;
+		}
+
+		remaining := (settle_at - get_time()) / 0.22;
+		if remaining <= 0.0 {
+			mech.creature_entity.set_local_scale(v2.{target_scale, target_scale});
+			entity.destroy();
+			return;
+		}
+		s := target_scale * (1.0 + 0.18 * remaining);
+		mech.creature_entity.set_local_scale(v2.{s, s});
+	}
+}
+
+// Kicks off the fancy local reveal for the newly-built part(s). VFX plays over the body
+// region that changes; the Mech_Part_Reveal entity applies the skin + pop a beat later.
+rr_mech_begin_part_reveal :: proc(player: Player, new_bits: int) {
+	if player == null || !#alive(player.entity) return;
+	offset := v2.{0, 0.55};
+	if (new_bits & 8) != 0 { offset = v2.{0, 1.0}; }       // missile launchers — shoulders
+	else if (new_bits & 4) != 0 { offset = v2.{0, 0.5}; }  // magnet cannons — arms
+	else if (new_bits & 2) != 0 { offset = v2.{0, 0.7}; }  // power core — chest
+	else if (new_bits & 1) != 0 { offset = v2.{0, 0.25}; } // legs / jetpack
+
+	rr_mech_spawn_part_transform_vfx(player, offset, 0.75, 0.9);
+	rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", player.entity.world_position, 0.4);
+	rr_mech_add_screenshake(player, 0.06, 0.2);
+
+	e := Scene.create_entity();
+	r := e.add_component(Mech_Part_Reveal);
+	r.player_id = player.entity.id;
+	r.apply_at = get_time() + 0.4;
+}
+
 rr_mech_add_screenshake :: proc(player: Player, intensity: float, seconds: float) {
 	if player == null return;
 	shake := player.entity.get_component(Mech_Screenshake_Status);
@@ -158,6 +251,8 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.anim_lock_until = 0.0;
 	mech.transform_anim_ends_at = 0.0;
 	mech.overlay_clear_at = 0.0;
+	mech.last_overlay_anim = "";
+	mech.shown_upgrade_sig = 0;
 }
 
 rr_guardian_reset_module :: proc(guard: Guardian_Module) {
@@ -178,6 +273,7 @@ rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 	guard.anim_lock_until = 0.0;
 	guard.transform_anim_ends_at = 0.0;
 	guard.overlay_clear_at = 0.0;
+	guard.last_overlay_anim = "";
 }
 
 rr_mech_round_global_cleanup :: proc() {
@@ -185,6 +281,10 @@ rr_mech_round_global_cleanup :: proc() {
 		mech_workbench_entity.destroy();
 	}
 	mech_workbench_entity = null;
+	if mech_convert_interactable_entity != null && #alive(mech_convert_interactable_entity) {
+		mech_convert_interactable_entity.destroy();
+	}
+	mech_convert_interactable_entity = null;
 	for w: component_iterator(Mech_Wreckage) {
 		if w != null && #alive(w.entity) { w.entity.destroy(); }
 	}
@@ -242,6 +342,22 @@ rr_mech_spawn_workbench_if_needed :: proc() {
 	mech_workbench_entity = Scene.create_entity();
 	mech_workbench_entity.set_local_position(pos);
 	mech_workbench_entity.add_component(Mech_Workbench_Interactable);
+
+	// Smash is a world interactable (prompt above each smashable task panel) instead of an
+	// ability button. Attach one to every component task; can_use gates it to the mech /
+	// minion so civilians still see only the normal task prompt.
+	for t: component_iterator(Task_Interactable) {
+		if t == null || !#alive(t.entity) continue;
+		if rr_mech_task_component_kind(t.get_task_id()) == 0 continue;
+		if t.entity.get_component(Mech_Smash_Interactable) == null {
+			t.entity.add_component(Mech_Smash_Interactable);
+		}
+	}
+
+	// Conversion is a world interactable that hovers over the nearest civilian in reach.
+	mech_convert_interactable_entity = Scene.create_entity();
+	mech_convert_interactable_entity.set_local_position(v2.{99999, 99999});
+	mech_convert_interactable_entity.add_component(Mech_Convert_Interactable);
 }
 
 rr_mech_get_owner :: proc(player: Player) -> Player {
@@ -332,9 +448,16 @@ rr_mech_apply_avatar_skins :: proc(player: Player) {
 	mech := player.entity.get_component(Mech_Module);
 	guard := player.entity.get_component(Guardian_Module);
 	anim: Spine_Animator = null;
-	if mech != null { anim = mech.creature_animator; }
-	if guard != null { anim = guard.creature_animator; }
+	ce: Entity = null;
+	if mech != null { anim = mech.creature_animator; ce = mech.creature_entity; }
+	if guard != null { anim = guard.creature_animator; ce = guard.creature_entity; }
+	// Creature entity/animator are local, runtime-spawned, and may be unbuilt or torn down
+	// on a remote client — touching a dangling animator crashes refresh_skins, so bail first.
+	if ce == null || !#alive(ce) return;
 	if anim == null || anim.instance == null return;
+	// Rig asset may still be streaming on a remote client; refresh_skins derefs a null
+	// skeleton and crashes if we touch it before it's loaded.
+	if anim.instance.get_skeleton() == null return;
 
 	anim.instance.disable_all_skins();
 	if guard != null {
@@ -351,16 +474,13 @@ rr_mech_apply_avatar_skins :: proc(player: Player) {
 			anim.instance.enable_skin("Head");
 			anim.instance.enable_skin("Arms");
 			anim.instance.enable_skin("Chest_empty");
-			if mech.ram_charge_unlocked || mech.power_cells > 0 { anim.instance.enable_skin("Chest_full"); }
-			if mech.magnet_cannon_unlocked || mech.schematics > 0 { anim.instance.enable_skin("Full/Mecha"); }
-			if mech.missile_barrage_unlocked || mech.circuits > 0 { anim.instance.enable_skin("Missiles"); }
-			if mech.helmet_trap_unlocked || mech.gears > 0 { anim.instance.enable_skin("Legs"); }
-			upgrades := 0;
-			if mech.power_cells > 0 || mech.ram_charge_unlocked { upgrades += 1; }
-			if mech.schematics > 0 || mech.magnet_cannon_unlocked { upgrades += 1; }
-			if mech.circuits > 0 || mech.missile_barrage_unlocked { upgrades += 1; }
-			if mech.gears > 0 || mech.helmet_trap_unlocked { upgrades += 1; }
-			scale := 1.06 + upgrades.(float) * 0.08;
+			// Bolt-on parts appear when the matching upgrade is BUILT at the workbench,
+			// not when raw components are collected.
+			if mech.ram_charge_unlocked { anim.instance.enable_skin("Chest_full"); }
+			if mech.magnet_cannon_unlocked { anim.instance.enable_skin("Full/Mecha"); }
+			if mech.missile_barrage_unlocked { anim.instance.enable_skin("Missiles"); }
+			if mech.helmet_trap_unlocked { anim.instance.enable_skin("Legs"); }
+			scale := 1.06 + rr_mech_upgrades_owned(mech).(float) * 0.08;
 			if mech.creature_entity != null { mech.creature_entity.set_local_scale(v2.{scale, scale}); }
 		}
 	}
@@ -376,7 +496,12 @@ rr_mech_show_avatar :: proc(player: Player, show: bool) {
 	if guard != null { e = guard.creature_entity; guard.creature_visible = show; }
 	if e != null && #alive(e) { e.set_local_enabled(show); }
 	rr_mech_enable_player_hidden(player, show);
-	if show { rr_mech_apply_avatar_skins(player); }
+	if show {
+		rr_mech_apply_avatar_skins(player);
+		// Baseline the shown-parts mask to whatever is already owned, so transforming in
+		// doesn't trigger a per-part reveal for parts the mech already had.
+		if mech != null { mech.shown_upgrade_sig = rr_mech_upgrade_sig(mech); }
+	}
 }
 
 rr_mech_play_avatar_anim :: proc(player: Player, anim_name: string, loop: bool) {
@@ -405,24 +530,16 @@ rr_mech_update_avatar_locomotion :: proc(player: Player) {
 	guard := player.entity.get_component(Guardian_Module);
 	moving := length(player.agent.velocity) > 0.25;
 	target_anim := "009SG/Idle";
+	// Track 0 is full-body locomotion; carry/grab pose rides the overlay track
+	// (track 1) via rr_mech_update_overlay so the body keeps walking/idling.
 	if guard != null {
 		if get_time() < guard.anim_lock_until return;
-		if guard.carried_player_id != 0 {
-			target_anim = "009SG/Carry_Player_AL";
-			if guard.last_anim != target_anim { rr_mech_play_avatar_anim(player, target_anim, true); }
-			return;
-		}
 		if moving { target_anim = "009SG/Run_guardian"; }
 		if guard.last_anim != target_anim {
 			rr_mech_play_avatar_anim(player, target_anim, true);
 		}
 	} else if mech != null {
 		if get_time() < mech.anim_lock_until return;
-		if mech.carried_player_id != 0 || mech.carried_corpse_id != 0 {
-			target_anim = "009SG/Carry_Player_AL";
-			if mech.last_anim != target_anim { rr_mech_play_avatar_anim(player, target_anim, true); }
-			return;
-		}
 		if mech.is_apex {
 			target_anim = moving ? "009SG/Fly_Run" : "009SG/Fly_Idle";
 		} else {
@@ -446,16 +563,35 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			mech.showdown_active = false;
 			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 		} else {
-			// Enforce visibility invariant each frame so server reconciliation
-			// can't leave the schleem body invisible after toggling form.
-			// Keep the mech avatar visible while a transform-out anim is still playing.
+			// Enforce visibility each frame (survives reconciliation); keep the
+			// avatar visible while a transform-out anim is still playing.
 			target_visible := mech.is_mech_form || mech.is_apex || get_time() < mech.transform_anim_ends_at;
 			if mech.creature_visible != target_visible {
 				rr_mech_show_avatar(player, target_visible);
 			}
 			rr_mech_update_carried(player, mech.carried_player_id, mech.carried_corpse_id);
 			rr_mech_update_showdown_for_mech(player, mech);
-			rr_mech_update_overlay_clear(mech.creature_animator, ref mech.overlay_clear_at);
+			rr_mech_update_overlay(mech.creature_animator, mech.carried_player_id != 0 || mech.carried_corpse_id != 0, mech.last_anim, ref mech.overlay_clear_at, ref mech.last_overlay_anim);
+
+			// Keep the avatar's bolt-on parts in sync with built upgrades on every client,
+			// and play the fancy reveal locally when a new part is built mid-form. (APEX has
+			// its own full skin, so no per-part reveal there.)
+			if mech.is_mech_form && !mech.is_apex && mech.creature_visible {
+				cur_sig := rr_mech_upgrade_sig(mech);
+				if cur_sig != mech.shown_upgrade_sig {
+					new_bits := 0;
+					if (cur_sig & 1) != 0 && (mech.shown_upgrade_sig & 1) == 0 { new_bits |= 1; }
+					if (cur_sig & 2) != 0 && (mech.shown_upgrade_sig & 2) == 0 { new_bits |= 2; }
+					if (cur_sig & 4) != 0 && (mech.shown_upgrade_sig & 4) == 0 { new_bits |= 4; }
+					if (cur_sig & 8) != 0 && (mech.shown_upgrade_sig & 8) == 0 { new_bits |= 8; }
+					mech.shown_upgrade_sig = cur_sig;
+					if new_bits != 0 && player.is_local() && get_time() >= mech.transform_anim_ends_at {
+						rr_mech_begin_part_reveal(player, new_bits);
+					} else {
+						rr_mech_apply_avatar_skins(player);
+					}
+				}
+			}
 		}
 	}
 	if guard != null {
@@ -471,39 +607,55 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			}
 			rr_mech_update_carried(player, guard.carried_player_id, 0);
 			rr_mech_update_showdown_for_guardian(player, guard);
-			rr_mech_update_overlay_clear(guard.creature_animator, ref guard.overlay_clear_at);
+			rr_mech_update_overlay(guard.creature_animator, guard.carried_player_id != 0, guard.last_anim, ref guard.overlay_clear_at, ref guard.last_overlay_anim);
 		}
 	}
 	rr_mech_update_avatar_locomotion(player);
 }
 
-// Clears track 1 (the grab overlay) once the scheduled time arrives so the
-// upper-body grab anim doesn't freeze on its last frame over locomotion.
-rr_mech_update_overlay_clear :: proc(anim: Spine_Animator, clear_at: ref float) {
-	if clear_at <= 0.0 return;
-	if get_time() < clear_at return;
-	if anim != null && anim.instance != null {
-		anim.instance.set_animation("__CLEAR_TRACK__", false, 1);
-	}
-	clear_at = 0.0;
+// Plays a one-shot arm-layer gesture (grab/throw) on overlay track 1 so locomotion
+// keeps running on track 0; rr_mech_update_overlay holds it until oneshot_until.
+rr_mech_play_overlay_oneshot :: proc(player: Player, anim_name: string) {
+	if player == null return;
+	mech := player.entity.get_component(Mech_Module);
+	guard := player.entity.get_component(Guardian_Module);
+	anim: Spine_Animator = null;
+	until := get_time() + rr_mech_anim_duration(anim_name);
+	if mech != null { anim = mech.creature_animator; mech.overlay_clear_at = until; mech.last_overlay_anim = anim_name; }
+	if guard != null { anim = guard.creature_animator; guard.overlay_clear_at = until; guard.last_overlay_anim = anim_name; }
+	if anim == null || anim.instance == null return;
+	anim.instance.set_animation(anim_name, false, 1);
+}
+
+// Drives overlay track 1: holds the carry pose while carrying, else mirrors base
+// locomotion (no clear-track API). One-shot gestures play out; re-issues on change only.
+rr_mech_update_overlay :: proc(anim: Spine_Animator, carrying: bool, base_loco: string, oneshot_until: ref float, last_overlay: ref string) {
+	if anim == null || anim.instance == null return;
+	if oneshot_until > 0.0 && get_time() < oneshot_until return; // gesture still playing
+	desired := carrying ? "009SG/Carry_Player_AL" : base_loco;
+	if desired == "" return; // locomotion not established yet; nothing to mirror
+	if last_overlay == desired return;
+	anim.instance.set_animation(desired, true, 1);
+	last_overlay = desired;
+	oneshot_until = 0.0;
 }
 
 rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_corpse_id: u64) {
 	if carrier == null return;
-	// Float the grabbed entity in front of the carrier (using facing direction),
-	// not directly above. The mech/guardian avatars are wide, so push it out 1.2u.
+	// Float the grabbed entity well in front of the carrier (facing direction), with
+	// a gentle bob so it visibly hovers in the grip.
 	forward := 1.0;
 	if carrier.entity.world_scale.x < 0.0 { forward = -1.0; }
-	offset := v2.{forward * 1.2, 0.7};
+	bob := sin(get_time() * 3.0) * 0.18;
+	offset := v2.{forward * 1.8, 0.75 + bob};
 	if carried_player_id != 0 {
 		target := get_player_by_entity_id(carried_player_id);
 		if target != null && target.player_state == Player_State.ALIVE {
 			target.entity.set_local_position(carrier.entity.world_position + offset);
 			target.agent.velocity = v2.{0, 0};
-			target.add_disable_movement_input_reason(MECH_CARRY_REASON);
 
-			// "Held" feedback on the victim: magnetised pose on their own spine
-			// (so all abilities are visually locked out) + magnetised VFX overlay.
+			// Held feedback: magnetised pose + VFX on the victim. Mech_Carried_Status
+			// owns the edge-triggered movement lock (re-adding every frame would leak).
 			rr_mech_mark_carried(target);
 			rr_mech_mark_magnetised(target, false);
 
@@ -522,11 +674,8 @@ rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_
 	}
 }
 
-// Status applied to a player while they're held by a Mech/Guardian. Drives the
-// magnetised player pose and is the single source of truth for "is this player
-// grabbed" — used by the global ability gate (player.csl ao_can_use_ability).
-// Refreshed every frame by rr_mech_update_carried; auto-clears when not refreshed
-// (so throw/cleanup paths don't need to explicitly poke it).
+// Status applied while a player is held by a Mech/Guardian; drives the magnetised pose
+// and is the source of truth for "grabbed". Refreshed each frame; auto-clears otherwise.
 Mech_Carried_Status :: class : Component {
 	active: bool;
 	expires_at: float;
@@ -536,8 +685,10 @@ Mech_Carried_Status :: class : Component {
 		if active return;
 		active = true;
 		p := entity.get_component(Player);
-		if p != null && p.animator != null && p.animator.state_machine != null {
-			p.animator.state_machine.set_bool("electrocute", true);
+		if p == null return;
+		p.add_disable_movement_input_reason(MECH_CARRY_REASON);
+		if p.animator != null && p.animator.state_machine != null {
+			p.animator.state_machine.set_bool("mech_magnetized", true);
 		}
 	}
 
@@ -545,8 +696,10 @@ Mech_Carried_Status :: class : Component {
 		if !active return;
 		active = false;
 		p := entity.get_component(Player);
-		if p != null && p.animator != null && p.animator.state_machine != null {
-			p.animator.state_machine.set_bool("electrocute", false);
+		if p == null return;
+		p.remove_disable_movement_input_reason(MECH_CARRY_REASON);
+		if p.animator != null && p.animator.state_machine != null {
+			p.animator.state_machine.set_bool("mech_magnetized", false);
 		}
 	}
 
@@ -572,9 +725,8 @@ rr_mech_is_carried :: proc(target: Player) -> bool {
 	return s != null && s.active;
 }
 
-// True while `target` is being carried by a (alive) Guardian. Used by the
-// kill path to make Civilian allies invincible inside the Guardian's arms
-// (matches spec: "Allies: invincible while held").
+// True while `target` is carried by an alive Guardian — makes Civilian allies
+// invincible while held (per spec).
 rr_guardian_is_protecting :: proc(target: Player) -> bool {
 	if target == null return false;
 	if !#alive(target.entity) return false;
@@ -668,9 +820,11 @@ rr_mech_find_nearby_corpse :: proc(player: Player) -> Corpse {
 }
 
 rr_mech_task_component_kind :: proc(task_id: string) -> int {
-	if task_id == "reroute_power" return MECH_COMPONENT_POWER_CELL;
-	if task_id == "guide_the_electron" return MECH_COMPONENT_CIRCUIT;
-	if task_id == "anagram_puzzle" return MECH_COMPONENT_SCHEMATIC;
+	// The four canonical task→part sources. All task panels are always present in the
+	// world, so these are always available to smash. Named in the Mech checklist.
+	if task_id == "reroute_power"        return MECH_COMPONENT_POWER_CELL;
+	if task_id == "guide_the_electron"   return MECH_COMPONENT_CIRCUIT;
+	if task_id == "anagram_puzzle"       return MECH_COMPONENT_SCHEMATIC;
 	if task_id == "calibrate_teleporter" return MECH_COMPONENT_GEAR;
 	return 0;
 }
@@ -680,11 +834,14 @@ rr_mech_add_component_part :: proc(player: Player, kind: int) {
 	mech := player.entity.get_component(Mech_Module);
 	minion := rr_mech_get_minion_effect(player);
 	if mech != null {
+		// Collecting a raw component only banks the material. The avatar's bolt-on parts
+		// reflect UNLOCKED upgrades (built at the workbench), not raw stock — so we do NOT
+		// re-skin here. (Re-skinning from this per-frame pickup path also crashed on remote
+		// clients whose Mech rig wasn't loaded yet.)
 		if kind == MECH_COMPONENT_POWER_CELL { mech.power_cells += 1; }
 		if kind == MECH_COMPONENT_CIRCUIT { mech.circuits += 1; }
 		if kind == MECH_COMPONENT_SCHEMATIC { mech.schematics += 1; }
 		if kind == MECH_COMPONENT_GEAR { mech.gears += 1; }
-		rr_mech_apply_avatar_skins(player);
 		return;
 	}
 	if minion != null {
@@ -903,26 +1060,26 @@ rr_mech_buy_upgrade :: proc(player: Player, upgrade_id: int) {
 	if mech == null return;
 	if rr_mech_upgrade_owned(mech, upgrade_id) return;
 	bought := false;
+	adds_body_part := false;
+	// Body-part upgrades intentionally do NOT re-skin here — rr_mech_update detects the
+	// new part and plays the reveal flourish (and re-skins on every client). They also
+	// close the workbench so the player watches the part bolt on.
 	if upgrade_id == MECH_UPGRADE_HELMET_TRAP && rr_mech_spend_component_pool(player, MECH_COMPONENT_GEAR, 1) {
 		mech.helmet_trap_unlocked = true;
 		player.Notify("Unlocked Helmet Trap.");
-		rr_mech_apply_avatar_skins(player);
-		bought = true;
+		bought = true; adds_body_part = true;
 	} else if upgrade_id == MECH_UPGRADE_RAM_CHARGE && rr_mech_spend_component_pool(player, MECH_COMPONENT_POWER_CELL, 1) {
 		mech.ram_charge_unlocked = true;
 		player.Notify("Unlocked Ram Charge.");
-		rr_mech_apply_avatar_skins(player);
-		bought = true;
+		bought = true; adds_body_part = true;
 	} else if upgrade_id == MECH_UPGRADE_MAGNET_CANNON && rr_mech_spend_component_pool(player, MECH_COMPONENT_SCHEMATIC, 1) {
 		mech.magnet_cannon_unlocked = true;
 		player.Notify("Unlocked Magnet Cannon.");
-		rr_mech_apply_avatar_skins(player);
-		bought = true;
+		bought = true; adds_body_part = true;
 	} else if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE && rr_mech_spend_component_pool(player, MECH_COMPONENT_CIRCUIT, 1) {
 		mech.missile_barrage_unlocked = true;
 		player.Notify("Unlocked Missile Barrage.");
-		rr_mech_apply_avatar_skins(player);
-		bought = true;
+		bought = true; adds_body_part = true;
 	} else if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP && rr_mech_spend_any_components(player, 2) {
 		mech.wreckage_warp_unlocked = true;
 		player.Notify("Unlocked Wreckage Warp.");
@@ -930,7 +1087,12 @@ rr_mech_buy_upgrade :: proc(player: Player, upgrade_id: int) {
 	}
 	if bought {
 		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", player.entity.world_position, 0.4);
-		rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.7}, 0.9, v4.{0.4, 0.85, 1.0, 0.6}, 0.32);
+		// A body-part build closes the bench so the reveal is visible; otherwise just flash.
+		if adds_body_part {
+			mech.workbench_ui_open = false;
+		} else {
+			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.7}, 0.9, v4.{0.4, 0.85, 1.0, 0.6}, 0.32);
+		}
 	}
 }
 
@@ -970,9 +1132,8 @@ rr_mech_convert_target :: proc(mech_player: Player, target: Player) {
 	if target.player_role == Player_Role.GUARDIAN {
 		mech_player.Notify("TARGET INVALID");
 		mech_player.Notify(format_string("% is Guardian.", .{target.entity.get_name()}));
-		// "Denied" reject: shield bounce SFX + error sting, golden shield burst over the
-		// target. Conveys that the conversion attempt itself was repelled (and tips the
-		// Mech off, per spec — no charge consumed).
+			// Denied reject: shield bounce + error sting, golden shield burst over the target.
+			// Conveys the attempt was repelled and tips the Mech off (no charge consumed).
 		rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", target.entity.world_position, 0.42);
 		rr_mech_play_sfx_at("sfx/ui_error.wav", mech_player.entity.world_position, 0.32);
 		rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 1.05, v4.{1.0, 0.95, 0.45, 0.75}, 0.3);
@@ -1011,11 +1172,12 @@ rr_mech_revert_minion :: proc(target: Player) {
 }
 
 rr_mech_get_throw_direction :: proc(player: Player) -> v2 {
-	dir := player.last_aim_direction;
-	if length_squared(dir) < 0.01 {
-		dir = v2.{1, 0};
+	// Throw straight ahead in the facing direction (rr_mech_update_carried uses the same
+	// scale sign), so it launches where they look rather than the last aim point.
+	if player.entity.world_scale.x < 0.0 {
+		return v2.{-1, 0};
 	}
-	return normalize(dir);
+	return v2.{1, 0};
 }
 
 rr_mech_is_near_magnet_node :: proc(pos: v2) -> bool {
@@ -1088,21 +1250,116 @@ rr_mech_find_throw_path_hit :: proc(carrier: Player, target: Player, start_pos: 
 	return false;
 }
 
+// Flies a thrown player along a parabolic arc, owning their position for the flight
+// (locks input). Re-applied each frame so it survives reconciliation; lands into stun pose.
+Mech_Thrown_Arc :: class : Component {
+	active: bool;
+	landed: bool;
+	start_pos: v2;
+	end_pos: v2;
+	start_time: float; // time-based so server reconciliation can't stall the flight
+	duration: float;
+	height: float;
+	land_fx: bool; // play a touchdown thud/dust (off when a wall/player hit already did)
+
+	arm :: proc(using this: Mech_Thrown_Arc, from: v2, to: v2, impact_fx: bool) {
+		start_pos = from;
+		end_pos = to;
+		start_time = get_time();
+		dist := length(to - from);
+		duration = clamp(dist / 22.0, 0.18, 0.55); // ~22 u/s, clamped so short tosses still arc
+		height = clamp(dist * 0.22, 0.7, 2.4);
+		active = true;
+		landed = false;
+		land_fx = impact_fx;
+		p := entity.get_component(Player);
+		if p != null {
+			p.add_disable_movement_input_reason(MECH_THROW_REASON);
+			p.set_trigger("hitman_fly_forward");
+		}
+	}
+
+	settle :: proc(using this: Mech_Thrown_Arc) {
+		p := entity.get_component(Player);
+		if p == null || !#alive(p.entity) return;
+		p.entity.set_local_position(end_pos);
+		p.agent.velocity = v2.{0, 0};
+		p.remove_disable_movement_input_reason(MECH_THROW_REASON);
+		// Land into the stun pose if still stunned, otherwise a quick recovery.
+		stun := p.entity.get_component(Mech_Stun_Status);
+		if stun != null && stun.active {
+			p.set_trigger("hitman_broken_leg_idle");
+		} else {
+			p.set_trigger("hitman_collide_midair_land");
+		}
+		// Touchdown impact for an open-space landing (wall/player hits already played
+		// their own collision feedback on the way down).
+		if land_fx {
+			rr_mech_spawn_flash(end_pos + v2.{0, 0.1}, 0.85, v4.{0.95, 0.9, 0.7, 0.55}, 0.24);
+			rr_mech_play_sfx_at("minigame/bonk_staff_77864c.wav", end_pos, 0.26);
+			rr_mech_add_screenshake(p, 0.07, 0.16);
+		}
+	}
+
+	ao_update :: method(dt: float) {
+		if !active return;
+		p := entity.get_component(Player);
+		if p == null || !#alive(p.entity) { active = false; return; }
+		if p.player_state != Player_State.ALIVE {
+			// Killed mid-flight (thrown into a hazard) — drop them on the spot.
+			p.entity.set_local_position(end_pos);
+			p.remove_disable_movement_input_reason(MECH_THROW_REASON);
+			active = false;
+			return;
+		}
+		t := (get_time() - start_time) / duration;
+		if t >= 1.0 {
+			// Land exactly once, then release control so movement isn't pinned.
+			if !landed { landed = true; settle(this); }
+			active = false;
+			return;
+		}
+		pos := v2.{
+			lerp(start_pos.x, end_pos.x, t),
+			lerp(start_pos.y, end_pos.y, t),
+		};
+		pos.y += height * 4.0 * t * (1.0 - t); // parabola, peaks at mid-flight
+		p.entity.set_local_position(pos);
+		p.agent.velocity = v2.{0, 0};
+	}
+
+	ao_end :: method() {
+		p := entity.get_component(Player);
+		if p != null { p.remove_disable_movement_input_reason(MECH_THROW_REASON); }
+	}
+}
+
+rr_mech_arc_throw :: proc(target: Player, from: v2, to: v2, land_fx: bool) {
+	if target == null || !#alive(target.entity) return;
+	a := target.entity.get_component(Mech_Thrown_Arc);
+	if a == null { a = target.entity.add_component(Mech_Thrown_Arc); }
+	a.arm(from, to, land_fx);
+}
+
 rr_mech_throw_player :: proc(carrier: Player, target: Player, killer_id: u64) {
 	if carrier == null || target == null return;
-	target.remove_disable_movement_input_reason(MECH_CARRY_REASON);
+	// Carry lock is released by Mech_Carried_Status when no longer refreshed; the throw
+	// arc/stun keep movement locked, so don't touch the ref-counted reason here.
 	dir := rr_mech_get_throw_direction(carrier);
 	start_pos := carrier.entity.world_position + dir * 0.8;
 	end_pos := carrier.entity.world_position + dir * MECH_THROW_DISTANCE;
 	path_hit := rr_mech_find_throw_path_hit(carrier, target, start_pos, dir, ref end_pos, killer_id);
-	target.entity.set_local_position(end_pos);
-	if path_hit {
-		target.agent.velocity = v2.{0, 0};
+	// Toss the victim along a natural arc from the carrier to the landing spot
+	// instead of teleporting them. Dead targets (hit a hazard) just snap to the spot.
+	if target.player_state == Player_State.ALIVE {
+		// land_fx only on a clean open landing — wall/player hits already played their
+		// own collision feedback in the path scan.
+		rr_mech_arc_throw(target, start_pos, end_pos, !path_hit);
 	} else {
-		target.agent.velocity = dir * 8.0;
+		target.entity.set_local_position(end_pos);
 	}
-	target.set_trigger("hitman_fly_forward");
-	rr_mech_play_avatar_anim(carrier, "009SG/Throw_Player_AL", false);
+	// Throw gesture rides the overlay track so the titan keeps locomoting underneath.
+	rr_mech_play_overlay_oneshot(carrier, "009SG/Throw_Player_AL");
 	rr_mech_play_sfx_at("sfx/killer_transform.wav", carrier.entity.world_position, 0.2);
 	rr_mech_add_screenshake(carrier, 0.09, 0.18);
 	if path_hit return;
@@ -1149,10 +1406,8 @@ rr_mech_release_guardian_pickup_if_needed :: proc(target: Player) {
 	guard := target.entity.get_component(Guardian_Module);
 	if guard == null return;
 	if guard.carried_player_id != 0 {
-		carried := get_player_by_entity_id(guard.carried_player_id);
-		if carried != null {
-			carried.remove_disable_movement_input_reason(MECH_CARRY_REASON);
-		}
+		// Clearing carried_player_id stops Mech_Carried_Status being refreshed, which
+		// releases the carry movement lock on its own (ref-counted, single owner).
 		guard.carried_player_id = 0;
 		target.Notify("Ram Charge broke your hold!");
 	}
@@ -1188,28 +1443,43 @@ rr_mech_draw_abilities :: proc(player: Player, idx: int) -> int {
 		draw_ability_button(player, Mech_Showdown_Mash_Ability, abilityIndex);
 		return abilityIndex + 1;
 	}
-	draw_ability_button(player, Kill_Ability, abilityIndex); abilityIndex += 1;
-	draw_ability_button(player, Mech_Transform_Ability, abilityIndex); abilityIndex += 1;
+	// Schleem form — gathering / utility kit (well under the bar limit).
 	if !mech.is_mech_form && !mech.is_apex {
+		draw_ability_button(player, Kill_Ability, abilityIndex); abilityIndex += 1;
+		draw_ability_button(player, Mech_Transform_Ability, abilityIndex); abilityIndex += 1;
 		draw_ability_button(player, Drag_Body_Ability, abilityIndex); abilityIndex += 1;
 		if mech.helmet_trap_unlocked { draw_ability_button(player, Mech_Helmet_Trap_Ability, abilityIndex); abilityIndex += 1; }
 		return abilityIndex;
 	}
-	draw_ability_button(player, Mech_Smash_Task_Ability, abilityIndex); abilityIndex += 1;
-	draw_ability_button(player, Mech_Pickup_Throw_Ability, abilityIndex); abilityIndex += 1;
-	if !mech.conversion_used { draw_ability_button(player, Mech_Conversion_Ability, abilityIndex); abilityIndex += 1; }
-	if mech.ram_charge_unlocked { draw_ability_button(player, Mech_Ram_Charge_Ability, abilityIndex); abilityIndex += 1; }
-	if mech.magnet_cannon_unlocked { draw_ability_button(player, Mech_Magnet_Cannon_Ability, abilityIndex); abilityIndex += 1; }
-	if mech.missile_barrage_unlocked { draw_ability_button(player, Mech_Missile_Barrage_Ability, abilityIndex); abilityIndex += 1; }
-	if mech.wreckage_warp_unlocked { draw_ability_button(player, Mech_Wreckage_Warp_Ability, abilityIndex); abilityIndex += 1; }
-	if rr_mech_can_awaken_apex(player) { draw_ability_button(player, Mech_Apex_Awakening_Ability, abilityIndex); abilityIndex += 1; }
-	if mech.endgame_unlocked { draw_ability_button(player, Mech_End_Game_Ability, abilityIndex); abilityIndex += 1; }
+
+	// Mech / APEX form. The engine ability bar holds at most 6 buttons (button_offsets is a
+	// fixed [6]), and the mech can unlock far more — so hard-cap at 6 and make the
+	// target-based tools (pickup / smash / convert) only appear when usable. Order is by
+	// priority: rare game-deciding buttons (APEX, End) sit high so they're never dropped,
+	// then weapons, then the contextual tools fill whatever slots remain.
+	if abilityIndex < 6 { draw_ability_button(player, Kill_Ability, abilityIndex); abilityIndex += 1; }
+	if abilityIndex < 6 { draw_ability_button(player, Mech_Transform_Ability, abilityIndex); abilityIndex += 1; }
+	if rr_mech_can_awaken_apex(player) && abilityIndex < 6 { draw_ability_button(player, Mech_Apex_Awakening_Ability, abilityIndex); abilityIndex += 1; }
+	if mech.endgame_unlocked && abilityIndex < 6 { draw_ability_button(player, Mech_End_Game_Ability, abilityIndex); abilityIndex += 1; }
+	if mech.ram_charge_unlocked && abilityIndex < 6 { draw_ability_button(player, Mech_Ram_Charge_Ability, abilityIndex); abilityIndex += 1; }
+	if mech.magnet_cannon_unlocked && abilityIndex < 6 { draw_ability_button(player, Mech_Magnet_Cannon_Ability, abilityIndex); abilityIndex += 1; }
+	if mech.missile_barrage_unlocked && abilityIndex < 6 { draw_ability_button(player, Mech_Missile_Barrage_Ability, abilityIndex); abilityIndex += 1; }
+
+	// Pickup/Throw — only while carrying something or with a target/corpse in reach.
+	show_pickup := mech.carried_player_id != 0 || mech.carried_corpse_id != 0
+		|| rr_mech_find_pickup_target(player) != null
+		|| rr_drag_body_get_closest_draggable_corpse(player) != null;
+	if show_pickup && abilityIndex < 6 { draw_ability_button(player, Mech_Pickup_Throw_Ability, abilityIndex); abilityIndex += 1; }
+
+	// Smash (above task panels) and Convert (hovers over nearest civ) are world
+	// interactables now, not bar buttons — see Mech_Smash_Interactable / Mech_Convert_Interactable.
+	// Wreckage Warp lives on the minimap buttons (rr_mech_draw_wreckage_warp_minimap_buttons).
 	return abilityIndex;
 }
 
 rr_minion_draw_abilities :: proc(player: Player, idx: int) -> int {
 	abilityIndex := idx;
-	draw_ability_button(player, Mech_Smash_Task_Ability, abilityIndex); abilityIndex += 1;
+	// Smash is a world interactable (Mech_Smash_Interactable) — minions use the same prompt.
 	draw_ability_button(player, Drag_Body_Ability, abilityIndex); abilityIndex += 1;
 	owner := rr_mech_get_owner(player);
 	if owner != null {
@@ -1274,6 +1544,8 @@ Mech_Loot_Corpse_Interactable :: class : Interactable {
 		if player == null return false;
 		if player.player_role != Player_Role.THE_MECH return false;
 		if player.player_state != Player_State.ALIVE return false;
+		// Loot works in both forms (Schleem & Mech) — it's a world interactable, not a
+		// bar button, so it doesn't compete for ability slots.
 		corpse := entity.get_component(Corpse);
 		if corpse == null return false;
 		return !corpse.mech_core_looted;
@@ -1289,6 +1561,90 @@ Mech_Loot_Corpse_Interactable :: class : Interactable {
 		rr_mech_spawn_flash(entity.world_position + v2.{0, 0.55}, 0.55, v4.{1.0, 0.15, 0.08, 0.65}, 0.35);
 		rr_mech_play_sfx_at("sfx/pick_up_item_a973cc.wav", entity.world_position, 0.32);
 		player.Notify(format_string("+1 Power Core (% total)", .{mech.power_cores}));
+	}
+}
+
+// Smash Task as a world interactable (prompt above the task panel) instead of an ability
+// button. Shares the task entity with the civilian Task_Interactable; can_use gates by
+// role so each side only sees its own prompt. Usable by the mech (mech form) and minions.
+Mech_Smash_Interactable :: class : Interactable {
+	ao_start :: method() {
+		this.set_listener(this);
+		this.set_text("Smash");
+		this.set_hold_text("Smashing...");
+		required_hold_time = 0.0;
+		radius = MECH_SMASH_RANGE;
+		prompt_offset = v2.{0, 1.4};
+		priority = 90;
+	}
+	can_use :: method(player: Player) -> bool {
+		if player == null return false;
+		if player.player_state != Player_State.ALIVE return false;
+		if player.player_role == Player_Role.THE_MECH {
+			mech := player.entity.get_component(Mech_Module);
+			if mech == null || (!mech.is_mech_form && !mech.is_apex) return false;
+		} else if !rr_mech_is_minion_active(player) {
+			return false;
+		}
+		task := entity.get_component(Task_Interactable);
+		if task == null return false;
+		if task.mech_smashed return false;
+		return rr_mech_task_component_kind(task.get_task_id()) != 0;
+	}
+	on_interact :: method(player: Player) {
+		task := entity.get_component(Task_Interactable);
+		if task == null return;
+		rr_mech_smash_task(player, task);
+	}
+}
+
+// Conversion as a world interactable that hovers over the nearest convertible player in
+// melee of the mech (instead of an ability button). One per round; parks itself offscreen
+// when there's no target or after the once-per-game conversion has been used.
+Mech_Convert_Interactable :: class : Interactable {
+	target_id: u64;
+	ao_start :: method() {
+		this.set_listener(this);
+		this.set_text("Convert");
+		this.set_hold_text("Converting...");
+		required_hold_time = 0.5;
+		radius = MECH_MELEE_RANGE;
+		prompt_offset = v2.{0, 1.2};
+		priority = 95;
+	}
+	ao_update :: method(dt: float) {
+		target_id = 0;
+		if game_state == Game_State.INGAME {
+			for i: 0..players.elements.count-1 {
+				mp := players.elements[i];
+				if mp == null continue;
+				if mp.player_role != Player_Role.THE_MECH continue;
+				if mp.player_state != Player_State.ALIVE continue;
+				mech := mp.entity.get_component(Mech_Module);
+				if mech == null || mech.conversion_used || (!mech.is_mech_form && !mech.is_apex) continue;
+				// Nearest non-traitor in melee — hover the prompt over them.
+				t := rr_mech_find_melee_target(mp, false);
+				if t != null {
+					target_id = t.entity.id;
+					entity.set_local_position(t.entity.world_position);
+				}
+				break;
+			}
+		}
+		if target_id == 0 {
+			entity.set_local_position(v2.{99999, 99999});
+		}
+	}
+	can_use :: method(player: Player) -> bool {
+		if player == null || player.player_role != Player_Role.THE_MECH return false;
+		if player.player_state != Player_State.ALIVE return false;
+		mech := player.entity.get_component(Mech_Module);
+		if mech == null || mech.conversion_used || (!mech.is_mech_form && !mech.is_apex) return false;
+		return target_id != 0;
+	}
+	on_interact :: method(player: Player) {
+		t := get_player_by_entity_id(target_id);
+		if t != null { rr_mech_convert_target(player, t); }
 	}
 }
 
@@ -1572,13 +1928,22 @@ Mech_Stun_Status :: class : Component {
 	active: bool;
 	ends_at: float;
 	arm :: proc(using this: Mech_Stun_Status, seconds: float) {
-		active = true;
 		ends_at = get_time() + seconds;
 		p := entity.get_component(Player);
 		if p != null {
-			p.add_disable_movement_input_reason(MECH_STUN_REASON);
-			p.set_trigger("hitman_broken_leg_idle");
+			// Only take the movement lock on the inactive->active edge — the reason is
+			// ref-counted, so re-stunning an already-stunned player must not stack it.
+			if !active {
+				p.add_disable_movement_input_reason(MECH_STUN_REASON);
+			}
+			// If a throw arc is mid-flight, let it play the flight anim and settle
+			// into the stun pose on landing; don't snap to the pose mid-air.
+			arc := entity.get_component(Mech_Thrown_Arc);
+			if arc == null || !arc.active {
+				p.set_trigger("hitman_broken_leg_idle");
+			}
 		}
+		active = true;
 	}
 	ao_update :: method(dt: float) {
 		if !active return;
@@ -1725,33 +2090,107 @@ Mech_Magnet_Node :: class : Component {
 	}
 }
 
+MECH_TRUCK_SCALE :: 1.4;
+
 Mech_Ram_Charge_Status :: class : Component {
 	owner_id: u64;
 	dir: v2;
 	ends_at: float;
 	hit: bool;
 	active: bool;
+	truck_entity: Entity;
+	truck_animator: Spine_Animator;
+	truck_skin: string;
+	next_aura_at: float;
+
 	arm :: proc(using this: Mech_Ram_Charge_Status, direction: v2, seconds: float) {
 		dir = direction;
 		if length_squared(dir) < 0.01 { dir = v2.{1, 0}; }
 		dir = normalize(dir);
 		ends_at = get_time() + seconds;
 		hit = false;
-		active = true;
 		p := entity.get_component(Player);
 		if p != null {
-			p.add_disable_movement_input_reason(MECH_LOCK_REASON);
-			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_In", false);
+			// Ref-counted reason — only lock on the inactive->active edge so a re-arm
+			// while already charging can't stack the lock and freeze the Mech.
+			if !active {
+				p.add_disable_movement_input_reason(MECH_LOCK_REASON);
+			}
+			// Hide the mech rig and reveal the truck. Toggle the creature entity directly
+			// (without going through show_avatar) so rr_mech_update — which only re-syncs
+			// visibility on a creature_visible mismatch — won't fight us, and the player's
+			// schleem body stays hidden the whole time.
+			mech := p.entity.get_component(Mech_Module);
+			if mech != null && mech.creature_entity != null && #alive(mech.creature_entity) {
+				mech.creature_entity.set_local_enabled(false);
+			}
+			ensure_truck(this, p);
+			rr_mech_spawn_transform_vfx(p);
 			rr_mech_add_screenshake(p, 0.06, 0.2);
 		}
+		active = true;
 	}
+
+	ensure_truck :: proc(using this: Mech_Ram_Charge_Status, p: Player) {
+		if truck_entity == null || !#alive(truck_entity) {
+			e := Scene.create_entity();
+			e.set_local_position(p.entity.world_position + v2.{0, 0.2});
+			anim := e.add_component(Spine_Animator);
+			anim.awaken();
+			anim.layer = 0;
+			if anim.instance != null {
+				anim.instance.set_skeleton(get_asset(Spine_Asset, MECH_TRUCK_RIG));
+				anim.instance.set_animation("Driving", true, 0);
+				rr_apply_shadow_mask(anim.instance);
+			}
+			truck_entity = e;
+			truck_animator = anim;
+			truck_skin = "";
+		} else {
+			truck_entity.set_local_enabled(true);
+		}
+		update_truck(this, p);
+	}
+
+	// Follows the player and faces the charge direction. Truck rig has side/front/back
+	// skins; side_view is mirrored via scale.x for left/right.
+	update_truck :: proc(using this: Mech_Ram_Charge_Status, p: Player) {
+		if truck_entity == null || !#alive(truck_entity) return;
+		truck_entity.set_local_position(p.entity.world_position + v2.{0, 0.2});
+		// Always the side view; just mirror it for left/right charges.
+		skin := "side_view";
+		flip := dir.x < 0.0;
+		if truck_animator != null && truck_animator.instance != null && truck_skin != skin {
+			truck_animator.instance.disable_all_skins();
+			truck_animator.instance.enable_skin(skin);
+			truck_animator.instance.refresh_skins();
+			truck_skin = skin;
+		}
+		sx := flip ? -MECH_TRUCK_SCALE : MECH_TRUCK_SCALE;
+		truck_entity.set_local_scale(v2.{sx, MECH_TRUCK_SCALE});
+	}
+
+	restore_mech :: proc(using this: Mech_Ram_Charge_Status, p: Player) {
+		if truck_entity != null && #alive(truck_entity) { truck_entity.destroy(); }
+		truck_entity = null;
+		truck_animator = null;
+		if p == null return;
+		mech := p.entity.get_component(Mech_Module);
+		if mech != null && mech.creature_entity != null && #alive(mech.creature_entity) {
+			mech.creature_entity.set_local_enabled(mech.creature_visible);
+		}
+	}
+
 	ao_update :: method(dt: float) {
 		if !active return;
 		p := entity.get_component(Player);
 		if p == null { return; }
 		if get_time() >= ends_at || p.player_state != Player_State.ALIVE {
 			p.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+			restore_mech(this, p);
 			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_out", false);
+			rr_mech_spawn_transform_vfx(p);
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position, 0.3);
 			hit = true;
 			active = false;
 			return;
@@ -1761,6 +2200,14 @@ Mech_Ram_Charge_Status :: class : Component {
 			desired := normalize(p.last_aim_direction);
 			dir = normalize(lerp(dir, desired, clamp(dt * MECH_APEX_RAM_TURN_RATE, 0.0, 1.0)));
 		}
+		update_truck(this, p);
+
+		// APEX power aura: a pulsing energy trail around the charging truck.
+		if mech != null && mech.is_apex && get_time() >= next_aura_at {
+			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.4}, 1.1, v4.{1.0, 0.35, 0.08, 0.5}, 0.22);
+			next_aura_at = get_time() + 0.06;
+		}
+
 		p.agent.velocity = dir * MECH_RAM_SPEED;
 		for target: component_iterator(Player) {
 			if target == null || target == p continue;
@@ -1775,6 +2222,13 @@ Mech_Ram_Charge_Status :: class : Component {
 			ends_at = get_time();
 			break;
 		}
+	}
+
+	ao_end :: method() {
+		// Cleanup if destroyed mid-charge (round end, etc.).
+		p := entity.get_component(Player);
+		if p != null { p.remove_disable_movement_input_reason(MECH_LOCK_REASON); }
+		restore_mech(this, p);
 	}
 }
 
@@ -1840,7 +2294,13 @@ Mech_Missile :: class : Component {
 
 Mech_Transform_Ability :: class : Ability_Base {
 	on_init :: proc(a: Mech_Transform_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/transform_evil.png"); }
-	can_use :: method() -> bool { return player.player_role == Player_Role.THE_MECH && player.player_state == Player_State.ALIVE; }
+	can_use :: method() -> bool {
+		if player.player_role != Player_Role.THE_MECH || player.player_state != Player_State.ALIVE return false;
+		// Can't revert while holding someone/something — throw or drop them first.
+		mech := player.entity.get_component(Mech_Module);
+		if mech != null && (mech.carried_player_id != 0 || mech.carried_corpse_id != 0) return false;
+		return true;
+	}
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
 			mech := player.entity.get_component(Mech_Module);
@@ -1869,7 +2329,13 @@ Mech_Transform_Ability :: class : Ability_Base {
 
 Guardian_Transform_Ability :: class : Ability_Base {
 	on_init :: proc(a: Guardian_Transform_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/transform_good.png"); }
-	can_use :: method() -> bool { return player.player_role == Player_Role.GUARDIAN && player.player_state == Player_State.ALIVE; }
+	can_use :: method() -> bool {
+		if player.player_role != Player_Role.GUARDIAN || player.player_state != Player_State.ALIVE return false;
+		// Can't revert while holding someone — throw or drop them first.
+		guard := player.entity.get_component(Guardian_Module);
+		if guard != null && guard.carried_player_id != 0 return false;
+		return true;
+	}
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
 			guard := player.entity.get_component(Guardian_Module);
@@ -1988,12 +2454,9 @@ Mech_Pickup_Throw_Ability :: class : Ability_Base {
 			target := rr_mech_find_pickup_target(player);
 			if target != null {
 				mech.carried_player_id = target.entity.id;
-				target.add_disable_movement_input_reason(MECH_CARRY_REASON);
-				// Play grab on track 1 so locomotion (legs) keeps running on track 0.
-				if mech.creature_animator != null && mech.creature_animator.instance != null {
-					mech.creature_animator.instance.set_animation("009SG/cm_pick_up", false, 1);
-				}
-				mech.overlay_clear_at = get_time() + rr_mech_anim_duration("009SG/cm_pick_up");
+				// Movement lock comes from Mech_Carried_Status (edge-triggered). Grab plays
+				// on overlay track 1 so track-0 locomotion keeps running; carry pose held after.
+				rr_mech_play_overlay_oneshot(player, "009SG/cm_pick_up");
 				return;
 			}
 			corpse := rr_drag_body_get_closest_draggable_corpse(player);
@@ -2278,12 +2741,9 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 			if target != null {
 				if rr_mech_is_transformed(target) return;
 				guard.carried_player_id = target.entity.id;
-				target.add_disable_movement_input_reason(MECH_CARRY_REASON);
-				// Play grab on track 1 so locomotion (idle/run) on track 0 keeps going underneath.
-				if guard.creature_animator != null && guard.creature_animator.instance != null {
-					guard.creature_animator.instance.set_animation("009SG/cm_pick_up", false, 1);
-				}
-				guard.overlay_clear_at = get_time() + rr_mech_anim_duration("009SG/cm_pick_up");
+				// Movement lock comes from Mech_Carried_Status (edge-triggered). Grab plays on
+				// overlay track 1 so track-0 locomotion keeps going; carry pose held after.
+				rr_mech_play_overlay_oneshot(player, "009SG/cm_pick_up");
 				// Tactile grab: ally-tinted vs enemy-tinted flash at the target + SFX.
 				ally := target.player_type == Player_Type.CIVILIAN;
 				color := ally ? v4.{0.45, 1.0, 0.55, 0.7} : v4.{1.0, 0.42, 0.32, 0.7};
@@ -2389,7 +2849,8 @@ Guardian_Showdown_Ability :: class : Ability_Base {
 
 rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Module) {
 	if guard == null || !guard.showdown_active return;
-	player.add_disable_movement_input_reason(MECH_LOCK_REASON);
+	// Lock is applied once at showdown start and released once on resolution; the reason
+	// is ref-counted, so re-adding it every frame would leak and freeze the fighter.
 	rr_guardian_draw_showdown_ui(player, guard);
 	// Once the start anim has played out, loop the dedicated Showdown_Loop on
 	// both fighters so the cinematic doesn't sag back to Idle during the mash.
@@ -2552,7 +3013,8 @@ rr_guardian_draw_showdown_ui :: proc(player: Player, guard: Guardian_Module) {
 
 rr_mech_update_showdown_for_mech :: proc(player: Player, mech: Mech_Module) {
 	if mech == null || !mech.showdown_active return;
-	player.add_disable_movement_input_reason(MECH_LOCK_REASON);
+	// Lock applied once at showdown start, released on resolution — don't re-add per
+	// frame (ref-counted reason would leak and freeze the Mech after the showdown).
 	if get_time() >= mech.showdown_ends_at {
 		// Guardian updater resolves the result. If it is gone, fail open to Mech.
 		guardian := get_player_by_entity_id(mech.showdown_opponent_id);
@@ -2585,33 +3047,57 @@ rr_mech_apex_status_text :: proc(player: Player, mech: Mech_Module) -> string {
 	return format_string("Need % more Power Cores.", .{cores_needed});
 }
 
-rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id: int) -> UIK.Interact_Handle {
-	name := "";
-	cost_label := "";
-	icon_path := "";
-	tint := v4.{1, 1, 1, 1};
+// Lookup for a workbench upgrade: name, icon path, cost component (0 == 2-of-any),
+// and theme tint. Shared by the workbench cards and the progression checklist.
+rr_mech_upgrade_info :: proc(upgrade_id: int) -> string, string, int, v4 {
+	if upgrade_id == MECH_UPGRADE_HELMET_TRAP     return "Helmet Trap",     "sprites/icons/mech/Helmet_Trap_Icon.png",     MECH_COMPONENT_GEAR,       v4.{0.42, 0.42, 0.48, 1};
+	if upgrade_id == MECH_UPGRADE_RAM_CHARGE      return "Ram Charge",      "sprites/icons/mech/Ram_Icon.png",             MECH_COMPONENT_POWER_CELL, v4.{0.55, 0.18, 0.14, 1};
+	if upgrade_id == MECH_UPGRADE_MAGNET_CANNON   return "Magnet Cannon",   "sprites/icons/mech/Magnet_Cannon_Icon.png",   MECH_COMPONENT_SCHEMATIC,  v4.{0.16, 0.38, 0.6, 1};
+	if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE return "Missile Barrage", "sprites/icons/mech/Missile_Barrage_Icon.png", MECH_COMPONENT_CIRCUIT,    v4.{0.55, 0.45, 0.12, 1};
+	if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP   return "Wreckage Warp",   "sprites/icons/mech/Wreckage_Warp_Icon.png",   0,                         v4.{0.25, 0.5, 0.28, 1};
+	return "", "", 0, v4.{1, 1, 1, 1};
+}
 
-	if upgrade_id == MECH_UPGRADE_HELMET_TRAP {
-		name = "Helmet Trap"; cost_label = "1 Gear";
-		icon_path = "sprites/icons/mech/Helmet_Trap_Icon.png";
-		tint = v4.{0.42, 0.42, 0.48, 1};
-	} else if upgrade_id == MECH_UPGRADE_RAM_CHARGE {
-		name = "Ram Charge"; cost_label = "1 Power Cell";
-		icon_path = "sprites/icons/mech/Ram_Icon.png";
-		tint = v4.{0.55, 0.18, 0.14, 1};
-	} else if upgrade_id == MECH_UPGRADE_MAGNET_CANNON {
-		name = "Magnet Cannon"; cost_label = "1 Schematic";
-		icon_path = "sprites/icons/mech/Magnet_Cannon_Icon.png";
-		tint = v4.{0.16, 0.38, 0.6, 1};
-	} else if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE {
-		name = "Missile Barrage"; cost_label = "1 Circuit";
-		icon_path = "sprites/icons/mech/Missile_Barrage_Icon.png";
-		tint = v4.{0.55, 0.45, 0.12, 1};
-	} else if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP {
-		name = "Wreckage Warp"; cost_label = "2 Any Components";
-		icon_path = "sprites/icons/mech/Wreckage_Warp_Icon.png";
-		tint = v4.{0.25, 0.5, 0.28, 1};
-	}
+// The in-world task a component drops from — so the checklist can tell the Mech
+// exactly which task panels to smash for each part.
+rr_mech_component_task_name :: proc(kind: int) -> string {
+	if kind == MECH_COMPONENT_POWER_CELL return "Reroute Power";
+	if kind == MECH_COMPONENT_CIRCUIT    return "Guide the Electron";
+	if kind == MECH_COMPONENT_SCHEMATIC  return "Anagram Puzzle";
+	if kind == MECH_COMPONENT_GEAR       return "Calibrate Teleporter";
+	return "";
+}
+
+// One "smash this task for this part" row: [task name] .... [part icon] xN.
+// Plain icon + text only (no scaling panels), so it renders identically at any res.
+rr_mech_draw_smash_row :: proc(row: Rect, kind: int, count: int, base_ts: Text_Settings) {
+	rc := row.inset(2.0, 4.0, 2.0, 4.0);
+	count_slot := rc.cut_right(32.0);
+	rc.cut_right(2.0);
+	icon_slot := rc.cut_right(rc.height());
+	rc.cut_right(6.0);
+
+	nts := base_ts;
+	nts.size = 17;
+	nts.do_autofit = true;
+	nts.autofit_min_size = 12;
+	nts.autofit_max_size = 18;
+	nts.color = v4.{0.92, 0.94, 1.0, 1.0};
+	UI.text(rc, nts, rr_mech_component_task_name(kind));
+
+	icon := get_asset(Texture_Asset, rr_mech_component_sprite_path(kind));
+	if icon != null { UI.quad(icon_slot.fit_aspect(icon.get_aspect()), icon, v4.{1, 1, 1, 1}); }
+
+	cts := base_ts;
+	cts.size = 17;
+	cts.halign = .RIGHT;
+	cts.color = count > 0 ? v4.{0.6, 1.0, 0.5, 1.0} : v4.{0.62, 0.62, 0.68, 1.0};
+	UI.text(count_slot, cts, format_string("x%", .{count}));
+}
+
+rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id: int, orient: UIK.Card_Orientation, height: UIK.Size) -> Interact_Result {
+	name, icon_path, comp_kind, tint := rr_mech_upgrade_info(upgrade_id);
+	cost_label := comp_kind == 0 ? "2 Components" : format_string("1 %", .{rr_mech_component_name(comp_kind)});
 
 	owned := rr_mech_upgrade_owned(mech, upgrade_id);
 	affordable := rr_mech_upgrade_can_afford(player, upgrade_id);
@@ -2623,7 +3109,9 @@ rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id:
 		display_tint = v4.{0.18, 0.18, 0.22, 1};
 	}
 
-	card_desc := UIK.card_desc(UIK.flex(1), UIK.flex(1), display_tint, .PORTRAIT, 0.45, 0.18, 0.30);
+	media_f := 0.5; header_f := 0.2; footer_f := 0.24;
+	if orient == .LANDSCAPE { media_f = 0.26; header_f = 0.34; footer_f = 0.32; }
+	card_desc := UIK.card_desc(UIK.flex(1), height, display_tint, orient, media_f, header_f, footer_f);
 	UIK.card_begin(format_string("mech_wb_card_%", .{upgrade_id}), card_desc);
 
 	UIK.card_zone(.MEDIA);
@@ -2655,67 +3143,77 @@ rr_mech_draw_workbench_ui :: proc(player: Player) {
 	if game_state != Game_State.INGAME { mech.workbench_ui_open = false; return; }
 	if player.player_state != Player_State.ALIVE { mech.workbench_ui_open = false; return; }
 
-	UIK.begin(UIK.modal(UIK.rect_window_large(), 1000));
+	UIK.begin(UIK.modal(UIK.rect_window(), 1000));
 
-	shell := UIK.panel_modal(.BLUE_WITH_FOOTER);
-	shell.padding = v4{16, 8, 16, 16};
-	shell.gap = 6;
+	// Red shell (the Mech's industrial theme) with black interior sections.
+	// Dark (black) shell with red accents — industrial theme without a big bright-red frame.
+	shell := UIK.panel_modal(.BLACK_WITH_FOOTER);
+	shell.padding = v4{16, 12, 16, 16};
+	shell.gap = 10;
 	UIK.panel_begin(shell);
 
-	exit_handle := UIK.title_area(UIK.title_area_desc("R&D WORKBENCH"));
+	title_desc := UIK.title_area_desc("R&D WORKBENCH");
+	title_desc.tint = v4.{0.62, 0.14, 0.1, 1.0};
+	exit_handle := UIK.title_area(title_desc);
 
-	// Component counts strip.
+	// Red-tinted section-header style, reused below.
+	hdr := UIK.text_title();
+	hdr.color = v4.{1.0, 0.42, 0.32, 1.0};
+	hdr.override_flags |= UIK.Text_Override_COLOR;
+
+	// Scrollable body with an auto scrollbar so sections never overlap/clip on short screens.
+	body := UIK.layout_column();
+	body.width = UIK.flex(1);
+	body.height = UIK.flex(1);
+	body.gap = 10;
+	UIK.scroll_area_begin("mech_wb_scroll", body, UIK.SCROLL_DEFAULT | UIK.SCROLL_AUTO_SCROLLBAR);
+
+	// Component / core counts strip (recessed inset for definition on the dark shell).
 	counts_row := UIK.layout_row();
 	counts_row.width = UIK.flex(1);
-	counts_row.height = UIK.pixels(56);
-	counts_row.gap = 18;
+	counts_row.height = UIK.pixels(54);
+	counts_row.background = .INTERIOR_INSET;
+	counts_row.padding = v4{10, 14, 10, 14};
+	counts_row.gap = 16;
 	counts_row.cross_align = .CENTER;
 	UIK.panel_begin(counts_row);
-
 	UIK.currency(get_asset(Texture_Asset, "sprites/power_cell.png"), rr_mech_count_component_pool(player, MECH_COMPONENT_POWER_CELL), UIK.text_body());
 	UIK.currency(get_asset(Texture_Asset, "sprites/cables.png"),     rr_mech_count_component_pool(player, MECH_COMPONENT_CIRCUIT), UIK.text_body());
 	UIK.currency(get_asset(Texture_Asset, "sprites/blueprint.png"),  rr_mech_count_component_pool(player, MECH_COMPONENT_SCHEMATIC), UIK.text_body());
 	UIK.currency(get_asset(Texture_Asset, "sprites/gears.png"),      rr_mech_count_component_pool(player, MECH_COMPONENT_GEAR), UIK.text_body());
 	UIK.spacer(UIK.flex(1), UIK.pixels(1));
 	UIK.currency(get_asset(Texture_Asset, "sprites/icons/mech/Loot_Icon.png"), mech.power_cores, UIK.text_body());
+	UIK.panel_end();
 
-	UIK.panel_end(); // counts_row
-
-	UIK.divider(1.0, v4.{1, 1, 1, 0.25});
-
-	// APEX status banner (top of tree).
-	apex_panel := UIK.panel_styled(.MODAL_TRANSP_BLACK);
+	// APEX status banner (recessed inset, sizes to its text).
+	apex_panel := UIK.panel_styled(.INTERIOR_INSET);
 	apex_panel.width = UIK.flex(1);
-	apex_panel.height = UIK.pixels(110);
-	apex_panel.padding = v4{14, 14, 14, 14};
-	apex_panel.gap = 8;
+	apex_panel.height = UIK.fit();
+	apex_panel.padding = v4{14, 12, 14, 12};
+	apex_panel.gap = 6;
 	UIK.panel_begin(apex_panel);
-	UIK.text("APEX AWAKENING", UIK.text_title());
+	UIK.text("APEX AWAKENING", hdr);
 	UIK.text(rr_mech_apex_status_text(player, mech), UIK.text_body());
 	UIK.panel_end();
 
-	// 4 weapon cards row (the leaves that feed APEX).
-	weapons_row := UIK.layout_row();
-	weapons_row.width = UIK.flex(1);
-	weapons_row.height = UIK.flex(1);
-	weapons_row.gap = 10;
+	UIK.text("ARSENAL", hdr);
+
+	// 4 weapon cards (the parts that feed APEX) — fixed height so they never squish.
+	weapons_row := UIK.layout_row(UIK.flex(1), UIK.pixels(220), 10);
 	UIK.panel_begin(weapons_row);
-
-	h_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_HELMET_TRAP);
-	r_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_RAM_CHARGE);
-	m_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_MAGNET_CANNON);
-	ms_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_MISSILE_BARRAGE);
-
-	UIK.panel_end(); // weapons_row
-
-	// Wreckage Warp (independent utility, separate from APEX tree).
-	warp_row := UIK.layout_row();
-	warp_row.width = UIK.flex(1);
-	warp_row.height = UIK.pixels(150);
-	UIK.panel_begin(warp_row);
-	w_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_WRECKAGE_WARP);
+	h_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_HELMET_TRAP,     .PORTRAIT, UIK.flex(1));
+	r_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_RAM_CHARGE,      .PORTRAIT, UIK.flex(1));
+	m_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_MAGNET_CANNON,   .PORTRAIT, UIK.flex(1));
+	ms_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_MISSILE_BARRAGE, .PORTRAIT, UIK.flex(1));
 	UIK.panel_end();
 
+	UIK.divider(1.0, v4.{1, 1, 1, 0.2});
+	UIK.text("UTILITY", hdr);
+
+	// Wreckage Warp — full-width landscape card (not a stretched portrait).
+	w_handle := rr_mech_draw_upgrade_card(player, mech, MECH_UPGRADE_WRECKAGE_WARP, .LANDSCAPE, UIK.pixels(110));
+
+	UIK.scroll_area_end();
 	UIK.panel_end(); // shell
 	UIK.end();
 
@@ -2744,17 +3242,22 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 	defer rr_pop_mobile_ui_scale(_pushed_scale);
 
 	safe := UI.get_safe_screen_rect();
-	PANEL_W :: 320.0;
-	ROW_H :: 32.0;
-	LIST_PAD :: 10.0;
+	PANEL_W  :: 300.0;
+	LIST_PAD :: 12.0;
 	DROPDOWN_SLICE_PX :: 16.0;
+
+	FORM_H  :: 30.0;
+	LABEL_H :: 18.0;
+	TASK_H  :: 28.0;
+	CORE_H  :: 30.0;
+	APEX_H  :: 34.0;
+	GAP     :: 5.0;
 
 	upgrades_owned := rr_mech_upgrades_owned(mech);
 	cores := min(mech.power_cores, MECH_LOOT_CORES_GOAL);
 	apex_ready := rr_mech_can_awaken_apex(player);
 
-	row_count := 5; // Form + bolt parts + cores + components + status
-	list_h := (row_count.(float)) * ROW_H + (LIST_PAD * 2.0);
+	list_h := FORM_H + GAP + LABEL_H + 4.0 * TASK_H + GAP + CORE_H + GAP + APEX_H + LIST_PAD * 2.0;
 
 	header_rect := rr_draw_task_list_header(safe, false, player);
 	if !player.task_list_open return;
@@ -2767,106 +3270,197 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
 
 	base_ts := UI.default_text_settings();
-	base_ts.size = 20;
+	base_ts.size = 18;
 	base_ts.halign = .LEFT;
 	base_ts.valign = .CENTER;
 	base_ts.do_outline = true;
 	base_ts.outline_thickness = 3;
 	base_ts.outline_color = v4.{0, 0, 0, 1};
 
-	list_content := list_rect.inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
+	content := list_rect.inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
 
-	// Row 1: form indicator
+	// --- Form line (flat fill scales identically at any resolution) ---
 	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		entry_content.cut_left(24.0);
-		ts := base_ts;
+		row := content.cut_top(FORM_H);
+		fill: v4;
+		form_color: v4;
+		form_label: string;
 		if mech.is_apex {
-			ts.color = v4.{1.0, 0.55, 0.2, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX TITAN");
+			fill = v4.{0.42, 0.2, 0.05, 0.55};  form_color = v4.{1.0, 0.72, 0.32, 1.0}; form_label = "APEX TITAN";
 		} else if mech.is_mech_form {
-			ts.color = v4.{1.0, 0.4, 0.3, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), ts, "MECH FORM");
+			fill = v4.{0.4, 0.12, 0.08, 0.55};  form_color = v4.{1.0, 0.58, 0.42, 1.0}; form_label = "MECH FORM";
 		} else {
-			ts.color = v4.{0.9, 0.9, 0.9, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), ts, "Schleem");
+			fill = v4.{0.12, 0.16, 0.22, 0.55}; form_color = v4.{0.8, 0.9, 1.0, 1.0};   form_label = "SCHLEEM (vulnerable)";
 		}
-	}
-
-	// Row 2: bolt-on parts (sub-abilities) X/4
-	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content.cut_left(24.0);
-		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
-		done := upgrades_owned >= MECH_BOLT_PARTS_GOAL;
-		if done {
-			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
-		} else {
-			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
-		}
+		UI.quad(row, core_globals.white_sprite, fill);
+		inner := row.inset(8.0, 0.0, 8.0, 0.0);
+		lvl_ts := base_ts;
+		lvl_ts.size = 14;
+		lvl_ts.halign = .RIGHT;
+		lvl_ts.color = v4.{0.8, 0.88, 0.95, 1.0};
+		UI.text(inner, lvl_ts, format_string("BUILD Lv %", .{upgrades_owned}));
 		ts := base_ts;
-		ts.color = done ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content.inset(0, 4, 0, 4), ts,
-			format_string("Bolt on Parts: %/%", .{upgrades_owned, MECH_BOLT_PARTS_GOAL}));
+		ts.size = 20;
+		ts.color = form_color;
+		UI.text(inner, ts, form_label);
 	}
 
-	// Row 3: power cores X/2
+	content.cut_top(GAP);
+
+	// --- "Smash these tasks for parts" — tells the Mech exactly what to destroy ---
 	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		checkbox_slot := entry_content.cut_left(24.0);
-		checkbox_rect := checkbox_slot.center_rect().grow(9.0);
+		row := content.cut_top(LABEL_H);
+		ts := base_ts;
+		ts.size = 13;
+		ts.color = v4.{0.45, 0.85, 1.0, 1.0};
+		UI.text(row, ts, "SMASH TASKS FOR PARTS");
+	}
+	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_POWER_CELL, mech.power_cells, base_ts);
+	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_CIRCUIT,    mech.circuits,    base_ts);
+	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_SCHEMATIC,  mech.schematics,  base_ts);
+	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_GEAR,       mech.gears,       base_ts);
+
+	content.cut_top(GAP);
+
+	// --- Power cores (loot from corpses) ---
+	{
+		row := content.cut_top(CORE_H);
+		rc := row.inset(2.0, 4.0, 2.0, 4.0);
 		done := cores >= MECH_LOOT_CORES_GOAL;
-		if done {
-			UI.quad(checkbox_rect.fit_aspect(checkbox_filled.get_aspect()), checkbox_filled, v4.{1, 1, 1, 1});
-		} else {
-			UI.quad(checkbox_rect.fit_aspect(checkbox.get_aspect()), checkbox, v4.{1, 1, 1, 1});
-		}
+
+		cb_slot := rc.cut_left(rc.height());
+		cb_tex := done ? checkbox_filled : checkbox;
+		UI.quad(cb_slot.fit_aspect(cb_tex.get_aspect()), cb_tex, v4.{1, 1, 1, 1});
+		rc.cut_left(6.0);
+
+		count_slot := rc.cut_right(40.0);
 		ts := base_ts;
-		ts.color = done ? v4.{0.6, 1.0, 0.4, 1.0} : v4.{1, 1, 1, 1};
-		UI.text(entry_content.inset(0, 4, 0, 4), ts,
-			format_string("Loot Power Cores: %/%", .{cores, MECH_LOOT_CORES_GOAL}));
+		ts.color = done ? v4.{0.6, 1.0, 0.45, 1.0} : v4.{1, 1, 1, 1};
+		UI.text(rc, ts, "Loot Power Cores");
+		cts := base_ts;
+		cts.halign = .RIGHT;
+		cts.color = ts.color;
+		UI.text(count_slot, cts, format_string("%/%", .{cores, MECH_LOOT_CORES_GOAL}));
 	}
 
-	// Row 4: components stockpile (PC C S G)
-	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		entry_content.cut_left(24.0);
-		ts := base_ts;
-		ts.size = 18;
-		ts.color = v4.{0.85, 0.9, 1.0, 1.0};
-		UI.text(entry_content.inset(0, 4, 0, 4), ts,
-			format_string("Parts: PC% C% S% G%", .{mech.power_cells, mech.circuits, mech.schematics, mech.gears}));
-	}
+	content.cut_top(GAP);
 
-	// Row 5: status callout (APEX state)
+	// --- APEX goal line (flat fill) ---
 	{
-		entry_rect := list_content.cut_top(ROW_H);
-		entry_content := entry_rect.inset(0.0, 6.0, 0.0, 6.0);
-		entry_content.cut_left(24.0);
-		ts := base_ts;
-		ts.size = 18;
+		row := content.cut_top(APEX_H);
+		fill: v4;
+		apex_color: v4;
+		apex_text: string;
 		if mech.is_apex {
-			ts.color = v4.{1.0, 0.55, 0.2, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX AWAKENED");
+			fill = v4.{0.42, 0.2, 0.04, 0.6};  apex_color = v4.{1.0, 0.72, 0.3, 1.0};  apex_text = "APEX AWAKENED";
 		} else if mech.apex_used {
-			ts.color = v4.{0.7, 0.7, 0.7, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX SPENT");
+			fill = v4.{0.14, 0.14, 0.16, 0.6}; apex_color = v4.{0.65, 0.65, 0.7, 1.0};  apex_text = "APEX SPENT";
 		} else if mech.apex_lost {
-			ts.color = v4.{0.7, 0.4, 0.4, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX LOST");
+			fill = v4.{0.22, 0.08, 0.08, 0.6}; apex_color = v4.{0.85, 0.45, 0.45, 1.0}; apex_text = "APEX LOST";
 		} else if apex_ready {
-			ts.color = v4.{0.6, 1.0, 0.4, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), ts, "APEX READY!");
+			pulse := 0.45 + sin(get_time() * 5.0) * 0.25;
+			fill = v4.{0.05, 0.4, 0.32, pulse}; apex_color = v4.{0.5, 1.0, 0.7, 1.0}; apex_text = "APEX READY — Awaken!";
 		} else {
-			needed_parts := MECH_BOLT_PARTS_GOAL - upgrades_owned;
-			needed_cores := MECH_LOOT_CORES_GOAL - cores;
-			ts.color = v4.{0.9, 0.9, 0.9, 1.0};
-			UI.text(entry_content.inset(0, 4, 0, 4), ts,
-				format_string("APEX needs % parts, % cores", .{max(needed_parts, 0), max(needed_cores, 0)}));
+			fill = v4.{0.1, 0.13, 0.18, 0.6}; apex_color = v4.{0.82, 0.9, 0.97, 1.0};
+			needed_parts := max(MECH_BOLT_PARTS_GOAL - upgrades_owned, 0);
+			needed_cores := max(MECH_LOOT_CORES_GOAL - cores, 0);
+			apex_text = format_string("APEX: % weapons + % cores left", .{needed_parts, needed_cores});
 		}
+		UI.quad(row, core_globals.white_sprite, fill);
+		ts := base_ts;
+		ts.size = 17;
+		ts.halign = .CENTER;
+		ts.do_autofit = true;
+		ts.autofit_min_size = 12;
+		ts.autofit_max_size = 18;
+		ts.color = apex_color;
+		UI.text(row.inset(8, 0, 8, 0), ts, apex_text);
 	}
+}
+
+MINION_WARNING_DURATION :: 5.0;
+
+// One-shot full-screen alert shown to a freshly converted Minion, for a fixed window
+// (timestamped on the synced effect so it survives reconciliation).
+rr_mech_draw_minion_warning :: proc(player: Player) {
+	if player == null return;
+	if !player.is_local_or_server() return;
+	if game_state != Game_State.INGAME return;
+
+	minion := rr_mech_get_minion_effect(player);
+	if minion == null || minion.converted_by_mech_id == 0 return;
+	if minion.warning_started_at <= 0.0 return;
+
+	t := get_time() - minion.warning_started_at;
+	if t < 0.0 || t > MINION_WARNING_DURATION return;
+
+	// Fade in fast, hold, fade out near the end.
+	alpha := 1.0;
+	if t < 0.4 { alpha = t / 0.4; }
+	else if t > MINION_WARNING_DURATION - 0.7 { alpha = (MINION_WARNING_DURATION - t) / 0.7; }
+	alpha = clamp(alpha, 0.0, 1.0);
+
+	UI.push_screen_draw_context();
+	defer UI.pop_draw_context();
+	UI.push_layer(9700);
+	defer UI.pop_layer();
+
+	_pushed_scale := rr_push_mobile_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
+	screen := UI.get_safe_screen_rect();
+	cx := (screen.min.x + screen.max.x) * 0.5;
+
+	band_w := clamp(screen.width() * 0.72, 360.0, 760.0);
+	band_h := 132.0;
+	// Slide down a touch as it fades in.
+	top_y := screen.min.y + screen.height() * 0.20 - (1.0 - alpha) * 24.0;
+	half_w := band_w * 0.5;
+	band := Rect{v2.{cx - half_w, top_y}, v2.{cx + half_w, top_y + band_h}};
+
+	// Pulsing red danger glow + dark body. Flat fills scale identically at any res.
+	glow_pulse := 0.5 + sin(get_time() * 6.0) * 0.5;
+	gp := 6.0 + glow_pulse * 5.0;
+	border := band.grow(gp, gp, gp, gp);
+	UI.quad(border, core_globals.white_sprite, v4.{0.95, 0.16, 0.1, (0.3 + glow_pulse * 0.22) * alpha});
+	UI.quad(band, core_globals.white_sprite, v4.{0.09, 0.05, 0.06, 0.96 * alpha});
+
+	inner := band.inset(18.0, 16.0, 18.0, 16.0);
+
+	// Mech emblem on the left — "serve this master".
+	emblem := get_asset(Texture_Asset, "sprites/icons/roles_small/Mecha_Icon.png");
+	emblem_slot := inner.cut_left(inner.height());
+	if emblem != null {
+		UI.quad(emblem_slot.fit_aspect(emblem.get_aspect()), emblem, v4.{1, 1, 1, alpha});
+	}
+	inner.cut_left(16.0);
+
+	// Title.
+	title_rect := inner.cut_top(inner.height() * 0.52);
+	title_ts := UI.default_text_settings();
+	title_ts.size = 30;
+	title_ts.halign = .LEFT;
+	title_ts.valign = .CENTER;
+	title_ts.do_outline = true;
+	title_ts.outline_thickness = 5;
+	title_ts.outline_color = v4.{0, 0, 0, alpha};
+	title_ts.do_autofit = true;
+	title_ts.autofit_min_size = 18;
+	title_ts.autofit_max_size = 32;
+	title_ts.color = v4.{1.0, 0.28, 0.22, alpha};
+	UI.text(title_rect, title_ts, "YOU ARE NOW A MINION");
+
+	// Subtitle.
+	sub_ts := UI.default_text_settings();
+	sub_ts.size = 19;
+	sub_ts.halign = .LEFT;
+	sub_ts.valign = .CENTER;
+	sub_ts.do_outline = true;
+	sub_ts.outline_thickness = 4;
+	sub_ts.outline_color = v4.{0, 0, 0, alpha};
+	sub_ts.do_autofit = true;
+	sub_ts.autofit_min_size = 13;
+	sub_ts.autofit_max_size = 20;
+	sub_ts.color = v4.{1.0, 0.92, 0.85, alpha};
+	UI.text(inner, sub_ts, "You're a TRAITOR now — help The Mech win!");
 }

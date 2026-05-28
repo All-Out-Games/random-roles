@@ -21,7 +21,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Navmesh",
   "data": {
-
+    "enable_automatic_rebuilds": false
   }
 },
 {

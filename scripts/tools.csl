@@ -7,7 +7,9 @@ Finder :: struct(T: typeid) {
 
     check :: proc(using f: *Finder(T), item: T, item_position: v2, required_range: float = -1) {
         distance := length_squared(position - item_position);
-        if distance > (required_range*required_range) {
+        // required_range is an OPTIONAL extra per-item gate. <0 means "no extra gate —
+        // just use the finder's own range" (closest_distance, set squared by make_finder).
+        if required_range >= 0 && distance > (required_range*required_range) {
             return;
         }
         if distance < closest_distance {
@@ -18,7 +20,7 @@ Finder :: struct(T: typeid) {
 
     check :: proc(using f: *Finder(T), item: T, required_range: float = -1) {
         distance := length_squared(position - item.entity.world_position);
-        if distance > (required_range*required_range) {
+        if required_range >= 0 && distance > (required_range*required_range) {
             return;
         }
         if distance < closest_distance {
@@ -28,10 +30,14 @@ Finder :: struct(T: typeid) {
     }
 }
 
-make_finder :: proc($T: typeid, position: v2, range := 999999999.0) -> Finder(T) {
+// `range` is the search radius. Default is 1.0 so callers that don't pass a range keep
+// the historical ~1-unit behavior; callers that DO pass a range now actually get it.
+// (Previously the range was stored un-squared while check() compares squared distances,
+// and check()'s gate clamped everything to ~1 unit — so abilities felt short-ranged.)
+make_finder :: proc($T: typeid, position: v2, range := 1.0) -> Finder(T) {
     result: Finder(T);
     result.position = position;
-    result.closest_distance = range;
+    result.closest_distance = range * range; // squared, to match length_squared() in check()
     return result;
 }
 

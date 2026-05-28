@@ -1,21 +1,7 @@
 import "core:ao"
 
-// =============================================================================
-// Hunter (Civilian role)
-//
-// Abilities:
-//   * Cripple   — aimed crossbow bolt that pierces a victim, applying a 50%
-//                 movespeed slow until the round ends.
-//   * Campfire  — placeable bonfire that grants schleem-form players a 25%
-//                 movespeed buff and casts a warm light that pierces darkness
-//                 (e.g. the Hacker's power outage) via its LOS_Caster.
-//   * Kill Shot — aimed crossbow bolt that only hurts already-pierced victims;
-//                 passes harmlessly through anyone else.
-//
-// Passive:
-//   * Tracker   — Hunter sees scent footprints left behind by any schleem
-//                 (transformed) player while they move.
-// =============================================================================
+// Hunter (Civilian role): Cripple (pierce + slow), Campfire (schleem speed aura +
+// anti-stealth light), Kill Shot (only hurts pierced), Tracker passive (scent footprints).
 
 // --- Tuning ---
 HUNTER_CRIPPLE_COOLDOWN_SECONDS    :: 25.0;
@@ -65,11 +51,8 @@ Hunter_Module :: class : Component {
     footprint_emit_last_positions: [..]v2;
 }
 
-// =============================================================================
 // Hunter_Pierce_Effect — applied to any player struck by a Cripple bolt.
-// Persists across frames; client-prediction friendly (no Game.is_server() gates
-// on speed application — only the initial arm() runs server-side).
-// =============================================================================
+// Client-prediction friendly; only the initial arm() runs server-side.
 
 Hunter_Pierce_Effect :: class : Component {
     active: bool;
@@ -93,9 +76,8 @@ Hunter_Pierce_Effect :: class : Component {
         p := entity.get_component(Player);
         if p != null {
             if !orig_speed_valid {
-                // Capture baseline so pierce slow is independent of any
-                // transient buffs/debuffs active at the moment of impact
-                // (e.g. hunter campfire boost, pyro on-fire buff).
+                // Capture baseline so pierce slow is independent of transient
+                // buffs/debuffs at impact (e.g. campfire boost, pyro on-fire).
                 if p.baseline_movement_speed_saved {
                     orig_speed = p.baseline_movement_speed;
                 } else {
@@ -193,10 +175,8 @@ rr_hunter_has_pierced_victim :: proc(hunter: Player) -> bool {
     return false;
 }
 
-// =============================================================================
 // Hunter_Crossbow_Bolt projectile (custom — RR_Projectile auto-kills civilians,
 // which Cripple/Kill_Shot must NOT do).
-// =============================================================================
 
 Hunter_Crossbow_Bolt :: class : Component {
     velocity: v2;
@@ -246,8 +226,7 @@ Hunter_Crossbow_Bolt :: class : Component {
         }
 
         // Killshot: pin the local owner's camera onto the bolt while it flies.
-        // Camera is local-only, so guard with is_local() and re-apply every frame
-        // (server reconciliation can otherwise stomp our overrides).
+        // Camera is local-only; guard with is_local() and re-apply every frame.
         if is_kill_shot && owner_player != null && owner_player.is_local() {
             if !camera_follow_active {
                 if !saved_camera_size_valid {
@@ -370,8 +349,7 @@ rr_hunter_shoot_bolt :: proc(hunter: Player, direction: v2, is_kill_shot: bool) 
     bolt.owner = hunter.entity;
     bolt.is_kill_shot = is_kill_shot;
 
-    // Killshot: drifting cinder/ember puff that rides behind the bolt.
-    // Local position (-d, 0) in the bolt's frame = "d units behind the bolt"
+    // Killshot: ember puff riding behind the bolt. Local (-d,0) = d units behind
     // in world space, since the bolt's local +x always faces motion.
     if is_kill_shot {
         embers := Scene.create_entity();
@@ -417,9 +395,7 @@ rr_hunter_bolt_restore_camera :: proc(using bolt: Hunter_Crossbow_Bolt) {
     saved_camera_size_valid = false;
 }
 
-// =============================================================================
 // Hunter_Campfire — placeable bonfire (anti-stealth + schleem speed aura).
-// =============================================================================
 
 Hunter_Campfire :: class : Component {
     owner_entity_id: u64;
@@ -456,9 +432,8 @@ Hunter_Campfire :: class : Component {
             l.intensity = 0.9;
             l.radii = v2.{HUNTER_CAMPFIRE_BUFF_RADIUS * 0.6, HUNTER_CAMPFIRE_BUFF_RADIUS * 1.1};
 
-            // LOS_Caster so the campfire's light actually punches through fog
-            // of war / power outage — anyone with vision touching the fire's
-            // glow gets to see what it lights up.
+            // LOS_Caster so the light punches through fog of war / power outage —
+            // anyone whose vision touches the glow sees what it lights up.
             caster := light_entity.add_component(LOS_Caster);
             caster.radii = l.radii;
         }
@@ -521,10 +496,8 @@ rr_hunter_is_player_in_campfire_buff_range :: proc(p: Player) -> bool {
     return false;
 }
 
-// Passive effect: holds the campfire speed buff for its entire lifetime.
-// Self-removes the moment any precondition fails (left the light, transformed,
-// pierced, died, round ended). effect_end always restores the speed we
-// captured at start, so we can't leak the multiplier into the lobby.
+// Passive campfire speed buff; self-removes when any precondition fails (left light,
+// transformed, pierced, died, round ended). effect_end always restores captured speed.
 Hunter_Campfire_Buff_Effect :: class : Effect_Base {
     orig_speed: float;
     orig_speed_valid: bool;
@@ -569,10 +542,8 @@ Hunter_Campfire_Buff_Effect :: class : Effect_Base {
     }
 }
 
-// Per-player update — every frame, ensure the schleem-only campfire buff effect
-// is present iff the player should be receiving it. The Effect_Base lifecycle
-// handles cleanup: as soon as ANY precondition fails (light, transform, pierce,
-// game state, alive), the effect removes itself and restores the prior speed.
+// Per-frame: add the schleem-only campfire buff effect iff the player qualifies.
+// The Effect_Base lifecycle removes it and restores speed when any precondition fails.
 rr_hunter_update_campfire_buff_for_player :: proc(p: Player) {
     if p == null return;
     if !#alive(p.entity) return;
@@ -619,9 +590,7 @@ rr_hunter_player_is_transformed :: proc(p: Player) -> bool {
     return false;
 }
 
-// =============================================================================
 // Hunter_Scent_Footprint — local visual driven by the Hunter's per-frame loop.
-// =============================================================================
 
 Hunter_Scent_Footprint :: class : Component {
     spawn_time: float;
@@ -665,8 +634,8 @@ Hunter_Scent_Footprint :: class : Component {
 }
 
 rr_hunter_pick_footprint_skin_for_dir :: proc(dir: v2) -> string {
-    // The rig ships with: east, south_east, south, north_east, north (+ default).
-    // Mirror handles the western half via flip_x at spawn time.
+    // Rig skins: east, south_east, south, north_east, north (+ default); western
+    // half handled via flip_x at spawn time.
     angle := atan2(dir.y, dir.x); // -PI..PI, 0 = east, PI/2 = north
     deg := to_degrees(angle);
     a := deg;
@@ -773,13 +742,10 @@ rr_hunter_update_footprints :: proc(hunter: Player, dt: float) {
     }
 }
 
-// =============================================================================
 // World-space HUD: campfire buff icon + low-time countdown.
-// =============================================================================
 
-// Draw a small flame icon above any player currently receiving the campfire
-// speed buff. Called once per frame from the local viewer so the icon shows
-// for ALL nearby buffed schleems, not just the local player.
+// Draw a flame icon above any player receiving the campfire speed buff. Called
+// per-frame from the local viewer so it shows for all buffed schleems, not just self.
 rr_hunter_draw_campfire_buff_icons :: proc(viewer: Player) {
     if viewer == null return;
     if game_state != Game_State.INGAME return;
@@ -814,9 +780,8 @@ rr_hunter_draw_campfire_buff_icons :: proc(viewer: Player) {
     }
 }
 
-// Draw a countdown above any campfire whose remaining lifetime is below
-// HUNTER_CAMPFIRE_LOW_TIME_THRESHOLD. Uses the same world-space pill-and-
-// text style as rr_draw_stun_timers so the HUD reads consistently.
+// Draw a countdown above any campfire under HUNTER_CAMPFIRE_LOW_TIME_THRESHOLD,
+// using the same world-space pill-and-text style as rr_draw_stun_timers.
 rr_hunter_draw_campfire_low_time_countdown :: proc(viewer: Player) {
     if viewer == null return;
     if game_state != Game_State.INGAME return;
@@ -869,9 +834,7 @@ rr_hunter_draw_campfire_low_time_countdown :: proc(viewer: Player) {
     }
 }
 
-// =============================================================================
 // Per-player Hunter update entry point (called from Player.ao_update).
-// =============================================================================
 
 rr_hunter_update :: proc(p: Player, dt: float) {
     if p == null return;
@@ -903,9 +866,8 @@ rr_hunter_round_start :: proc(p: Player) {
         eff.orig_speed_valid = false;
     }
 
-    // Force-clear any campfire buff effect carrying over from a previous round.
-    // The effect's own update would also catch this on its next tick, but
-    // removing it here ensures no one-frame stale buff between rounds.
+    // Force-clear any campfire buff carrying over from a previous round, avoiding
+    // a one-frame stale buff before the effect's own update catches it.
     remove_effect(p.entity, Hunter_Campfire_Buff_Effect, false);
 
     if p.player_role != Player_Role.HUNTER return;
@@ -933,9 +895,7 @@ rr_hunter_round_global_cleanup :: proc() {
     }
 }
 
-// =============================================================================
-// Abilities
-// =============================================================================
+// --- Abilities ---
 
 // True iff the player currently has any active stun the Hunter abilities
 // should respect (locking out cooldown progress + blocking activation).
@@ -967,11 +927,8 @@ rr_hunter_is_stunned :: proc(p: Player) -> bool {
     return false;
 }
 
-// Pause the cooldown tick while the Hunter is stunned, so the cooldown
-// doesn't quietly drain during a Hacker electrocution, mine stun, etc.
-// `update_ability_cooldowns` runs before on_update and already subtracted
-// dt — we snapshot the cooldown on the first stunned frame and restore it
-// every subsequent stunned frame.
+// Pause cooldown drain while stunned. update_ability_cooldowns already subtracted dt,
+// so snapshot the cooldown on the first stunned frame and restore it each frame after.
 rr_hunter_pause_cooldown_if_stunned :: proc(ability: Ability_Base, paused_cd: ref float) -> bool {
     if ability == null return false;
     if ability.player == null return false;
@@ -1051,9 +1008,8 @@ Hunter_Cripple_Ability :: class : Ability_Base {
     }
 }
 
-// Bright "AIMING" indicator drawn over the Hunter's currently-selected aimed
-// ability button (Cripple vs Kill Shot), since the existing dim-the-others
-// cue is too subtle to tell which crossbow shot is queued up.
+// Bright "AIMING" indicator over the currently-selected aimed ability button
+// (Cripple vs Kill Shot); the dim-the-others cue alone is too subtle.
 rr_hunter_draw_aiming_overlay :: proc(ability: Ability_Base, rect: Rect) {
     if ability == null return;
     p := ability.player;

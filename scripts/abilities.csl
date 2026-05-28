@@ -417,16 +417,14 @@ WEREWOLF_TRANSFORM_HOWL_SKIN_DELAY :: 1.0; // half of the howl anim (2s total)
 WEREWOLF_DEVOUR_COOLDOWN_SECONDS :: 60.0;
 WEREWOLF_INFECT_COOLDOWN_SECONDS :: 60.0;
 WEREWOLF_CLAW_COOLDOWN_SECONDS :: 70.0;
-// Claw is a melee swipe — each swing rolls a random reach in this band so
-// attacks feel varied, and hits anyone in a forward cone. The slash VFX
-// sweeps forward visually to make the wider reach feel justified.
+// Claw is a melee swipe: each swing rolls a random reach in this band and
+// hits anyone in a forward cone. The slash VFX sweeps forward to match.
 WEREWOLF_CLAW_RANGE_MIN :: 4.0;
 WEREWOLF_CLAW_RANGE_MAX :: 5.5;
 // cos(half-angle); 0.95 ≈ 37° total cone — narrow swipe along the aim line.
 WEREWOLF_CLAW_CONE_DOT_THRESHOLD :: 0.95;
-// Forward-traveling slash VFX (purely cosmetic — hit detection is instant).
-// Travel distance (speed * lifetime) ≈ ability hit range so victims can read
-// where the slash will and won't connect.
+// Forward-traveling slash VFX (cosmetic; hit detection is instant). Travel
+// distance (speed * lifetime) ≈ hit range so victims can read its reach.
 WEREWOLF_CLAW_VFX_SPEED :: 12.0;
 WEREWOLF_CLAW_VFX_LIFETIME :: 0.32;
 WEREWOLF_CLAW_VFX_SPINE_PATH :: "slash_projectile_7879c4/slash_projectile.spine";
@@ -606,10 +604,8 @@ rr_werewolf_apply_infection :: proc(infector: Player, target: Player) {
 
 	// Bite animation plays immediately on the infector.
 	infector.set_trigger("werewolf_infection_bite");
-	// The victim's transform animation + skin change is delayed so they look normal for a while.
-	// For the full delay period nothing visible happens to the victim -- no stun, no notification,
-	// no task swap. Everything reveals at the transform moment.
-	// The animation trigger fires 1s before the skin swap so the howl/transform anim leads into it.
+	// The victim looks normal during the full delay (no stun/notify/task swap); everything
+	// reveals at the transform moment. Anim trigger fires 1s before the skin swap to lead in.
 	target_eff.infected_transform_trigger_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS - 1.0;
 	target_eff.skin_enable_at = get_time() + WEREWOLF_INFECTED_SKIN_DELAY_SECONDS;
 	target_eff.skin_disable_at = 0.0;
@@ -1594,9 +1590,8 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 			}
 		}
 
-		// Use the standard targeted-aimed helper for PC + mobile compatibility.
-		// PC: click button -> aim mode -> click to fire (right-click cancel).
-		// Mobile: press-drag-release to aim and fire.
+		// Standard targeted-aimed helper for PC + mobile: PC clicks to aim then fire
+		// (right-click cancels); mobile press-drag-releases to aim and fire.
 		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
 
 		// Camera zoom while targeting (the helper sets player.active_ability during aim mode).
@@ -2092,9 +2087,8 @@ Vote_Ability :: class : Ability_Base {
             voting_ui_open = true;
             show_recent_deaths = true;
 			recent_deaths_open_time = get_time();
-			// Return early so stale markers from the previous session can't
-			// render this frame while rr_vote_results_active / has_voted may
-			// not have synced yet from the server.
+			// Return early so stale markers from the previous session can't render
+			// this frame before rr_vote_results_active / has_voted sync from server.
 			return;
         }
 
@@ -2759,8 +2753,7 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 			sfx := SFX.default_sfx_desc();
 			sfx.set_position(nearest.entity.world_position);
 			sfx.volume = 0.8;
-			// Explicit death SFX (old `sfx/death.wav` removed).
-			// Note: `traitor_kill_death.wav` is reserved for knife/neck-snap kills.
+			// Explicit death SFX (`traitor_kill_death.wav` is reserved for knife/neck-snap).
 			// Global SFX mix: everything at 25% volume.
 			sfx.volume *= 0.25;
 			sfx.volume_perturb *= 0.25;
@@ -3629,9 +3622,8 @@ Movie_Star_Write_Autograph :: class : Component {
 
 MOVIE_STAR_AUTOGRAPH_STUN_REASON :: "movie_star_autograph_stun";
 
-// Local-only "wowie you're looking at an autograph!" reveal for the stunned player.
-// Start time is stored on the Player (synced field) because CSL globals get clobbered
-// by client-side prediction resimulation.
+// Local-only autograph reveal for the stunned player. Start time lives on the Player
+// (synced field) because CSL globals get clobbered by client-side prediction resim.
 AUTOGRAPH_STUN_VISUAL_DURATION :: 3.8;
 AUTOGRAPH_STUN_VISUAL_SPIN_IN :: 0.55;
 AUTOGRAPH_STUN_VISUAL_FADE_OUT :: 0.6;
@@ -3681,9 +3673,8 @@ rr_draw_autograph_stun_visual :: proc(viewer: Player) {
 	tex := get_asset(Texture_Asset, "sprites/autograph.png");
 	if tex == null return;
 
-	// Screen-centered reveal so it's always clearly visible to the stunned player.
-	// Screen dimensions here are already unscaled; use grow_unscaled so the
-	// display size derived from screen space stays consistent across UI scaling.
+	// Screen-centered reveal, always visible to the stunned player. Dimensions are
+	// already unscaled; grow_unscaled keeps the size consistent across UI scaling.
 	screen := UI.get_screen_rect();
 	base_half := min(screen.width(), screen.height()) * 0.4;
 	half := base_half * scale;
@@ -3721,17 +3712,15 @@ Stunned_By_Autograph_Effect :: class : Component {
 			p.set_trigger("RESET");
 			p.set_trigger("stunned_by_autograph_loop");
 
-			// Set the visual start time on BOTH client and server so state sync
-			// doesn't stomp the client's local-only write back to 0.
-			// The draw itself is gated to the local client in player.csl.
+			// Set visual start time on BOTH client and server so state sync doesn't stomp
+			// the local write to 0. The draw is gated to the local client in player.csl.
 			now := get_time();
 			if now - last_visual_spawn_time > 0.25 {
 				rr_trigger_autograph_stun_visual(p);
 				last_visual_spawn_time = now;
 
-				// Only the trapped player hears this swooning cue.
-				// Use is_local_or_server() so the play runs on both sides and
-				// reconciliation doesn't cut the SFX short.
+				// Only the trapped player hears this swooning cue. Use is_local_or_server()
+				// so it plays on both sides and reconciliation doesn't cut the SFX short.
 				if p.is_local_or_server() {
 					sfx := get_asset(SFX_Asset, "sfx/fall_in_love.wav");
 					if sfx != null {

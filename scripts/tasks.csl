@@ -1,8 +1,7 @@
 import "core:ao"
 
-// Mobile UI: push a higher scale factor on phones/tablets so HUD elements
-// are readable without changing the base layout for PC players.
-// Pass multiplier > 1.0 to also scale on PC (e.g. for large help panels).
+// Mobile UI: bump HUD scale on phones/tablets for readability.
+// multiplier > 1.0 also scales on PC (e.g. large help panels).
 RR_MOBILE_UI_SCALE_PHONE  :: 1.5;
 RR_MOBILE_UI_SCALE_TABLET :: 1.2;
 
@@ -590,9 +589,8 @@ rr_draw_civilian_progress_bar :: proc(player: Player) {
 	UI.text(pct_rect, pct_ts, "%0%%", .{progress_pct});
 }
 
-// Shared header for all task-list-style panels (tasks, sabotage, role ability panels).
-// Draws the task_backing image and label text. Returns the header rect.
-// Callers position the list below using: header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0).
+// Shared header for task-list-style panels (tasks/sabotage/abilities). Draws backing + label, returns header rect.
+// Callers position the list below via: header_rect.bottom_left_rect().grow(0.0, PANEL_W, list_h, 0.0).
 rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player) -> Rect {
 	PANEL_W :: 320.0;
 	HEADER_H :: 46.0;
@@ -1410,9 +1408,8 @@ update_tasks_ui :: proc(player: Player) {
 		return;
 	}
 	if player.active_tasks.elements.count == 0 {
-		// During sabotages we may still want to show the sabotage panel even if the
-		// player normally has no tasks (e.g. anarchists). Traitors should not be
-		// instructed to fix sabotages.
+		// During sabotages, show the sabotage panel even for players with no tasks
+		// (e.g. anarchists). Traitors are not instructed to fix sabotages.
 		if player.player_type == Player_Type.TRAITOR {
 			header_rect := rr_draw_task_list_header(screen, false, player);
 			rr_draw_role_help_panel(player);
@@ -2071,9 +2068,8 @@ Task_Repair_Laptop :: class : Task_Base {
 		if completed return;
 		if !player.is_local_or_server() return;
 
-		// IMPORTANT: `start_attempt()` is not dynamically dispatched (it is called on `Task_Base`),
-		// so we must self-initialize per attempt here. Otherwise fields like `dragging_idx` default
-		// to 0 (CPU) and the CPU appears "pre-dragged" and blocks other parts.
+		// `start_attempt()` isn't dynamically dispatched, so self-initialize per attempt
+		// here; otherwise dragging_idx defaults to 0 (CPU) and blocks other parts.
 		if seen_attempt_id != attempt_id {
 			seen_attempt_id = attempt_id;
 			layout_initialized = false;
@@ -2513,10 +2509,8 @@ Task_Call_Jail_Codes :: class : Task_Base {
 				UI.push_id("jail_codes_key_%_%", .{row, col});
 				defer UI.pop_id();
 
-				// Per-button disabled rules:
-				// - Digits: disabled when full (can't enter more), or base disabled
-				// - Enter: disabled until exact number of digits entered, or base disabled
-				// - Cancel: clears the full input; keep enabled unless base disabled
+				// Per-button disabled rules: digits disabled when full, Enter disabled until
+				// exact digit count entered, Cancel always enabled (unless base disabled).
 				disabled := base_disabled;
 				if !is_cancel && !is_enter {
 					disabled = disabled || (input_count >= CODE_LEN);
@@ -2683,11 +2677,8 @@ Task_Restart_Generator :: class : Task_Base {
 		w := window_rect.width();
 		h := window_rect.height();
 
-		// Positions are based on the provided template.png (tuned for that art).
-		// Anchor is where the cord starts at the generator.
-		// IMPORTANT: template.png is the "pulled" state, so the HOME position should be
-		// near the generator (not pulled).
-		// Shifted up/left to land on the generator's gray port.
+		// Positions tuned to template.png (the "pulled" state). Anchor is the cord start;
+		// HOME sits near the generator's gray port (not pulled).
 		anchor_pos = v2.{window_rect.min.x + w * 0.63, window_rect.min.y + h * 0.62};
 		handle_home = v2.{anchor_pos.x - w * 0.12, anchor_pos.y + h * 0.02};
 		handle_pos = handle_home;
@@ -2734,10 +2725,8 @@ Task_Restart_Generator :: class : Task_Base {
 		clock_rect = clock_rect.fit_aspect(task.clock_texture.get_aspect(), .KEEP_HEIGHT);
 		UI.quad(clock_rect, task.clock_texture, .{1, 1, 1, 1});
 
-		// Pointer behavior:
-		// - Pull 0: stable at 0
-		// - Pull 1/2: stronger wobble (but max angle is still limited)
-		// - Pull 3: oscillates through the full 0..45 range (no resting at 45)
+		// Pointer behavior: pull 0 stable at 0, pulls 1/2 wobble (capped angle),
+		// pull 3 oscillates the full 0..45 range (no resting at 45).
 		progress01 := clamp((task.pulls_done.(float)) / (PULLS_REQUIRED.(float)), 0.0, 1.0);
 		range_max := lerp(0.0, 45.0, progress01);
 
@@ -3411,9 +3400,8 @@ Task_Reroute_Power :: class : Task_Base {
 			}
 		}
 
-		// Tiles
-		// When dragging or in success-state, draw-only (no buttons) to avoid duplicate ids
-		// and to keep pointer capture stable.
+		// Tiles. When dragging or in success-state, draw-only (no buttons) to avoid
+		// duplicate ids and keep pointer capture stable.
 		if dragging || success_state {
 			for row: 0..GRID_H-1 {
 				for col: 0..GRID_W-1 {
@@ -4365,8 +4353,7 @@ Task_Catching_Butterflies :: class : Task_Base {
 		h := window_rect.height();
 
 		// --- Net input (grab handle) ---
-		// QoL: clicking anywhere inside the task window picks up the handle and
-		// moves it to your hand (no need to click the tiny handle hotspot).
+		// QoL: clicking anywhere in the window grabs the handle (no tiny hotspot to hit).
 		UI.push_id("catching_butterflies_net_grab_area");
 		defer UI.pop_id();
 		btn_bs: Button_Settings = .{};
@@ -4382,9 +4369,8 @@ Task_Catching_Butterflies :: class : Task_Base {
 		}
 
 		if interact.active || interact.clicked {
-			// Clamp handle to a reasonable region inside the window (left-ish).
-			// Since this is the bottom-right anchor, keep it away from the far-left edge
-			// so the net (which extends left) doesn't go off-screen too easily.
+			// Clamp the handle to a left-ish region; as the bottom-right anchor, keep it
+			// off the far-left edge so the left-extending net stays on-screen.
 			min_x := window_rect.min.x + w * 0.15;
 			max_x := window_rect.max.x - w * 0.02;
 			min_y := window_rect.min.y + h * 0.02;
@@ -4443,10 +4429,8 @@ Task_Catching_Butterflies :: class : Task_Base {
 		// net_handle_pos is bottom-right => net extends left from the anchor (and up from the anchor).
 		net_rect := base.grow_unscaled(net_len, 0.0, 0.0, net_w);
 
-		// Net opening for catching (near the top)
-		// IMPORTANT: catch position should match the visible mouth of the net.
-		// Since the net rect extends UP and LEFT from the bottom-right handle pivot, the "mouth"
-		// is near the top-left corner in local (unrotated) space, then rotated about the pivot.
+		// Net catch opening = visible mouth. Net extends UP/LEFT from the bottom-right
+		// pivot, so the mouth is near the top-left in local space, then rotated about the pivot.
 		mouth_local := net_handle_pos + v2.{0, net_len * 0.8};
 		hoop_center := this.rotate_point_about_pivot(mouth_local, rad, net_handle_pos);
 
@@ -4918,9 +4902,8 @@ Task_Signal_Sync :: class : Task_Base {
 		// origin is the rotated emitter position (not the unrotated emitter_pos).
 		emitter_world := task.rotate_point_about_pivot(emitter_pos, angle_rad, dish_pivot);
 
-		// Default beam length: distance until the ray hits the window bounds.
-		// (Old code used min distance to ANY edge, which capped the beam to the nearest edge behind/aside the emitter,
-		// preventing it from ever reaching satellites.)
+		// Default beam length: distance until the ray hits the window bounds
+		// (not the nearest edge, which would stop the beam short of satellites).
 		default_len := task.ray_rect_distance(emitter_world, task.beam_dir, window_rect);
 		default_len = default_len - h * 0.03;
 		if default_len < 50.0 { default_len = 50.0; }
@@ -4962,9 +4945,8 @@ Task_Signal_Sync :: class : Task_Base {
 			target_forward = c_forward;
 		}
 
-		// Beam length behavior:
-		// - When NOT aiming near a satellite, keep a stable "idle" length to the window boundary.
-		// - When aiming near one, smoothly scale down to that satellite distance.
+		// Beam length: idle to the window boundary when not aiming near a satellite,
+		// smoothly scaling down to the satellite distance when aiming near one.
 		acquire_threshold := sat_size * 0.55;
 		aim01 := 0.0;
 		if target_id != 0 && best_lateral <= acquire_threshold {

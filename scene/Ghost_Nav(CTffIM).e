@@ -22,6 +22,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Navmesh",
   "data": {
-    "ignore_colliders": true
+    "ignore_colliders": true,
+    "enable_automatic_rebuilds": false
   }
 }

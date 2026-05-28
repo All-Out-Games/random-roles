@@ -1,21 +1,5 @@
-// role_pools.csl
-// ────────────────────────────────────────────────────────────────────
-// Purchase-weighted role pool system.
-//
-// Players who own a role product get that role added to their personal
-// pool AND a decaying probability boost to land on it each round.
-//
-//   Usage count     Boost chance
-//   ───────────     ────────────
-//   0 – 1          100 %
-//   2               40 %
-//   3 – 5           20 %
-//   6 +              0 % (normal odds)
-//
-// The system preserves exact type-count targets (civilian / anarchist /
-// traitor distribution) while giving boosted players priority access to
-// available slots of their target type and specific role.
-// ────────────────────────────────────────────────────────────────────
+// role_pools.csl — Purchase-weighted role pool system.
+// Product owners get a decaying boost (100/40/20/0% by usage) for priority on their target type/role while preserving exact type-count targets.
 
 // ── Product configuration ───────────────────────────────────────────
 GGG_PRODUCT_ID         :: "69b1aa6e3a1668e54467c5d4";
@@ -328,12 +312,8 @@ rp_record_boost_used :: proc(player: Player, role: Player_Role) {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Phase 1 — Player-type assignment with boosts
-// ════════════════════════════════════════════════════════════════════
-// Sets player_type on each unforced player in-place.
-// Boosted players roll for priority on their target type slot;
-// total type distribution is preserved exactly.
+// ── Phase 1 — Player-type assignment with boosts ──
+// Sets player_type on each unforced player; boosted players roll for priority on their target type slot, total distribution preserved.
 rp_assign_player_types :: proc(
     unforced:      ref [..]Player,
     remaining_civ: int,
@@ -459,13 +439,8 @@ rp_assign_player_types :: proc(
 
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Phase 2 — Specific role assignment with boosts
-// ════════════════════════════════════════════════════════════════════
-// For a single type's player list, assigns specific roles.
-// Boosted winners get their role directly; remaining players draw
-// from the bag as usual.  At most one player can claim each boosted
-// role per round.
+// ── Phase 2 — Specific role assignment with boosts ──
+// Boosted winners get their role directly (max one per boosted role/round); remaining players draw from the bag.
 rp_assign_roles_for_type :: proc(
     type_players:     ref List(Player),
     bag:              ref List(Player_Role),
@@ -479,10 +454,8 @@ rp_assign_roles_for_type :: proc(
     // Shuffle for base randomness.
     shuffle_player_list(ref type_players);
 
-    // ── Loadout cache ───────────────────────────────────────────────
-    // One Save.try_get_json per player, reused across both passes below.
-    // null entries mean "no saved loadout" → loadout_player_allows_role
-    // treats that as allow-all.
+    // ── Loadout cache: one load per player, reused across passes. ──
+    // null entries mean "no saved loadout" → treated as allow-all.
     loadouts: [..]Loadout_Data;
     for i: 0..count - 1 {
         loadouts.append(loadout_load_for_player(type_players.elements[i]));
@@ -534,11 +507,8 @@ rp_assign_roles_for_type :: proc(
         rp_record_boost_used(p, won_role);
     }
 
-    // ── Draw remaining roles from bag ───────────────────────────────
-    // Strict loadout pass: players with a non-empty allow-list for this team
-    // get an eligible role before the generic bag draw. This prevents a
-    // Sparks-only traitor loadout from rejecting all drawn base traitor roles
-    // and staying Player_Role.NONE ("Normal Dude").
+    // ── Draw remaining roles from bag ──
+    // Strict loadout pass first: players with a non-empty allow-list get an eligible role before the generic draw (avoids NONE).
     loadout_won:  [..]bool;
     loadout_role: [..]Player_Role;
     for i: 0..count - 1 {
@@ -624,11 +594,8 @@ rp_assign_roles_for_type :: proc(
         }
     }
 
-    // Pass 1: assign purchase-gated roles to eligible owners only.
-    // Eligibility now also requires the player's loadout to permit the role
-    // (boost wins above already bypassed loadout). If no eligible owner
-    // exists the role is discarded and replaced with a fresh draw from
-    // ungated_master, which pass 2 then tries to place.
+    // Pass 1: assign purchase-gated roles to eligible owners whose loadout permits them.
+    // No eligible owner → discard and redraw a free role from ungated_master (placed in pass 2).
     for d: 0..drawn.elements.count - 1 {
         role := drawn.elements[d];
         if !rp_is_purchase_gated(role) continue; // free role, handle in pass 2
@@ -659,11 +626,8 @@ rp_assign_roles_for_type :: proc(
         }
     }
 
-    // Pass 2: assign remaining drawn roles to remaining players, respecting
-    // each player's loadout allow-list. For each unused drawn role, find
-    // any unassigned player whose loadout permits it. If nobody allows it,
-    // discard and redraw from ungated_master (capped to avoid pathological
-    // loops when no combination satisfies any loadout).
+    // Pass 2: assign remaining drawn roles to unassigned players whose loadout permits them.
+    // If nobody allows a role, discard and redraw from ungated_master (capped to avoid loops).
     LOADOUT_REDRAW_BUDGET :: 8;
     redraws_left := LOADOUT_REDRAW_BUDGET;
     d := 0;
@@ -701,10 +665,8 @@ rp_assign_roles_for_type :: proc(
         d += 1;
     }
 
-    // Pass 3 (fallback): any player still unassigned (e.g. their loadout
-    // excluded every drawn role and the redraw budget ran out) gets the
-    // next leftover drawn role regardless of loadout. Better to break the
-    // loadout filter than to ship a player with Player_Role.NONE.
+    // Pass 3 (fallback): any still-unassigned player gets the next leftover drawn role regardless of loadout.
+    // Better to break the loadout filter than ship a player with Player_Role.NONE.
     leftover_idx := 0;
     for i: 0..count - 1 {
         if assigned[i] continue;
@@ -727,8 +689,7 @@ rp_assign_roles_for_type :: proc(
     }
 
     // Final safety: never leave a team-assigned player with Player_Role.NONE.
-    // Prefer an unlocked, not-yet-claimed role; if every role is claimed, use
-    // an unlocked duplicate rather than showing "Normal Dude" for the team.
+    // Prefer an unlocked unclaimed role; else an unlocked duplicate over "Normal Dude".
     for i: 0..count - 1 {
         if assigned[i] continue;
 
@@ -756,9 +717,7 @@ rp_assign_roles_for_type :: proc(
 
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Chat command — /my_boost
-// ════════════════════════════════════════════════════════════════════
+// ── Chat command — /my_boost ──
 my_boost :: proc(player: Player) {
     found_any := false;
     rp_check_boost(player, "Goo Goo Gaga", GGG_PRODUCT_ID, GGG_USAGE_KEY, ref found_any);
@@ -783,9 +742,7 @@ rp_check_boost :: proc(player: Player, name: string, product_id: string, usage_k
     }
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Admin command — /is_boost <product_id>
-// ════════════════════════════════════════════════════════════════════
+// ── Admin command — /is_boost <product_id> ──
 is_boost :: proc(player: Player, product_id: string) {
     owns := Purchasing.owns_product(player, product_id);
     if !owns {
@@ -804,9 +761,7 @@ is_boost :: proc(player: Player, product_id: string) {
     }
 } @chat_command
 
-// ════════════════════════════════════════════════════════════════════
-//  Admin command — /reset_boost <product_id>
-// ════════════════════════════════════════════════════════════════════
+// ── Admin command — /reset_boost <product_id> ──
 reset_boost :: proc(player: Player, product_id: string) {
     owns := Purchasing.owns_product(player, product_id);
     if !owns {

@@ -17,9 +17,8 @@ lobby_minigame_active: bool;
 lobby_minigame_wait_since: float;
 lobby_minigame_started_at: float;
 
-// All per-player minigame state lives on this effect. It's added to every
-// player while the minigame is running and removed when it stops, so players
-// don't carry extra fields/timers around the rest of the time.
+// Per-player minigame state. Added to every player while the minigame runs and
+// removed when it stops, so players don't carry extra fields/timers otherwise.
 Lobby_Minigame_Effect :: class : Effect_Base {
 	score: int;
 	tags_taken: int;
@@ -156,10 +155,8 @@ Lobby_Minigame_Effect :: class : Effect_Base {
 			if mg.shield_active {
 				alpha = 0.7 + sin(now * 8.0) * 0.12;
 			} else {
-				// Post-respawn shield: blink, accelerating as it's about to expire.
-				// Use phase integrated over elapsed-since-shield-started (not absolute
-				// time) so the pattern is identical on every death — otherwise the
-				// chain rule of now * freq(now) makes the apparent rate grow without bound.
+				// Post-respawn shield: blink accelerating as it expires. Integrate phase over
+				// elapsed-since-start (not absolute time) so the pattern is identical each death.
 				remaining := mg.shield_until - now;
 				if remaining < 0.0 remaining = 0.0;
 				elapsed := LOBBY_MINIGAME_SPAWN_SHIELD_SECONDS - remaining;

@@ -1,23 +1,5 @@
-// loadout.csl
-// ────────────────────────────────────────────────────────────────────
-// Game-side reader for the per-player loadout chosen in the hub.
-//
-// Source of truth lives in the hub project (`random-roles - hub`) under
-// `scripts/hub/loadout.csl`. The hub writes a JSON blob keyed by
-// LOADOUT_SAVE_KEY into per-player Save data; we read it here and use
-// it as a filter during role assignment.
-//
-// Behavior summary (see ../LOADOUT_INTEGRATION.md):
-//   - Empty loadout / no save  → allow every role (legacy default).
-//   - Boost wins always override loadout (boost > loadout).
-//   - Roles not present in the hub's selector (BIG_CHARLIE) are
-//     treated as always-eligible.
-//   - Unknown role IDs from a forward/older hub build → skip silently.
-//
-// Loadout_Data MUST mirror the hub's class exactly — same field names,
-// types, and @ao_serialize markers — or Save.try_get_json fails to
-// deserialize.
-// ────────────────────────────────────────────────────────────────────
+// loadout.csl — game-side reader for the per-player loadout chosen in the hub.
+// Loadout_Data MUST mirror the hub's class exactly (field names, types, @ao_serialize) or deserialize fails.
 
 LOADOUT_SAVE_KEY     :: "loadout_v2";
 LOADOUT_DATA_VERSION :: 2;
@@ -55,9 +37,8 @@ loadout_role_id_to_player_role :: proc(id: string) -> Player_Role {
     return Player_Role.NONE;
 }
 
-// True iff the hub exposes this role in its loadout picker. Roles outside
-// the picker (e.g. BIG_CHARLIE) are not gated by loadout — the player
-// can still land on them.
+// True iff the hub exposes this role in its loadout picker.
+// Roles outside the picker (e.g. BIG_CHARLIE) are not gated by loadout.
 loadout_is_role_managed :: proc(role: Player_Role) -> bool {
     if role == Player_Role.SHERIFF         return true;
     if role == Player_Role.DOCTOR          return true;
@@ -78,9 +59,8 @@ loadout_is_role_managed :: proc(role: Player_Role) -> bool {
     return false;
 }
 
-// Read the player's saved loadout. May return null (no save written yet
-// — treat as legacy default = allow all). Callers should cache rather
-// than calling this per-attempt; it's a disk read.
+// Read the player's saved loadout (may return null = legacy default, allow all).
+// It's a disk read — callers should cache rather than calling per-attempt.
 loadout_load_for_player :: proc(player: Player) -> Loadout_Data {
     ld: Loadout_Data;
     if player == null return ld;
@@ -128,14 +108,8 @@ loadout_role_boost_consume :: proc(player: Player, ld: Loadout_Data, ptype: Play
     return false;
 }
 
-// True iff `role` is allowed by `ld`. Pre-loaded form so role-pool code
-// can cache one Save read per player per round.
-//
-//   ld == null                    → true (no preference saved)
-//   role not in hub picker        → true (e.g. BIG_CHARLIE)
-//   relevant array empty          → true (no preference for that team)
-//   role listed in relevant array → true
-//   otherwise                     → false
+// True iff `role` is allowed by `ld` (pre-loaded so role-pool code caches one Save read per round).
+// Returns true for null ld, unmanaged roles, empty team array, or a listed role; else false.
 loadout_player_allows_role :: proc(ld: Loadout_Data, role: Player_Role) -> bool {
     if ld == null return true;
     if !loadout_is_role_managed(role) return true;
@@ -165,18 +139,14 @@ loadout_player_allows_role :: proc(ld: Loadout_Data, role: Player_Role) -> bool 
     return true;
 }
 
-// Convenience: read + check in one call. Don't use inside the role-pool
-// inner loop — it does a fresh disk read each time. Use only for
-// one-off queries (chat commands, debug).
+// Convenience read + check in one call (fresh disk read each time).
+// Use only for one-off queries (chat commands, debug), not the role-pool loop.
 loadout_player_allows_role_uncached :: proc(player: Player, role: Player_Role) -> bool {
     return loadout_player_allows_role(loadout_load_for_player(player), role);
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Chat command — /my_loadout
-// ════════════════════════════════════════════════════════════════════
-// Dumps the deserialized loadout for the calling player. Useful for
-// verifying the hub→game round-trip without playing a full round.
+// ── Chat command — /my_loadout ──
+// Dumps the deserialized loadout for the calling player (verify hub→game round-trip).
 my_loadout :: proc(player: Player) {
     ld := loadout_load_for_player(player);
     if ld == null {

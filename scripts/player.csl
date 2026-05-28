@@ -92,10 +92,8 @@ Player :: class : Player_Base {
 	// Local-only camera zoom so dead players can see more of the map.
 	ghost_camera_zoom_active: bool;
 	ghost_camera_original_size: float;
-	// Deathbraid cinematic: overriding is true while the deathbraid camera is
-	// hijacking this client's camera. restore_until is a grace window (wall-clock
-	// time in seconds) during which ghost-zoom is suppressed so the camera reset
-	// isn't immediately undone by the ghost QoL zoom kicking in mid-cinematic-exit.
+	// Deathbraid cinematic camera hijack. restore_until is a grace window (seconds)
+	// suppressing ghost-zoom so it doesn't undo the camera reset mid-cinematic-exit.
 	lily_deathbraid_cam_overriding: bool;
 	lily_deathbraid_cam_restore_until: float;
 	// Canonical baseline speed captured once at join — used to hard-reset every round.
@@ -160,9 +158,7 @@ Player :: class : Player_Base {
 	door_unlock_interactable: Door_Unlock_Interactable;
 
 	// --- Werewolf (Traitor role) ---
-	// Gameplay fields (kills, wolf form, speed) live in Werewolf_Module (only on werewolf player).
-	// Cosmetic/transform-timing fields live in Werewolf_Look_Effect, attached only to
-	// the actual werewolf and to infected civilians.
+	// Gameplay fields live in Werewolf_Module; cosmetic/transform fields in Werewolf_Look_Effect.
 	werewolf_infected: bool;          // infected "small werewolf" curse — synced fast-check flag
 	werewolf_infected_from_id: u64;   // original werewolf entity id (0 = unknown)
 
@@ -256,10 +252,8 @@ Player :: class : Player_Base {
 	}
 
     update_freeze_reasons :: proc(using this: Player) {
-        // Prevent player movement while global popups are on-screen, and while the local
-        // player is actively working on a task.
-        //
-        // We use separate reasons so popups and tasks don't accidentally unfreeze each other.
+        // Freeze movement while global popups are on-screen or the local player is in a task.
+        // Separate reasons so popups and tasks don't accidentally unfreeze each other.
         should_freeze_for_popup :=
             game_state == Game_State.ANIM_INTRO ||
 			game_state == Game_State.ANIM_VOTE_EJECT ||
@@ -341,9 +335,8 @@ Player :: class : Player_Base {
             on_player_go_dead(this);
             world_references.teleport_to_voting(this);
         } else {
-			// Any other state (ANIM_INTRO, ANIM_BODY_FOUND, ANIM_MEETING_CALLED,
-			// ANIM_VOTE_EJECT, ANIM_JESTER_WIN, ANIM_PYRO_WIN):
-			// the round is already in progress so late-joiners must be ghosts.
+			// Any other (anim) state: round is already in progress so late-joiners
+			// must be ghosts.
 			on_player_go_dead(this);
         }
     }
@@ -373,9 +366,8 @@ Player :: class : Player_Base {
 
 	apply_voice_chat_masks_ghost_or_passive :: proc(using this: Player) {
         log_info("apply_voice_chat_masks_ghost_or_passive");
-		// Ghosts/spectators can hear everyone, but only speak to other ghosts.
-		// Exception: during the lobby minigame, everyone shares one channel so
-		// respawning players can still chat with active ones.
+		// Ghosts/spectators hear everyone but only speak to other ghosts. Exception: during
+		// the lobby minigame everyone shares one channel so respawning players can chat.
 		comms_channel_listen_mask = ALL_VOICE_CHANNELS;
 		if lobby_minigame_active && game_state == Game_State.LOBBY {
 			comms_channel_speak_mask = ALL_VOICE_CHANNELS;
@@ -555,9 +547,8 @@ Player :: class : Player_Base {
 			is_moving := length_squared(this.agent.velocity) > 0.01;
 			sm_ref.set_bool("lily_debuff_moving", is_moving);
 
-			// Fire start triggers on rising edge only (so start anim plays once).
-			// The no-eyes overlay timer must still arm even when already crawling,
-			// otherwise the track-1 eye-hiding layer never turns on for legless victims.
+			// Fire start triggers on rising edge only. The no-eyes overlay timer must arm
+			// even when already crawling, else the eye-hiding layer never turns on for legless.
 			if this.lily_no_eyes && !this.lily_no_eyes_prev {
 				// No-eyes main layer anim only fires when NOT also crawling
 				// (legless takes priority on the main layer).
@@ -593,9 +584,8 @@ Player :: class : Player_Base {
 			this.lily_no_eyes_prev = this.lily_no_eyes;
 			this.lily_crawling_prev = this.lily_crawling;
 
-			// Stuns (autograph, mine, prank, infection bite, etc.) override the main layer
-			// and transition back to plain idle, dropping legless/no-eyes anims. Re-fire
-			// the debuff trigger on the stun's falling edge so the visual state restores.
+			// Stuns override the main layer and drop legless/no-eyes anims. Re-fire the
+			// debuff trigger on the stun's falling edge so the visual state restores.
 			stun_active := rr_get_stun_remaining(this) > 0.0;
 			if !stun_active && this.lily_stun_was_active {
 				rr_lily_reapply_debuff_anim(this);
@@ -822,22 +812,16 @@ Player :: class : Player_Base {
 				rr_player_restore_default_camera(this, false);
 			}
 
-			// Ghost QoL: zoom the local dead player's camera out a bit so they can
-			// see more of the map while spectating.
-			//
-			// Important:
-			// - Only the local player has a camera.
-			// - Avoid fighting win cinematics (handled by the early return below).
+			// Ghost QoL: zoom the local dead player's camera out so they see more while spectating.
+			// Only the local player has a camera; win cinematics handled by the early return below.
 			if this.is_local() {
 				if !camera_default_size_saved {
 					camera_default_size = this.camera.size;
 					camera_default_size_saved = true;
 				}
 
-				// Reset ghost/override flags at round boundaries and on the victory
-				// screen. The camera itself is reset by rr_player_restore_default_camera
-				// above; this block clears the local-only overrides that don't live on
-				// the synced Player.
+				// Reset ghost/override flags at round boundaries + victory screen. Camera is
+				// reset above; this clears local-only overrides not on the synced Player.
 				if game_state == Game_State.ANIM_INTRO ||
 				   game_state == Game_State.LOBBY ||
 				   game_state == Game_State.ANIM_VICTORY {
@@ -863,9 +847,8 @@ Player :: class : Player_Base {
 
 				if should_ghost_zoom {
 					if !ghost_camera_zoom_active {
-						// Prefer the saved engine default: capturing camera.size here
-						// risks snapshotting a cinematic zoom and then "restoring" to
-						// that zoomed value on ghost-zoom exit.
+						// Prefer the saved engine default: capturing camera.size here risks
+						// snapshotting a cinematic zoom and restoring to it on ghost-zoom exit.
 						if camera_default_size_saved {
 							ghost_camera_original_size = camera_default_size;
 						} else {
@@ -955,16 +938,8 @@ Player :: class : Player_Base {
 				return;
 			}
 
-			// Big Charlie Mass Birth cinematic: lock every player's camera onto
-			// Big Charlie for the duration of the wave-of-deaths, with a brief
-			// medium screenshake on the synced transform beat.
-			//
-			// Mirrors the lily deathbraid camera pattern: direct-set position
-			// every frame (no lerp — lerp reads camera.position back, fights
-			// engine smoothing, and produced a two-position oscillation when
-			// combined with shake offsets and reconciliation). Camera writes
-			// are gated to is_local(); the override flag is set under the
-			// outer is_local_or_server() gate so it sticks through reconcile.
+			// Big Charlie Mass Birth: lock every camera onto Charlie with a screenshake. Direct-set
+			// position per frame (no lerp); writes gated is_local(), flag under is_local_or_server().
 			if game_state == Game_State.ANIM_BC_MASS_BIRTH {
 				bc_target := get_player_by_entity_id(bc_mass_birth_player_id);
 				if bc_target != null && #alive(bc_target.entity) {
@@ -991,10 +966,8 @@ Player :: class : Player_Base {
 						}
 						this.camera.position = v2.{target_pos.x + shake_x, target_pos.y + BC_MASS_BIRTH_CAM_Y_OFFSET + shake_y};
 
-						// Detach the local LOS light from this player and pin it
-						// to Charlie's position so the cinematic view isn't dark
-						// for spectators / chasers viewing from the wrong angle.
-						// Mirrors lily deathbraid (lily.csl:4167).
+						// Detach the local LOS light and pin it to Charlie so the cinematic
+						// view isn't dark for spectators. Mirrors lily deathbraid (lily.csl:4167).
 						if this.local_light_entity != null && #alive(this.local_light_entity) {
 							this.local_light_entity.set_parent(null, true);
 							this.local_light_entity.set_local_position(target_pos);
@@ -1017,9 +990,8 @@ Player :: class : Player_Base {
 						abilityIndex += 1;
 					}
                 } else if game_state == Game_State.INGAME {
-					// Mini-werewolf infection: suppress ALL normal abilities until they pass the bite.
-					// Only show after the transformation has revealed (skin active = wolf look applied).
-					// During the 10s delay the player keeps their normal abilities so nothing looks different.
+					// Mini-werewolf infection: suppress all abilities until they pass the bite.
+					// Only after transform reveals (skin active); during the 10s delay abilities stay.
 					if this.werewolf_infected && rr_werewolf_skin_active(this) {
 						draw_ability_button(this, Werewolf_Pass_Bite_Ability, 0);
 						return;
@@ -1239,10 +1211,7 @@ Player :: class : Player_Base {
     }
 
     setup_player_colors :: proc(using this: Player) {
-		// Per-viewer name coloring:
-		// - If the local player is an impostor (traitor), all impostors show red.
-		// - Otherwise, everyone is white.
-		//
+		// Per-viewer name coloring: if local player is a traitor, all traitors show red, else white.
 		// IMPORTANT: run this only on the local client (see ao_update).
 		local_is_impostor := this.player_type == Player_Type.TRAITOR;
 		for p: component_iterator(Player) {
@@ -1942,6 +1911,7 @@ draw_player_role_hud :: proc(player: Player) {
 // --- Mech checklist HUD: left side --- (delegates to mech.csl)
 draw_mech_role_hud :: proc(player: Player) {
 	rr_mech_draw_checklist_panel(player);
+	rr_mech_draw_minion_warning(player);
 }
 
 // --- GGG ability unlock progress: left side ---
@@ -2721,9 +2691,8 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 	reset_werewolf_visuals :: method() {
 		this.werewolf_infected = false;
 		this.werewolf_infected_from_id = 0;
-		// Drop the look effect entirely. effect_end restores visuals as part of
-		// the teardown — and because the engine flips already_ending first, the
-		// effect's update can't fire afterwards and re-enable wolf look.
+		// Drop the look effect entirely; effect_end restores visuals on teardown. The engine
+		// flips already_ending first, so its update can't re-enable wolf look afterwards.
 		eff := rr_werewolf_get_look_effect(this);
 		if eff != null {
 			eff.remove_effect(true);
@@ -2803,6 +2772,19 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 		stunned_autograph_state := layer.create_state("004RAND_movie_star/stunned_by_autograph_loop", true, 15.0);
 		layer.create_global_transition(stunned_autograph_state, false).create_trigger_condition(stunned_autograph_var);
 		// This is a loop; exit via RESET (or another explicit transition), not state completion.
+	}
+
+	rr_sm_setup_mech :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
+		// Held in a Mech/Guardian's grip — magnetised hold pose loops for the whole
+		// carry. Driven by the mech_magnetized bool (set by Mech_Carried_Status).
+		magnetized_var := sm.create_variable("mech_magnetized", State_Machine_Variable.Kind.BOOL);
+		magnetized_state := layer.create_state("Mech/magnetized", true, 0.0);
+
+		to_magnetized := layer.create_global_transition(magnetized_state, false);
+		to_magnetized.create_bool_condition(magnetized_var, true);
+
+		exit_magnetized := layer.create_transition(magnetized_state, idle_state, false);
+		exit_magnetized.create_bool_condition(magnetized_var, false);
 	}
 
 	rr_sm_setup_hitman :: proc(sm: State_Machine, layer: State_Machine_Layer, idle_state: State_Machine_State) {
@@ -3077,10 +3059,8 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 		layer.create_global_transition(bc_birth_state, false).create_trigger_condition(bc_birth_var);
 		layer.create_transition(bc_birth_state, idle_state, true);
 
-		// Shockwave stun — victim plays the Fall_To_Ground_Hurt one-shot
-		// (3.4s) and returns to idle. The BC_Shockwave_Stun component holds
-		// movement-input disabled for the same duration so the anim and the
-		// gameplay stun end together.
+		// Shockwave stun — victim plays Fall_To_Ground_Hurt then returns to idle.
+		// BC_Shockwave_Stun disables movement for the same duration so they end together.
 		bc_shockwave_stun_var := sm.create_variable("bc_shockwave_stun", State_Machine_Variable.Kind.TRIGGER);
 		bc_shockwave_stun_state := layer.create_state("004RAND_hitman/Land_On_Front_Recover_Stationary", false, 2.7);
 		layer.create_global_transition(bc_shockwave_stun_state, false).create_trigger_condition(bc_shockwave_stun_var);
@@ -3307,6 +3287,7 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 
 		rr_sm_setup_common(sm, layer, idle_state);
 		rr_sm_setup_movie_star(sm, layer, idle_state);
+		rr_sm_setup_mech(sm, layer, idle_state);
 		rr_sm_setup_hitman(sm, layer, idle_state);
 		rr_sm_setup_werewolf(sm, layer, idle_state);
 		rr_sm_setup_pyromaniac(sm, layer, idle_state);
@@ -3994,11 +3975,8 @@ rr_draw_task_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, color: v4)
 	}
 }
 
-// Draw minimap markers for every prop the Pyromaniac can still ignite
-// (i.e. props that are not already actively burning).
-// Returns one of 12 vivid hues by sequential index (mod 12).
-// Hues span the blue-green-purple-magenta arc, avoiding yellow/orange/red
-// so they don't clash with the "burning" red flash or "fully burned" deep-orange.
+// Returns one of 12 vivid hues by sequential index (mod 12), spanning the
+// blue-green-purple-magenta arc to avoid clashing with burning red/orange props.
 rr_pyro_room_color :: proc(idx: int) -> v4 {
 	switch idx % 12 {
 		case 0:  return v4.{0.0,  1.0,  0.15, 1.0}; // pure green      (~120°)
@@ -4764,9 +4742,7 @@ destroy_pirate_dig_spots_for_player :: proc(player_entity_id: u64) {
 }
 
 // --- Door Unlock Interactable: per-player update ---
-// Creates the interactable entity if needed, then repositions it to the nearest
-// closed door each frame. When no closed door is nearby the entity is parked
-// off-screen so the engine won't show a prompt.
+// Lazy-creates the entity, repositions it to the nearest closed door each frame, parking it off-screen otherwise.
 rr_update_door_unlock_interactable :: proc(player: Player) {
 	if player == null return;
 	if !#alive(player.entity) return;
@@ -4824,9 +4800,7 @@ rr_cleanup_door_unlock_interactable :: proc(player: Player) {
 	player.door_unlock_interactable = null;
 }
 
-// ============================================================
-// Intro role animation (per-player Spine_Instance)
-// ============================================================
+// === Intro role animation (per-player Spine_Instance) ===
 
 rr_intro_ensure_role_spine :: proc(player: Player) {
 	if player.intro_role_spine_ready { return; }

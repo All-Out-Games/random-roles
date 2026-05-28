@@ -5,8 +5,7 @@ import "core:ao"
 // =============================================================================
 
 // --- Constants ---
-// Runtime-constructed paths to prevent engine pre-loading spine assets at startup.
-// The engine eagerly loads all spine assets referenced by string constants.
+// Runtime-constructed paths so the engine doesn't eagerly pre-load spine assets at startup.
 LILY_RIG_PREFIX :: "anims/roles/Lily/";
 rr_lily_get_creature_rig_path :: proc() -> string {
 	return format_string("%Lily_Lovebraids_Art.spine", {LILY_RIG_PREFIX});
@@ -280,11 +279,8 @@ rr_lily_swap_to_player :: proc(player: Player) {
 	player.remove_name_invisibility_reason(LILY_NAME_INVIS_REASON);
 }
 
-// Detach Lily's creature rig so it stays at `origin` as a semi-transparent ghost while
-// Lily's player entity teleports to follow a remote body (spider / eye-machine tube).
-// The player is hidden to everyone via invisibility_reason; her animator is disabled to
-// silence footsteps. The creature rig (forced visible even if she wasn't in Lily form)
-// stays at origin at reduced alpha as the ghost marker.
+// Detach Lily's creature rig at `origin` as a semi-transparent ghost while her player entity
+// teleports to follow a remote body (spider / tube). Player hidden via invisibility_reason.
 rr_lily_detach_body_to_origin :: proc(player: Player, origin: v2) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
@@ -597,9 +593,8 @@ rr_lily_round_start :: proc(p: Player) {
 rr_lily_cleanup :: proc(player: Player) {
 	rr_lily_force_revert(player);
 
-	// Victim-side cleanup runs for every player (not just the Lily) so stolen
-	// legs/eyes don't persist into the next round if the Lily leaves or dies
-	// before a doctor heal.
+	// Victim-side cleanup runs for every player so stolen legs/eyes don't persist
+	// into the next round if the Lily leaves or dies before a doctor heal.
 	if player.lily_crawling {
 		rr_lily_restore_legs(player);
 	}
@@ -613,9 +608,8 @@ rr_lily_cleanup :: proc(player: Player) {
 		rr_player_restore_default_camera(player, true);
 	}
 
-	// Global sweeps run regardless of whether this player has a Lily_Module — covers
-	// orphan trees/AOEs left behind by a Lily who left the game or whose module was
-	// removed before cleanup ran. Idempotent across the per-player round-start loop.
+	// Global sweeps run regardless of Lily_Module — covers orphan trees/AOEs left by a
+	// departed Lily. Idempotent across the per-player round-start loop.
 	for tree: component_iterator(Lily_Hair_Tree) {
 		if tree == null continue;
 		if #alive(tree.entity) {
@@ -1963,10 +1957,8 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 	table_pos := lm.tea_table_entity.world_position;
 	victim.set_facing_right(table_pos.x > seat_world.x);
 
-	// Camera focus (must set every frame due to server sync)
-	// NOTE: Lily's own camera is intentionally NOT locked to the table — she
-	// should stay on her regular follow camera during the tea party.
-	// Focus victim's camera on the table
+	// Focus victim's camera on the table every frame (server sync). Lily's own camera
+	// is intentionally left on her regular follow camera.
 	if victim.is_local_or_server() {
 		table_pos := lm.tea_table_entity.world_position;
 		victim.camera.follow_player = false;
@@ -2006,9 +1998,8 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 			if cup_effect == LILY_TEA_CUP_CAFFEINE {
 				victim.set_trigger("lily_tea_hyper");
 			} else {
-				// Poison and safe both use the neutral drink animation.
-				// Poison's leg-loss visual comes from the Legless_Start anim
-				// that fires when rr_lily_apply_crawl flips lily_crawling on.
+				// Poison and safe both use the neutral drink anim; poison's leg-loss visual
+				// comes from Legless_Start when rr_lily_apply_crawl flips lily_crawling on.
 				victim.set_trigger("lily_tea_safe");
 				rr_lily_reapply_debuff_anim(victim);
 			}
@@ -2244,12 +2235,8 @@ rr_lily_end_tea_party :: proc(player: Player) {
 	rr_lily_end_tea_party_ex(player, true);
 }
 
-// reset_victim_anim: when true, fires `lily_tea_safe` on the victim to reset
-// their animation to idle. Cancellation paths (timeouts, unstuck, round end)
-// want this; the post-resolve path does NOT — the outcome trigger
-// (lily_tea_hyper / lily_tea_sleep, or the legless_start from crawl) has
-// already been set during drink/resolve and fires its own loop + effect, so
-// a second safe trigger would overwrite it with the safe drink anim.
+// reset_victim_anim: when true, fires `lily_tea_safe` to reset the victim to idle (cancel paths).
+// The post-resolve path passes false so it doesn't overwrite the outcome anim set during drink.
 rr_lily_end_tea_party_ex :: proc(player: Player, reset_victim_anim: bool) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
@@ -2750,9 +2737,8 @@ Lily_Mind_Control_Puppet :: class : Component {
 
 		target_pos := p.entity.world_position;
 
-		// Snap to the puppet — the engine already smooths the target entity's
-		// position via prediction/reconciliation. Any additional lerp here just
-		// adds phase lag and makes frame-to-frame wobble more visible.
+		// Snap camera to the puppet — the engine already smooths the target's position,
+		// so an extra lerp here would just add phase lag and visible wobble.
 		lily.camera.follow_player = false;
 		lily.camera.position = target_pos;
 
@@ -3088,10 +3074,8 @@ rr_lily_draw_mind_control_picker :: proc(player: Player) {
 	lm := player.entity.get_component(Lily_Module);
 	if lm == null return;
 
-	// Auto-close if the player is no longer in a valid state to be picking
-	// (died, transformed out of Lily form, round ended, mind control already active, etc.).
-	// Without this, a stranded mind_control_picking flag leaves the modal stuck on layer 15,
-	// blocking all other input.
+	// Auto-close if the player is no longer in a valid state to be picking (died, reverted,
+	// round ended, etc.) — otherwise a stranded flag leaves the modal stuck blocking input.
 	invalid := game_state != Game_State.INGAME
 		|| player.player_state != Player_State.ALIVE
 		|| player.player_type != Player_Type.TRAITOR
@@ -4382,9 +4366,8 @@ Lily_Kill_Ability :: class : Ability_Base {
 					if puppet != null {
 						puppet.set_facing_right(closest.entity.world_position.x > puppet.entity.world_position.x);
 						puppet.set_trigger("traitor_kill");
-						// If the puppet is legless/blinded, the kill anim interrupts the
-						// crawl/no-eyes main-layer anim. Schedule a reapply once the kill
-						// anim finishes so the debuff anim resumes cleanly.
+						// If the puppet is legless/blinded, the kill anim interrupts the debuff anim;
+						// schedule a reapply once the kill anim finishes so it resumes cleanly.
 						if puppet.lily_crawling || puppet.lily_no_eyes {
 							puppet.lily_reapply_debuff_anim_at = get_time() + 1.05;
 						}
@@ -4810,10 +4793,8 @@ rr_lily_apply_crawl :: proc(victim: Player) {
 	victim.lily_crawling_until = get_time() + LILY_LEGLESS_DURATION;
 }
 
-// Re-fire debuff-animation triggers after a disruption (trap root, tea party, caffeine,
-// sleep) so the legless/no-eyes visual state doesn't get lost once the disruption ends.
-// The rising-edge triggers in player.csl only fire when the flag flips, but disruptions
-// override the main-layer anim without flipping the flag.
+// Re-fire debuff-anim triggers after a disruption (trap, tea party, caffeine, sleep) so the
+// legless/no-eyes visual isn't lost — rising-edge triggers in player.csl only fire on flag flip.
 rr_lily_reapply_debuff_anim :: proc(p: Player) {
 	if p == null return;
 	if p.animator == null || p.animator.instance == null return;
@@ -4856,9 +4837,8 @@ rr_lily_update_spider :: proc(player: Player, dt: float) {
 
 	now := get_time();
 
-	// Teleport Lily's player entity to the spider every frame so voice/SFX emit from
-	// there. Server sync reconciles on its own. The detached creature rig stays put
-	// at lm.ability_origin_pos and acts as the ghost marker.
+	// Teleport Lily's player entity to the spider every frame so voice/SFX emit from there;
+	// the detached creature rig stays at lm.ability_origin_pos as the ghost marker.
 	spider_pos := lm.spider_entity.world_position;
 	player.entity.set_local_position(spider_pos);
 
@@ -5289,9 +5269,8 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 		lm.eye_machine_propeller_sfx_id = SFX.play(prop_asset, prop_desc);
 	}
 
-	// Lily's input is forwarded to the machine then zeroed each frame (like spider).
-	// Don't use add_freeze_reason or add_disable_movement_input_reason — they prevent
-	// input_this_frame from being populated.
+	// Lily's input is forwarded to the machine then zeroed each frame (like spider). Don't use
+	// freeze/disable-movement reasons — they prevent input_this_frame from being populated.
 
 	// Save camera state and zoom out (run on both server & client so reconciliation matches)
 	if player.is_local_or_server() {
@@ -5357,9 +5336,8 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 	rr_lily_reattach_body_from_origin(player);
 	rr_lily_set_ability_invis(player, false);
 
-	// Restore camera — set position before re-enabling follow to avoid a black frame.
-	// Must run on both server & client so sync reconciliation doesn't overwrite the
-	// restored state on subsequent frames.
+	// Restore camera — set position before re-enabling follow to avoid a black frame. Must run
+	// on both server & client so sync reconciliation doesn't overwrite the restored state.
 	if player.is_local_or_server() {
 		player.camera.position = player.entity.world_position;
 		player.camera.size = lm.eye_machine_camera_saved_size;
@@ -5374,11 +5352,8 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 	lm.eye_machine_linger_start = 0.0;
 }
 
-// Apply eye-machine camera state for the current frame. Extracted so it can run
-// in BOTH ao_update and ao_late_update — the late-update pass ensures the camera
-// reflects state that was changed by ability clicks fired this same frame (e.g.
-// the spawn frame), avoiding a 1-frame artifact where the camera/LOS hasn't
-// taken effect yet. Runs on server + local client so reconciliation matches.
+// Apply eye-machine camera state. Runs in BOTH ao_update and ao_late_update (server + local)
+// so clicks fired this same frame take effect without a 1-frame camera/LOS artifact.
 rr_lily_apply_eye_machine_camera :: proc(player: Player) {
 	if player == null return;
 	if !player.is_local_or_server() return;
@@ -6713,9 +6688,8 @@ rr_destroy_world_lily_pickups :: proc() {
 	}
 }
 
-// Restore camera + deathbraid override state to engine defaults. Idempotent.
-// with_grace=true starts a 1-second window that suppresses ghost-zoom so this
-// reset isn't immediately undone when called mid-cinematic-exit.
+// Restore camera + deathbraid override state to engine defaults (idempotent). with_grace=true
+// opens a 1s window suppressing ghost-zoom so the reset isn't undone mid-cinematic-exit.
 rr_player_restore_default_camera :: proc(p: Player, with_grace: bool) {
 	if p == null return;
 	p.lily_deathbraid_cam_overriding = false;

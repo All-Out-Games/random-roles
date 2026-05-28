@@ -1,22 +1,7 @@
 import "core:ao"
 
-// =============================================================================
-// Werewolf — cosmetic state + transform timing.
-//
-// The Werewolf (Traitor role) can transform into wolf form and bite civilians
-// to spread an infection. Both the wolf and infected civilians share the same
-// cosmetic state machine: stripped cosmetic skins, werewolf skin enabled, dark
-// avatar color, hidden nameplate.
-//
-// All of that state used to sit on the Player class for every player — even
-// the 90% who never get infected or transform. It now lives on a passive
-// Werewolf_Look_Effect attached only to players who actually need it:
-//   • added at round start for the actual werewolf (long-lived baseline)
-//   • added at infection time for infected civilians
-//
-// The effect's effect_update drives the per-frame state machine, so players
-// without the effect skip all of this work.
-// =============================================================================
+// Werewolf — cosmetic state + transform timing. Wolf and infected civilians share a
+// cosmetic state machine, driven by a passive Werewolf_Look_Effect on players who need it.
 
 // --- Werewolf skins (merged player rig) ---
 WEREWOLF_SKIN_NAME :: "004RAND/werewolf";
@@ -50,9 +35,8 @@ Werewolf_Look_Effect :: class : Effect_Base {
 	infected_transform_trigger_at: float;
 	infection_expires_at: float;
 
-	// Restore the player's pre-wolf cosmetic look. Reads directly from this
-	// effect's fields so it works even when the engine has already detached us
-	// from the entity's effect list (i.e. mid-effect_end).
+	// Restore the player's pre-wolf cosmetic look from this effect's fields, so it
+	// works even when already detached from the entity's effect list (mid-effect_end).
 	disable_look :: method() {
 		if player == null return;
 		if !#alive(player.entity) return;
@@ -63,9 +47,8 @@ Werewolf_Look_Effect :: class : Effect_Base {
 		// Remove shadow mask material first so the material swap doesn't clobber the color we set below.
 		player.animator.instance.set_material(null, false);
 
-		// Disable werewolf skin and restore saved cosmetics.
-		// Safety: if the per-transform snapshot is unexpectedly empty, fall back to the
-		// round-start baseline captured at game start.
+		// Disable werewolf skin and restore saved cosmetics; if the per-transform snapshot
+		// is empty, fall back to the round-start baseline captured at game start.
 		if saved_cosmetic_skins.count > 0 {
 			player.animator.instance.disable_all_skins();
 			for i: 0..saved_cosmetic_skins.count-1 {
@@ -98,10 +81,8 @@ Werewolf_Look_Effect :: class : Effect_Base {
 		saved_cosmetic_skins.clear();
 	}
 
-	// Effect_Base hook: fires when remove_effect is called (round end, lobby
-	// return, entity destruction, etc.). The engine flips `already_ending`
-	// before this runs, so effect_update is guaranteed not to fire again and
-	// can't re-enable wolf look after we restore here.
+	// Effect_Base hook on remove_effect (round end, lobby return, destruction). Engine flips
+	// `already_ending` first, so effect_update won't re-enable wolf look after we restore.
 	effect_end :: method(interrupt: bool) {
 		if skin_active {
 			this.disable_look();
@@ -315,10 +296,8 @@ rr_werewolf_enable_wolf_look :: proc(player: Player) {
 	eff.skin_active = true;
 }
 
-// Restores the player's original cosmetic skins and avatar color after wolf form ends,
-// keeping the effect attached (so the player can transform again later). For full
-// teardown that drops the effect entirely, call eff.remove_effect(true) instead —
-// effect_end handles visual restoration.
+// Restores original cosmetics/color after wolf form ends, keeping the effect attached for
+// future transforms. For full teardown call eff.remove_effect(true) (effect_end restores visuals).
 rr_werewolf_disable_wolf_look :: proc(player: Player) {
 	eff := rr_werewolf_get_look_effect(player);
 	if eff == null return;
