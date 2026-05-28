@@ -657,6 +657,8 @@ rr_draw_task_list_header :: proc(screen: Rect, is_sabotage: bool, player: Player
 				case .MIMICER:      { role_name = "MIMICER";     role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/mimicer_icon.png"); }
 				case .BIG_CHARLIE:  { role_name = "BIG CHARLIE"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/charlie_icon (1).png"); }
 				case .LILY_LOVEBRAIDS: { role_name = "LILY"; role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/lily_icon (1).png"); }
+				case .THE_MECH:     { role_name = "THE MECH";    role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/Mecha_Icon.png"); }
+				case .GUARDIAN:     { role_name = "GUARDIAN";    role_icon = get_asset(Texture_Asset, "sprites/icons/roles_small/Guardian_Icon.png"); }
 			}
 		}
 
@@ -763,6 +765,7 @@ rr_role_has_abilities :: proc(role: Player_Role, ptype: Player_Type) -> bool {
 		case .HITMAN:       return true;
 		case .WEREWOLF:     return true;
 		case .MIMICER:      return true;
+		case .GUARDIAN:     return true;
 	}
 	return false;
 }
@@ -777,6 +780,7 @@ rr_get_role_description :: proc(role: Player_Role, ptype: Player_Type) -> string
 			case .MIMICER: return "A shape-shifting predator. Kill civilians and corrupt their corpses at Void Pillars to steal faces. Each stolen face unlocks new powers — Void Lunge, Spew Corruption, and the devastating Unleash.";
 			case .BIG_CHARLIE: return "A growing horror. Each kill grants Flesh Mass and spawns a Lil' Nugget. Unlock Slough, Marrow, and Stampede as you grow, then scout through Nuggets like living cameras while your body stands vulnerable.";
 			case .LILY_LOVEBRAIDS: return "A predatory weaver. String civilians to track them, then plant your Hair Tree as your permanent base. Feed the tree its requested offerings (corpses, eyes, legs, strung victims) to grow it and unlock stronger abilities — Tea Party, Mind Control, and the ultimate Deathbraid.";
+			case .THE_MECH: return "A shape-shifting traitor. Loot Power Cores from corpses and smash tasks for Components, then spend them at the R&D Workbench to bolt new weapons onto your Mech form. Helmet Trap, Ram Charge, Magnet Cannon, and Missile Barrage all bolt onto the rig — collect them all plus 2 Power Cores to awaken APEX. Convert one civilian into your Minion to feed you parts.";
 		}
 		return "You are a traitor. Sabotage the station, eliminate the civilians, and avoid suspicion. Work with fellow traitors to win.";
 	}
@@ -797,6 +801,7 @@ rr_get_role_description :: proc(role: Player_Role, ptype: Player_Type) -> string
 		case .CORONER:      return "The station's forensic investigator. Collect DNA samples from dead bodies and match them against living players to identify the killers.";
 		case .PORTAL_MAKER: return "A spatial engineer who bends space. Place a red portal and a blue portal anywhere on the station. Players who enter one exit through the other.";
 		case .HUNTER:       return "A crossbow-wielding tracker. Cripple suspicious players with a piercing bolt that slows them by 50%, place a campfire that buffs nearby schleems by 25% and reveals invisible enemies, then finish the wounded with a Kill Shot. Follow scent footprints left by transformed killers.";
+		case .GUARDIAN:     return "A civilian protector with a hidden Guardian form. Transform to pick up and throw schleems out of harm's way, and challenge The Mech to a Showdown when it goes APEX to break its ultimate.";
 	}
 	return "You are a civilian. Complete your tasks and work with civilians to identify and vote out the traitors.";
 }
@@ -856,6 +861,20 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 				append(ref results, Help_Ability_Entry.{"sprites/icons/big_charlie/abilities/Slough_Icon.png", "Slough", "1 Flesh Mass. Absorb a nearby Nugget for a speed burst and knockback explosion."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/big_charlie/abilities/Marrow_Icon.png", "Marrow", "2 Flesh Mass. Encase a corpse in a fleshy nest. Blocks investigation, spawns bonus Nuggets, and can be reversed early by Doctor."});
 				append(ref results, Help_Ability_Entry.{"sprites/icons/big_charlie/abilities/Stampede_Icon.png", "Stampede", "3 Flesh Mass. All Nuggets charge toward you, trampling players. Absorbed Nuggets trigger a brief Rampage with better kill range and cooldown."});
+			}
+			case .THE_MECH: {
+				append(ref results, Help_Ability_Entry.{"sprites/icons/transform_evil.png", "Transform", "Free toggle between schleem and Mech form. Mech form is required for most weapons."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Loot_Icon.png", "Loot Body", "Interact with a corpse to extract +1 Power Core."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Smash_Task_Icon.png", "Smash Task", "Mech form. Bash a task panel for a matching Component (Power Cell, Circuit, Schematic, Gear). Leaves a Wreckage."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Convert_Player_Icon.png", "Conversion", "Mech form, once per game. Convert a Civilian or Anarchist into your Minion. Cannot target Guardian or other Traitors."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Loot_Icon.png", "Pickup / Throw", "Mech form. Grab a schleem or corpse, then throw them into walls, players, magnets, or wreckage for stuns and kills."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Helmet_Trap_Icon.png", "Helmet Trap", "Schleem form. 1 Gear. Place a trap that blinds the first non-Traitor who steps on it. Helmeted victims are magnet + missile lightning rods."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Ram_Icon.png", "Ram Charge", "Mech form. 1 Power Cell. Transform into a truck and charge in a straight line — instantly kills the first hit. Breaks Guardian's grab. Steerable in APEX."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Magnet_Cannon_Icon.png", "Magnet Cannon", "Mech form. 1 Schematic. Fire a harpoon that traps nearby players to a magnet node — globally pulls Helmeted victims. APEX fires 3 javelins."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Missile_Barrage_Icon.png", "Missile Barrage", "Mech form. 1 Circuit. Fire 3 homing missiles that stun on hit (kill on magnetized targets). APEX fires 6."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Wreckage_Warp_Icon.png", "Wreckage Warp", "Mech form. 2 Components. Teleport between Wreckages you (or your Minion) have left around the map."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Apex_Awakening_Icon.png", "APEX Awakening", "All 4 weapons + 2 Power Cores. Once per game. Combine into the colossal APEX TITAN. All weapons upgrade automatically and you can't be picked up by Guardian."});
+				append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Showdown_Icon.png", "Showdown", "Guardian-initiated QTE while in APEX. Win to unlock the End Game ability; lose to drop out of APEX."});
 			}
 			case .LILY_LOVEBRAIDS: {
 				append(ref results, Help_Ability_Entry.{"sprites/icons/transform_evil.png", "Transform", "Toggle between schleem and Lily form. Lily form moves faster."});
@@ -930,6 +949,11 @@ rr_get_role_ability_entries :: proc(role: Player_Role, ptype: Player_Type, resul
 			append(ref results, Help_Ability_Entry.{"sprites/icons/hunter/cripple.png", "Cripple", "Fire a crossbow bolt that pierces and slows the target by 50%."});
 			append(ref results, Help_Ability_Entry.{"sprites/icons/hunter/campfire.png", "Campfire", "Place a campfire that buffs nearby schleems by 25% and reveals invisible enemies in its light."});
 			append(ref results, Help_Ability_Entry.{"sprites/icons/hunter/killshot.png", "Kill Shot", "Finish off a pierced victim. Only available once a target is pierced."});
+		}
+		case .GUARDIAN: {
+			append(ref results, Help_Ability_Entry.{"sprites/icons/transform_good.png", "Transform", "Free toggle between schleem and Guardian form."});
+			append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Loot_Icon.png", "Pickup / Throw", "Guardian form. Grab a schleem and throw them away from danger. Cannot pick up the APEX Mech."});
+			append(ref results, Help_Ability_Entry.{"sprites/icons/mech/Showdown_Icon.png", "Showdown", "Guardian form. Challenge the APEX Mech up close. Win to strip its APEX form, lose to unlock its End Game ability."});
 		}
 	}
 }

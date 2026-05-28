@@ -221,6 +221,8 @@ Player :: class : Player_Base {
 		if pyro_on_fire return false;
 		// Cocooned by Big Charlie — wrapped up, no abilities.
 		if bc_cocooned return false;
+		// Held by a Mech or Guardian — fully locked out until thrown/dropped.
+		if rr_mech_is_carried(this) return false;
 		// Trapped or being dragged by GGG — no abilities.
 		ggg_root := entity.get_component(GGG_Trap_Root_Effect);
 		if ggg_root != null && ggg_root.active return false;
@@ -533,6 +535,14 @@ Player :: class : Player_Base {
 
 		// Hunter per-frame update (campfire buff aura, scent footprints).
 		rr_hunter_update(this, delta_time);
+
+		// Transformers: The Mech / Guardian update.
+		rr_mech_update(this, delta_time);
+
+		// Mech R&D Workbench modal (local Mech only).
+		if this.is_local_or_server() && this.player_role == Player_Role.THE_MECH {
+			rr_mech_draw_workbench_ui(this);
+		}
 
 		// Deathbraid camera — runs for ALL players so everyone sees the cinematic.
 		rr_lily_update_deathbraid_camera(this);
@@ -1020,6 +1030,11 @@ Player :: class : Player_Base {
 						return;
 					}
 
+					// Held by a Mech/Guardian — no ability buttons until released.
+					if rr_mech_is_carried(this) {
+						return;
+					}
+
 					// Hide all abilities during the Lily deathbraid cinematic.
 					if rr_lily_any_deathbraid_active() {
 						return;
@@ -1063,6 +1078,9 @@ Player :: class : Player_Base {
 							draw_ability_button(this, Hunter_Kill_Shot_Ability, abilityIndex);
 							abilityIndex += 1;
 						}
+					}
+					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.GUARDIAN {
+						abilityIndex = rr_guardian_draw_abilities(this, abilityIndex);
 					}
 					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PRANKSTER {
 						draw_ability_button(this, Prank_Ability, abilityIndex);
@@ -1268,6 +1286,12 @@ Player :: class : Player_Base {
 		if rr_lily_should_intercept_remote_body_kill(this) {
 			return;
 		}
+		// Civilian allies held by Guardian are invincible while in the Guardian's arms.
+		if rr_guardian_is_protecting(this) {
+			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
+			rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.55}, 0.85, v4.{0.45, 1.0, 0.55, 0.65}, 0.28);
+			return;
+		}
 		// If we were dragging a body, drop it immediately.
 		rr_drag_body_force_drop_for_player(this);
 		// Werewolf infection should never persist through death.
@@ -1311,6 +1335,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .CORONER:    return "CORONER";
 		case .PORTAL_MAKER: return "WARPER";
 		case .HUNTER:     return "HUNTER";
+		case .GUARDIAN:   return "GUARDIAN";
 		case .PRANKSTER:  return "PRANKSTER";
 		case .PYROMANIAC: return "PYROMANIAC";
 		case .HACKER:     return "HACKER";
@@ -1321,6 +1346,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .MIMICER:       return "MIMICER";
 		case .BIG_CHARLIE:   return "BIG CHARLIE";
 		case .LILY_LOVEBRAIDS: return "LILY";
+		case .THE_MECH:      return "THE MECH";
 	}
 	return "CREW";
 }
@@ -1910,6 +1936,12 @@ draw_player_role_hud :: proc(player: Player) {
 	draw_mimicer_role_hud(player);
 	draw_bc_role_hud(player);
 	draw_lily_role_hud(player);
+	draw_mech_role_hud(player);
+}
+
+// --- Mech checklist HUD: left side --- (delegates to mech.csl)
+draw_mech_role_hud :: proc(player: Player) {
+	rr_mech_draw_checklist_panel(player);
 }
 
 // --- GGG ability unlock progress: left side ---
@@ -2516,6 +2548,10 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 	abilityIndex := idx;
 	player_role := player.player_role;
 
+	if rr_mech_is_minion_active(player) {
+		return rr_minion_draw_abilities(player, abilityIndex);
+	}
+
 	// Hitman replaces the default kill with Neck Snap.
 	if player_role == Player_Role.HITMAN {
 		draw_ability_button(player, Hitman_Neck_Snap_Ability, abilityIndex);
@@ -2567,13 +2603,15 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 		abilityIndex = rr_mimicer_draw_abilities(player, abilityIndex);
 	} else if player_role == Player_Role.LILY_LOVEBRAIDS {
 		abilityIndex = rr_lily_draw_abilities(player, abilityIndex);
+	} else if player_role == Player_Role.THE_MECH {
+		abilityIndex = rr_mech_draw_abilities(player, abilityIndex);
 	} else {
 		draw_ability_button(player, Kill_Ability, abilityIndex);
 		abilityIndex += 1;
 	}
 
 	// All traitors (except werewolf and GGG, handled above) can drag bodies.
-	if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA && player_role != Player_Role.MIMICER && player_role != Player_Role.LILY_LOVEBRAIDS {
+	if player_role != Player_Role.WEREWOLF && player_role != Player_Role.GOO_GOO_GAGA && player_role != Player_Role.MIMICER && player_role != Player_Role.LILY_LOVEBRAIDS && player_role != Player_Role.THE_MECH {
 		draw_ability_button(player, Drag_Body_Ability, abilityIndex);
 		abilityIndex += 1;
 	}
@@ -3475,6 +3513,8 @@ Task_Interactable :: class : Component {
 	// Optional override so runtime-spawned interactables can use the task system
 	// without relying on the entity name.
 	task_id_override: string @ao_serialize;
+	mech_smashed: bool;
+	mech_wreckage_entity: Entity;
 
 	get_task_id :: proc(using this: Task_Interactable) -> string {
 		if task_id_override.count > 0 {
@@ -3489,11 +3529,32 @@ Task_Interactable :: class : Component {
 		}
         interactable.set_listener(this);
 
-		// Register this interactable's world position as a destination for its task id.
+        // Register this interactable's world position as a destination for its task id.
 		rr_register_task_destination(this.get_task_id(), this.entity.world_position);
     }
 
+	ao_update :: proc(using this: Task_Interactable, dt: float) {
+		if interactable == null return;
+		if mech_smashed {
+			interactable.set_text("Repair");
+		} else {
+			interactable.set_text(get_task_display_name(this.get_task_id()));
+		}
+	}
+
     on_interact :: proc(using this: Task_Interactable, player: Player) {
+		if mech_smashed {
+			if player == null return;
+			if player.player_type == Player_Type.TRAITOR return;
+			mech_smashed = false;
+			if mech_wreckage_entity != null && #alive(mech_wreckage_entity) {
+				mech_wreckage_entity.destroy();
+			}
+			mech_wreckage_entity = null;
+			player.Notify("Task repaired.");
+			rr_mech_play_sfx_at("sfx/task_success.wav", entity.world_position, 0.25);
+			return;
+		}
 		if rr_hacker_try_trigger_hacked_task(this, player) {
 			return;
 		}
@@ -3507,8 +3568,15 @@ Task_Interactable :: class : Component {
         }
     }
 
-    can_use :: proc(using this: Task_Interactable, player: Player) -> bool {
+	can_use :: proc(using this: Task_Interactable, player: Player) -> bool {
 		task_id := this.get_task_id();
+
+		if mech_smashed {
+			if game_state != Game_State.INGAME return false;
+			if player == null return false;
+			if player.player_state != Player_State.ALIVE return false;
+			return player.player_type != Player_Type.TRAITOR;
+		}
 
 		// Mini-werewolf infection blocks normal task completion until cured.
 		if player != null && player.werewolf_infected {
@@ -3771,6 +3839,8 @@ Corpse :: class : Component {
 	ggg_pre_wrap_death_anim: string;
 	// Mimicer: true if the Mimicer killed this player while disguised.
 	mimicer_disguised_kill: bool;
+	// The Mech: corpse has already yielded a Power Core.
+	mech_core_looted: bool;
 
 	// --- Drag Body ---
 	// 0 = not being dragged; otherwise entity id of the dragging player.
@@ -4523,6 +4593,8 @@ update_minimap_ui :: proc(player: Player) {
 		}
 	}
 
+	rr_mech_draw_wreckage_warp_minimap_buttons(player, map_rect);
+
 	// --- Sabotage buttons (traitors only): to the right of the minimap ---
 	power_clicked := false;
 	comms_clicked := false;
@@ -4882,6 +4954,25 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 		rr_intro_copy_player_skins(player);
 		player.intro_role_spine.refresh_skins();
 		player.intro_role_spine.set_animation("004RAND_hunter/intro_animation", false, 0);
+	} else if role == Player_Role.THE_MECH {
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Mech Guardian/004RAND_Mech.spine"));
+		player.intro_role_spine.enable_skin("Full/Mecha_skeleton");
+		player.intro_role_spine.enable_skin("Head");
+		player.intro_role_spine.enable_skin("Arms");
+		player.intro_role_spine.enable_skin("Chest_empty");
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("009SG/APEX_transform_grounded", false, 0);
+		player.intro_is_creature_rig = true;
+		player.intro_second_anim_name = "009SG/Showdown_Start";
+		player.intro_second_anim_at = 3.3;
+	} else if role == Player_Role.GUARDIAN {
+		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Mech Guardian/004RAND_Mech.spine"));
+		player.intro_role_spine.enable_skin("Full/Guardian");
+		player.intro_role_spine.refresh_skins();
+		player.intro_role_spine.set_animation("009SG/Showdown_Start", false, 0);
+		player.intro_is_creature_rig = true;
+		player.intro_second_anim_name = "009SG/Run_guardian";
+		player.intro_second_anim_at = 1.4;
 	} else {
 		player.intro_role_spine.destroy();
 		player.intro_role_spine_ready = false;

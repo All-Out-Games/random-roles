@@ -13,6 +13,118 @@ Doctor_Module :: class : Component {
 	resurrects_used: int;
 }
 
+// --- Transformers: The Mech / Guardian ---
+Mech_Module :: class : Component {
+	is_mech_form: bool;
+	is_apex: bool;
+	apex_used: bool;
+	apex_lost: bool;
+
+	power_cores: int;
+	power_cells: int;
+	circuits: int;
+	schematics: int;
+	gears: int;
+
+	helmet_trap_unlocked: bool;
+	ram_charge_unlocked: bool;
+	magnet_cannon_unlocked: bool;
+	missile_barrage_unlocked: bool;
+	wreckage_warp_unlocked: bool;
+	endgame_unlocked: bool;
+	conversion_used: bool;
+
+	carried_player_id: u64;
+	carried_corpse_id: u64;
+	warp_index: int;
+
+	workbench_ui_open: bool;
+
+	showdown_active: bool;
+	showdown_opponent_id: u64;
+	showdown_mashes: int;
+	showdown_ends_at: float;
+
+	creature_entity: Entity;
+	creature_animator: Spine_Animator;
+	creature_visible: bool;
+	last_anim: string;
+	anim_lock_until: float;
+	transform_anim_ends_at: float;
+	// >0 means "clear track 1 at this time so the grab overlay doesn't freeze on
+	// the last frame". 0 means no pending clear.
+	overlay_clear_at: float;
+}
+
+Guardian_Module :: class : Component {
+	is_guardian_form: bool;
+	carried_player_id: u64;
+	showdown_active: bool;
+	showdown_opponent_id: u64;
+	showdown_mashes: int;
+	showdown_ends_at: float;
+
+	creature_entity: Entity;
+	creature_animator: Spine_Animator;
+	creature_visible: bool;
+	last_anim: string;
+	anim_lock_until: float;
+	transform_anim_ends_at: float;
+	overlay_clear_at: float;
+}
+
+Mech_Minion_Effect :: class : Effect_Base {
+	converted_by_mech_id: u64;
+	original_role: Player_Role;
+	original_type: Player_Type;
+	saved_skins: [..]string;
+	saved_color: Color_Replace_Color;
+	power_cells: int;
+	circuits: int;
+	schematics: int;
+	gears: int;
+	warp_index: int;
+
+	effect_start :: method() {
+		if player == null return;
+		player.player_type = Player_Type.TRAITOR;
+		if player.animator != null && player.animator.instance != null {
+			player.animator.instance.enable_skin("body/half_cyborg");
+			player.animator.instance.refresh_skins();
+		}
+		player.Notify("You are The Mech's Minion.");
+	}
+
+	effect_update :: method(dt: float) {
+		if player == null { remove_effect(false); return; }
+		if !#alive(player.entity) { remove_effect(false); return; }
+		if game_state != Game_State.INGAME { remove_effect(false); return; }
+		if player.player_state != Player_State.ALIVE { remove_effect(false); return; }
+		if converted_by_mech_id == 0 { remove_effect(false); return; }
+		player.player_type = Player_Type.TRAITOR;
+	}
+
+	effect_end :: method(interrupt: bool) {
+		if player == null return;
+		if !#alive(player.entity) return;
+		player.player_type = original_type;
+		player.player_role = original_role;
+		if player.animator != null && player.animator.instance != null {
+			player.animator.instance.disable_all_skins();
+			if saved_skins.count > 0 {
+				for i: 0..saved_skins.count-1 {
+					player.animator.instance.enable_skin(saved_skins[i]);
+				}
+			} else {
+				player.animator.instance.enable_skin("base/crewchsia");
+			}
+			player.animator.instance.refresh_skins();
+			player.animator.instance.set_color_replace_color(saved_color);
+		}
+		converted_by_mech_id = 0;
+	}
+}
+
 // --- Coroner ---
 Coroner_Module :: class : Component {
 	dna_vials: [..]u64;
