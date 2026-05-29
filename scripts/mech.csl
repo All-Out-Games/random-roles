@@ -40,7 +40,9 @@ MECH_MELEE_RANGE :: 2.6;
 MECH_THROW_DISTANCE :: 10.0;
 MECH_STUN_SECONDS :: 3.0;
 MECH_RAM_SECONDS :: 1.15;
-MECH_RAM_SPEED :: 18.0;
+MECH_RAM_SPEED :: 26.0;
+MECH_RAM_HIT_RADIUS :: 1.4;   // how close a victim must be to get flattened by the charge
+MECH_RAM_SHOVE_SPEED :: 18.0; // sideways impulse shoving non-killed victims out of the car's path
 MECH_APEX_RAM_TURN_RATE :: 9.0;
 MECH_MAGNET_PULL_SECONDS :: 6.0;
 MECH_MAGNET_RADIUS :: 5.0;
@@ -136,7 +138,7 @@ rr_mech_upgrades_owned :: proc(mech: Mech_Module) -> int {
 	return count;
 }
 
-rr_mech_spawn_transform_vfx :: proc(player: Player) {
+rr_mech_spawn_transform_vfx :: proc(player: Player, duration := MECH_TRANSFORM_VFX_DURATION) {
 	if player == null || !#alive(player.entity) return;
 	e := Scene.create_entity();
 	e.set_parent(player.entity, false);
@@ -150,7 +152,7 @@ rr_mech_spawn_transform_vfx :: proc(player: Player) {
 		anim.instance.set_animation("repairing", false, 0);
 	}
 	vfx := new(Mech_Transform_Vfx_Effect);
-	vfx.set_duration(MECH_TRANSFORM_VFX_DURATION);
+	vfx.set_duration(duration);
 	e.add_passive_effect(vfx);
 }
 
@@ -324,6 +326,69 @@ rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 	guard.transform_anim_ends_at = 0.0;
 	guard.overlay_clear_at = 0.0;
 	guard.last_overlay_anim = "";
+}
+
+// Reverts a transformed Mech / Guardian to their human ("schleem") form for a meeting. Run from
+// setup_voting right after the teleport so the swap is masked by the jump — matching every other
+// transforming role (which is why the Mech is added to rr_force_revert_all_roles_for_meeting).
+// Progression and the once-per-game APEX state are deliberately preserved: the is_mech_form /
+// is_apex / is_guardian_form flags are kept so the avatar auto-restores when gameplay resumes.
+rr_mech_force_revert :: proc(player: Player) {
+	if player == null || !#alive(player.entity) return;
+	mech := player.entity.get_component(Mech_Module);
+	guard := player.entity.get_component(Guardian_Module);
+	if mech == null && guard == null return;
+
+	transformed_or_showing :=
+		(mech != null && (mech.is_mech_form || mech.is_apex || mech.creature_visible)) ||
+		(guard != null && (guard.is_guardian_form || guard.creature_visible));
+	if !transformed_or_showing {
+		// Defensive: make sure no stale transform invis reason is left hiding the real player.
+		rr_mech_enable_player_hidden(player, false);
+		return;
+	}
+
+	// Hide the creature avatar and clear the transform invis reason unconditionally (not gated on
+	// creature_visible) so a desynced/half-applied transform can't leave the real player invisible.
+	rr_mech_show_avatar(player, false);
+	player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+
+	// Tear down an in-progress Ram so its truck rig doesn't linger in the voting circle.
+	ram := player.entity.get_component(Mech_Ram_Charge_Status);
+	if ram != null {
+		if ram.truck_entity != null && #alive(ram.truck_entity) { ram.truck_entity.destroy(); }
+		ram.truck_entity = null;
+		ram.truck_animator = null;
+		ram.truck_swapped = false;
+		ram.active = false;
+	}
+
+	if mech != null {
+		mech.carried_player_id = 0;
+		mech.carried_corpse_id = 0;
+		mech.showdown_active = false;
+		mech.showdown_opponent_id = 0;
+		mech.showdown_mashes = 0;
+		mech.showdown_ends_at = 0.0;
+		mech.apex_transform_locked = false;
+		mech.last_anim = "";
+		mech.anim_lock_until = 0.0;
+		mech.overlay_clear_at = 0.0;
+		mech.last_overlay_anim = "";
+	}
+	if guard != null {
+		guard.carried_player_id = 0;
+		guard.showdown_active = false;
+		guard.showdown_opponent_id = 0;
+		guard.showdown_mashes = 0;
+		guard.showdown_ends_at = 0.0;
+		guard.showdown_death_at = 0.0;
+		guard.showdown_death_killer_id = 0;
+		guard.last_anim = "";
+		guard.anim_lock_until = 0.0;
+		guard.overlay_clear_at = 0.0;
+		guard.last_overlay_anim = "";
+	}
 }
 
 // Tears down all Mech world entities and reverts per-player mech/guardian/minion state.
@@ -634,7 +699,11 @@ rr_mech_update :: proc(player: Player, dt: float) {
 	guard := player.entity.get_component(Guardian_Module);
 	if mech != null {
 		if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
-			if mech.creature_visible { rr_mech_show_avatar(player, false); }
+			// Defer the visual transform-revert for meetings to teleport time (rr_mech_force_revert
+			// in setup_voting) so nearby players don't see the pop and it survives reconciliation —
+			// matching the other transforming roles. Dead players have no meeting teleport, so they
+			// still revert here.
+			if player.player_state != Player_State.ALIVE && mech.creature_visible { rr_mech_show_avatar(player, false); }
 			mech.carried_player_id = 0;
 			mech.carried_corpse_id = 0;
 			mech.showdown_active = false;
@@ -717,7 +786,9 @@ rr_mech_update :: proc(player: Player, dt: float) {
 	}
 	if guard != null {
 		if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
-			if guard.creature_visible { rr_mech_show_avatar(player, false); }
+			// Meeting revert is deferred to teleport (rr_mech_force_revert in setup_voting) like the
+			// other transforming roles; dead Guardians have no teleport, so revert them here.
+			if player.player_state != Player_State.ALIVE && guard.creature_visible { rr_mech_show_avatar(player, false); }
 			guard.carried_player_id = 0;
 			guard.showdown_active = false;
 			guard.showdown_death_at = 0.0;
@@ -2375,12 +2446,66 @@ Mech_Magnet_Node :: class : Component {
 
 MECH_TRUCK_SCALE :: 1.4;
 
+MECH_RAM_SHOVE_REASON :: "mech_ram_shove";
+MECH_RAM_SHOVE_SECONDS :: 0.35; // how long the sideways shove drives the victim
+
+// Sideways shove for players the ram clips after its first kill. Mirrors Hitman_Mine_Fling:
+// velocity is re-applied every frame for the duration (a one-shot impulse gets overwritten by
+// the movement system, so it never visibly moves the victim).
+Mech_Ram_Shove :: class : Component {
+	active: bool;
+	end_time: float;
+	dir: v2;
+	speed: float;
+
+	arm :: proc(using this: Mech_Ram_Shove, seconds: float, direction: v2, shove_speed: float) {
+		if seconds <= 0.0 { seconds = 0.1; }
+		end_time = get_time() + seconds;
+		dir = direction;
+		speed = shove_speed;
+		p := entity.get_component(Player);
+		if p != null {
+			// Ref-counted reason — only lock on the inactive->active edge so a re-arm while
+			// already shoving can't stack the lock and leave the victim frozen.
+			if !active { p.add_disable_movement_input_reason(MECH_RAM_SHOVE_REASON); }
+			p.agent.velocity = dir * speed;
+		}
+		active = true;
+	}
+
+	release :: proc(using this: Mech_Ram_Shove) {
+		if !active return;
+		active = false;
+		p := entity.get_component(Player);
+		if p != null { p.remove_disable_movement_input_reason(MECH_RAM_SHOVE_REASON); }
+	}
+
+	ao_update :: method(dt: float) {
+		if !active return;
+		p := entity.get_component(Player);
+		if p == null { active = false; return; }
+		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE || get_time() >= end_time {
+			release(this);
+			return;
+		}
+		// Keep driving the shove velocity until it expires.
+		p.agent.velocity = dir * speed;
+	}
+
+	// Destroyed mid-shove (round reset / meeting teardown) — release the lock so it can't
+	// leak onto a player who keeps the component into the next round.
+	ao_end :: method() {
+		release(this);
+	}
+}
+
 Mech_Ram_Charge_Status :: class : Component {
 	owner_id: u64;
 	dir: v2;
 	ends_at: float;
 	hit: bool;
 	active: bool;
+	killed: bool; // only the first victim per ram dies; everyone else gets shoved aside
 	truck_entity: Entity;
 	truck_animator: Spine_Animator;
 	truck_skin: string;
@@ -2394,6 +2519,7 @@ Mech_Ram_Charge_Status :: class : Component {
 		dir = normalize(dir);
 		ends_at = get_time() + seconds;
 		hit = false;
+		killed = false;
 		truck_swapped = false;
 		p := entity.get_component(Player);
 		if p != null {
@@ -2406,8 +2532,12 @@ Mech_Ram_Charge_Status :: class : Component {
 			// truck revealed only once that anim finishes (see ao_update).
 			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_out", false);
 			truck_swap_at = get_time() + rr_mech_anim_duration("009SG/Transform_Truck_out");
-			rr_mech_spawn_transform_vfx(p);
+			// Only run the morph VFX until the truck appears — not the full default duration,
+			// which would leave it sparking on the car for the rest of the charge.
+			rr_mech_spawn_transform_vfx(p, rr_mech_anim_duration("009SG/Transform_Truck_out"));
 			rr_mech_add_screenshake(p, 0.06, 0.2);
+			// Engine ignition the instant the Ram is triggered.
+			rr_mech_play_sfx_at("sfx/imposter_car_start_47c7ab.wav", p.entity.world_position, 0.5);
 		}
 		active = true;
 	}
@@ -2489,6 +2619,8 @@ Mech_Ram_Charge_Status :: class : Component {
 			}
 			ensure_truck(this, p);
 			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position, 0.25);
+			// Engine revs up as the truck appears and barrels forward.
+			rr_mech_play_sfx_at("sfx/car_rev_up_03ff05.wav", p.entity.world_position, 0.55);
 			truck_swapped = true;
 		}
 
@@ -2505,25 +2637,50 @@ Mech_Ram_Charge_Status :: class : Component {
 		}
 
 		p.agent.velocity = dir * MECH_RAM_SPEED;
+		// Continuous ground-rumble while charging. Re-armed each frame with a short decay
+		// window so the amplitude stays roughly steady for the whole ram (max() in arm()
+		// means per-kill jolts below still punch through on top of it).
+		rr_mech_add_screenshake(p, 0.05, 0.12);
+		// Plow straight through: the FIRST victim contacted this ram gets flattened; everyone
+		// else hit afterwards is shoved out of the car's path instead of killed. Don't stop on
+		// first contact, and don't break — keep barreling for the full duration. Killed players
+		// drop out next frame via the ALIVE check, so they're never re-hit.
 		for target: component_iterator(Player) {
 			if target == null || target == p continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
-			if !in_range(target.entity.world_position - p.entity.world_position, 1.0) continue;
-			rr_mech_release_guardian_pickup_if_needed(target);
-			target.kill_with_killer(p.entity.id);
-			rr_mech_spawn_flash(target.entity.world_position, 1.0, v4.{1.0, 0.3, 0.08, 0.75}, 0.28);
-			rr_mech_add_screenshake(p, 0.12, 0.22);
-			rr_mech_play_sfx_at("sfx/other_death.wav", target.entity.world_position, 0.38);
-			ends_at = get_time();
-			break;
+			if !in_range(target.entity.world_position - p.entity.world_position, MECH_RAM_HIT_RADIUS) continue;
+			if !killed {
+				rr_mech_release_guardian_pickup_if_needed(target);
+				target.kill_with_killer(p.entity.id);
+				rr_mech_spawn_flash(target.entity.world_position, 1.0, v4.{1.0, 0.3, 0.08, 0.75}, 0.28);
+				rr_mech_add_screenshake(p, 0.12, 0.22);
+				rr_mech_play_sfx_at("sfx/other_death.wav", target.entity.world_position, 0.38);
+				killed = true;
+			} else {
+				// Shove sideways, off the line the car is travelling along. Pick the side the
+				// victim is already on (perpendicular to dir) so they're pushed clear, not across.
+				perp := v2.{-dir.y, dir.x};
+				rel := target.entity.world_position - p.entity.world_position;
+				if (rel.x * perp.x + rel.y * perp.y) < 0.0 { perp = perp * -1.0; }
+				shove := target.entity.get_component(Mech_Ram_Shove);
+				if shove == null { shove = target.entity.add_component(Mech_Ram_Shove); }
+				// Don't re-arm while a shove is still active — arm() adds a ref-counted
+				// movement-disable reason, so re-arming every frame would freeze the victim.
+				if !shove.active {
+					shove.arm(MECH_RAM_SHOVE_SECONDS, normalize(perp), MECH_RAM_SHOVE_SPEED);
+				}
+			}
 		}
 	}
 
 	ao_end :: method() {
-		// Cleanup if destroyed mid-charge (round end, etc.).
+		// Cleanup if destroyed mid-charge (round end, etc.). Only release the lock when still
+		// active — arm() adds it on the inactive->active edge and ao_update removes it on normal
+		// completion, so removing again here would underflow the ref count.
 		p := entity.get_component(Player);
-		if p != null { p.remove_disable_movement_input_reason(MECH_LOCK_REASON); }
+		if active && p != null { p.remove_disable_movement_input_reason(MECH_LOCK_REASON); }
+		active = false;
 		restore_mech(this, p);
 	}
 }
@@ -2817,7 +2974,10 @@ Mech_Ram_Charge_Ability :: class : Ability_Base {
 		return mech != null && mech.ram_charge_unlocked && (mech.is_mech_form || mech.is_apex);
 	}
 	on_update :: method(params: ref Ability_Update_Params) {
-		activation := Ability_Utilities.full_update_aimed_ability(player, ref params);
+		// Targeted variant: only aim + draw the aiming line while Ram is the selected
+		// ability. full_update_aimed_ability would draw the line whenever Ram is merely
+		// available (active_ability == null), so the line showed permanently.
+		activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
 		if activation.activate && params.can_use {
 			st := player.entity.get_component(Mech_Ram_Charge_Status);
 			if st == null { st = player.entity.add_component(Mech_Ram_Charge_Status); }
