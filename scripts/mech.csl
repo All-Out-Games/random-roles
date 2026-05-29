@@ -13,6 +13,10 @@ MECH_WRECKAGE_SFX :: "sfx/electrocuted_7fc3d5.wav";
 MECH_MAGNETISED_RIG :: "anims/roles/Mech Guardian/magnetisedVFX/009SG_magnetised.spine";
 MECH_TRUCK_RIG :: "anims/roles/Mech Guardian/Car/010WD_Truck.spine";
 MECH_TRANSFORM_VFX_DURATION :: 1.55;
+// How far into the 3.33s APEX_transform anim the mech→APEX skin swap fires. The rig plays
+// the transform on the OLD (mech) skin and we hold it until this morph climax, so the body
+// visibly morphs instead of popping into the APEX skin on frame one.
+MECH_APEX_SKIN_REVEAL_SECONDS :: 2.45;
 MECH_WRECKAGE_APPEAR_DURATION :: 0.45;
 MECH_WRECKAGE_EXPLODE_DURATION :: 0.6;
 MECH_MISSILE_EXPLODE_DURATION :: 0.45;
@@ -47,8 +51,9 @@ MECH_MAGNET_JAVELIN_SPREAD :: 1.8;   // APEX: horizontal spacing of the 3 javeli
 MECH_MAGNET_PLACE_RANGE :: 16.0;     // max distance from the Mech you can place the magnet
 MECH_MAGNET_GROUND_SNAP_TOL :: 2.0;  // only snap the landing onto navmesh if it's this close
 MECH_SHOWDOWN_SECONDS :: 8.0;
-MECH_SHOWDOWN_SEPARATION :: 1.7;   // each fighter is placed this far from the clash midpoint
+MECH_SHOWDOWN_SEPARATION :: 2.4;   // each fighter is placed this far from the clash midpoint
 MECH_SHOWDOWN_LOSER_COOLDOWN :: 30.0; // the loser's whole kit goes on cooldown
+MECH_SHOWDOWN_WINNER_LOCK :: 5.0;     // brief kit lock on the winner so leftover mashing can't fire an ability
 MECH_THROW_STEP :: 0.55;
 MECH_THROW_WALL_TOLERANCE :: 0.65;
 MECH_AIM_CAMERA_SIZE :: 15.0;
@@ -60,6 +65,7 @@ MECH_RETICLE_TEX :: "sprites/reticle.png";
 MECH_GROUND_RETICLE_TEX :: "sprites/ground_reticle.png";
 
 // End Game cinematic timing (the Mech floats up and rains missiles on the whole map).
+MECH_ENDGAME_UNLOCK_DELAY :: 5.0;     // arm delay after unlock so a post-Showdown misclick can't fire it
 MECH_ENDGAME_FOCUS_SECONDS :: 0.9;    // camera-focus beat before the Mech starts rising
 MECH_ENDGAME_FLOAT_SECONDS :: 1.5;    // rise-into-the-air beat before the barrage
 MECH_ENDGAME_FLOAT_HEIGHT :: 3.0;     // how high the avatar lifts off the ground
@@ -247,6 +253,11 @@ rr_mech_add_screenshake :: proc(player: Player, intensity: float, seconds: float
 
 rr_mech_reset_module :: proc(mech: Mech_Module) {
 	if mech == null return;
+	// Clear the transform invisibility reason — otherwise a player whose round ended while
+	// transformed keeps the real avatar hidden, since the normal revert path (which removes it)
+	// never runs at round end.
+	player := mech.entity.get_component(Player);
+	if player != null { rr_mech_enable_player_hidden(player, false); }
 	if mech.creature_entity != null && #alive(mech.creature_entity) {
 		mech.creature_entity.destroy();
 	}
@@ -255,6 +266,8 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.apex_used = false;
 	mech.apex_lost = false;
 	mech.apex_transform_locked = false;
+	mech.apex_skin_revealed = false;
+	mech.apex_reveal_at = 0.0;
 	mech.power_cores = 0;
 	mech.power_cells = 0;
 	mech.circuits = 0;
@@ -269,7 +282,6 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.conversion_used = false;
 	mech.carried_player_id = 0;
 	mech.carried_corpse_id = 0;
-	mech.warp_index = 0;
 	mech.workbench_ui_open = false;
 	mech.showdown_active = false;
 	mech.showdown_opponent_id = 0;
@@ -288,6 +300,11 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 
 rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 	if guard == null return;
+	// Clear the transform invisibility reason — otherwise a player whose round ended while
+	// transformed keeps the real avatar hidden, since the normal revert path (which removes it)
+	// never runs at round end.
+	player := guard.entity.get_component(Player);
+	if player != null { rr_mech_enable_player_hidden(player, false); }
 	if guard.creature_entity != null && #alive(guard.creature_entity) {
 		guard.creature_entity.destroy();
 	}
@@ -297,6 +314,8 @@ rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 	guard.showdown_opponent_id = 0;
 	guard.showdown_mashes = 0;
 	guard.showdown_ends_at = 0.0;
+	guard.showdown_death_at = 0.0;
+	guard.showdown_death_killer_id = 0;
 	guard.creature_entity = null;
 	guard.creature_animator = null;
 	guard.creature_visible = false;
@@ -518,7 +537,10 @@ rr_mech_apply_avatar_skins :: proc(player: Player) {
 			guard.creature_entity.set_local_scale(v2.{1.18, 1.18});
 		}
 	} else if mech != null {
-		if mech.is_apex {
+		// Only render the APEX skin once the transform has hit its reveal beat — until then
+		// the body keeps the regular mech skin so the morph reads as a transformation, not a
+		// pop. rr_mech_update flips apex_skin_revealed at apex_reveal_at.
+		if mech.is_apex && mech.apex_skin_revealed {
 			anim.instance.enable_skin("Full/Mecha_APEX");
 			if mech.creature_entity != null { mech.creature_entity.set_local_scale(v2.{1.55, 1.55}); }
 		} else {
@@ -643,6 +665,30 @@ rr_mech_update :: proc(player: Player, dt: float) {
 				player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 				mech.apex_transform_locked = false;
 			}
+			// APEX skin reveal: at the morph climax, swap the held mech skin for the APEX skin
+			// so the body transforms instead of popping. The skin swap runs on every client
+			// (each flips its own synced flag as time passes); the burst/flash is local polish.
+			if mech.is_apex && !mech.apex_skin_revealed && get_time() >= mech.apex_reveal_at {
+				mech.apex_skin_revealed = true;
+				rr_mech_apply_avatar_skins(player);
+				if player.is_local() {
+					rr_mech_spawn_part_transform_vfx(player, v2.{0, 0.7}, 1.1, 0.6);
+					rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.6}, 1.4, v4.{1.0, 0.45, 0.1, 0.75}, 0.4);
+					rr_mech_add_screenshake(player, 0.14, 0.3);
+					rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.4);
+				}
+			}
+			// Smoothly grow the avatar from its mech size to full APEX size across the whole
+			// transform anim, so the scale ramps with the morph instead of snapping when the
+			// skin swaps. Runs after the reveal block so it overrides the scale apply_skins set.
+			if mech.is_apex && get_time() < mech.transform_anim_ends_at && mech.creature_entity != null && #alive(mech.creature_entity) {
+				anim_dur := rr_mech_anim_duration("009SG/APEX_transform");
+				t := clamp((get_time() - (mech.transform_anim_ends_at - anim_dur)) / anim_dur, 0.0, 1.0);
+				ease := t * t * (3.0 - 2.0 * t);
+				start_scale := 1.06 + rr_mech_upgrades_owned(mech).(float) * 0.08; // matches mech-skin scale
+				s := lerp(start_scale, 1.55, ease); // 1.55 = APEX skin scale in rr_mech_apply_avatar_skins
+				mech.creature_entity.set_local_scale(v2.{s, s});
+			}
 			rr_mech_update_carried(player, mech.carried_player_id, mech.carried_corpse_id);
 			rr_mech_update_showdown_for_mech(player, mech);
 			rr_mech_update_endgame(player, mech, dt);
@@ -674,6 +720,7 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			if guard.creature_visible { rr_mech_show_avatar(player, false); }
 			guard.carried_player_id = 0;
 			guard.showdown_active = false;
+			guard.showdown_death_at = 0.0;
 			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 		} else {
 			target_visible := guard.is_guardian_form || get_time() < guard.transform_anim_ends_at;
@@ -1488,28 +1535,6 @@ rr_mech_release_guardian_pickup_if_needed :: proc(target: Player) {
 	}
 }
 
-rr_mech_get_next_wreckage :: proc(player: Player, idx: ref int) -> Mech_Wreckage, bool {
-	count := 0;
-	for w: component_iterator(Mech_Wreckage) {
-		if w == null || !#alive(w.entity) continue;
-		if w.exploding continue;
-		count += 1;
-	}
-	if count == 0 return null, false;
-	if idx >= count { idx = 0; }
-	i := 0;
-	for w: component_iterator(Mech_Wreckage) {
-		if w == null || !#alive(w.entity) continue;
-		if w.exploding continue;
-		if i == idx {
-			idx += 1;
-			return w, true;
-		}
-		i += 1;
-	}
-	return null, false;
-}
-
 rr_mech_draw_abilities :: proc(player: Player, idx: int) -> int {
 	abilityIndex := idx;
 	mech := player.entity.get_component(Mech_Module);
@@ -1531,7 +1556,9 @@ rr_mech_draw_abilities :: proc(player: Player, idx: int) -> int {
 	// bottom-middle widget instead (rr_mech_draw_titan_buttons), so the regular kit fits
 	// comfortably here. Hard-cap kept as a safety net; target tools stay contextual.
 	if abilityIndex < 6 { draw_ability_button(player, Kill_Ability, abilityIndex); abilityIndex += 1; }
-	if abilityIndex < 6 { draw_ability_button(player, Mech_Transform_Ability, abilityIndex); abilityIndex += 1; }
+	// Transform-back is hidden in APEX — it can't revert form (the toggle forces is_mech_form
+	// back on), so the button would be a no-op.
+	if !mech.is_apex && abilityIndex < 6 { draw_ability_button(player, Mech_Transform_Ability, abilityIndex); abilityIndex += 1; }
 	if mech.ram_charge_unlocked && abilityIndex < 6 { draw_ability_button(player, Mech_Ram_Charge_Ability, abilityIndex); abilityIndex += 1; }
 	if mech.magnet_cannon_unlocked && abilityIndex < 6 { draw_ability_button(player, Mech_Magnet_Cannon_Ability, abilityIndex); abilityIndex += 1; }
 	if mech.missile_barrage_unlocked && abilityIndex < 6 { draw_ability_button(player, Mech_Missile_Barrage_Ability, abilityIndex); abilityIndex += 1; }
@@ -1552,13 +1579,8 @@ rr_minion_draw_abilities :: proc(player: Player, idx: int) -> int {
 	abilityIndex := idx;
 	// Smash is a world interactable (Mech_Smash_Interactable) — minions use the same prompt.
 	draw_ability_button(player, Drag_Body_Ability, abilityIndex); abilityIndex += 1;
-	owner := rr_mech_get_owner(player);
-	if owner != null {
-		mech := owner.entity.get_component(Mech_Module);
-		if mech != null && mech.wreckage_warp_unlocked {
-			draw_ability_button(player, Mech_Wreckage_Warp_Ability, abilityIndex); abilityIndex += 1;
-		}
-	}
+	// Wreckage Warp lives on the minimap node buttons (rr_mech_draw_wreckage_warp_minimap_buttons),
+	// shared with the Mech — minions click a wreckage on the map to warp once it's unlocked.
 	return abilityIndex;
 }
 
@@ -1677,7 +1699,7 @@ Mech_Convert_Interactable :: class : Interactable {
 		this.set_text("Convert");
 		this.set_hold_text("Converting...");
 		required_hold_time = 0.5;
-		radius = MECH_MELEE_RANGE;
+		radius = MECH_MELEE_RANGE / 2;
 		prompt_offset = v2.{0, 1.2};
 		priority = 95;
 	}
@@ -1763,6 +1785,11 @@ Mech_Screenshake_Status :: class : Component {
 			intensity = 0.0;
 			return;
 		}
+		// During the End Game cinematic the endgame camera owns the position (and layers in
+		// this same shake on top of the cinematic framing). A raw override here would snap the
+		// view down to the grounded body every missile wave, fighting the cinematic.
+		mech := entity.get_component(Mech_Module);
+		if mech != null && mech.endgame_active return;
 		duration := ends_at - start_time;
 		if duration <= 0.0 return;
 		remaining := (ends_at - get_time()) / duration;
@@ -1968,6 +1995,14 @@ rr_mech_do_wreckage_warp :: proc(player: Player, wreckage: Mech_Wreckage) {
 	if player == null || wreckage == null || !#alive(wreckage.entity) return;
 	from := player.entity.world_position;
 	dest := wreckage.entity.world_position + v2.{0, 0.7};
+
+	// Clamp the destination onto the navmesh so the +0.7 offset (or a wreckage left
+	// near a wall) can't drop the player outside walkable bounds and strand them.
+	nav_dest: v2 = dest;
+	nav_hint: s64;
+	if try_find_closest_point_on_navmesh(dest, ref nav_dest, ref nav_hint) {
+		dest = nav_dest;
+	}
 
 	// Vanish from where we are.
 	rr_mech_spawn_warp_vfx(from);
@@ -2369,8 +2404,8 @@ Mech_Ram_Charge_Status :: class : Component {
 			}
 			// Play the transform-in anim on the mech rig first; the rig is hidden and the
 			// truck revealed only once that anim finishes (see ao_update).
-			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_In", false);
-			truck_swap_at = get_time() + rr_mech_anim_duration("009SG/Transform_Truck_In");
+			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_out", false);
+			truck_swap_at = get_time() + rr_mech_anim_duration("009SG/Transform_Truck_out");
 			rr_mech_spawn_transform_vfx(p);
 			rr_mech_add_screenshake(p, 0.06, 0.2);
 		}
@@ -2435,7 +2470,7 @@ Mech_Ram_Charge_Status :: class : Component {
 		if get_time() >= ends_at || p.player_state != Player_State.ALIVE {
 			p.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 			restore_mech(this, p);
-			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_out", false);
+			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_In", false);
 			rr_mech_spawn_transform_vfx(p);
 			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position, 0.3);
 			hit = true;
@@ -2907,7 +2942,6 @@ rr_mech_fire_missile_barrage :: proc(player: Player, point: v2, count: int) {
 
 Mech_Magnet_Cannon_Ability :: class : Ability_Base {
 	was_targeting: bool;
-	camera_original_size: float;
 	on_init :: proc(a: Mech_Magnet_Cannon_Ability) {
 		a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Magnet_Cannon_Icon.png");
 		a.is_aimed_ability = true;
@@ -2918,8 +2952,13 @@ Mech_Magnet_Cannon_Ability :: class : Ability_Base {
 	}
 	stop_targeting :: proc(using this: Mech_Magnet_Cannon_Ability) {
 		// Restore on client AND server (camera is synced). Gating zoom behind is_local desyncs
-		// get_mouse_world_position on the server → short placement.
-		if was_targeting && player.is_local_or_server() { player.camera.size = camera_original_size; }
+		// get_mouse_world_position on the server → short placement. Restore to the saved engine
+		// default, NOT a size captured on entry: the camera syncs server→client and the zoom is
+		// re-applied every frame, so a captured value can snapshot the already-zoomed size and
+		// leave the camera stuck zoomed out.
+		if was_targeting && player.is_local_or_server() && player.camera_default_size_saved {
+			player.camera.size = player.camera_default_size;
+		}
 		was_targeting = false;
 	}
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -2930,7 +2969,6 @@ Mech_Magnet_Cannon_Ability :: class : Ability_Base {
 
 		// Enter targeting: zoom the camera out and strike the aim pose.
 		if !was_targeting {
-			camera_original_size = player.camera.size;
 			rr_mech_play_avatar_anim(player, "009SG/Magnet_Cannon_Aim", true);
 		}
 		was_targeting = true;
@@ -2970,7 +3008,6 @@ Mech_Magnet_Cannon_Ability :: class : Ability_Base {
 
 Mech_Missile_Barrage_Ability :: class : Ability_Base {
 	was_targeting: bool;
-	camera_original_size: float;
 	on_init :: proc(a: Mech_Missile_Barrage_Ability) {
 		a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Missile_Barrage_Icon.png");
 		a.is_aimed_ability = true;
@@ -2980,7 +3017,11 @@ Mech_Missile_Barrage_Ability :: class : Ability_Base {
 		return mech != null && mech.missile_barrage_unlocked && (mech.is_mech_form || mech.is_apex);
 	}
 	stop_targeting :: proc(using this: Mech_Missile_Barrage_Ability) {
-		if was_targeting && player.is_local_or_server() { player.camera.size = camera_original_size; }
+		// Restore to the saved engine default, not a size captured on entry — see Magnet Cannon:
+		// a captured value can snapshot the synced already-zoomed size and stick the camera out.
+		if was_targeting && player.is_local_or_server() && player.camera_default_size_saved {
+			player.camera.size = player.camera_default_size;
+		}
 		was_targeting = false;
 	}
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -2989,7 +3030,6 @@ Mech_Missile_Barrage_Ability :: class : Ability_Base {
 		if targeting && !params.can_use { player.active_ability = null; stop_targeting(this); return; }
 		if !targeting { stop_targeting(this); return; }
 
-		if !was_targeting { camera_original_size = player.camera.size; }
 		was_targeting = true;
 		// Zoom on client AND server (camera synced) so get_mouse_world_position agrees on the
 		// authoritative server — otherwise the salvo's strike point lands short there.
@@ -3032,41 +3072,6 @@ Mech_Missile_Barrage_Ability :: class : Ability_Base {
 	on_draw_button :: proc(instance: Mech_Missile_Barrage_Ability, rect: Rect) { draw_ability_name_label(rect, "Missile"); }
 }
 
-Mech_Wreckage_Warp_Ability :: class : Ability_Base {
-	on_init :: proc(a: Mech_Wreckage_Warp_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Wreckage_Warp_Icon.png"); }
-	can_use :: method() -> bool {
-		owner := rr_mech_get_owner(player);
-		if owner == null return false;
-		mech := owner.entity.get_component(Mech_Module);
-		if mech == null || !mech.wreckage_warp_unlocked return false;
-		if player.player_role == Player_Role.THE_MECH && !mech.is_mech_form && !mech.is_apex return false;
-		return true;
-	}
-	on_update :: method(params: ref Ability_Update_Params) {
-		if params.clicked && params.can_use {
-			mech := player.entity.get_component(Mech_Module);
-			minion := rr_mech_get_minion_effect(player);
-			idx := 0;
-			if mech != null { idx = mech.warp_index; }
-			if minion != null { idx = minion.warp_index; }
-			wreckage, ok := rr_mech_get_next_wreckage(player, ref idx);
-			if ok && wreckage != null {
-				cooldown_left := (wreckage.last_warp_at + 10.0) - get_time();
-				if cooldown_left > 0.0 {
-					if mech != null { mech.warp_index = idx; }
-					if minion != null { minion.warp_index = idx; }
-					return;
-				}
-				rr_mech_do_wreckage_warp(player, wreckage);
-				current_cooldown = 10.0;
-			}
-			if mech != null { mech.warp_index = idx; }
-			if minion != null { minion.warp_index = idx; }
-		}
-	}
-	on_draw_button :: proc(instance: Mech_Wreckage_Warp_Ability, rect: Rect) { draw_ability_name_label(rect, "Warp"); }
-}
-
 // APEX awakening action. Safe to run on client + server (guarded by can_awaken; the state
 // it sets are synced Mech_Module fields). Triggered by the custom bottom-middle button.
 rr_mech_awaken_apex :: proc(player: Player) {
@@ -3078,8 +3083,11 @@ rr_mech_awaken_apex :: proc(player: Player) {
 	mech.is_apex = true;
 	mech.is_mech_form = true;
 	mech.apex_used = true;
-	rr_mech_show_avatar(player, true);
-	rr_mech_apply_avatar_skins(player);
+	// Hold the pre-APEX mech skin and morph into APEX partway through the transform anim
+	// (rr_mech_update flips this at apex_reveal_at) so the body visibly transforms.
+	mech.apex_skin_revealed = false;
+	mech.apex_reveal_at = get_time() + MECH_APEX_SKIN_REVEAL_SECONDS;
+	rr_mech_show_avatar(player, true); // renders the mech skin (not APEX yet) for the morph
 	rr_mech_play_avatar_anim(player, "009SG/APEX_transform", false);
 	// Lock movement (and hold the anim) for the duration of the transform; rr_mech_update
 	// releases it when transform_anim_ends_at passes.
@@ -3106,11 +3114,19 @@ rr_mech_apex_blocks_kill :: proc(victim: Player, killer: Player) -> bool {
 // End Game cinematic — begins the "float up + barrage the whole map" cutscene. The
 // actual kills + round end happen at the end of the cinematic in rr_mech_finish_end_game.
 // Self-guarded (endgame_active) so a held button or client+server double-entry is harmless.
+// End Game is unlocked the instant the Mech wins a Showdown, but stays disarmed for a
+// few seconds so a player still mashing the Showdown button can't immediately fumble the
+// round-ending barrage. Gates both the titan button display and the trigger itself.
+rr_mech_end_game_armed :: proc(mech: Mech_Module) -> bool {
+	if mech == null || !mech.endgame_unlocked return false;
+	return get_time() >= mech.endgame_unlocked_at + MECH_ENDGAME_UNLOCK_DELAY;
+}
+
 rr_mech_trigger_end_game :: proc(player: Player) {
 	if player == null return;
 	if game_state != Game_State.INGAME return;
 	mech := player.entity.get_component(Mech_Module);
-	if mech == null || !mech.endgame_unlocked || !mech.is_apex return;
+	if mech == null || !rr_mech_end_game_armed(mech) || !mech.is_apex return;
 	if mech.endgame_active return;
 
 	mech.endgame_active = true;
@@ -3287,12 +3303,28 @@ rr_mech_update_endgame_camera :: proc(player: Player, dt: float) {
 			target_size = lerp(MECH_ENDGAME_RAISE_CAMERA_SIZE, MECH_ENDGAME_BARRAGE_CAMERA_SIZE, t);
 		}
 
+		// Missile-wave shake, layered ON TOP of the cinematic framing instead of letting
+		// Mech_Screenshake_Status snap the camera to the grounded body (which read as the
+		// camera "resetting" mid-barrage). Sampled from the Mech's shake status so every
+		// client's cinematic shakes in sync.
+		shake_off := v2.{0, 0};
+		ss := mp.entity.get_component(Mech_Screenshake_Status);
+		if ss != null && get_time() < ss.ends_at {
+			sdur := ss.ends_at - ss.start_time;
+			if sdur > 0.0 {
+				samp := ss.intensity * ((ss.ends_at - get_time()) / sdur);
+				shake_off = v2.{sin(get_time() * 80.0) * samp, cos(get_time() * 101.0) * samp * 0.7};
+			}
+		}
+
 		// Smoothly ease the camera toward the target so any residual jitter is damped and the
-		// zoom/move reads as a deliberate cinematic push rather than a rigid snap.
+		// zoom/move reads as a deliberate cinematic push rather than a rigid snap. The shake is
+		// added on top of the eased focus so it wobbles around the framing rather than dragging
+		// it to the body (the offset is tiny, so feeding back through next frame's ease is moot).
 		k := clamp(dt * 9.0, 0.0, 1.0);
 		player.camera.follow_player = false;
 		player.camera.size = lerp(player.camera.size, target_size, k);
-		player.camera.position = lerp(player.camera.position, focus, k);
+		player.camera.position = lerp(player.camera.position, focus, k) + shake_off;
 		player.mech_endgame_cam_overriding = true;
 		// Vision is blown out separately in update_local_vision_light so the whole map is lit.
 		return;
@@ -3317,7 +3349,7 @@ Mech_End_Game_Ability :: class : Ability_Base {
 	on_init :: proc(a: Mech_End_Game_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Missile_Barrage_Icon.png"); }
 	can_use :: method() -> bool {
 		mech := player.entity.get_component(Mech_Module);
-		return mech != null && mech.endgame_unlocked && mech.is_apex;
+		return rr_mech_end_game_armed(mech) && mech.is_apex;
 	}
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use { rr_mech_trigger_end_game(player); }
@@ -3442,6 +3474,10 @@ Guardian_Showdown_Ability :: class : Ability_Base {
 			player.entity.set_local_position(v2.{gx, ground_y});
 			apex.entity.set_local_position(v2.{ax, ground_y});
 			clash_pos := v2.{mid_x, ground_y};
+			// Turn the two titans to face each other across the clash (reapplied each
+			// frame in rr_mech_update_showdown_for_guardian so server sync can't reset it).
+			player.set_facing_right(guard_left);
+			apex.set_facing_right(!guard_left);
 
 			rr_mech_play_avatar_anim(player, "009SG/Showdown_Start", false);
 			rr_mech_play_avatar_anim(apex, "009SG/Showdown_Start", false);
@@ -3471,7 +3507,17 @@ rr_mech_put_all_abilities_on_cooldown :: proc(p: Player, seconds: float) {
 }
 
 rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Module) {
-	if guard == null || !guard.showdown_active return;
+	if guard == null return;
+	// A lost Showdown is fatal: kill fires at the end of the lose-death anim (set in the
+	// resolution branch below). Checked before the showdown_active gate since the showdown
+	// is already resolved by the time this lands.
+	if guard.showdown_death_at > 0.0 && get_time() >= guard.showdown_death_at {
+		guard.showdown_death_at = 0.0;
+		player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+		player.kill_with_killer(guard.showdown_death_killer_id);
+		return;
+	}
+	if !guard.showdown_active return;
 	// Lock is applied once at showdown start and released once on resolution; the reason
 	// is ref-counted, so re-adding it every frame would leak and freeze the fighter.
 	// (Cinematic HUD — letterbox, top winner bar, mash button — is rr_mech_draw_showdown_hud.)
@@ -3488,6 +3534,10 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 			rr_mech_play_avatar_anim(mech_opp, "009SG/Showdown_Loop", true);
 			mech_state.anim_lock_until = mech_state.showdown_ends_at;
 		}
+		// Keep both fighters squared up facing each other for the duration of the clash.
+		guard_is_left := player.entity.world_position.x <= mech_opp.entity.world_position.x;
+		player.set_facing_right(guard_is_left);
+		mech_opp.set_facing_right(!guard_is_left);
 	}
 	if get_time() < guard.showdown_ends_at return;
 	mech_player := get_player_by_entity_id(guard.showdown_opponent_id);
@@ -3513,6 +3563,8 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 			}
 		}
 		rr_mech_play_avatar_anim(player, "009SG/Showdown_Win", false);
+		// Briefly lock the winner's kit so residual mash taps can't fire an ability.
+		rr_mech_put_all_abilities_on_cooldown(player, MECH_SHOWDOWN_WINNER_LOCK);
 		// Heroic Guardian victory burst — cyan + gold + white.
 		rr_mech_play_sfx_at("sfx/end_game_victory.wav", player.entity.world_position, 0.4);
 		rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", clash_pos, 0.45);
@@ -3526,11 +3578,20 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 		mech := mech_player.entity.get_component(Mech_Module);
 		if mech != null {
 			mech.endgame_unlocked = true;
+			mech.endgame_unlocked_at = get_time();
 			mech.showdown_active = false;
 			mech_player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+			// Briefly lock the winner's kit so residual mash taps can't fire an ability.
+			rr_mech_put_all_abilities_on_cooldown(mech_player, MECH_SHOWDOWN_WINNER_LOCK);
 			mech_player.Notify("End Game Ability unlocked.");
 		}
+		death_anim_dur := rr_mech_anim_duration("009SG/Showdown_Lose_Death");
 		rr_mech_play_avatar_anim(player, "009SG/Showdown_Lose_Death", false);
+		// Losing the Showdown is fatal — the Guardian is killed at the end of the death anim.
+		// Keep the lock held (don't release it below) so it can't move during the death throes.
+		guard.showdown_death_at = get_time() + death_anim_dur;
+		guard.showdown_death_killer_id = mech_player != null ? mech_player.entity.id : 0;
+		guard.anim_lock_until = guard.showdown_death_at;
 		// Brutal APEX defeat burst — red-magenta + purple.
 		rr_mech_play_sfx_at("sfx/ggg_explode.wav", clash_pos, 0.45);
 		rr_mech_play_sfx_at("sfx/other_death.wav", player.entity.world_position, 0.4);
@@ -3539,8 +3600,9 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 		rr_mech_spawn_flash(clash_pos, 0.7, v4.{1.0, 0.95, 1.0, 0.95}, 0.3);
 		rr_mech_add_screenshake(player, 0.22, 0.55);
 		rr_mech_add_screenshake(mech_player, 0.22, 0.55);
-		rr_mech_put_all_abilities_on_cooldown(player, MECH_SHOWDOWN_LOSER_COOLDOWN);
 		player.Notify("APEX overpowered you...");
+		guard.showdown_active = false;
+		return;
 	}
 	guard.showdown_active = false;
 	player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
@@ -3703,26 +3765,28 @@ rr_mech_draw_showdown_hud :: proc(player: Player) {
 	time_left := guard.showdown_ends_at - get_time();
 	if time_left < 0.0 { time_left = 0.0; }
 
-	// Cinematic framing — letterbox + top winner bar — for whoever is watching locally.
+	// Only the two fighters get the HUD (letterbox framing, tug-of-war slider + text, mash
+	// button). Everyone else still sees the world-space clash anims, just no UI overlay.
+	am_guard := player == guard_p;
+	am_apex := apex_p != null && player == apex_p;
+	if !am_guard && !am_apex return;
+
+	// Cinematic framing — letterbox + top winner bar — for the fighter watching locally.
 	if player.is_local() {
 		player.draw_letterbox_bars();
 		rr_mech_draw_showdown_top_bar(player, guard.showdown_mashes, apex_mashes, time_left);
 	}
 
-	// MASH button only for the two fighters; click increments THIS fighter's mash count.
-	am_guard := player == guard_p;
-	am_apex := apex_p != null && player == apex_p;
-	if am_guard || am_apex {
-		tint := am_guard ? v4.{0.45, 0.85, 1.0, 1.0} : v4.{1.0, 0.22, 0.42, 1.0};
-		if rr_mech_draw_showdown_mash_button(player, tint) {
-			if am_guard { guard.showdown_mashes += 1; }
-			else if apex_mech != null { apex_mech.showdown_mashes += 1; }
-			if player.is_local() {
-				rr_mech_play_sfx_at("sfx/task_click_tile.wav", player.entity.world_position, 0.22);
-				flash_col := am_guard ? v4.{0.5, 0.9, 1.0, 0.7} : v4.{1.0, 0.3, 0.5, 0.7};
-				rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.8}, 0.4, flash_col, 0.12);
-				rr_mech_add_screenshake(player, 0.05, 0.09);
-			}
+	// MASH button; click increments THIS fighter's mash count.
+	tint := am_guard ? v4.{0.45, 0.85, 1.0, 1.0} : v4.{1.0, 0.22, 0.42, 1.0};
+	if rr_mech_draw_showdown_mash_button(player, tint) {
+		if am_guard { guard.showdown_mashes += 1; }
+		else if apex_mech != null { apex_mech.showdown_mashes += 1; }
+		if player.is_local() {
+			rr_mech_play_sfx_at("sfx/task_click_tile.wav", player.entity.world_position, 0.22);
+			flash_col := am_guard ? v4.{0.5, 0.9, 1.0, 0.7} : v4.{1.0, 0.3, 0.5, 0.7};
+			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.8}, 0.4, flash_col, 0.12);
+			rr_mech_add_screenshake(player, 0.05, 0.09);
 		}
 	}
 }
@@ -3736,6 +3800,7 @@ rr_mech_update_showdown_for_mech :: proc(player: Player, mech: Mech_Module) {
 		guardian := get_player_by_entity_id(mech.showdown_opponent_id);
 		if guardian == null {
 			mech.endgame_unlocked = true;
+			mech.endgame_unlocked_at = get_time();
 			mech.showdown_active = false;
 			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 		}
@@ -3941,15 +4006,22 @@ rr_mech_draw_workbench_ui :: proc(player: Player) {
 	if UIK.clicked(w_handle)  { rr_mech_buy_upgrade(player, MECH_UPGRADE_WRECKAGE_WARP); }
 }
 
-// Side checklist HUD for The Mech — drawn from draw_mech_role_hud in player.csl.
+// Side checklist HUD for The Mech AND its Minions — drawn from draw_mech_role_hud in
+// player.csl. Minions read the exact same checklist as their master: it's driven entirely
+// by the owner's Mech_Module and the shared (mech + minions) component pool, so they can
+// see which task panels to smash and how close the Mech is to APEX.
 rr_mech_draw_checklist_panel :: proc(player: Player) {
 	if player == null return;
 	if !player.is_local_or_server() return;
-	if player.player_role != Player_Role.THE_MECH return;
+	is_mech := player.player_role == Player_Role.THE_MECH;
+	is_minion := rr_mech_is_minion_active(player);
+	if !is_mech && !is_minion return;
 
-	mech := player.entity.get_component(Mech_Module);
+	owner := rr_mech_get_owner(player);
+	if owner == null return;
+	mech := owner.entity.get_component(Mech_Module);
 	if mech == null return;
-	if mech.workbench_ui_open return;
+	if is_mech && mech.workbench_ui_open return;
 
 	UI.push_layer(1600);
 	defer UI.pop_layer();
@@ -3971,7 +4043,7 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 
 	upgrades_owned := rr_mech_upgrades_owned(mech);
 	cores := min(mech.power_cores, MECH_LOOT_CORES_GOAL);
-	apex_ready := rr_mech_can_awaken_apex(player);
+	apex_ready := rr_mech_can_awaken_apex(owner);
 
 	list_h := FORM_H + GAP + LABEL_H + 4.0 * TASK_H + GAP + CORE_H + GAP + APEX_H + LIST_PAD * 2.0;
 
@@ -4001,7 +4073,10 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 		fill: v4;
 		form_color: v4;
 		form_label: string;
-		if mech.is_apex {
+		if is_minion {
+			// The minion's own banner — the rest of the panel is the master's progress.
+			fill = v4.{0.35, 0.1, 0.12, 0.55}; form_color = v4.{1.0, 0.5, 0.45, 1.0}; form_label = "MINION";
+		} else if mech.is_apex {
 			fill = v4.{0.42, 0.2, 0.05, 0.55};  form_color = v4.{1.0, 0.72, 0.32, 1.0}; form_label = "APEX TITAN";
 		} else if mech.is_mech_form {
 			fill = v4.{0.4, 0.12, 0.08, 0.55};  form_color = v4.{1.0, 0.58, 0.42, 1.0}; form_label = "MECH FORM";
@@ -4031,10 +4106,12 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 		ts.color = v4.{0.45, 0.85, 1.0, 1.0};
 		UI.text(row, ts, "SMASH TASKS FOR PARTS");
 	}
-	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_POWER_CELL, mech.power_cells, base_ts);
-	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_CIRCUIT,    mech.circuits,    base_ts);
-	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_SCHEMATIC,  mech.schematics,  base_ts);
-	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_GEAR,       mech.gears,       base_ts);
+	// Show the SHARED pool (mech + every minion), so parts a minion smashed and collected
+	// visibly land on the Mech's checklist instead of looking like they vanished.
+	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_POWER_CELL, rr_mech_count_component_pool(owner, MECH_COMPONENT_POWER_CELL), base_ts);
+	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_CIRCUIT,    rr_mech_count_component_pool(owner, MECH_COMPONENT_CIRCUIT),    base_ts);
+	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_SCHEMATIC,  rr_mech_count_component_pool(owner, MECH_COMPONENT_SCHEMATIC),  base_ts);
+	rr_mech_draw_smash_row(content.cut_top(TASK_H), MECH_COMPONENT_GEAR,       rr_mech_count_component_pool(owner, MECH_COMPONENT_GEAR),       base_ts);
 
 	content.cut_top(GAP);
 
@@ -4095,10 +4172,13 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 }
 
 // Big pulsing "ultimate" button drawn bottom-middle. Returns true on click.
-rr_mech_draw_titan_button :: proc(player: Player, rect: Rect, id: string, icon: Texture_Asset, label: string, glow_color: v4) -> bool {
+// locked_seconds > 0 draws it disarmed: greyed out, no glow, with a big arming countdown
+// over the icon, and the click is swallowed so it can't fire while still locked.
+rr_mech_draw_titan_button :: proc(player: Player, rect: Rect, id: string, icon: Texture_Asset, label: string, glow_color: v4, locked_seconds: float) -> bool {
+	locked := locked_seconds > 0.0;
 	pulse := 0.55 + sin(get_time() * 5.0) * 0.45;
 	glow := get_asset(Texture_Asset, "sprites/Shapes/shape_circle_gradient.png");
-	if glow != null {
+	if glow != null && !locked {
 		UI.quad(rect.grow(20.0 + pulse * 16.0), glow, v4.{glow_color.x, glow_color.y, glow_color.z, 0.45 * pulse});
 	}
 
@@ -4110,8 +4190,26 @@ rr_mech_draw_titan_button :: proc(player: Player, rect: Rect, id: string, icon: 
 	bs.press_scaling = 1.0;
 	rr_ui_apply_button_click_sound(ref bs);
 	interact := UI.button(rect, bs, .{}, "");
+	icon_tint := locked ? v4.{0.55, 0.55, 0.55, 0.6} : v4.{1, 1, 1, 1};
 	if icon != null {
-		UI.quad(rect.inset(22, 22, 22, 22).fit_aspect(icon.get_aspect()), icon, v4.{1, 1, 1, 1});
+		UI.quad(rect.inset(22, 22, 22, 22).fit_aspect(icon.get_aspect()), icon, icon_tint);
+	}
+
+	if locked {
+		// Dim scrim + ceil'd countdown so the player sees the button arming, not missing.
+		UI.quad(rect, core_globals.white_sprite, v4.{0.0, 0.0, 0.0, 0.5});
+		secs_i := locked_seconds.(int);
+		if locked_seconds - secs_i.(float) > 0.001 { secs_i += 1; }
+		if secs_i < 1 { secs_i = 1; }
+		cs := UI.default_text_settings();
+		cs.size = 44;
+		cs.halign = .CENTER;
+		cs.valign = .CENTER;
+		cs.do_outline = true;
+		cs.outline_thickness = 5;
+		cs.outline_color = v4.{0, 0, 0, 1};
+		cs.color = v4.{1.0, 0.92, 0.7, 1.0};
+		UI.text(rect, cs, format_string("%", .{secs_i}));
 	}
 
 	ts := UI.default_text_settings();
@@ -4121,10 +4219,10 @@ rr_mech_draw_titan_button :: proc(player: Player, rect: Rect, id: string, icon: 
 	ts.do_outline = true;
 	ts.outline_thickness = 4;
 	ts.outline_color = v4.{0, 0, 0, 1};
-	ts.color = v4.{1.0, 0.92, 0.7, 1.0};
+	ts.color = locked ? v4.{0.7, 0.66, 0.55, 1.0} : v4.{1.0, 0.92, 0.7, 1.0};
 	label_rect := rect.top_center_rect().grow(34.0, 150.0, 0.0, 150.0).offset(0.0, 14.0);
 	UI.text(label_rect, ts, label);
-	return interact.clicked;
+	return interact.clicked && !locked;
 }
 
 // Custom bottom-middle widget for the once-per-game "ultimate" buttons (APEX Awakening,
@@ -4142,7 +4240,10 @@ rr_mech_draw_titan_buttons :: proc(player: Player) {
 	if mech == null return;
 
 	show_apex := rr_mech_can_awaken_apex(player) && mech.is_mech_form;
+	// Show End Game as soon as it's unlocked, but keep it visibly locked (countdown over
+	// the icon) for the arm delay so the player can see when it becomes usable.
 	show_end := mech.endgame_unlocked && mech.is_apex;
+	end_locked := mech.endgame_unlocked ? max(0.0, mech.endgame_unlocked_at + MECH_ENDGAME_UNLOCK_DELAY - get_time()) : 0.0;
 	if !show_apex && !show_end return;
 
 	UI.push_screen_draw_context();
@@ -4161,18 +4262,18 @@ rr_mech_draw_titan_buttons :: proc(player: Player) {
 	end_icon := get_asset(Texture_Asset, "sprites/icons/mech/Missile_Barrage_Icon.png");
 
 	if show_apex && show_end {
-		if rr_mech_draw_titan_button(player, safe.bottom_center_rect().grow(HALF).offset(-GAP, UP), "mech_titan_apex", apex_icon, "AWAKEN APEX", v4.{1.0, 0.45, 0.12, 1.0}) {
+		if rr_mech_draw_titan_button(player, safe.bottom_center_rect().grow(HALF).offset(-GAP, UP), "mech_titan_apex", apex_icon, "AWAKEN APEX", v4.{1.0, 0.45, 0.12, 1.0}, 0.0) {
 			rr_mech_awaken_apex(player);
 		}
-		if rr_mech_draw_titan_button(player, safe.bottom_center_rect().grow(HALF).offset(GAP, UP), "mech_titan_end", end_icon, "END GAME", v4.{1.0, 0.16, 0.1, 1.0}) {
+		if rr_mech_draw_titan_button(player, safe.bottom_center_rect().grow(HALF).offset(GAP, UP), "mech_titan_end", end_icon, "END GAME", v4.{1.0, 0.16, 0.1, 1.0}, end_locked) {
 			rr_mech_trigger_end_game(player);
 		}
 	} else if show_apex {
-		if rr_mech_draw_titan_button(player, safe.bottom_center_rect().grow(HALF).offset(0.0, UP), "mech_titan_apex", apex_icon, "AWAKEN APEX", v4.{1.0, 0.45, 0.12, 1.0}) {
+		if rr_mech_draw_titan_button(player, safe.bottom_center_rect().grow(HALF).offset(0.0, UP), "mech_titan_apex", apex_icon, "AWAKEN APEX", v4.{1.0, 0.45, 0.12, 1.0}, 0.0) {
 			rr_mech_awaken_apex(player);
 		}
 	} else {
-		if rr_mech_draw_titan_button(player, safe.bottom_center_rect().grow(HALF).offset(0.0, UP), "mech_titan_end", end_icon, "END GAME", v4.{1.0, 0.16, 0.1, 1.0}) {
+		if rr_mech_draw_titan_button(player, safe.bottom_center_rect().grow(HALF).offset(0.0, UP), "mech_titan_end", end_icon, "END GAME", v4.{1.0, 0.16, 0.1, 1.0}, end_locked) {
 			rr_mech_trigger_end_game(player);
 		}
 	}

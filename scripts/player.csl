@@ -201,6 +201,16 @@ Player :: class : Player_Base {
 	intro_second_anim_name: string;
 	intro_second_anim_at: float;
 	intro_second_anim_started: bool;
+	// Optional third intro beat; loops if intro_third_anim_loop so the role can hold a
+	// living pose for the rest of the popup instead of freezing on a static last frame.
+	intro_third_anim_name: string;
+	intro_third_anim_at: float;
+	intro_third_anim_started: bool;
+	intro_third_anim_loop: bool;
+	// Mid-anim skin reveal (e.g. Mech morphing into APEX partway through the transform anim).
+	intro_skin_swap_name: string;
+	intro_skin_swap_at: float;
+	intro_skin_swapped: bool;
 
 	// True when the local player has any task attempt currently open/in progress.
 	// Used to suppress ability input while interacting with task UI.
@@ -223,6 +233,17 @@ Player :: class : Player_Base {
 		if bc_cocooned return false;
 		// Held by a Mech or Guardian — fully locked out until thrown/dropped.
 		if rr_mech_is_carried(this) return false;
+		// While an aimed ability is mid-targeting it owns the next click — block every OTHER
+		// ability so clicking a different button can't fire it straight through the aim overlay.
+		// Self-heal a dangling target if we can no longer act (e.g. died mid-aim) so the bar,
+		// which has no global active_ability reset, can never get stuck locked out.
+		if active_ability != null {
+			if player_state != Player_State.ALIVE {
+				active_ability = null;
+			} else if active_ability != ability {
+				return false;
+			}
+		}
 		// Trapped or being dragged by GGG — no abilities.
 		ggg_root := entity.get_component(GGG_Trap_Root_Effect);
 		if ggg_root != null && ggg_root.active return false;
@@ -498,6 +519,24 @@ Player :: class : Player_Base {
                         if elapsed >= intro_second_anim_at {
                             intro_role_spine.set_animation(intro_second_anim_name, false, 0);
                             intro_second_anim_started = true;
+                        }
+                    }
+                    // Optional third beat (e.g. settle into a looping idle/combat pose).
+                    if intro_third_anim_at > 0.0 && !intro_third_anim_started {
+                        elapsed := get_time() - intro_popup.show_start_time;
+                        if elapsed >= intro_third_anim_at {
+                            intro_role_spine.set_animation(intro_third_anim_name, intro_third_anim_loop, 0);
+                            intro_third_anim_started = true;
+                        }
+                    }
+                    // Swap the skin mid-anim (Mech reveals its APEX form during the transform).
+                    if intro_skin_swap_at > 0.0 && !intro_skin_swapped {
+                        elapsed := get_time() - intro_popup.show_start_time;
+                        if elapsed >= intro_skin_swap_at {
+                            intro_role_spine.disable_all_skins();
+                            intro_role_spine.enable_skin(intro_skin_swap_name);
+                            intro_role_spine.refresh_skins();
+                            intro_skin_swapped = true;
                         }
                     }
                 }
@@ -3720,7 +3759,7 @@ Report_Corpse_Interactable :: class : Interactable {
 		this.set_text("Report");
 		this.set_hold_text("Reporting...");
 		// Match the old report ability's feel (range ~5m, but prompt shouldn't be huge).
-		radius = 3.0;
+		radius = 1.5;
 		prompt_offset = v2.{0, 1.0};
 		required_hold_time = 0.5;
 		priority = 50;
@@ -4871,6 +4910,11 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 	player.intro_is_creature_rig = false;
 	player.intro_second_anim_at = 0.0;
 	player.intro_second_anim_started = false;
+	player.intro_third_anim_at = 0.0;
+	player.intro_third_anim_started = false;
+	player.intro_third_anim_loop = false;
+	player.intro_skin_swap_at = 0.0;
+	player.intro_skin_swapped = false;
 
 	// --- Transforming roles (creature rig: transform-in then attack) ---
 	if role == Player_Role.MIMICER {
@@ -4993,16 +5037,21 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 		player.intro_role_spine.refresh_skins();
 		player.intro_role_spine.set_animation("009SG/APEX_transform_grounded", false, 0);
 		player.intro_is_creature_rig = true;
-		player.intro_second_anim_name = "009SG/Showdown_Start";
-		player.intro_second_anim_at = 3.3;
+		// Reveal the APEX skin ~66% through the 4.13s grounded transform, then let it finish.
+		player.intro_skin_swap_name = "Full/Mecha_APEX";
+		player.intro_skin_swap_at = 2.7;
 	} else if role == Player_Role.GUARDIAN {
 		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Mech Guardian/004RAND_Mech.spine"));
 		player.intro_role_spine.enable_skin("Full/Guardian");
 		player.intro_role_spine.refresh_skins();
-		player.intro_role_spine.set_animation("009SG/Showdown_Start", false, 0);
+		// Warp in (0.62s) -> heroic Showdown_Start (1.6s) -> settle into the living Showdown_Loop.
+		player.intro_role_spine.set_animation("009SG/Warp_Appear", false, 0);
 		player.intro_is_creature_rig = true;
-		player.intro_second_anim_name = "009SG/Run_guardian";
-		player.intro_second_anim_at = 1.4;
+		player.intro_second_anim_name = "009SG/Showdown_Start";
+		player.intro_second_anim_at = 0.62;
+		player.intro_third_anim_name = "009SG/Showdown_Loop";
+		player.intro_third_anim_at = 2.22; // 0.62 + 1.6s Showdown_Start
+		player.intro_third_anim_loop = true;
 	} else {
 		player.intro_role_spine.destroy();
 		player.intro_role_spine_ready = false;

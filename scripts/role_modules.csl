@@ -20,6 +20,11 @@ Mech_Module :: class : Component {
 	apex_used: bool;
 	apex_lost: bool;
 	apex_transform_locked: bool; // movement locked while the APEX transform anim plays
+	// The avatar keeps its pre-APEX mech skin until apex_reveal_at, then swaps to the APEX
+	// skin at the transform's morph climax. apex_skin_revealed gates that one-time swap so
+	// the skin doesn't snap in on frame one and spoil the morph illusion.
+	apex_skin_revealed: bool;
+	apex_reveal_at: float;
 
 	power_cores: int;
 	power_cells: int;
@@ -33,11 +38,13 @@ Mech_Module :: class : Component {
 	missile_barrage_unlocked: bool;
 	wreckage_warp_unlocked: bool;
 	endgame_unlocked: bool;
+	// When End Game became available. Gated by a short arm delay so the Mech can't
+	// fumble straight from Showdown-mashing into the round-ending barrage.
+	endgame_unlocked_at: float;
 	conversion_used: bool;
 
 	carried_player_id: u64;
 	carried_corpse_id: u64;
-	warp_index: int;
 
 	workbench_ui_open: bool;
 
@@ -78,6 +85,10 @@ Guardian_Module :: class : Component {
 	showdown_opponent_id: u64;
 	showdown_mashes: int;
 	showdown_ends_at: float;
+	// Losing a Showdown is fatal: the kill fires at the end of the lose-death anim.
+	// 0 when no death is pending; killer is showdown_death_killer_id (the APEX Mech).
+	showdown_death_at: float;
+	showdown_death_killer_id: u64;
 
 	creature_entity: Entity;
 	creature_animator: Spine_Animator;
@@ -99,7 +110,6 @@ Mech_Minion_Effect :: class : Effect_Base {
 	circuits: int;
 	schematics: int;
 	gears: int;
-	warp_index: int;
 
 	// Conversion timestamp — drives the synced one-shot "You are now a Minion" warning
 	// banner (rr_mech_draw_minion_warning), shown for a fixed window from the server stamp.
