@@ -1641,6 +1641,8 @@ setup_lobby :: proc() {
 	rr_ggg_clear_nest();
 	rr_pyro_extinguish_all_fires();
 	rr_hunter_round_global_cleanup();
+	// Clear Mech debris + revert any leftover mech/guardian/minion/smashed-task state.
+	rr_mech_clear_world_and_state();
 	// Clear all Mimicer Void Pillars
 	for p: component_iterator(Player) {
 		rr_mimicer_clear_void_pillars(p);
@@ -2053,6 +2055,11 @@ end_game_with_winners :: proc(victor: Player_Type, winners: List(Player)) {
 	// Wipe Hunter campfires now so they don't linger through the victory cinematic.
 	// setup_lobby() also runs this, but only after the popup ends.
 	rr_hunter_round_global_cleanup();
+
+	// Tear down Mech debris (wreckage, traps, magnet nodes, component pickups) and revert any
+	// mech/guardian/minion state now so none of it lingers through the victory cinematic.
+	// setup_lobby() also runs this, but only after the popup ends.
+	rr_mech_clear_world_and_state();
 
 	// Properly transition all players to passive (removes ghost reasons, restores speed, etc.).
 	for i: 0..players.elements.count-1 {
@@ -2640,6 +2647,21 @@ unlock :: proc(player: Player) {
 			mm.stolen_faces = max(mm.stolen_faces, MIMICER_UNLEASH_UNLOCK_FACES);
 		}
 	}
+	// The Mech: build every part, stock power cores for APEX, open End Game.
+	if role == Player_Role.THE_MECH {
+		mech := player.entity.get_component(Mech_Module);
+		if mech != null {
+			mech.helmet_trap_unlocked = true;
+			mech.ram_charge_unlocked = true;
+			mech.magnet_cannon_unlocked = true;
+			mech.missile_barrage_unlocked = true;
+			mech.wreckage_warp_unlocked = true;
+			mech.endgame_unlocked = true;
+			mech.power_cores = max(mech.power_cores, 2);
+			rr_mech_apply_avatar_skins(player);
+		}
+	}
+	// Guardian: all abilities are available from the start — nothing gated to unlock.
 	// Big Charlie: complete Mass Birth checklist
 	if role == Player_Role.BIG_CHARLIE {
 		bc := player.entity.get_component(Big_Charlie_Module);
@@ -3560,7 +3582,7 @@ assign_players_to_types :: proc() {
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 	append(ref traitor_roles_master, Player_Role.HITMAN);
 	append(ref traitor_roles_master, Player_Role.WEREWOLF);
-	append(ref traitor_roles_master, Player_Role.THE_MECH);
+	// The Mech & Guardian are admin-only — never in the random pool, only forced via /r.
 	// Purchase-gated roles: add to master if any connected player owns the product.
 	if rp_any_player_owns(ref players, GGG_PRODUCT_ID) {
 		append(ref traitor_roles_master, Player_Role.GOO_GOO_GAGA);
@@ -3609,7 +3631,8 @@ assign_players_to_types :: proc() {
 		p.forced_role_next_round = Player_Role.NONE;
 	}
 	
-	// If The Mech rolled this round, guarantee one living civilian counter-role.
+	// The Mech only appears via /r, so this just gives an admin-forced Mech its Guardian
+	// counter — guarantee one living civilian counter-role when a Mech is present.
 	has_mech := false;
 	has_guardian := false;
 	for i: 0..players.elements.count-1 {
@@ -3627,7 +3650,7 @@ assign_players_to_types :: proc() {
 			break;
 		}
 	}
-	
+
 	// Record round-start analytics now that every player has a final role.
 	rr_analytics_record_round_start();
 

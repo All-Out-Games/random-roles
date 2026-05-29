@@ -96,6 +96,10 @@ Player :: class : Player_Base {
 	// suppressing ghost-zoom so it doesn't undo the camera reset mid-cinematic-exit.
 	lily_deathbraid_cam_overriding: bool;
 	lily_deathbraid_cam_restore_until: float;
+	// Mech End Game cinematic camera hijack (focuses every client on the floating Mech).
+	mech_endgame_cam_overriding: bool;
+	// Raised follow-camera while flying in APEX form (manual offset; engine has no follow offset).
+	mech_apex_cam_overriding: bool;
 	// Canonical baseline speed captured once at join — used to hard-reset every round.
 	baseline_movement_speed: float;
 	baseline_movement_speed_saved: bool;
@@ -470,6 +474,12 @@ Player :: class : Player_Base {
 			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN || game_state == Game_State.ANIM_BC_MASS_BIRTH || game_state == Game_State.ANIM_HACKER_WIN {
 				this.draw_letterbox_bars();
 			}
+			// Mech End Game cutscene runs during INGAME (not a dedicated ANIM_ state), so bar it here.
+			if rr_mech_any_endgame_active() {
+				this.draw_letterbox_bars();
+			}
+			// Guardian vs APEX Showdown — cinematic letterbox + top winner bar + mash button.
+			rr_mech_draw_showdown_hud(this);
 			if game_state == Game_State.ANIM_VOTE_EJECT {
 				this.draw_vote_eject_cinematic_ui();
 			}
@@ -538,6 +548,7 @@ Player :: class : Player_Base {
 
 		// Deathbraid camera — runs for ALL players so everyone sees the cinematic.
 		rr_lily_update_deathbraid_camera(this);
+		// (Mech End Game camera runs in ao_late_update — after the APEX gameplay camera block.)
 
 		// Drive lily debuff animations on all clients.
 		if this.animator != null && this.animator.instance != null && this.animator.instance.state_machine != null {
@@ -786,6 +797,11 @@ Player :: class : Player_Base {
 			radii.x = 999.0;
 			radii.y = 999.0;
 		}
+		// Mech End Game finale: light the whole map so everyone sees the barrage.
+		if rr_mech_any_endgame_active() {
+			radii.x = MECH_ENDGAME_LOS_RADIUS;
+			radii.y = MECH_ENDGAME_LOS_RADIUS;
+		}
 		local_light_entity.set_local_position(v2.{0.0, 0.0});
 
 		local_light.radii = radii;
@@ -879,7 +895,35 @@ Player :: class : Player_Base {
 						}
 					}
 				}
+
+				// APEX flying: the apex hovers above the ground, so lift the follow camera to
+				// keep it framed. The engine has no follow offset, so drive position manually
+				// (rigid follow + Y offset). The End Game cinematic owns the camera itself, so
+				// stand down while it's active.
+				apex_flying := false;
+				if this.player_role == Player_Role.THE_MECH &&
+				   this.player_state == Player_State.ALIVE &&
+				   game_state == Game_State.INGAME {
+					mech_cam := this.entity.get_component(Mech_Module);
+					// Not during the Showdown — there the APEX is grounded for the clash.
+					if mech_cam != null && mech_cam.is_apex && !mech_cam.endgame_active && !mech_cam.showdown_active {
+						apex_flying = true;
+					}
+				}
+				if apex_flying {
+					this.camera.follow_player = false;
+					this.camera.position = this.entity.world_position + v2.{0, MECH_APEX_CAMERA_Y_OFFSET};
+					mech_apex_cam_overriding = true;
+				} else if mech_apex_cam_overriding {
+					this.camera.follow_player = true;
+					mech_apex_cam_overriding = false;
+				}
 			}
+
+			// Mech End Game camera — runs for ALL players so everyone watches the finale.
+			// MUST be after the APEX gameplay-camera block above so the cinematic wins (the
+			// Mech is APEX during the finale, and that block would otherwise fight it).
+			rr_mech_update_endgame_camera(this, delta_time);
 
 			// If we were overriding the camera for a win cinematic and it ended,
 			// restore the normal follow behavior.
@@ -1009,6 +1053,11 @@ Player :: class : Player_Base {
 
 					// Hide all abilities during the Lily deathbraid cinematic.
 					if rr_lily_any_deathbraid_active() {
+						return;
+					}
+
+					// Hide all abilities during the Mech End Game cinematic.
+					if rr_mech_any_endgame_active() {
 						return;
 					}
 
@@ -1259,6 +1308,12 @@ Player :: class : Player_Base {
 		if rr_guardian_is_protecting(this) {
 			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
 			rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.55}, 0.85, v4.{0.45, 1.0, 0.55, 0.65}, 0.28);
+			return;
+		}
+		// APEX-form Mech is immune to the anti-traitor roles (Hacker / Hunter / Sheriff).
+		if rr_mech_apex_blocks_kill(this, killer_check) {
+			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
+			rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.7}, 0.9, v4.{1.0, 0.4, 0.1, 0.7}, 0.32);
 			return;
 		}
 		// If we were dragging a body, drop it immediately.
@@ -1912,6 +1967,7 @@ draw_player_role_hud :: proc(player: Player) {
 draw_mech_role_hud :: proc(player: Player) {
 	rr_mech_draw_checklist_panel(player);
 	rr_mech_draw_minion_warning(player);
+	rr_mech_draw_titan_buttons(player);
 }
 
 // --- GGG ability unlock progress: left side ---
