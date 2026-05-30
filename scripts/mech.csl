@@ -5,6 +5,7 @@ MECH_HARPOON_RIG :: "anims/roles/Mech Guardian/Harpoon/Harpoon.spine";
 MECH_HELMET_RIG :: "anims/roles/Mech Guardian/Helmet/Helmet_trap.spine";
 MECH_TRANSFORM_VFX_RIG :: "anims/roles/Mech Guardian/transformVFX/Machine_Transform.spine";
 MECH_MISSILE_RIG :: "anims/roles/Mech Guardian/Missile/RED013_Rocket.spine";
+MECH_CRATER_RIG :: "anims/crater/BAT003_meteor_crash_crator.spine";
 MECH_WRECKAGE_RIG :: "anims/roles/Mech Guardian/Wreckage/004RAND_Task_Wreckage.spine";
 // Looping short-circuit overlays for smashed task panels (electric arcs + overheated smoke).
 MECH_WRECKAGE_SPARK_RIG :: "anims/vfx/002MURD_electrical_overload/002MURD_electrical_overload.spine";
@@ -63,6 +64,8 @@ MECH_APEX_CAMERA_Y_OFFSET :: 1.5;    // raise the follow camera while flying in 
 MECH_MISSILE_SPEED :: 13.0;
 MECH_MISSILE_LAUNCH_SECONDS :: 0.4;  // shoulder-burst before homing kicks in
 MECH_MISSILE_HIT_RADIUS :: 0.62;
+MECH_MISSILE_CRATER_SECONDS :: 5.0;  // scorched crater left on the ground at the impact point
+MECH_EXPLOSION_SHAKE_RADIUS :: 9.0;  // anyone this close to a missile blast feels the screenshake
 MECH_RETICLE_TEX :: "sprites/reticle.png";
 MECH_GROUND_RETICLE_TEX :: "sprites/ground_reticle.png";
 
@@ -72,8 +75,14 @@ MECH_ENDGAME_FOCUS_SECONDS :: 0.9;    // camera-focus beat before the Mech start
 MECH_ENDGAME_FLOAT_SECONDS :: 1.5;    // rise-into-the-air beat before the barrage
 MECH_ENDGAME_FLOAT_HEIGHT :: 3.0;     // how high the avatar lifts off the ground
 MECH_ENDGAME_BARRAGE_SECONDS :: 3.4;  // length of the missile rain
-MECH_ENDGAME_WAVE_INTERVAL :: 0.34;   // gap between missile waves
-MECH_ENDGAME_FINISH_SECONDS :: 0.8;   // settle beat after the last wave before the round ends
+MECH_ENDGAME_WAVE_INTERVAL :: 0.2;    // gap between missile waves (dense rain)
+MECH_ENDGAME_MISSILES_PER_VICTIM :: 2; // homing missiles fired at each victim per wave
+MECH_ENDGAME_SATURATION_PER_WAVE :: 3; // extra cosmetic ground-strike missiles carpet-bombing the map
+MECH_ENDGAME_SATURATION_RADIUS :: 16.0; // how far around the Mech the carpet bombing scatters
+MECH_ENDGAME_BLAST_SCALE :: 2.4;       // finale detonations are huge
+MECH_ENDGAME_MISSILE_TRAVEL :: 1.8;    // finale rockets lob slowly (seconds from launch to impact)
+MECH_ENDGAME_MISSILE_ARC :: 5.5;       // how high they arc up before raining back down
+MECH_ENDGAME_FINISH_SECONDS :: 3.0;   // settle beat after the last wave — long enough to take in the craters/damage before the round ends
 MECH_ENDGAME_FREEZE_REASON :: "mech_endgame";
 MECH_ENDGAME_RAISE_CAMERA_SIZE :: 7.5;   // tight zoom on the Mech as it rises (before it shoots)
 MECH_ENDGAME_BARRAGE_CAMERA_SIZE :: 18.0; // pulled out to frame the map-wide barrage
@@ -126,6 +135,48 @@ rr_mech_spawn_flash :: proc(pos: v2, scale: float, color: v4, duration: float) {
 	vfx.end_scale = scale * 2.2;
 	vfx.color = color;
 	vfx.duration = duration;
+}
+
+// Shakes every alive player within `radius` of a blast, scaled down by distance so the
+// impact is felt strongest at ground zero. Used for the heavy missile detonations so the
+// explosion is felt map-wide, not just by the Mech who fired it.
+rr_mech_shake_players_near :: proc(center: v2, radius: float, intensity: float, seconds: float) {
+	for p: component_iterator(Player) {
+		if p == null || !#alive(p.entity) continue;
+		d := length(p.entity.world_position - center);
+		if d > radius continue;
+		falloff := 1.0 - clamp(d / radius, 0.0, 1.0);
+		rr_mech_add_screenshake(p, intensity * falloff, seconds);
+	}
+}
+
+// Drops a scorched crater spine on the ground at an impact point. It plays its appear anim,
+// holds an idle loop, then plays disappear and tears itself down so the total on-screen
+// lifetime matches `lifetime`.
+rr_mech_spawn_crater :: proc(at: v2, lifetime: float, scale := 1.2) {
+	e := Scene.create_entity();
+	e.set_local_position(at);
+	e.set_local_scale(v2.{scale, scale});
+	e.add_component(Spine_Animator);
+	c := e.add_component(Mech_Crater);
+	c.lifetime = lifetime;
+}
+
+// Billowing smoke puff left in the air by a big blast. Plays the smoke "Start" one-shot and
+// tears itself down after `lifetime`.
+rr_mech_spawn_smoke_puff :: proc(at: v2, scale: float, lifetime := 1.6) {
+	e := Scene.create_entity();
+	e.set_local_position(at);
+	e.set_local_scale(v2.{scale, scale});
+	a := e.add_component(Spine_Animator);
+	a.awaken();
+	a.layer = -6;
+	if a.instance != null {
+		a.instance.set_skeleton(get_asset(Spine_Asset, MECH_WRECKAGE_SMOKE_RIG));
+		a.instance.set_animation("010WD2/Start", false, 0);
+	}
+	lt := e.add_component(Mech_Vfx_Lifetime);
+	lt.lifetime = lifetime;
 }
 
 rr_mech_upgrades_owned :: proc(mech: Mech_Module) -> int {
@@ -1869,6 +1920,65 @@ Mech_Screenshake_Status :: class : Component {
 	}
 }
 
+// Generic throwaway VFX entity that self-destructs after a fixed lifetime (used for one-shot
+// spine bursts like smoke puffs that have no built-in "end and vanish" trigger we drive).
+Mech_Vfx_Lifetime :: class : Component {
+	spawn_time: float;
+	lifetime: float;
+	ao_start :: method() {
+		spawn_time = get_time();
+		if lifetime <= 0.0 { lifetime = 1.0; }
+	}
+	ao_update :: method(dt: float) {
+		if get_time() - spawn_time >= lifetime { entity.destroy(); }
+	}
+}
+
+// Scorched ground crater left behind by a missile blast. Sequences appear -> idle loop ->
+// disappear so the full lifetime matches what the caller asked for, then self-destructs.
+Mech_Crater :: class : Component {
+	CRATER_APPEAR :: 1.1667;
+	CRATER_DISAPPEAR :: 1.1667;
+	spawn_time: float;
+	lifetime: float;
+	looped: bool;
+	disappearing: bool;
+	ao_start :: method() {
+		spawn_time = get_time();
+		if lifetime <= 0.0 { lifetime = MECH_MISSILE_CRATER_SECONDS; }
+		spine := entity.get_component(Spine_Animator);
+		if spine != null {
+			spine.awaken();
+			// Ground-decal convention (matches mines/portals): layer 0 + a positive depth_offset
+			// renders it ABOVE the floor but y-sorts it BENEATH the characters. A negative layer
+			// gets buried under the map's floor detail.
+			spine.layer = 0;
+			spine.depth_offset = 1.0;
+			if spine.instance != null {
+				spine.instance.set_skeleton(get_asset(Spine_Asset, MECH_CRATER_RIG));
+				spine.instance.set_animation("appear", false, 0);
+			}
+		}
+	}
+	ao_update :: method(dt: float) {
+		age := get_time() - spawn_time;
+		spine := entity.get_component(Spine_Animator);
+		if !looped && !disappearing && age >= CRATER_APPEAR {
+			if spine != null && spine.instance != null {
+				spine.instance.set_animation("idle", true, 0);
+			}
+			looped = true;
+		}
+		if !disappearing && age >= lifetime - CRATER_DISAPPEAR {
+			if spine != null && spine.instance != null {
+				spine.instance.set_animation("disappear", false, 0);
+			}
+			disappearing = true;
+		}
+		if age >= lifetime { entity.destroy(); }
+	}
+}
+
 Mech_Wreckage :: class : Component {
 	owner_id: u64;
 	last_warp_at: float;
@@ -2695,6 +2805,9 @@ Mech_Missile :: class : Component {
 	next_trail_at: float;
 	exploding: bool;
 	expires_at: float;
+	// Master multiplier on the detonation spectacle (fireball / crater / shake). 1.0 = a
+	// normal Mech missile; APEX barrages and the End Game finale push this far higher.
+	blast_scale: float;
 	// End Game barrage missiles are lethal: they kill outright instead of stunning,
 	// and don't require the magnet-node combo.
 	is_lethal: bool;
@@ -2702,10 +2815,20 @@ Mech_Missile :: class : Component {
 	// this spot and detonates there, rather than vanishing or blasting the launcher.
 	last_target_pos: v2;
 	has_target_pos: bool;
+	// Ballistic (mortar) mode — used by the End Game finale. Instead of homing, the rocket lobs
+	// on a parabolic arc from ballistic_start, up over arc_height, and back down onto
+	// ballistic_target where it detonates. Endgame targets are frozen, so a fixed-point arc is
+	// exact. travel_time controls how slow/floaty the lob is.
+	ballistic: bool;
+	ballistic_start: v2;
+	ballistic_target: v2;
+	travel_time: float;
+	arc_height: float;
 	ao_start :: method() {
 		speed = MECH_MISSILE_SPEED;
 		launch_time = get_time();
 		next_trail_at = get_time();
+		if blast_scale <= 0.0 { blast_scale = 1.0; }
 		if length_squared(launch_dir) < 0.01 { launch_dir = v2.{0, 1}; }
 		heading = normalize(launch_dir);
 		t := get_player_by_entity_id(target_id);
@@ -2722,11 +2845,41 @@ Mech_Missile :: class : Component {
 		}
 	}
 	detonate :: proc(using this: Mech_Missile, at: v2) {
-		owner := get_player_by_entity_id(owner_id);
-		rr_mech_spawn_flash(at, 0.9, v4.{1.0, 0.35, 0.05, 0.7}, 0.25);
-		rr_mech_spawn_flash(at, 0.45, v4.{1.0, 0.85, 0.4, 0.85}, 0.18);
-		if owner != null { rr_mech_add_screenshake(owner, 0.08, 0.18); }
-		rr_mech_play_sfx_at("sfx/ggg_explode.wav", at, 0.28);
+		// Master size knob: 1.0 = normal Mech missile, larger for APEX barrages and the End
+		// Game finale. Every part of the blast scales off it so they all grow together.
+		s := blast_scale;
+		if s <= 0.0 { s = 1.0; }
+		// Big layered fireball: a wide expanding shockwave, a fierce orange core, a hot inner
+		// burst, and a white-yellow flash at the dead center.
+		rr_mech_spawn_flash(at, 4.8 * s, v4.{1.0, 0.6, 0.2, 0.32}, 0.6);   // faint outer shockwave ring
+		rr_mech_spawn_flash(at, 3.3 * s, v4.{1.0, 0.45, 0.1, 0.55}, 0.45);
+		rr_mech_spawn_flash(at, 2.1 * s, v4.{1.0, 0.32, 0.05, 0.8}, 0.34);
+		rr_mech_spawn_flash(at, 1.2 * s, v4.{1.0, 0.85, 0.4, 0.92}, 0.24);
+		rr_mech_spawn_flash(at, 0.65 * s, v4.{1.0, 1.0, 0.88, 0.95}, 0.16);
+		// Scorched crater on the ground that lingers (5s) after the blast. Kept compact and only
+		// loosely tied to the blast size so APEX / finale craters don't sprawl across the ground.
+		rr_mech_spawn_crater(at, MECH_MISSILE_CRATER_SECONDS, 0.6 + 0.06 * s);
+		// The spine-based smoke puff is gorgeous but expensive (a Spine instance per blast). The
+		// finale rains HUNDREDS of missiles, so we skip the smoke there — the cheap sprite
+		// fireball carries it — and keep the smoke for the lower-volume regular / APEX barrage.
+		if !is_lethal {
+			rr_mech_spawn_smoke_puff(at + v2.{0, 0.3 * s}, 0.9 * s, 1.6);
+		}
+		// Heavy screenshake felt by everyone near the blast, not just the launcher — radius and
+		// amplitude both grow with the blast size.
+		rr_mech_shake_players_near(at, MECH_EXPLOSION_SHAKE_RADIUS * (0.7 + 0.55 * s), 0.4 * (0.6 + 0.7 * s), 0.4 + 0.12 * s);
+		// Finale blasts also pump the firing Mech's own shake — it's the Mech's shake status that
+		// drives the synced cinematic camera wobble on every client during the End Game — and
+		// stamp the impact time so the cinematic post-FX punches only on impacts.
+		if is_lethal {
+			owner := get_player_by_entity_id(owner_id);
+			if owner != null {
+				rr_mech_add_screenshake(owner, 0.4, 0.4);
+				omech := owner.entity.get_component(Mech_Module);
+				if omech != null { omech.endgame_last_impact_at = get_time(); }
+			}
+		}
+		rr_mech_play_sfx_at("sfx/ggg_explode.wav", at, clamp(0.5 + 0.18 * s, 0.3, 1.0));
 		spine := entity.get_component(Spine_Animator);
 		if spine != null && spine.instance != null {
 			spine.instance.set_animation("explode", false, 0);
@@ -2734,9 +2887,48 @@ Mech_Missile :: class : Component {
 		exploding = true;
 		expires_at = get_time() + MECH_MISSILE_EXPLODE_DURATION;
 	}
+	// Parabolic mortar lob (finale): rise up off ballistic_start, arc over, crash down onto
+	// ballistic_target. Targets are frozen during the End Game so the endpoint is fixed.
+	update_ballistic :: proc(using this: Mech_Missile, dt: float) {
+		PI :: 3.14159265;
+		tt := travel_time;
+		if tt <= 0.0 { tt = 1.5; }
+		t := clamp((get_time() - launch_time) / tt, 0.0, 1.0);
+		horiz := lerp(ballistic_start, ballistic_target, t);
+		pos := horiz + v2.{0, sin(t * PI) * arc_height};
+		entity.set_local_position(pos);
+		// Point the rocket along its path (sample slightly ahead so the nose tracks the arc —
+		// up on the way out, straight down on the way in).
+		t2 := clamp(t + 0.03, 0.0, 1.0);
+		ahead := lerp(ballistic_start, ballistic_target, t2) + v2.{0, sin(t2 * PI) * arc_height};
+		dir := ahead - pos;
+		if length_squared(dir) > 0.00001 { entity.set_local_rotation(to_degrees(atan2(dir.y, dir.x))); }
+
+		if get_time() >= next_trail_at {
+			rr_mech_spawn_flash(pos, 0.22, v4.{1.0, 0.55, 0.1, 0.4}, 0.18);
+			next_trail_at = get_time() + 0.05;
+		}
+
+		if t >= 1.0 {
+			target := get_player_by_entity_id(target_id);
+			if target != null && target.player_state == Player_State.ALIVE {
+				if is_lethal || rr_mech_is_near_magnet_node(target.entity.world_position) {
+					rr_mech_release_guardian_pickup_if_needed(target);
+					target.kill_with_killer(owner_id);
+				} else {
+					rr_mech_apply_stun(target, MECH_STUN_SECONDS);
+				}
+			}
+			detonate(this, ballistic_target);
+		}
+	}
 	ao_update :: method(dt: float) {
 		if exploding {
 			if get_time() >= expires_at { entity.destroy(); }
+			return;
+		}
+		if ballistic {
+			update_ballistic(this, dt);
 			return;
 		}
 		age := get_time() - launch_time;
@@ -3078,6 +3270,11 @@ rr_mech_select_missile_targets :: proc(player: Player, point: v2, count: int, ou
 
 rr_mech_fire_missile_barrage :: proc(player: Player, point: v2, count: int) {
 	if player == null return;
+	mech := player.entity.get_component(Mech_Module);
+	apex := mech != null && mech.is_apex;
+	// APEX form fires noticeably bigger missiles with correspondingly bigger blasts.
+	missile_scale := apex ? 0.8 : 0.45;
+	blast := apex ? 1.7 : 1.0;
 	targets: [..]u64;
 	rr_mech_select_missile_targets(player, point, count, ref targets);
 	if targets.count == 0 return;
@@ -3087,11 +3284,12 @@ rr_mech_fire_missile_barrage :: proc(player: Player, point: v2, count: int) {
 		from := rr_mech_shoulder_pos(player, right);
 		e := Scene.create_entity();
 		e.set_local_position(from);
-		e.set_local_scale(v2.{0.45, 0.45});
+		e.set_local_scale(v2.{missile_scale, missile_scale});
 		e.add_component(Spine_Animator);
 		m := e.add_component(Mech_Missile);
 		m.owner_id = player.entity.id;
 		m.target_id = tid;
+		m.blast_scale = blast;
 		m.launch_dir = right ? v2.{0.7, 1.0} : v2.{-0.7, 1.0};
 	}
 	rr_mech_play_avatar_anim(player, "009SG/Missile_Fire", false);
@@ -3293,6 +3491,7 @@ rr_mech_trigger_end_game :: proc(player: Player) {
 	mech.endgame_started_at = get_time();
 	mech.endgame_anchor = player.entity.world_position;
 	mech.endgame_next_wave_at = get_time() + MECH_ENDGAME_FOCUS_SECONDS + MECH_ENDGAME_FLOAT_SECONDS;
+	mech.endgame_wave_index = 0;
 	// Lock the whole lobby in place for the cutscene. Movement-lock reconciles from the
 	// server, so applying it on the acting client+server propagates to everyone.
 	player.add_disable_movement_input_reason(MECH_LOCK_REASON);
@@ -3329,32 +3528,73 @@ rr_mech_fire_endgame_wave :: proc(player: Player) {
 	spread := 0.6;
 	if mech != null && mech.is_apex { shoulder_h = 1.7; spread = 0.95; }
 	body := player.entity.world_position + v2.{0, MECH_ENDGAME_FLOAT_HEIGHT};
+	wave := mech != null ? mech.endgame_wave_index : 0;
 	fired := 0;
+	// Several homing missiles PER victim — a saturating volley, not a single dart each.
 	for p: component_iterator(Player) {
 		if p == null || p == player continue;
 		if p.player_state != Player_State.ALIVE continue;
 		if p.player_type == Player_Type.TRAITOR continue;
-		right := (fired % 2) == 0;
+		for k: 0..MECH_ENDGAME_MISSILES_PER_VICTIM-1 {
+			right := (fired % 2) == 0;
+			from := body + (right ? v2.{spread, shoulder_h} : v2.{-spread, shoulder_h});
+			e := Scene.create_entity();
+			e.set_local_position(from);
+			e.set_local_scale(v2.{0.85, 0.85});
+			e.add_component(Spine_Animator);
+			m := e.add_component(Mech_Missile);
+			m.owner_id = player.entity.id;
+			m.target_id = p.entity.id;
+			m.blast_scale = MECH_ENDGAME_BLAST_SCALE;
+			m.is_lethal = true;
+			// Lob it: arc high off the shoulder and rain back down onto the (frozen) victim.
+			// Fan the impact points apart so a victim's volley doesn't stack on one spot, and
+			// stagger travel time so they don't all land on the same frame.
+			fan := (k.(float) - (MECH_ENDGAME_MISSILES_PER_VICTIM - 1).(float) * 0.5) * 0.8;
+			m.ballistic = true;
+			m.ballistic_start = from;
+			m.ballistic_target = p.entity.world_position + v2.{fan, 0};
+			m.travel_time = MECH_ENDGAME_MISSILE_TRAVEL + k.(float) * 0.18;
+			m.arc_height = MECH_ENDGAME_MISSILE_ARC;
+			fired += 1;
+		}
+	}
+	// Carpet-bomb the surrounding map with cosmetic ground-strike missiles (no target — they
+	// just rain down and blow up for spectacle). Deterministically seeded off the wave index so
+	// every client rains them on the same spots.
+	rng: u64 = rng_root_seed() + wave.(u64);
+	for i: 0..MECH_ENDGAME_SATURATION_PER_WAVE-1 {
+		ang := rng_range_float(ref rng, 0.0, 6.2831853);
+		dist := rng_range_float(ref rng, 3.0, MECH_ENDGAME_SATURATION_RADIUS);
+		ground := mech.endgame_anchor + v2.{cos(ang) * dist, sin(ang) * dist};
+		right := (i % 2) == 0;
 		from := body + (right ? v2.{spread, shoulder_h} : v2.{-spread, shoulder_h});
 		e := Scene.create_entity();
 		e.set_local_position(from);
-		e.set_local_scale(v2.{0.5, 0.5});
+		e.set_local_scale(v2.{0.8, 0.8});
 		e.add_component(Spine_Animator);
 		m := e.add_component(Mech_Missile);
 		m.owner_id = player.entity.id;
-		m.target_id = p.entity.id;
-		// Burst up and out of the shoulders first, then home toward the victim.
-		m.launch_dir = right ? v2.{0.85, 1.0} : v2.{-0.85, 1.0};
+		m.blast_scale = MECH_ENDGAME_BLAST_SCALE * 0.85;
 		m.is_lethal = true;
+		// No target player — lob up and rain down onto the ground point. Vary the arc and
+		// timing (deterministically, off the same seed) so they don't fall in lockstep.
+		m.ballistic = true;
+		m.ballistic_start = from;
+		m.ballistic_target = ground;
+		m.travel_time = MECH_ENDGAME_MISSILE_TRAVEL + rng_range_float(ref rng, 0.0, 0.6);
+		m.arc_height = MECH_ENDGAME_MISSILE_ARC + rng_range_float(ref rng, -1.5, 2.0);
 		fired += 1;
 	}
+	if mech != null { mech.endgame_wave_index = wave + 1; }
 	if fired > 0 {
 		// Shoot_AL is an arm-layer overlay (track 1), so the Fly_Idle on track 0 keeps playing.
 		rr_mech_play_overlay_oneshot(player, "009SG/Shoot_AL");
-		rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position, 0.3);
-		rr_mech_play_sfx_at("Whoosh_1e3125.wav", player.entity.world_position, 0.32);
-		rr_mech_spawn_flash(body + v2.{0, shoulder_h}, 0.7, v4.{1.0, 0.55, 0.15, 0.7}, 0.16);
-		rr_mech_add_screenshake(player, 0.07, 0.16);
+		rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position, 0.4);
+		rr_mech_play_sfx_at("Whoosh_1e3125.wav", player.entity.world_position, 0.42);
+		rr_mech_spawn_flash(body + v2.{0, shoulder_h}, 1.3, v4.{1.0, 0.55, 0.15, 0.8}, 0.2);
+		// Heavy launch kick — this is what drives the synced cinematic camera shake on every client.
+		rr_mech_add_screenshake(player, 0.32, 0.26);
 	}
 }
 
@@ -3474,6 +3714,24 @@ rr_mech_update_endgame_camera :: proc(player: Player, dt: float) {
 			if sdur > 0.0 {
 				samp := ss.intensity * ((ss.ends_at - get_time()) / sdur);
 				shake_off = v2.{sin(get_time() * 80.0) * samp, cos(get_time() * 101.0) * samp * 0.7};
+			}
+		}
+
+		// Cinematic post-processing for the finale — local screen only (it's a fullscreen FX).
+		// Only punches BRIEFLY on missile impacts (not a continuous look), and kept very soft.
+		if player.is_local() {
+			since := get_time() - mech.endgame_last_impact_at;
+			impact := clamp(1.0 - since / 0.3, 0.0, 1.0); // short decay after each impact
+			if impact > 0.0 {
+				bloom: Post_Processing.Bloom_Config;
+				bloom.bloom_amount = 0.2 * impact;
+				Post_Processing.bloom(bloom);
+
+				ca: Post_Processing.Chromatic_Aberration_Config;
+				amt := 0.0014 * impact;
+				ca.channel_offsets = v3.{-amt, 0.0, amt};
+				ca.focal_point     = v2.{0.5, 0.5};
+				Post_Processing.chromatic_aberration(ca);
 			}
 		}
 
