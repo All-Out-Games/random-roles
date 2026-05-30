@@ -23,6 +23,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "is_trigger": true,
     "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
@@ -143,6 +144,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "is_trigger": true,
     "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
@@ -187,6 +189,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "is_trigger": true,
     "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
@@ -275,6 +278,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "is_trigger": true,
     "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
@@ -319,6 +323,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "is_trigger": true,
     "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
@@ -491,6 +496,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "is_trigger": true,
     "make_navmesh_loop": true,
     "flip_navmesh_loop": true,
     "is_loop": true,
@@ -540,6 +546,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Edge_Collider",
   "data": {
+    "is_trigger": true,
     "make_navmesh_loop": true,
     "is_loop": true,
     "points": [
