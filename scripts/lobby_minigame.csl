@@ -79,6 +79,9 @@ Lobby_Minigame_Effect :: class : Effect_Base {
 			player.camera.follow_player = true;
 			camera_shaking = false;
 		}
+		// Drop any mid-aim targeting handle owned by the minigame's Shoot/Roll so it can't
+		// carry into the round and lock out the player's real role abilities.
+		player.active_ability = null;
 		rr_player_clear_gun_state(player);
 		player.apply_voice_chat_masks_for_current_state();
 	}
@@ -451,6 +454,16 @@ rr_lobby_minigame_stop :: proc() {
 		if vfx == null continue;
 		if !#alive(vfx.entity) continue;
 		vfx.entity.destroy();
+	}
+
+	// Destroy any in-flight minigame projectiles. RR_Projectile already self-destructs the
+	// moment the minigame is inactive (and can never deal real damage), but tearing them down
+	// at the source removes any chance of a leftover shot overlapping with real gameplay.
+	for proj: component_iterator(RR_Projectile) {
+		if proj == null continue;
+		if !proj.lobby_minigame continue;
+		if !#alive(proj.entity) continue;
+		proj.entity.destroy();
 	}
 }
 
