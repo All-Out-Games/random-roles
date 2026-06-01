@@ -98,8 +98,16 @@ Player :: class : Player_Base {
 	lily_deathbraid_cam_restore_until: float;
 	// Mech End Game cinematic camera hijack (focuses every client on the floating Mech).
 	mech_endgame_cam_overriding: bool;
+	// Mech/Guardian Showdown camera hijack (frames every client on the clash midpoint).
+	mech_showdown_cam_overriding: bool;
+	// Pulled into the survivor crowd ringed around a Showdown clash (frozen, crying).
+	mech_showdown_crowd: bool;
 	// Raised follow-camera while flying in APEX form (manual offset; engine has no follow offset).
 	mech_apex_cam_overriding: bool;
+	// Slight cinematic camera punch-in while the once-per-game APEX transform morph plays.
+	mech_apex_cine_cam_overriding: bool;
+	// Camera punch-in while a workbench part-build reveal (forging slam) plays.
+	mech_part_cine_cam_overriding: bool;
 	// Canonical baseline speed captured once at join — used to hard-reset every round.
 	baseline_movement_speed: float;
 	baseline_movement_speed_saved: bool;
@@ -465,6 +473,12 @@ Player :: class : Player_Base {
 				this.update_chat_mode();
 				this.update_local_vision_light();
 			}
+			// APEX awakening + part-build reveal cinematics: hide the gameplay HUD while the
+			// transform/forging morph plays so the framing reads clean behind the letterbox.
+			apex_cine := rr_mech_in_apex_transform_cinematic(this);
+			part_cine := rr_mech_in_part_reveal_cinematic(this);
+			mech_cine := apex_cine || part_cine;
+			if !mech_cine {
 			// Cosmetic: blackout overlay first so tasks UI/minigames can draw above it.
 			rr_draw_power_outage_overlay_if_needed(this);
 			rr_ggg_draw_trap_blind_overlay(this);
@@ -493,6 +507,11 @@ Player :: class : Player_Base {
 				// + low-time countdown above any campfire about to extinguish.
 				rr_hunter_draw_campfire_buff_icons(this);
 				rr_hunter_draw_campfire_low_time_countdown(this);
+			}
+			} // end !mech_cine HUD gate
+			// APEX awakening + part-build reveal cinematics: black letterbox bars frame it.
+			if mech_cine {
+				this.draw_letterbox_bars();
 			}
 			if game_state == Game_State.ANIM_VOTE_EJECT || game_state == Game_State.ANIM_JESTER_WIN || game_state == Game_State.ANIM_PYRO_WIN || game_state == Game_State.ANIM_BC_MASS_BIRTH || game_state == Game_State.ANIM_HACKER_WIN {
 				this.draw_letterbox_bars();
@@ -959,7 +978,44 @@ Player :: class : Player_Base {
 					this.camera.follow_player = true;
 					mech_apex_cam_overriding = false;
 				}
+
+				// APEX awakening cinematic: ease the camera in for a slight punch-in while the
+				// transform morph plays, then restore once. Re-applied each frame so it survives
+				// server reconciliation; layered on top of the apex_flying framing above.
+				if rr_mech_in_apex_transform_cinematic(this) {
+					if camera_default_size_saved {
+						target := camera_default_size * MECH_APEX_CINE_CAMERA_ZOOM;
+						this.camera.size = lerp(this.camera.size, target, clamp(delta_time * 4.0, 0.0, 1.0));
+					}
+					mech_apex_cine_cam_overriding = true;
+				} else if mech_apex_cine_cam_overriding {
+					if camera_default_size_saved { this.camera.size = camera_default_size; }
+					mech_apex_cine_cam_overriding = false;
+				}
+
+				// Part-build reveal: punch the camera in (follow stays on the mech) while the
+				// forging slam plays, then restore once. Driven from a time-based ramp and set
+				// directly (NOT lerped from camera.size) so a server reconciliation reset of
+				// camera.size is corrected the next frame instead of sawtoothing in/out.
+				mech_pr := this.entity.get_component(Mech_Module);
+				if mech_pr != null && mech_pr.part_reveal_active {
+					if camera_default_size_saved {
+						t := clamp((get_time() - mech_pr.part_reveal_started_at) / MECH_PART_REVEAL_CAM_RAMP, 0.0, 1.0);
+						ease := t * t * (3.0 - 2.0 * t);
+						this.camera.size = lerp(camera_default_size, camera_default_size * MECH_PART_REVEAL_CAM_ZOOM, ease);
+					}
+					mech_part_cine_cam_overriding = true;
+				} else if mech_part_cine_cam_overriding {
+					if camera_default_size_saved { this.camera.size = camera_default_size; }
+					mech_part_cine_cam_overriding = false;
+				}
 			}
+
+			// Mech/Guardian Showdown — centre the camera on the clash midpoint for every
+			// client, and ring the other survivors around the two titans, crying. Runs for
+			// ALL players. Mutually exclusive with the End Game finale below.
+			rr_mech_update_showdown_camera(this, delta_time);
+			rr_mech_update_showdown_crowd(this);
 
 			// Mech End Game camera — runs for ALL players so everyone watches the finale.
 			// MUST be after the APEX gameplay-camera block above so the cinematic wins (the
@@ -3735,6 +3791,11 @@ Call_Meeting_Interactable :: class : Component {
 			player.Notify("Can't call a meeting during a sabotage!");
 			return;
 		}
+		// Once a Mech has gone APEX, meetings are locked for the final showdown.
+		if rr_any_mech_apex_active() {
+			player.Notify("Can't call a meeting — the Apex Mech is loose!");
+			return;
+		}
         start_meeting(false, player);
     }
 
@@ -3746,6 +3807,8 @@ Call_Meeting_Interactable :: class : Component {
 		if rr_power_outage_active || rr_comms_outage_active || rr_lockdown_active return false;
 		// Disable during Lily's Deathbraid cinematic.
 		if rr_lily_any_deathbraid_active() return false;
+		// Disable once a Mech has gone APEX — final showdown, no more meetings.
+		if rr_any_mech_apex_active() return false;
         // Always show the interactable; cooldown text + on_interact guard handle the rest.
         return true;
     }
@@ -3776,6 +3839,8 @@ Report_Corpse_Interactable :: class : Interactable {
 		if player.player_role == Player_Role.MIMICER && player.player_type == Player_Type.TRAITOR return false;
 		// Infected players cannot report bodies (they can't call meetings).
 		if player.werewolf_infected return false;
+		// Once a Mech has gone APEX, body reports are locked for the final showdown.
+		if rr_any_mech_apex_active() return false;
 		// Brief lockout after an unwrap so report doesn't fire in the same gesture.
 		if get_time() < cooldown_ends_at return false;
 		// Disable during Lily's Deathbraid cinematic.
