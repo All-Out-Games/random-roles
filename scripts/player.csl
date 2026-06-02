@@ -279,6 +279,10 @@ Player :: class : Player_Base {
 		// Lily can't interact while controlling spider or eye-machine tube (her body is detached).
 		lm := entity.get_component(Lily_Module);
 		if lm != null && (lm.spider_active || lm.eye_machine_active) return false;
+		// The Mech "End Game" ultimate cutscene runs during INGAME (no dedicated ANIM_ state), so
+		// the normal state gates don't catch it. Hide every interactable prompt lobby-wide while
+		// players are frozen for the missile barrage.
+		if rr_mech_any_endgame_active() return false;
 		// Ghost tasks: dead civilians are allowed to interact (Task_Interactable.can_use does the task gating).
 		if player_state != Player_State.ALIVE {
 			return player_state == Player_State.DEAD && player_type == Player_Type.CIVILIAN && !werewolf_infected;
@@ -470,6 +474,8 @@ Player :: class : Player_Base {
 			// Cosmetic-only: name coloring is per-viewer. Do this only on the local client.
 			if this.is_local() {
             	this.setup_player_colors();
+				// Per-viewer cosmetic: only traitors see converted Minions in their half-cyborg disguise.
+				rr_mech_apply_minion_disguise_for_viewer(this);
 				this.update_chat_mode();
 				this.update_local_vision_light();
 			}
@@ -498,6 +504,9 @@ Player :: class : Player_Base {
 				rr_draw_lily_debuff_timers(this);
 				// Draw stun countdown timers above stunned players' heads.
 				rr_draw_stun_timers(this);
+				// Magnet Rod disappear timers + Magnet Helmet auto-release timers.
+				rr_mech_draw_rod_timers(this);
+				rr_mech_draw_helmet_timers(this);
 				// Draw the "wowie you're looking at it!" autograph reveal if active.
 				rr_draw_autograph_stun_visual(this);
 				// Draw fake nameplates (mimicer clones, etc.)
@@ -762,6 +771,16 @@ Player :: class : Player_Base {
 			return v2.{999.0, 999.0};
 		}
 
+		// Mech missile placement (recording aid): while the LOS follows the zoomed-out aim camera
+		// (see Mech_Missile_Aim_Controller), widen it so the whole framed view around the aim point
+		// is lit. Gated on the global flag so the public build keeps normal vision.
+		if mech_missile_los_follows_camera {
+			mech_aim := this.entity.get_component(Mech_Module);
+			if mech_aim != null && (mech_aim.missile_aim_active || get_time() < mech_aim.missile_cam_hold_until) {
+				return v2.{MECH_MISSILE_AIM_LOS_RADIUS, MECH_MISSILE_AIM_LOS_RADIUS + 4};
+			}
+		}
+
 		// Blind-induced LOS shrink is suppressed during the Lily deathbraid
 		// cinematic so the blinded victim can actually see what's happening.
 		deathbraid_active := rr_lily_any_deathbraid_active();
@@ -780,6 +799,13 @@ Player :: class : Player_Base {
 		// Lily eye steal: temporary blindness until the timer ends or Doctor heals.
 		if this.lily_no_eyes && !deathbraid_active {
 			return v2.{LILY_BLIND_LOS_INNER, LILY_BLIND_LOS_OUTER};
+		}
+
+		// Mech Magnet Helmet: a clamped helmet collapses the victim's vision to a tight bubble
+		// so it actually reduces visibility (not just a screen-darkening overlay).
+		helm := this.entity.get_component(Mech_Helmeted_Status);
+		if helm != null && helm.active && !deathbraid_active {
+			return v2.{MECH_HELMET_BLIND_LOS_INNER, MECH_HELMET_BLIND_LOS_OUTER};
 		}
 
 		radii := v2.{PLAYER_LIGHT_BASE_INNER_RADIUS, PLAYER_LIGHT_BASE_OUTER_RADIUS};
@@ -965,8 +991,12 @@ Player :: class : Player_Base {
 				   this.player_state == Player_State.ALIVE &&
 				   game_state == Game_State.INGAME {
 					mech_cam := this.entity.get_component(Mech_Module);
-					// Not during the Showdown — there the APEX is grounded for the clash.
-					if mech_cam != null && mech_cam.is_apex && !mech_cam.endgame_active && !mech_cam.showdown_active {
+					// Not during the Showdown (APEX is grounded for the clash) and not while placing
+					// missiles OR during the post-fire camera hold — there the free-cam owns the
+					// position (on client AND server, so get_mouse_world_position stays correct), and
+					// this rigid follow would fight it.
+					missile_cam := mech_cam != null && (mech_cam.missile_aim_active || get_time() < mech_cam.missile_cam_hold_until);
+					if mech_cam != null && mech_cam.is_apex && !mech_cam.endgame_active && !mech_cam.showdown_active && !missile_cam {
 						apex_flying = true;
 					}
 				}
@@ -1162,74 +1192,9 @@ Player :: class : Player_Base {
                     if player_type == Player_Type.TRAITOR {
 						abilityIndex = rr_draw_traitor_abilities(this, abilityIndex);
                     }
-                    if player_type == Player_Type.CIVILIAN && player_role == Player_Role.SHERIFF {
-                        draw_ability_button(this, Shoot_Ability, abilityIndex);
-                        abilityIndex += 1;
-                    }
-					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.DOCTOR {
-						draw_ability_button(this, Resurrect_Ability, abilityIndex);
-						abilityIndex += 1;
-					}
-					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.MOVIE_STAR {
-						draw_ability_button(this, Autograph_Ability, abilityIndex);
-						abilityIndex += 1;
-					}
-					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.CORONER {
-						draw_ability_button(this, DNA_Sample_Ability, abilityIndex);
-						abilityIndex += 1;
-						draw_ability_button(this, DNA_Match_Ability, abilityIndex);
-						abilityIndex += 1;
-					}
-					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.PORTAL_MAKER {
-						draw_ability_button(this, Red_Portal_Ability, abilityIndex);
-						abilityIndex += 1;
-						draw_ability_button(this, Blue_Portal_Ability, abilityIndex);
-						abilityIndex += 1;
-					}
-					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.HUNTER {
-						draw_ability_button(this, Hunter_Cripple_Ability, abilityIndex);
-						abilityIndex += 1;
-						draw_ability_button(this, Hunter_Campfire_Ability, abilityIndex);
-						abilityIndex += 1;
-						// Kill Shot only appears once the Hunter has a pierced victim.
-						if rr_hunter_has_pierced_victim(this) {
-							draw_ability_button(this, Hunter_Kill_Shot_Ability, abilityIndex);
-							abilityIndex += 1;
-						}
-					}
-					if player_type == Player_Type.CIVILIAN && player_role == Player_Role.GUARDIAN {
-						abilityIndex = rr_guardian_draw_abilities(this, abilityIndex);
-					}
-					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PRANKSTER {
-						draw_ability_button(this, Prank_Ability, abilityIndex);
-						abilityIndex += 1;
-						draw_ability_button(this, Fake_Meeting_Ability, abilityIndex);
-						abilityIndex += 1;
-						// Only show Jester Win once unlocked.
-						prk := this.entity.get_component(Prankster_Module);
-						if prk != null && prk.jester_unlocked_time > 0.0 {
-							draw_ability_button(this, Jester_Win_Ability, abilityIndex);
-							abilityIndex += 1;
-						}
-					}
-					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.PYROMANIAC {
-						draw_ability_button(this, Pyromaniac_Light_Fire_Ability, abilityIndex);
-						abilityIndex += 1;
-						draw_ability_button(this, Pyromaniac_Light_Corpse_Ability, abilityIndex);
-						abilityIndex += 1;
-						// Only show World Fire once unlocked.
-						pyro := this.entity.get_component(Pyro_Module);
-						if pyro != null && pyro.world_fire_unlocked_time > 0.0 {
-							draw_ability_button(this, Pyromaniac_World_Fire_Ability, abilityIndex);
-							abilityIndex += 1;
-						}
-					}
-					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.BIG_CHARLIE {
-						abilityIndex = rr_bc_draw_abilities(this, abilityIndex);
-					}
-					if player_type == Player_Type.ANARCHIST && player_role == Player_Role.HACKER {
-						abilityIndex = rr_hacker_draw_abilities(this, abilityIndex);
-					}
+					// Civilian + Anarchist role kits (shared with converted Minions — see
+					// rr_draw_role_abilities). for_minion=false: normal players keep their win triggers.
+					abilityIndex = rr_draw_role_abilities(this, player_role, player_type, abilityIndex, false);
 					}
 				} else if game_state == Game_State.LOBBY {
 					if lobby_minigame_active {
@@ -1532,6 +1497,12 @@ rr_get_stun_remaining :: proc(p: Player) -> float {
 	hs := p.entity.get_component(Hacker_Electrocuted_Stun);
 	if hs != null && hs.active {
 		r := hs.end_time - now;
+		if r > best { best = r; }
+	}
+
+	mss := p.entity.get_component(Mech_Stun_Status);
+	if mss != null && mss.active {
+		r := mss.ends_at - now;
 		if r > best { best = r; }
 	}
 
@@ -2064,6 +2035,7 @@ draw_player_role_hud :: proc(player: Player) {
 draw_mech_role_hud :: proc(player: Player) {
 	rr_mech_draw_checklist_panel(player);
 	rr_mech_draw_minion_warning(player);
+	rr_mech_draw_minion_carry_indicator(player);
 	rr_mech_draw_titan_buttons(player);
 }
 
@@ -2666,12 +2638,91 @@ rr_player_has_skin :: proc(player: Player, skin: string) -> bool {
 	return false;
 }
 
+// Per-role ability buttons for CIVILIAN + ANARCHIST roles. Shared by the normal ability dispatch
+// (ao_late_update) and by converted Minions (rr_minion_draw_abilities), which pass their ORIGINAL
+// role/type so a converted player keeps their old kit on top of the Minion's.
+//
+// for_minion suppresses the role's WIN-CONDITION trigger abilities: a Minion is traitor-aligned
+// and can no longer pursue their original (anarchist) win, even though they keep the moment-to-
+// moment abilities. (Those win triggers gate on the role module, not player_type, so without this
+// a Minion could literally fire a Jester win — so the suppression is correctness, not just flavor.)
+// Roles whose ENTIRE kit is win machinery (Big Charlie, Hacker) are skipped outright for Minions.
+rr_draw_role_abilities :: proc(player: Player, role: Player_Role, ptype: Player_Type, idx: int, for_minion: bool) -> int {
+	abilityIndex := idx;
+	if ptype == Player_Type.CIVILIAN && role == Player_Role.SHERIFF {
+		draw_ability_button(player, Shoot_Ability, abilityIndex); abilityIndex += 1;
+	}
+	if ptype == Player_Type.CIVILIAN && role == Player_Role.DOCTOR {
+		draw_ability_button(player, Resurrect_Ability, abilityIndex); abilityIndex += 1;
+	}
+	if ptype == Player_Type.CIVILIAN && role == Player_Role.MOVIE_STAR {
+		draw_ability_button(player, Autograph_Ability, abilityIndex); abilityIndex += 1;
+	}
+	if ptype == Player_Type.CIVILIAN && role == Player_Role.CORONER {
+		draw_ability_button(player, DNA_Sample_Ability, abilityIndex); abilityIndex += 1;
+		draw_ability_button(player, DNA_Match_Ability, abilityIndex); abilityIndex += 1;
+	}
+	if ptype == Player_Type.CIVILIAN && role == Player_Role.PORTAL_MAKER {
+		draw_ability_button(player, Red_Portal_Ability, abilityIndex); abilityIndex += 1;
+		draw_ability_button(player, Blue_Portal_Ability, abilityIndex); abilityIndex += 1;
+	}
+	if ptype == Player_Type.CIVILIAN && role == Player_Role.HUNTER {
+		draw_ability_button(player, Hunter_Cripple_Ability, abilityIndex); abilityIndex += 1;
+		draw_ability_button(player, Hunter_Campfire_Ability, abilityIndex); abilityIndex += 1;
+		// Kill Shot only appears once the Hunter has a pierced victim.
+		if rr_hunter_has_pierced_victim(player) {
+			draw_ability_button(player, Hunter_Kill_Shot_Ability, abilityIndex); abilityIndex += 1;
+		}
+	}
+	if ptype == Player_Type.CIVILIAN && role == Player_Role.GUARDIAN {
+		abilityIndex = rr_guardian_draw_abilities(player, abilityIndex);
+	}
+	if ptype == Player_Type.ANARCHIST && role == Player_Role.PRANKSTER {
+		draw_ability_button(player, Prank_Ability, abilityIndex); abilityIndex += 1;
+		draw_ability_button(player, Fake_Meeting_Ability, abilityIndex); abilityIndex += 1;
+		// Jester Win is a win-condition trigger — denied to Minions.
+		if !for_minion {
+			prk := player.entity.get_component(Prankster_Module);
+			if prk != null && prk.jester_unlocked_time > 0.0 {
+				draw_ability_button(player, Jester_Win_Ability, abilityIndex); abilityIndex += 1;
+			}
+		}
+	}
+	if ptype == Player_Type.ANARCHIST && role == Player_Role.PYROMANIAC {
+		draw_ability_button(player, Pyromaniac_Light_Fire_Ability, abilityIndex); abilityIndex += 1;
+		draw_ability_button(player, Pyromaniac_Light_Corpse_Ability, abilityIndex); abilityIndex += 1;
+		// World Fire is the Pyromaniac's win-condition trigger — denied to Minions.
+		if !for_minion {
+			pyro := player.entity.get_component(Pyro_Module);
+			if pyro != null && pyro.world_fire_unlocked_time > 0.0 {
+				draw_ability_button(player, Pyromaniac_World_Fire_Ability, abilityIndex); abilityIndex += 1;
+			}
+		}
+	}
+	// Big Charlie & Hacker kits are entirely win machinery (Mass Birth / role-theft), so a Minion
+	// retains none of it — they just get the Minion kit.
+	if !for_minion && ptype == Player_Type.ANARCHIST && role == Player_Role.BIG_CHARLIE {
+		abilityIndex = rr_bc_draw_abilities(player, abilityIndex);
+	}
+	if !for_minion && ptype == Player_Type.ANARCHIST && role == Player_Role.HACKER {
+		abilityIndex = rr_hacker_draw_abilities(player, abilityIndex);
+	}
+	return abilityIndex;
+}
+
 // Traitor ability drawing (extracted from ao_late_update to reduce register pressure).
 rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 	abilityIndex := idx;
 	player_role := player.player_role;
 
 	if rr_mech_is_minion_active(player) {
+		// Minions keep their ORIGINAL role's kit (for_minion=true suppresses their original
+		// win-condition triggers) on top of the Minion-specific kit. Drawn here (not inside
+		// rr_minion_draw_abilities) because the shared dispatch lives in this file.
+		minion := rr_mech_get_minion_effect(player);
+		if minion != null {
+			abilityIndex = rr_draw_role_abilities(player, minion.original_role, minion.original_type, abilityIndex, true);
+		}
 		return rr_minion_draw_abilities(player, abilityIndex);
 	}
 

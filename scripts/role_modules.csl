@@ -52,6 +52,26 @@ Mech_Module :: class : Component {
 
 	workbench_ui_open: bool;
 
+	// While > 0 (and not yet elapsed) the follow camera is held zoomed out to the aim size,
+	// so the Magnet Cannon's wide framing lingers briefly AFTER the last rod is fired instead
+	// of snapping back the instant placement ends. Synced so client + server agree on the size.
+	magnet_cam_hold_until: float;
+
+	// Missile Barrage free-cam placement. While targeting, the avatar is frozen in place
+	// (movement-input lock) and ONLY the camera roams — missile_aim_center is the detached
+	// camera/cursor position panned by the player's movement input; markers are the chosen
+	// ground strike points. missile_cam_hold_until keeps the camera parked over the strike
+	// zone for a beat AFTER firing so the player watches the rockets land (mirrors the magnet
+	// cam hold). Synced so client + server agree.
+	missile_aim_active: bool;
+	missile_aim_center: v2;
+	// The Mech's body is pinned here every frame while placing missiles (it must hold position; the
+	// pan input only roams the camera). Captured at aim start; see Mech_Missile_Aim_Controller.
+	missile_aim_anchor: v2;
+	missile_markers: [6]v2;
+	missile_markers_placed: int;
+	missile_cam_hold_until: float;
+
 	showdown_active: bool;
 	showdown_opponent_id: u64;
 	showdown_mashes: int;
@@ -137,10 +157,9 @@ Mech_Minion_Effect :: class : Effect_Base {
 	effect_start :: method() {
 		if player == null return;
 		player.player_type = Player_Type.TRAITOR;
-		if player.animator != null && player.animator.instance != null {
-			player.animator.instance.enable_skin("body/half_cyborg");
-			player.animator.instance.refresh_skins();
-		}
+		// The half-cyborg disguise is applied PER-VIEWER (only traitors see it) by
+		// rr_mech_apply_minion_disguise_for_viewer on each local client — NOT here, where it
+		// would replicate to everyone. See player.csl ao_update.
 		// Show the custom full-screen warning instead of a plain notification.
 		warning_started_at = get_time();
 	}
@@ -160,9 +179,13 @@ Mech_Minion_Effect :: class : Effect_Base {
 		player.player_type = original_type;
 		player.player_role = original_role;
 		if player.animator != null && player.animator.instance != null {
+			// Strip the per-viewer disguise skin and rebuild the original cosmetics. Local clients'
+			// per-viewer pass also clears it once the player stops being a minion, but rebuild here
+			// too so the restore is authoritative the instant the effect ends.
 			player.animator.instance.disable_all_skins();
 			if saved_skins.count > 0 {
 				for i: 0..saved_skins.count-1 {
+					if saved_skins[i] == MECH_MINION_SKIN continue;
 					player.animator.instance.enable_skin(saved_skins[i]);
 				}
 			} else {

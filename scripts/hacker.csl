@@ -39,7 +39,10 @@ hacker_win_player_id: u64;
 
 rr_is_hacker :: proc(player: Player) -> bool {
 	if player == null return false;
-	return player.player_type == Player_Type.ANARCHIST && player.player_role == Player_Role.HACKER;
+	if player.player_type == Player_Type.ANARCHIST && player.player_role == Player_Role.HACKER return true;
+	// A converted Minion keeps the powers of their original role (their player_type is forced to
+	// TRAITOR for alignment), so honor a Hacker who became a Minion.
+	return rr_minion_has_original_power(player, Player_Type.ANARCHIST, Player_Role.HACKER);
 }
 
 rr_hacker_get_module :: proc(player: Player) -> Hacker_Module {
@@ -61,7 +64,18 @@ rr_hacker_has_stolen_civilian_role :: proc(player: Player, role: Player_Role) ->
 rr_player_has_civilian_power :: proc(player: Player, role: Player_Role) -> bool {
 	if player == null return false;
 	if player.player_type == Player_Type.CIVILIAN && player.player_role == role return true;
+	// A converted Minion keeps the powers of their original CIVILIAN role (every civilian ability
+	// gates through this proc, so honoring it here makes their whole kit work as a Minion).
+	if rr_minion_has_original_power(player, Player_Type.CIVILIAN, role) return true;
 	return rr_hacker_has_stolen_civilian_role(player, role);
+}
+
+// Anarchist analogue of rr_player_has_civilian_power: true for a native Anarchist of `role`, or a
+// converted Minion whose original role was that Anarchist. Anarchist abilities gate through this.
+rr_player_has_anarchist_power :: proc(player: Player, role: Player_Role) -> bool {
+	if player == null return false;
+	if player.player_type == Player_Type.ANARCHIST && player.player_role == role return true;
+	return rr_minion_has_original_power(player, Player_Type.ANARCHIST, role);
 }
 
 rr_hacker_is_normal_task_id :: proc(task_id: string) -> bool {
