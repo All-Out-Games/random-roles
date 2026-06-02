@@ -241,6 +241,11 @@ Player :: class : Player_Base {
 		if bc_cocooned return false;
 		// Held by a Mech or Guardian — fully locked out until thrown/dropped.
 		if rr_mech_is_carried(this) return false;
+		// Disrupted by a Guardian shockwave — every ability is hard-locked during the warning window
+		// (while the status is active). After the forced de-transform the status releases and the
+		// lockout is enforced by ability cooldowns instead (see Guardian_Shock_Status).
+		shock := entity.get_component(Guardian_Shock_Status);
+		if shock != null && shock.active return false;
 		// While an aimed ability is mid-targeting it owns the next click — block every OTHER
 		// ability so clicking a different button can't fire it straight through the aim overlay.
 		// Self-heal a dangling target if we can no longer act (e.g. died mid-aim) so the bar,
@@ -531,6 +536,8 @@ Player :: class : Player_Base {
 			}
 			// Guardian vs APEX Showdown — cinematic letterbox + top winner bar + mash button.
 			rr_mech_draw_showdown_hud(this);
+			// Distress arrow pointing a Minion to its downed (faked-death) master so it can revive.
+			rr_mech_draw_downed_revive_ui(this);
 			if game_state == Game_State.ANIM_VOTE_EJECT {
 				this.draw_vote_eject_cinematic_ui();
 			}
@@ -2035,6 +2042,8 @@ draw_player_role_hud :: proc(player: Player) {
 draw_mech_role_hud :: proc(player: Player) {
 	rr_mech_draw_checklist_panel(player);
 	rr_mech_draw_minion_warning(player);
+	rr_guardian_draw_shock_warning(player);
+	rr_mech_draw_car_hud(player);
 	rr_mech_draw_minion_carry_indicator(player);
 	rr_mech_draw_titan_buttons(player);
 }

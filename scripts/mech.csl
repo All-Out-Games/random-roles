@@ -47,12 +47,29 @@ MECH_LOOT_RANGE :: 3.0;
 MECH_MELEE_RANGE :: 2.6;
 MECH_THROW_DISTANCE :: 10.0;
 MECH_STUN_SECONDS :: 3.0;
-MECH_RAM_SECONDS :: 1.15;
-MECH_RAM_SPEED :: 26.0;
-MECH_RAM_HIT_RADIUS :: 1.4;   // how close a victim must be to get flattened by the charge
-MECH_RAM_SHOVE_SPEED :: 18.0; // sideways impulse shoving non-killed victims out of the car's path
-MECH_APEX_RAM_TURN_RATE :: 9.0;
+// Ram is a drivable CAR: the Mech transforms into a truck and drives for this whole window,
+// plowing any victim it runs into forward along with it (rather than a quick dash-kill). The driver
+// STEERS with their normal move input (joystick / WASD) — so the car is driven by writing
+// agent.input_this_frame, NOT by a movement lock (a lock zeroes input_this_frame, killing steering).
+MECH_RAM_SECONDS :: 15.0;
+MECH_CAR_SPEED_MULT :: 2.0;    // car drive speed = baseline_movement_speed * this
+MECH_RAM_HIT_RADIUS :: 1.9;    // forward reach in front of the car that scoops victims up to be plowed
+MECH_RAM_PLOW_HALF_WIDTH :: 1.2; // sideways half-width of the plow zone (truck is ~1.4 wide)
+MECH_RAM_PLOW_STANDOFF :: 1.1; // caught victims are pinned this far in front of the car (the bumper)
+MECH_APEX_RAM_TURN_RATE :: 7.0; // how fast the car steers toward the input direction (both forms steer)
+MECH_CAR_BOOST_MULT :: 1.6;    // APEX turbo: extra speed multiplier on top of the car speed while boosting
+MECH_CAR_BOOST_SECONDS :: 2.5; // how long one turbo boost lasts
+MECH_CAR_BOOST_COOLDOWN :: 4.0; // gap between turbo boosts
+MECH_CAR_ROD_KILL_RADIUS :: 1.4; // APEX: a plowed victim this close to a Magnet Rod triggers the electric blast
+// Guardian Shockwave — the Guardian's anti-monster nuke. Shocks every transformed monster in an
+// AOE around it, then force-reverts them out of their forms after a warning window.
+MECH_GUARDIAN_SHOCK_RADIUS :: 8.0;     // AOE reach of the shockwave around the Guardian
+MECH_GUARDIAN_SHOCK_WARNING :: 10.0;   // grace window: abilities locked, can still run, before forced de-transform
+MECH_GUARDIAN_SHOCK_LOCKOUT :: 12.0;   // after de-transform: how long abilities + re-transform stay locked
+MECH_GUARDIAN_SHOCK_COOLDOWN :: 50.0;  // cooldown on the Guardian's shockwave ability
 MECH_MAGNET_PULL_SECONDS :: 6.0;
+MECH_MAGNET_LINGER_MECH :: 5.0;  // base Mech form: rods stay live this many seconds past the pull window
+MECH_MAGNET_LINGER_APEX :: 10.0; // APEX form: rods linger this much longer than the base window
 MECH_MAGNET_RADIUS :: 5.0;
 MECH_MAGNET_SHOCK_RADIUS :: 2.4;     // electric-shock range for non-helmeted players — TIGHTER than the magnetise pull radius
 MECH_MAGNET_FLIGHT_SECONDS :: 1.3167; // harpoon travel time = "Arc" anim length
@@ -69,10 +86,14 @@ MECH_HELMET_BLIND_LOS_OUTER :: 2.2;  // ...and this outer radius (fog of war clo
 MECH_WARP_COOLDOWN :: 10.0;          // shared per-wreckage cooldown between Wreckage Warps
 MECH_MAGNET_HELMET_SKIN :: "Magnet_Helmet"; // player-rig skin layered onto victims clamped in a Helmet Trap (until removed)
 MECH_MINION_SKIN :: "body/half_cyborg"; // half-cyborg disguise on converted Minions — visible ONLY to traitors
-MECH_SHOWDOWN_SECONDS :: 8.0;
+MECH_SHOWDOWN_SECONDS :: 11.0;
 MECH_SHOWDOWN_SEPARATION :: 2.4;   // each fighter is placed this far from the clash midpoint
 MECH_SHOWDOWN_LOSER_COOLDOWN :: 30.0; // the loser's whole kit goes on cooldown
 MECH_SHOWDOWN_WINNER_LOCK :: 5.0;     // brief kit lock on the winner so leftover mashing can't fire an ability
+MECH_SHOWDOWN_COOLDOWN :: 60.0;       // long re-challenge cooldown so Showdowns can't be spammed (auto-reset on APEX awaken)
+MECH_SHOWDOWN_REVIVE_RANGE :: 3.0;    // a Minion this close to its downed Mech can revive it
+MECH_CALL_MINION_COOLDOWN :: 8.0;     // distress-ping ("Call Minion") button cooldown on the downed Mech
+MECH_SHOWDOWN_FAKEDEATH_HOLD :: 2.5;  // how long the downed Mech holds the faked-death pose before bleeding out to a REAL death (only when no revive is possible)
 MECH_SHOWDOWN_CROWD_RADIUS :: 4.5;    // surviving players ring the clash at this radius, crying
 MECH_SHOWDOWN_CROWD_REASON :: "mech_showdown_crowd";
 MECH_SHOWDOWN_CAMERA_SIZE :: 10.0;    // tight cinematic framing centred on the two titans
@@ -520,6 +541,10 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.showdown_opponent_id = 0;
 	mech.showdown_mashes = 0;
 	mech.showdown_ends_at = 0.0;
+	mech.showdown_downed = false;
+	mech.showdown_death_at = 0.0;
+	mech.showdown_death_killer_id = 0;
+	mech.minion_revive_used = false;
 	mech.creature_entity = null;
 	mech.creature_animator = null;
 	mech.creature_visible = false;
@@ -553,6 +578,7 @@ rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 	guard.showdown_ends_at = 0.0;
 	guard.showdown_death_at = 0.0;
 	guard.showdown_death_killer_id = 0;
+	guard.showdown_cooldown_until = 0.0;
 	guard.creature_entity = null;
 	guard.creature_animator = null;
 	guard.creature_visible = false;
@@ -589,12 +615,10 @@ rr_mech_force_revert :: proc(player: Player) {
 	player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 
 	// Tear down an in-progress Ram so its truck rig doesn't linger in the voting circle.
+	// restore_mech also hands back the driven walk speed + clears the forced move input.
 	ram := player.entity.get_component(Mech_Ram_Charge_Status);
 	if ram != null {
-		if ram.truck_entity != null && #alive(ram.truck_entity) { ram.truck_entity.destroy(); }
-		ram.truck_entity = null;
-		ram.truck_animator = null;
-		ram.truck_swapped = false;
+		ram.restore_mech(player);
 		ram.active = false;
 	}
 
@@ -605,6 +629,10 @@ rr_mech_force_revert :: proc(player: Player) {
 		mech.showdown_opponent_id = 0;
 		mech.showdown_mashes = 0;
 		mech.showdown_ends_at = 0.0;
+		// A meeting interrupting a downed Mech un-downs it (it reverts to human form like everyone
+		// else); don't leave it frozen. minion_revive_used persists (still once per game).
+		mech.showdown_downed = false;
+		mech.showdown_death_at = 0.0;
 		mech.apex_transform_locked = false;
 		mech.last_anim = "";
 		mech.anim_lock_until = 0.0;
@@ -999,6 +1027,8 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			mech.carried_player_id = 0;
 			mech.carried_corpse_id = 0;
 			mech.showdown_active = false;
+			mech.showdown_downed = false;
+			mech.showdown_death_at = 0.0;
 			// If the cinematic was interrupted (Mech died / game ended otherwise), unfreeze the
 			// lobby and restore the avatar's float offset + render layer.
 			if mech.endgame_active {
@@ -2024,6 +2054,14 @@ rr_mech_draw_abilities :: proc(player: Player, idx: int) -> int {
 	// During a Showdown the kit is hidden — mashing is the big bottom-center button
 	// (rr_mech_draw_showdown_hud), not an ability-bar slot.
 	if mech.showdown_active return abilityIndex;
+	// Downed (faked death) — the whole kit is hidden; the ONLY button is "Call Minion" (a distress
+	// ping), and only while a living Minion can still revive it.
+	if mech.showdown_downed {
+		if !mech.minion_revive_used && rr_mech_get_living_minion(player) != null {
+			draw_ability_button(player, Mech_Call_Minion_Ability, abilityIndex); abilityIndex += 1;
+		}
+		return abilityIndex;
+	}
 	// Schleem form — gathering / utility kit (well under the bar limit).
 	if !mech.is_mech_form && !mech.is_apex {
 		draw_ability_button(player, Kill_Ability, abilityIndex); abilityIndex += 1;
@@ -2032,6 +2070,15 @@ rr_mech_draw_abilities :: proc(player: Player, idx: int) -> int {
 		if mech.helmet_trap_unlocked { draw_ability_button(player, Mech_Helmet_Trap_Ability, abilityIndex); abilityIndex += 1; }
 		// Recall Minion — only while a living Minion exists.
 		if rr_mech_get_living_minion(player) != null && abilityIndex < 6 { draw_ability_button(player, Mech_Invoke_Minion_Ability, abilityIndex); abilityIndex += 1; }
+		return abilityIndex;
+	}
+
+	// Driving the Ram car: the whole kit is swapped out for the drive. APEX gets a Boost button
+	// (turbo fire); both forms get an Exit button to bail early. Returning here keeps us clear of
+	// the 6-cap.
+	if rr_mech_car_is_active(player) {
+		if mech.is_apex && abilityIndex < 6 { draw_ability_button(player, Mech_Car_Boost_Ability, abilityIndex); abilityIndex += 1; }
+		if abilityIndex < 6 { draw_ability_button(player, Mech_Car_Exit_Ability, abilityIndex); abilityIndex += 1; }
 		return abilityIndex;
 	}
 
@@ -2070,6 +2117,15 @@ rr_minion_draw_abilities :: proc(player: Player, idx: int) -> int {
 	abilityIndex := idx;
 	// Smash is a world interactable (Mech_Smash_Interactable) — minions use the same prompt.
 	if abilityIndex < 6 { draw_ability_button(player, Drag_Body_Ability, abilityIndex); abilityIndex += 1; }
+	// Revive Master — shown while the master Mech is downed (faked death) and the once-per-game
+	// revive is unspent. can_use gates the proximity, so it only lights up in range.
+	owner := rr_mech_get_owner(player);
+	if owner != null {
+		om := owner.entity.get_component(Mech_Module);
+		if om != null && om.showdown_downed && !om.minion_revive_used && abilityIndex < 6 {
+			draw_ability_button(player, Mech_Revive_Master_Ability, abilityIndex); abilityIndex += 1;
+		}
+	}
 	// Wreckage Warp lives on the minimap node buttons (rr_mech_draw_wreckage_warp_minimap_buttons),
 	// shared with the Mech — minions click a wreckage on the map to warp once it's unlocked.
 	return abilityIndex;
@@ -2084,7 +2140,11 @@ rr_guardian_draw_abilities :: proc(player: Player, idx: int) -> int {
 	draw_ability_button(player, Guardian_Transform_Ability, abilityIndex); abilityIndex += 1;
 	if guard.is_guardian_form {
 		draw_ability_button(player, Guardian_Pickup_Throw_Ability, abilityIndex); abilityIndex += 1;
-		if rr_guardian_can_showdown(player) { draw_ability_button(player, Guardian_Showdown_Ability, abilityIndex); abilityIndex += 1; }
+		draw_ability_button(player, Guardian_Shockwave_Ability, abilityIndex); abilityIndex += 1;
+		// Always shown in Guardian form: greyed when no titan-form Mech is in range (can_use),
+		// greyed with a countdown while on the re-challenge cooldown (current_cooldown driven in
+		// on_update), and normal/usable otherwise.
+		if abilityIndex < 6 { draw_ability_button(player, Guardian_Showdown_Ability, abilityIndex); abilityIndex += 1; }
 	}
 	return abilityIndex;
 }
@@ -3256,7 +3316,15 @@ Mech_Magnet_Node :: class : Component {
 	land :: proc(using this: Mech_Magnet_Node) {
 		landed = true;
 		land_time = get_time();
-		ends_at = get_time() + MECH_MAGNET_PULL_SECONDS;
+		// Rods linger past the base pull window so trapped helmeted players stay magnetised longer:
+		// +5s when fired in base Mech form, +10s in APEX form.
+		owner := get_player_by_entity_id(owner_id);
+		linger := 0.0;
+		if owner != null {
+			mech := owner.entity.get_component(Mech_Module);
+			if mech != null { linger = mech.is_apex ? MECH_MAGNET_LINGER_APEX : MECH_MAGNET_LINGER_MECH; }
+		}
+		ends_at = get_time() + MECH_MAGNET_PULL_SECONDS + linger;
 		// Settle onto solid ground ONLY if the navmesh is near the aimed spot (snaps the magnet
 		// off a wall edge onto walkable ground). If the nearest navmesh point is far — e.g. the
 		// spot is across a gap or out past the navmesh — DON'T yank it back to that distant point
@@ -3277,7 +3345,6 @@ Mech_Magnet_Node :: class : Component {
 		rr_mech_play_sfx_at("sfx/zap.wav", target_pos, 0.4);
 		// Lightning bolt crashes down onto the rod as it plants into the ground.
 		rr_mech_spawn_lightning_strike(target_pos);
-		owner := get_player_by_entity_id(owner_id);
 		if owner != null { rr_mech_add_screenshake(owner, 0.07, 0.18); }
 		// Looping electromagnet hum while the trap is live.
 		desc := SFX.default_sfx_desc();
@@ -3365,40 +3432,39 @@ Mech_Magnet_Node :: class : Component {
 	}
 }
 
-MECH_TRUCK_SCALE :: 1.4;
+MECH_TRUCK_SCALE :: 1.4;       // APEX car size
+MECH_TRUCK_SCALE_MECH :: 1.15; // base Mech car — a bit smaller than APEX's
 
-MECH_RAM_SHOVE_REASON :: "mech_ram_shove";
-MECH_RAM_SHOVE_SECONDS :: 0.35; // how long the sideways shove drives the victim
+MECH_CAR_PUSH_REASON :: "mech_car_push";
+MECH_CAR_PUSH_GRACE :: 0.18; // release the victim this long after the car last touched them
 
-// Sideways shove for players the ram clips after its first kill. Mirrors Hitman_Mine_Fling:
-// velocity is re-applied every frame for the duration (a one-shot impulse gets overwritten by
-// the movement system, so it never visibly moves the victim).
-Mech_Ram_Shove :: class : Component {
+// Plow lock: while the car has a victim in front of it, the car PINS the victim to its front bumper
+// each frame (see the plow loop in Mech_Ram_Charge_Status.ao_update) so they ride along instead of
+// being launched. This component owns only the ref-counted movement lock + the short post-contact
+// grace release — it doesn't move the victim itself; it just keeps their own input from fighting the
+// pin and zeroes any residual velocity so they don't coast/fling once the car lets go.
+Mech_Car_Push :: class : Component {
 	active: bool;
 	end_time: float;
-	dir: v2;
-	speed: float;
 
-	arm :: proc(using this: Mech_Ram_Shove, seconds: float, direction: v2, shove_speed: float) {
-		if seconds <= 0.0 { seconds = 0.1; }
-		end_time = get_time() + seconds;
-		dir = direction;
-		speed = shove_speed;
+	// Called each frame the car is plowing this victim: extends the grace window and takes the
+	// movement lock on the inactive->active edge (the reason is ref-counted, so re-locking an
+	// already-pushed victim would stack and leave them frozen).
+	refresh :: proc(using this: Mech_Car_Push) {
+		end_time = get_time() + MECH_CAR_PUSH_GRACE;
 		p := entity.get_component(Player);
 		if p != null {
-			// Ref-counted reason — only lock on the inactive->active edge so a re-arm while
-			// already shoving can't stack the lock and leave the victim frozen.
-			if !active { p.add_disable_movement_input_reason(MECH_RAM_SHOVE_REASON); }
-			p.agent.velocity = dir * speed;
+			if !active { p.add_disable_movement_input_reason(MECH_CAR_PUSH_REASON); }
+			p.agent.velocity = v2.{0, 0};
 		}
 		active = true;
 	}
 
-	release :: proc(using this: Mech_Ram_Shove) {
+	release :: proc(using this: Mech_Car_Push) {
 		if !active return;
 		active = false;
 		p := entity.get_component(Player);
-		if p != null { p.remove_disable_movement_input_reason(MECH_RAM_SHOVE_REASON); }
+		if p != null { p.remove_disable_movement_input_reason(MECH_CAR_PUSH_REASON); }
 	}
 
 	ao_update :: method(dt: float) {
@@ -3409,15 +3475,45 @@ Mech_Ram_Shove :: class : Component {
 			release(this);
 			return;
 		}
-		// Keep driving the shove velocity until it expires.
-		p.agent.velocity = dir * speed;
+		// Hold still between car contacts (no coast / fling); the car re-pins the position while
+		// it's still touching them.
+		p.agent.velocity = v2.{0, 0};
 	}
 
-	// Destroyed mid-shove (round reset / meeting teardown) — release the lock so it can't
+	// Destroyed mid-push (round reset / meeting teardown) — release the lock so it can't
 	// leak onto a player who keeps the component into the next round.
 	ao_end :: method() {
 		release(this);
 	}
+}
+
+// APEX car combo: if `victim` (being plowed) is shoved onto one of the Mech's live Magnet Rods,
+// detonate an electric blast that destroys the rod and kills the victim. Returns true if it fired
+// (the caller then skips the normal push for that victim this frame). Mirrors the rod's own zap
+// palette so it reads as the rod overloading.
+rr_mech_car_try_rod_kill :: proc(driver: Player, victim: Player) -> bool {
+	if driver == null || victim == null return false;
+	for node: component_iterator(Mech_Magnet_Node) {
+		if node == null || !#alive(node.entity) continue;
+		if !node.landed continue;
+		if !in_range(victim.entity.world_position - node.entity.world_position, MECH_CAR_ROD_KILL_RADIUS) continue;
+		at := node.entity.world_position;
+		// Electric overload blast — layered blue shockwave + white core.
+		rr_mech_spawn_shockwave(at, 0.4, 5.0, v4.{0.4, 0.85, 1.0, 0.8}, 0.4);
+		rr_mech_spawn_flash(at, 2.0, v4.{0.55, 0.9, 1.0, 0.85}, 0.32);
+		rr_mech_spawn_flash(at, 1.0, v4.{0.95, 1.0, 1.0, 0.95}, 0.2);
+		rr_mech_spawn_lightning_strike(at);
+		rr_mech_play_sfx_at("sfx/zap.wav", at, 0.5);
+		rr_mech_play_sfx_at("sfx/other_death.wav", victim.entity.world_position, 0.4);
+		rr_mech_add_screenshake(driver, 0.18, 0.3);
+		// Kill the victim and destroy the rod it overloaded.
+		rr_mech_release_guardian_pickup_if_needed(victim);
+		victim.kill_with_killer(driver.entity.id);
+		node.stop_hum();
+		node.entity.destroy();
+		return true;
+	}
+	return false;
 }
 
 Mech_Ram_Charge_Status :: class : Component {
@@ -3426,13 +3522,18 @@ Mech_Ram_Charge_Status :: class : Component {
 	ends_at: float;
 	hit: bool;
 	active: bool;
-	killed: bool; // only the first victim per ram dies; everyone else gets shoved aside
 	truck_entity: Entity;
 	truck_animator: Spine_Animator;
 	truck_skin: string;
 	next_aura_at: float;
 	truck_swap_at: float;
 	truck_swapped: bool;
+	// APEX turbo boost: a temporary speed surge with a fire jet out the back.
+	boosting: bool;
+	boost_ends_at: float;
+	boost_cd_until: float;
+	boost_fire_entity: Entity;   // looped flame rig parented behind the car while boosting
+	next_boost_flame_at: float;  // throttle for the trailing fire flashes
 
 	arm :: proc(using this: Mech_Ram_Charge_Status, direction: v2, seconds: float) {
 		dir = direction;
@@ -3440,15 +3541,16 @@ Mech_Ram_Charge_Status :: class : Component {
 		dir = normalize(dir);
 		ends_at = get_time() + seconds;
 		hit = false;
-		killed = false;
 		truck_swapped = false;
+		boosting = false;
+		boost_ends_at = 0.0;
+		boost_cd_until = 0.0;
 		p := entity.get_component(Player);
 		if p != null {
-			// Ref-counted reason — only lock on the inactive->active edge so a re-arm
-			// while already charging can't stack the lock and freeze the Mech.
-			if !active {
-				p.add_disable_movement_input_reason(MECH_LOCK_REASON);
-			}
+			// NOTE: deliberately NO movement-input lock here — the car is steered with the driver's
+			// move input, and a disable-movement reason zeroes agent.input_this_frame (see the drive
+			// logic in ao_update). The body is instead held still (input/velocity 0) until the truck
+			// reveal, then driven by writing input_this_frame.
 			// Play the transform-in anim on the mech rig first; the rig is hidden and the
 			// truck revealed only once that anim finishes (see ao_update).
 			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_out", false);
@@ -3461,6 +3563,60 @@ Mech_Ram_Charge_Status :: class : Component {
 			rr_mech_play_sfx_at("sfx/imposter_car_start_47c7ab.wav", p.entity.world_position, 0.5);
 		}
 		active = true;
+	}
+
+	// APEX turbo: kick the car into a brief fire-spewing speed surge. Gated by the caller
+	// (Mech_Car_Boost_Ability) on apex + car-active; here we just stamp the window + cooldown.
+	start_boost :: proc(using this: Mech_Ram_Charge_Status, p: Player) {
+		if !active return;
+		if get_time() < boost_cd_until return;
+		boosting = true;
+		boost_ends_at = get_time() + MECH_CAR_BOOST_SECONDS;
+		boost_cd_until = get_time() + MECH_CAR_BOOST_SECONDS + MECH_CAR_BOOST_COOLDOWN;
+		if p != null {
+			rr_mech_play_sfx_at("sfx/car_rev_up_03ff05.wav", p.entity.world_position, 0.6);
+			rr_mech_play_sfx_at("sfx/Whoosh_1e3125.wav", p.entity.world_position, 0.5);
+			rr_mech_add_screenshake(p, 0.12, 0.25);
+			// Burst of fire out the exhaust as the turbo lights.
+			behind := p.entity.world_position - dir * 0.8 + v2.{0, 0.35};
+			rr_mech_spawn_flash(behind, 1.4, v4.{1.0, 0.45, 0.08, 0.85}, 0.3);
+			rr_mech_spawn_flash(behind, 0.8, v4.{1.0, 0.85, 0.4, 0.9}, 0.22);
+		}
+	}
+
+	// Looped flame jet behind the car while boosting; torn down the instant the boost ends.
+	update_boost_fire :: proc(using this: Mech_Ram_Charge_Status, p: Player) {
+		if !boosting {
+			if boost_fire_entity != null && #alive(boost_fire_entity) { boost_fire_entity.destroy(); }
+			boost_fire_entity = null;
+			return;
+		}
+		if boost_fire_entity == null || !#alive(boost_fire_entity) {
+			e := Scene.create_entity();
+			anim := e.add_component(Spine_Animator);
+			anim.awaken();
+			anim.layer = 0;
+			if anim.instance != null {
+				anim.instance.set_skeleton(get_asset(Spine_Asset, MECH_FIRE_PILLAR_RIG));
+				anim.instance.set_animation("fire_column_loop", true, 0);
+				rr_apply_shadow_mask(anim.instance);
+			}
+			boost_fire_entity = e;
+		}
+		// Anchor at the car's rear and ROTATE the flame so it shoots straight out the back instead of
+		// pointing up. The rig's flame points +Y at rotation 0, so rotate +Y to align with -dir
+		// (backwards along travel). Stretched along its length into a jet plume.
+		rear := p.entity.world_position - dir * 0.35 + v2.{0, 0.1};
+		boost_fire_entity.set_local_position(rear);
+		boost_fire_entity.set_local_rotation(to_degrees(atan2(-dir.y, -dir.x)) - 90.0);
+		boost_fire_entity.set_local_scale(v2.{0.8, 1.45}); // narrow + long = a jet plume
+		// Dense ember trail streaming off the back, along the exhaust line.
+		if get_time() >= next_boost_flame_at {
+			tail := p.entity.world_position - dir * 1.2 + v2.{0, 0.15};
+			rr_mech_spawn_flash(tail, 0.85, v4.{1.0, 0.4, 0.06, 0.6}, 0.22);
+			rr_mech_spawn_flash(rear + v2.{0, 0.1}, 0.6, v4.{1.0, 0.78, 0.28, 0.5}, 0.16);
+			next_boost_flame_at = get_time() + 0.04;
+		}
 	}
 
 	ensure_truck :: proc(using this: Mech_Ram_Charge_Status, p: Player) {
@@ -3498,8 +3654,11 @@ Mech_Ram_Charge_Status :: class : Component {
 			truck_animator.instance.refresh_skins();
 			truck_skin = skin;
 		}
-		sx := flip ? -MECH_TRUCK_SCALE : MECH_TRUCK_SCALE;
-		truck_entity.set_local_scale(v2.{sx, MECH_TRUCK_SCALE});
+		// APEX drives the full-size truck; the base Mech's car is a bit smaller.
+		mech := p.entity.get_component(Mech_Module);
+		s := (mech != null && mech.is_apex) ? MECH_TRUCK_SCALE : MECH_TRUCK_SCALE_MECH;
+		sx := flip ? -s : s;
+		truck_entity.set_local_scale(v2.{sx, s});
 	}
 
 	restore_mech :: proc(using this: Mech_Ram_Charge_Status, p: Player) {
@@ -3507,7 +3666,14 @@ Mech_Ram_Charge_Status :: class : Component {
 		truck_entity = null;
 		truck_animator = null;
 		truck_swapped = false;
+		boosting = false;
+		if boost_fire_entity != null && #alive(boost_fire_entity) { boost_fire_entity.destroy(); }
+		boost_fire_entity = null;
 		if p == null return;
+		// Hand back the normal walk speed + stop driving (the drive bumped movement_speed and wrote
+		// input_this_frame every frame).
+		if p.baseline_movement_speed_saved { p.agent.movement_speed = p.baseline_movement_speed; }
+		p.agent.input_this_frame = v2.{0, 0};
 		mech := p.entity.get_component(Mech_Module);
 		if mech != null && mech.creature_entity != null && #alive(mech.creature_entity) {
 			mech.creature_entity.set_local_enabled(mech.creature_visible);
@@ -3519,7 +3685,6 @@ Mech_Ram_Charge_Status :: class : Component {
 		p := entity.get_component(Player);
 		if p == null { return; }
 		if get_time() >= ends_at || p.player_state != Player_State.ALIVE {
-			p.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 			restore_mech(this, p);
 			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_In", false);
 			rr_mech_spawn_transform_vfx(p);
@@ -3545,62 +3710,84 @@ Mech_Ram_Charge_Status :: class : Component {
 			truck_swapped = true;
 		}
 
-		if mech != null && mech.is_apex && length_squared(p.last_aim_direction) > 0.01 {
-			desired := normalize(p.last_aim_direction);
+		// Hold the body still during the brief transform-in, then start driving once the truck is out.
+		if !truck_swapped {
+			p.agent.input_this_frame = v2.{0, 0};
+			p.agent.velocity = v2.{0, 0};
+			return;
+		}
+
+		// Steer the car with the driver's MOVE input (joystick / WASD), read from input_this_frame
+		// BEFORE we overwrite it below to drive. No deadzone snap — small nudges just bend the
+		// heading. BOTH forms steer; APEX is just faster + boostable.
+		steer := p.agent.input_this_frame;
+		if length_squared(steer) > 0.04 {
+			desired := normalize(steer);
 			dir = normalize(lerp(dir, desired, clamp(dt * MECH_APEX_RAM_TURN_RATE, 0.0, 1.0)));
 		}
-		if truck_swapped { update_truck(this, p); }
+		update_truck(this, p);
 
-		// APEX power aura: a pulsing energy trail around the charging truck.
-		if mech != null && mech.is_apex && get_time() >= next_aura_at {
+		// --- APEX turbo boost: time out the surge, spew the fire jet. ---
+		apex := mech != null && mech.is_apex;
+		if boosting && (get_time() >= boost_ends_at || !apex) { boosting = false; }
+		update_boost_fire(this, p);
+
+		// APEX power aura: a pulsing energy trail around the truck.
+		if apex && get_time() >= next_aura_at {
 			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.4}, 1.1, v4.{1.0, 0.35, 0.08, 0.5}, 0.22);
 			next_aura_at = get_time() + 0.06;
 		}
 
-		p.agent.velocity = dir * MECH_RAM_SPEED;
-		// Continuous ground-rumble while charging. Re-armed each frame with a short decay
-		// window so the amplitude stays roughly steady for the whole ram (max() in arm()
-		// means per-kill jolts below still punch through on top of it).
-		rr_mech_add_screenshake(p, 0.05, 0.12);
-		// Plow straight through: the FIRST victim contacted this ram gets flattened; everyone
-		// else hit afterwards is shoved out of the car's path instead of killed. Don't stop on
-		// first contact, and don't break — keep barreling for the full duration. Killed players
-		// drop out next frame via the ALIVE check, so they're never re-hit.
+		// Drive: scale movement_speed off the player's baseline and FORCE the move input to the car's
+		// heading, so the agent's own movement system carries the car forward (it ignores a directly
+		// set velocity once input is non-zero). The plow pushes victims at this same world speed.
+		base := p.baseline_movement_speed_saved ? p.baseline_movement_speed : p.agent.movement_speed;
+		car_speed := base * MECH_CAR_SPEED_MULT;
+		if boosting { car_speed = car_speed * MECH_CAR_BOOST_MULT; }
+		p.agent.movement_speed = car_speed;
+		p.agent.input_this_frame = dir;
+		p.set_facing_right(dir.x >= 0.0);
+		// Continuous ground-rumble while driving (re-armed each frame with a short decay window so the
+		// amplitude stays roughly steady; the per-hit jolts below still punch through on top).
+		rr_mech_add_screenshake(p, boosting ? 0.08 : 0.05, 0.12);
+
+		// --- Plow: scoop up every victim in front of the car and PIN them to the bumper so they ride
+		// along with it (no longer a dash-kill, and no fling — they're held just in front, not given a
+		// big velocity). A victim shoved into a Magnet Rod by an APEX car triggers an electric blast
+		// that destroys the rod and kills them (the only lethal outcome of the drive). ---
+		car_pos := p.entity.world_position;
+		forward := dir;
+		perp := v2.{-dir.y, dir.x};
 		for target: component_iterator(Player) {
 			if target == null || target == p continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
-			if !in_range(target.entity.world_position - p.entity.world_position, MECH_RAM_HIT_RADIUS) continue;
-			if !killed {
-				rr_mech_release_guardian_pickup_if_needed(target);
-				target.kill_with_killer(p.entity.id);
-				rr_mech_spawn_flash(target.entity.world_position, 1.0, v4.{1.0, 0.3, 0.08, 0.75}, 0.28);
-				rr_mech_add_screenshake(p, 0.12, 0.22);
-				rr_mech_play_sfx_at("sfx/other_death.wav", target.entity.world_position, 0.38);
-				killed = true;
-			} else {
-				// Shove sideways, off the line the car is travelling along. Pick the side the
-				// victim is already on (perpendicular to dir) so they're pushed clear, not across.
-				perp := v2.{-dir.y, dir.x};
-				rel := target.entity.world_position - p.entity.world_position;
-				if (rel.x * perp.x + rel.y * perp.y) < 0.0 { perp = perp * -1.0; }
-				shove := target.entity.get_component(Mech_Ram_Shove);
-				if shove == null { shove = target.entity.add_component(Mech_Ram_Shove); }
-				// Don't re-arm while a shove is still active — arm() adds a ref-counted
-				// movement-disable reason, so re-arming every frame would freeze the victim.
-				if !shove.active {
-					shove.arm(MECH_RAM_SHOVE_SECONDS, normalize(perp), MECH_RAM_SHOVE_SPEED);
-				}
-			}
+			rel := target.entity.world_position - car_pos;
+			fwd_dist := rel.x * forward.x + rel.y * forward.y;   // how far ahead along travel
+			lat := rel.x * perp.x + rel.y * perp.y;               // signed sideways offset from the path
+			// Only catch victims roughly in front of the car and within the plow lane.
+			if fwd_dist < -0.4 || fwd_dist > MECH_RAM_HIT_RADIUS continue;
+			if abs(lat) > MECH_RAM_PLOW_HALF_WIDTH continue;
+
+			// APEX-only lethal combo: pushed into one of the Mech's own Magnet Rods.
+			if apex && rr_mech_car_try_rod_kill(p, target) continue;
+
+			// Lock their input + grace (so they don't walk away or coast off), then pin them to the
+			// bumper: a fixed standoff straight ahead, keeping their current sideways offset so a
+			// cluster spreads across the front instead of stacking on the centre line.
+			push := target.entity.get_component(Mech_Car_Push);
+			if push == null { push = target.entity.add_component(Mech_Car_Push); }
+			push.refresh();
+			bumper := car_pos + forward * MECH_RAM_PLOW_STANDOFF + perp * clamp(lat, -MECH_RAM_PLOW_HALF_WIDTH, MECH_RAM_PLOW_HALF_WIDTH);
+			target.entity.set_local_position(bumper);
+			target.agent.velocity = v2.{0, 0};
 		}
 	}
 
 	ao_end :: method() {
-		// Cleanup if destroyed mid-charge (round end, etc.). Only release the lock when still
-		// active — arm() adds it on the inactive->active edge and ao_update removes it on normal
-		// completion, so removing again here would underflow the ref count.
+		// Cleanup if destroyed mid-drive (round end, etc.): restore_mech hands back the walk speed,
+		// stops the driven input, and tears down the truck + boost fire.
 		p := entity.get_component(Player);
-		if active && p != null { p.remove_disable_movement_input_reason(MECH_LOCK_REASON); }
 		active = false;
 		restore_mech(this, p);
 	}
@@ -3887,6 +4074,238 @@ Guardian_Transform_Ability :: class : Ability_Base {
 	on_draw_button :: proc(instance: Guardian_Transform_Ability, rect: Rect) { draw_ability_name_label(rect, "Transform"); }
 }
 
+// ============================ Guardian Shockwave =============================
+// The Guardian's anti-monster nuke. Slams the ground (009SG/Smash_Task) and electrocutes every
+// transformed monster in an AOE around it — the Mech (mech/APEX), Werewolf, Mimicer, Big Charlie
+// and Lily. Each caught monster is given a Guardian_Shock_Status: a red warning + countdown, all
+// abilities locked (they can still run/escape), and after the warning they're forced out of their
+// form and stay locked out for the cooldown.
+
+// True if `p` is currently in a monster transform form the Guardian shockwave can disrupt.
+rr_player_is_transformed_monster :: proc(p: Player) -> bool {
+	if p == null || !#alive(p.entity) return false;
+	if p.player_state != Player_State.ALIVE return false;
+	mech := p.entity.get_component(Mech_Module);
+	if mech != null && (mech.is_mech_form || mech.is_apex) return true;
+	wm := p.entity.get_component(Werewolf_Module);
+	if wm != null && wm.is_wolf_form return true;
+	mm := p.entity.get_component(Mimicer_Module);
+	if mm != null && (mm.is_monster_form || mm.is_ultimate_form) return true;
+	bc := p.entity.get_component(Big_Charlie_Module);
+	if bc != null && bc.is_big_charlie_form return true;
+	lm := p.entity.get_component(Lily_Module);
+	if lm != null && lm.is_lily_form return true;
+	return false;
+}
+
+// Applied to a monster caught in the Guardian shockwave (APEX Mechs are immune — see
+// rr_guardian_fire_shockwave). While active (the warning window) every ability is hard-locked but
+// movement is free, so they can flee. At the warning's end they're forced out of their form, every
+// ability is slapped on cooldown for a bit (the "lockout"), and the status releases.
+Guardian_Shock_Status :: class : Component {
+	active: bool;
+	warning_ends_at: float;
+	next_zap_at: float;
+
+	arm :: proc(using this: Guardian_Shock_Status) {
+		active = true;
+		warning_ends_at = get_time() + MECH_GUARDIAN_SHOCK_WARNING;
+		next_zap_at = 0.0;
+	}
+
+	deactivate :: proc(using this: Guardian_Shock_Status) {
+		active = false;
+	}
+
+	// Force the monster out of whatever form it's in. Reuses each role's own revert path so the
+	// teardown matches the meeting revert exactly. APEX Mechs are never here (immune), so the Mech
+	// branch only handles the normal Mech form.
+	do_revert :: proc(using this: Guardian_Shock_Status, p: Player) {
+		if p == null return;
+		mech := p.entity.get_component(Mech_Module);
+		if mech != null && mech.is_mech_form && !mech.is_apex {
+			// rr_mech_force_revert hides the avatar + tears down any Ram car but PRESERVES the form
+			// flag; flip it off afterwards so the de-transform actually sticks.
+			rr_mech_force_revert(p);
+			mech.is_mech_form = false;
+		}
+		wm := p.entity.get_component(Werewolf_Module);
+		if wm != null && wm.is_wolf_form {
+			wm.is_wolf_form = false;
+			wm.transform_ends_at = 0.0;
+			p.set_trigger("RESET");
+			rr_werewolf_disable_wolf_look(p);
+		}
+		mm := p.entity.get_component(Mimicer_Module);
+		if mm != null && (mm.is_monster_form || mm.is_ultimate_form) { rr_mimicer_force_revert(p); }
+		bc := p.entity.get_component(Big_Charlie_Module);
+		if bc != null && bc.is_big_charlie_form { rr_bc_force_revert(p); }
+		lm := p.entity.get_component(Lily_Module);
+		if lm != null && lm.is_lily_form { rr_lily_force_revert(p); }
+	}
+
+	ao_update :: method(dt: float) {
+		if !active return;
+		p := entity.get_component(Player);
+		if p == null { active = false; return; }
+		if p.player_state != Player_State.ALIVE { deactivate(this); return; }
+		if game_state != Game_State.INGAME { deactivate(this); return; }
+		// APEX is immune: if the victim is (or awakened into) an APEX Mech, the shock just fizzles off.
+		mech := p.entity.get_component(Mech_Module);
+		if mech != null && mech.is_apex {
+			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.7}, 0.8, v4.{0.6, 0.9, 1.0, 0.55}, 0.25);
+			deactivate(this);
+			return;
+		}
+		// Electric arcs crackle over the victim through the warning.
+		if get_time() >= next_zap_at {
+			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.7}, 0.55, v4.{0.55, 0.9, 1.0, 0.7}, 0.2);
+			rr_mech_play_sfx_at("sfx/zap.wav", p.entity.world_position, 0.16);
+			next_zap_at = get_time() + 0.45;
+		}
+		// Warning elapsed -> force them out of their form, drop the UI + hard-lock, and instead slap
+		// every ability on cooldown for a bit so they can't immediately act / re-transform. Then release.
+		if get_time() >= warning_ends_at {
+			do_revert(this, p);
+			rr_mech_put_all_abilities_on_cooldown(p, MECH_GUARDIAN_SHOCK_LOCKOUT);
+			rr_mech_spawn_shockwave(p.entity.world_position, 0.4, 4.0, v4.{0.5, 0.85, 1.0, 0.8}, 0.45);
+			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.5}, 1.4, v4.{0.8, 0.95, 1.0, 0.85}, 0.3);
+			rr_mech_play_sfx_at("sfx/zap.wav", p.entity.world_position, 0.4);
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position, 0.32);
+			deactivate(this);
+		}
+	}
+
+	ao_end :: method() {
+		active = false;
+	}
+}
+
+// Slam + electrocute every transformed monster within the shockwave AOE.
+rr_guardian_fire_shockwave :: proc(player: Player) {
+	if player == null return;
+	origin := player.entity.world_position;
+	// Guardian attack animation + the slam's electric shockwave.
+	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false);
+	rr_mech_spawn_shockwave(origin, 0.5, MECH_GUARDIAN_SHOCK_RADIUS * 2.0, v4.{0.45, 0.85, 1.0, 0.7}, 0.55);
+	rr_mech_spawn_shockwave(origin, 0.3, MECH_GUARDIAN_SHOCK_RADIUS * 1.3, v4.{0.85, 0.95, 1.0, 0.6}, 0.45);
+	rr_mech_spawn_flash(origin + v2.{0, 0.5}, 2.0, v4.{0.7, 0.9, 1.0, 0.7}, 0.3);
+	rr_mech_play_sfx_at("sfx/zap.wav", origin, 0.5);
+	rr_mech_play_sfx_at("sfx/killer_transform.wav", origin, 0.3);
+	rr_mech_add_screenshake(player, 0.2, 0.35);
+	for target: component_iterator(Player) {
+		if target == null || target == player continue;
+		if !rr_player_is_transformed_monster(target) continue;
+		if !in_range(target.entity.world_position - origin, MECH_GUARDIAN_SHOCK_RADIUS) continue;
+		// APEX Mechs are immune — the shockwave just arcs harmlessly off them (VFX only, no disrupt).
+		tmech := target.entity.get_component(Mech_Module);
+		if tmech != null && tmech.is_apex {
+			rr_mech_spawn_shockwave(target.entity.world_position, 0.3, 3.0, v4.{0.5, 0.85, 1.0, 0.55}, 0.35);
+			rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.8}, 1.2, v4.{0.7, 0.95, 1.0, 0.7}, 0.3);
+			rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position, 0.4);
+			continue;
+		}
+		rr_guardian_apply_shock(target);
+	}
+}
+
+// Mark a single monster as shocked (no-op if already disrupted, so it can't be re-triggered to
+// extend the lock).
+rr_guardian_apply_shock :: proc(target: Player) {
+	if target == null || !#alive(target.entity) return;
+	sh := target.entity.get_component(Guardian_Shock_Status);
+	if sh == null { sh = target.entity.add_component(Guardian_Shock_Status); }
+	if sh.active return;
+	sh.arm();
+	rr_mech_spawn_shockwave(target.entity.world_position, 0.3, 3.5, v4.{0.5, 0.85, 1.0, 0.7}, 0.4);
+	rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.7}, 1.0, v4.{0.7, 0.95, 1.0, 0.8}, 0.28);
+	rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position, 0.4);
+}
+
+Guardian_Shockwave_Ability :: class : Ability_Base {
+	on_init :: proc(a: Guardian_Shockwave_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Smash_Task_Icon.png"); }
+	can_use :: method() -> bool {
+		if player.player_role != Player_Role.GUARDIAN || player.player_state != Player_State.ALIVE return false;
+		guard := player.entity.get_component(Guardian_Module);
+		return guard != null && guard.is_guardian_form;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			rr_guardian_fire_shockwave(player);
+			current_cooldown = MECH_GUARDIAN_SHOCK_COOLDOWN;
+		}
+	}
+	on_draw_button :: proc(instance: Guardian_Shockwave_Ability, rect: Rect) { draw_ability_name_label(rect, "Shock"); }
+}
+
+// Victim-side HUD: pulsing red hue + a warning banner counting down to the forced de-transform.
+// Shown ONLY during the warning window — once the forced revert fires the UI vanishes (the lockout
+// is then just ability cooldowns). Local viewer only.
+rr_guardian_draw_shock_warning :: proc(player: Player) {
+	if player == null return;
+	if !player.is_local_or_server() return;
+	if game_state != Game_State.INGAME return;
+	sh := player.entity.get_component(Guardian_Shock_Status);
+	if sh == null || !sh.active return;
+
+	UI.push_screen_draw_context();
+	defer UI.pop_draw_context();
+	UI.push_layer(9700);
+	defer UI.pop_layer();
+
+	// Pulsing red hue over the whole screen.
+	pulse := 0.5 + sin(get_time() * 5.0) * 0.5;
+	UI.quad(UI.get_screen_rect(), core_globals.white_sprite, v4.{0.85, 0.08, 0.06, 0.16 + pulse * 0.12});
+
+	_pushed_scale := rr_push_mobile_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
+	screen := UI.get_safe_screen_rect();
+	cx := (screen.min.x + screen.max.x) * 0.5;
+	band_w := clamp(screen.width() * 0.6, 320.0, 680.0);
+	band_h := 120.0;
+	top_y := screen.min.y + screen.height() * 0.18;
+	half_w := band_w * 0.5;
+	band := Rect{v2.{cx - half_w, top_y}, v2.{cx + half_w, top_y + band_h}};
+
+	gp := 6.0 + pulse * 5.0;
+	UI.quad(band.grow(gp, gp, gp, gp), core_globals.white_sprite, v4.{0.95, 0.16, 0.1, 0.4 + pulse * 0.2});
+	UI.quad(band, core_globals.white_sprite, v4.{0.09, 0.05, 0.06, 0.96});
+
+	inner := band.inset(18.0, 14.0, 18.0, 14.0);
+	title_rect := inner.cut_top(inner.height() * 0.55);
+	title_ts := UI.default_text_settings();
+	title_ts.size = 30;
+	title_ts.halign = .CENTER;
+	title_ts.valign = .CENTER;
+	title_ts.do_outline = true;
+	title_ts.outline_thickness = 5;
+	title_ts.outline_color = v4.{0, 0, 0, 1};
+	title_ts.do_autofit = true;
+	title_ts.autofit_min_size = 18;
+	title_ts.autofit_max_size = 32;
+	title_ts.color = v4.{1.0, 0.3, 0.24, 1.0};
+	UI.text(title_rect, title_ts, "FORM DESTABILIZED");
+
+	sub_ts := UI.default_text_settings();
+	sub_ts.size = 22;
+	sub_ts.halign = .CENTER;
+	sub_ts.valign = .CENTER;
+	sub_ts.do_outline = true;
+	sub_ts.outline_thickness = 4;
+	sub_ts.outline_color = v4.{0, 0, 0, 1};
+	sub_ts.do_autofit = true;
+	sub_ts.autofit_min_size = 14;
+	sub_ts.autofit_max_size = 24;
+	sub_ts.color = v4.{1.0, 0.92, 0.85, 1.0};
+	secs := sh.warning_ends_at - get_time();
+	if secs < 0.0 { secs = 0.0; }
+	si := secs.(int);
+	if secs - si.(float) > 0.001 { si += 1; }
+	if si < 1 { si = 1; }
+	UI.text(inner, sub_ts, "De-transforming in %... abilities locked", .{si});
+}
+
 Mech_Smash_Task_Ability :: class : Ability_Base {
 	on_init :: proc(a: Mech_Smash_Task_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Smash_Task_Icon.png"); }
 	can_use :: method() -> bool {
@@ -4067,6 +4486,98 @@ Mech_Ram_Charge_Ability :: class : Ability_Base {
 		}
 	}
 	on_draw_button :: proc(instance: Mech_Ram_Charge_Ability, rect: Rect) { draw_ability_name_label(rect, "Ram"); }
+}
+
+// True while this player's Ram car is actually driving (truck out, not the brief transform-in).
+rr_mech_car_is_active :: proc(player: Player) -> bool {
+	if player == null return false;
+	st := player.entity.get_component(Mech_Ram_Charge_Status);
+	return st != null && st.active;
+}
+
+// APEX-only turbo for the car: lights a fire jet and surges the car's speed for a short window.
+// Only available while the car is driving (gated on the live Ram status).
+Mech_Car_Boost_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Car_Boost_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/pyro/set_fire.png"); }
+	can_use :: method() -> bool {
+		mech := player.entity.get_component(Mech_Module);
+		if mech == null || !mech.is_apex || player.player_state != Player_State.ALIVE return false;
+		st := player.entity.get_component(Mech_Ram_Charge_Status);
+		if st == null || !st.active || st.boosting return false;
+		return get_time() >= st.boost_cd_until;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			st := player.entity.get_component(Mech_Ram_Charge_Status);
+			if st == null return;
+			st.start_boost(player);
+			current_cooldown = MECH_CAR_BOOST_SECONDS + MECH_CAR_BOOST_COOLDOWN;
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Car_Boost_Ability, rect: Rect) { draw_ability_name_label(rect, "Boost"); }
+}
+
+// Bail out of the car early — ends the drive now (transforms back to the Mech). Available in both
+// forms while driving. Setting ends_at to now lets the normal completion path in ao_update run the
+// revert + transform-in anim next frame.
+Mech_Car_Exit_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Car_Exit_Ability) { a.icon = get_asset(Texture_Asset, "sprites/tasks/cypher/icons/icon_schleem.png"); }
+	can_use :: method() -> bool {
+		return rr_mech_car_is_active(player) && player.player_state == Player_State.ALIVE;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			st := player.entity.get_component(Mech_Ram_Charge_Status);
+			if st != null { st.ends_at = get_time(); }
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Car_Exit_Ability, rect: Rect) { draw_ability_name_label(rect, "Exit"); }
+}
+
+// Driver HUD: a compact top-centre countdown of how long is left in the car. Local driver only.
+rr_mech_draw_car_hud :: proc(player: Player) {
+	if player == null return;
+	if !player.is_local_or_server() return;
+	if game_state != Game_State.INGAME return;
+	st := player.entity.get_component(Mech_Ram_Charge_Status);
+	if st == null || !st.active return;
+
+	rem := st.ends_at - get_time();
+	if rem < 0.0 { rem = 0.0; }
+	si := rem.(int);
+	if rem - si.(float) > 0.001 { si += 1; }
+
+	UI.push_screen_draw_context();
+	defer UI.pop_draw_context();
+	UI.push_layer(9600);
+	defer UI.pop_layer();
+	_pushed_scale := rr_push_mobile_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
+	screen := UI.get_safe_screen_rect();
+	cx := (screen.min.x + screen.max.x) * 0.5;
+	w := 138.0;
+	h := 54.0;
+	top := screen.min.y + 22.0;
+	panel := Rect{v2.{cx - w * 0.5, top}, v2.{cx + w * 0.5, top + h}};
+	UI.quad(panel.grow(4, 4, 4, 4), core_globals.white_sprite, v4.{1.0, 0.55, 0.1, 0.45});
+	UI.quad(panel, core_globals.white_sprite, v4.{0.08, 0.06, 0.05, 0.93});
+
+	inner := panel.inset(8.0, 6.0, 8.0, 6.0);
+	icon := get_asset(Texture_Asset, "sprites/icons/mech/Ram_Icon.png");
+	icon_slot := inner.cut_left(inner.height());
+	if icon != null { UI.quad(icon_slot.fit_aspect(icon.get_aspect()), icon, v4.{1, 1, 1, 1}); }
+	inner.cut_left(8.0);
+
+	ts := UI.default_text_settings();
+	ts.size = 32;
+	ts.halign = .LEFT;
+	ts.valign = .CENTER;
+	ts.do_outline = true;
+	ts.outline_thickness = 5;
+	ts.outline_color = v4.{0, 0, 0, 1};
+	ts.color = v4.{1.0, 0.85, 0.3, 1.0};
+	UI.text(inner, ts, "%s", .{si});
 }
 
 // Snaps a chosen point onto the navmesh so magnets always land on walkable ground.
@@ -4467,6 +4978,9 @@ rr_mech_awaken_apex :: proc(player: Player) {
 	mech.is_apex = true;
 	mech.is_mech_form = true;
 	mech.apex_used = true;
+	// Clear any active Showdown cooldown so the Guardian always gets a fresh challenge against the
+	// titan form. APEX is once per game, so this naturally fires only once.
+	rr_mech_reset_guardian_showdown_cooldowns();
 	// Hold the pre-APEX mech skin and morph into APEX partway through the transform anim
 	// (rr_mech_update flips this at apex_reveal_at) so the body visibly transforms.
 	mech.apex_skin_revealed = false;
@@ -4869,13 +5383,25 @@ rr_guardian_throw_player :: proc(carrier: Player, target: Player, killer_id: u64
 	rr_mech_throw_player(carrier, target, killer_id, aim_dir);
 }
 
-rr_guardian_can_showdown :: proc(player: Player) -> bool {
+// A Mech is a valid Showdown target while in a titan form (regular Mech OR APEX) and not already
+// downed. The is_apex split only matters at resolution: an APEX loss strips the form (survive),
+// a regular Mech-form loss downs (then kills) it. Schleem/human form is never challengeable.
+rr_mech_is_showdown_target :: proc(mech: Mech_Module) -> bool {
+	if mech == null return false;
+	if mech.showdown_downed return false;
+	return mech.is_apex || mech.is_mech_form;
+}
+
+// Guardian form + a valid Mech target in melee range. Does NOT consider the re-challenge cooldown:
+// that's surfaced as the Showdown button's current_cooldown so it stays visible and greys with a
+// countdown like every other ability (rather than vanishing).
+rr_guardian_has_showdown_target :: proc(player: Player) -> bool {
 	guard := player.entity.get_component(Guardian_Module);
 	if guard == null || !guard.is_guardian_form return false;
 	for p: component_iterator(Player) {
 		if p == null || p.player_state != Player_State.ALIVE continue;
 		mech := p.entity.get_component(Mech_Module);
-		if mech == null || !mech.is_apex continue;
+		if !rr_mech_is_showdown_target(mech) continue;
 		if in_range(p.entity.world_position - player.entity.world_position, MECH_MELEE_RANGE) return true;
 	}
 	return false;
@@ -4893,12 +5419,12 @@ rr_any_mech_apex_active :: proc() -> bool {
 	return false;
 }
 
-rr_guardian_find_apex :: proc(player: Player) -> Player {
+rr_guardian_find_showdown_target :: proc(player: Player) -> Player {
 	finder := make_finder(Player, player.entity.world_position, MECH_MELEE_RANGE);
 	for p: component_iterator(Player) {
 		if p == null || p.player_state != Player_State.ALIVE continue;
 		mech := p.entity.get_component(Mech_Module);
-		if mech == null || !mech.is_apex continue;
+		if !rr_mech_is_showdown_target(mech) continue;
 		finder.check(p, p.entity.world_position);
 	}
 	return finder.closest;
@@ -4909,13 +5435,20 @@ Guardian_Showdown_Ability :: class : Ability_Base {
 	can_use :: method() -> bool {
 		guard := player.entity.get_component(Guardian_Module);
 		if guard == null || guard.showdown_active return false;
-		return rr_guardian_can_showdown(player);
+		return rr_guardian_has_showdown_target(player);
 	}
 	on_update :: method(params: ref Ability_Update_Params) {
+		guard := player.entity.get_component(Guardian_Module);
+		// Surface the long re-challenge cooldown as the standard greyed button + countdown, so the
+		// Showdown button stays visible (next to the Mech) instead of vanishing during the cooldown.
+		if guard != null {
+			rem := guard.showdown_cooldown_until - get_time();
+			current_cooldown = rem > 0.0 ? rem : 0.0;
+		}
 		if params.clicked && params.can_use {
-			guard := player.entity.get_component(Guardian_Module);
 			if guard == null || guard.showdown_active return;
-			apex := rr_guardian_find_apex(player);
+			if get_time() < guard.showdown_cooldown_until return; // still on cooldown
+			apex := rr_guardian_find_showdown_target(player);
 			if apex == null return;
 			mech := apex.entity.get_component(Mech_Module);
 			if mech == null return;
@@ -5010,6 +5543,10 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 		mech_opp.set_facing_right(!guard_is_left);
 	}
 	if get_time() < guard.showdown_ends_at return;
+	// Re-arm the long re-challenge cooldown the instant the Showdown resolves (any outcome).
+	// Only an APEX awaken clears it early (rr_mech_awaken_apex), guaranteeing the Guardian a
+	// fresh crack at the titan form.
+	guard.showdown_cooldown_until = get_time() + MECH_SHOWDOWN_COOLDOWN;
 	mech_player := get_player_by_entity_id(guard.showdown_opponent_id);
 	mech_mashes := 0;
 	if mech_player != null {
@@ -5019,19 +5556,46 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 	clash_pos := player.entity.world_position;
 	if mech_player != null { clash_pos = (player.entity.world_position + mech_player.entity.world_position) * 0.5; }
 	if guard.showdown_mashes >= mech_mashes {
+		// The Guardian won — the Mech loses. Its fate depends on the form it lost in.
+		mech_was_apex := false; mech_went_down := false;
 		if mech_player != null {
 			mech := mech_player.entity.get_component(Mech_Module);
 			if mech != null {
-				mech.is_apex = false;
-				// Stay a REGULAR mech (NOT schleem); the human body only returns later when the player Transforms back.
-				mech.apex_skin_revealed = false;
-				mech.apex_lost = true;
+				mech_was_apex = mech.is_apex;
 				mech.showdown_active = false;
-				rr_mech_show_avatar(mech_player, true); // force the regular-mech avatar visible (re-enables rig + mech skin; human stays hidden)
-				rr_mech_play_avatar_anim(mech_player, "009SG/Showdown_Lose_Survive", false);
-				mech_player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
-				rr_mech_put_all_abilities_on_cooldown(mech_player, MECH_SHOWDOWN_LOSER_COOLDOWN);
-				mech_player.Notify("APEX form lost!");
+				if mech.is_apex {
+					// APEX loss — the titan form is broken but the Mech SURVIVES (it had a buffer).
+					mech.is_apex = false;
+					// Stay a REGULAR mech (NOT schleem); the human body only returns later when the player Transforms back.
+					mech.apex_skin_revealed = false;
+					mech.apex_lost = true;
+					rr_mech_show_avatar(mech_player, true); // force the regular-mech avatar visible (re-enables rig + mech skin; human stays hidden)
+					rr_mech_play_avatar_anim(mech_player, "009SG/Showdown_Lose_Survive", false);
+					mech_player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+					rr_mech_put_all_abilities_on_cooldown(mech_player, MECH_SHOWDOWN_LOSER_COOLDOWN);
+					mech_player.Notify("APEX form lost!");
+				} else {
+					// Regular Mech-form loss — no buffer. The Mech is FAKE-killed: it plays the
+					// lose-death and freezes on the last frame (downed), NOT an immediate real death.
+					// Movement stays LOCKED (the body is frozen on the death pose). From here a living
+					// Minion can revive it once per game; if no revive is possible (no Minion, or the
+					// revive was already spent on an earlier down) it bleeds out to a REAL death —
+					// rr_mech_update_showdown_for_mech drives both outcomes.
+					rr_mech_show_avatar(mech_player, true);
+					rr_mech_play_avatar_anim(mech_player, "009SG/Showdown_Lose_Death", false);
+					// Also hold the death pose on the arm-overlay track (track 1). Without this,
+					// rr_mech_update_overlay mirrors the base anim onto track 1 as a LOOP and replays
+					// the death over and over instead of freezing on the last frame.
+					rr_mech_play_overlay_oneshot(mech_player, "009SG/Showdown_Lose_Death");
+					mech.showdown_death_killer_id = player.entity.id; // the winning Guardian
+					mech.showdown_downed = true;
+					mech_went_down = true;
+					if !mech.minion_revive_used && rr_mech_get_living_minion(mech_player) != null {
+						mech_player.Notify("Downed! Call your Minion — it can revive you once.");
+					} else {
+						mech_player.Notify("Downed by the Guardian — no one left to revive you...");
+					}
+				}
 			}
 		}
 		rr_mech_play_avatar_anim(player, "009SG/Showdown_Win", false);
@@ -5045,7 +5609,9 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 		rr_mech_spawn_flash(clash_pos, 0.7, v4.{1.0, 1.0, 1.0, 0.95}, 0.3);
 		rr_mech_add_screenshake(player, 0.18, 0.45);
 		if mech_player != null { rr_mech_add_screenshake(mech_player, 0.18, 0.45); }
-		player.Notify("You broke APEX!");
+		if mech_was_apex { player.Notify("You broke APEX!"); }
+		else if mech_went_down { player.Notify("You downed the Mech!"); }
+		else { player.Notify("You slew the Mech!"); }
 	} else if mech_player != null {
 		mech := mech_player.entity.get_component(Mech_Module);
 		if mech != null {
@@ -5382,7 +5948,40 @@ rr_mech_draw_showdown_hud :: proc(player: Player) {
 }
 
 rr_mech_update_showdown_for_mech :: proc(player: Player, mech: Mech_Module) {
-	if mech == null || !mech.showdown_active return;
+	if mech == null return;
+
+	// Pending lost-Showdown death (regular Mech-form loss with no revive available): the kill
+	// fires at the end of the lose-death anim. Mirrors the Guardian's showdown_death_at path,
+	// and is checked first since the showdown itself is already resolved by the time this lands.
+	if mech.showdown_death_at > 0.0 && get_time() >= mech.showdown_death_at {
+		mech.showdown_death_at = 0.0;
+		mech.showdown_downed = false;
+		player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+		player.kill_with_killer(mech.showdown_death_killer_id);
+		return;
+	}
+
+	// Faked death (downed): hold the lose-death pose frozen on its last frame by keeping the
+	// locomotion anim-lock ahead, and stay movement-locked. A living Minion can revive it once per
+	// game (see Mech_Revive_Master_Ability). If NO revive is possible — the once-per-game revive is
+	// already spent, or there's no living Minion to reach it — the faked death becomes a REAL death
+	// after a brief hold on the pose (showdown_death_at, fired by the kill check above).
+	if mech.showdown_downed {
+		// Keep BOTH spine tracks frozen on the lose-death last frame: anim_lock_until gates the
+		// track-0 locomotion, overlay_clear_at gates the track-1 arm overlay (rr_mech_update_overlay
+		// returns early while this is ahead) so neither resumes/loops over the held pose.
+		mech.anim_lock_until = get_time() + 1.0;
+		mech.overlay_clear_at = get_time() + 1.0;
+		revive_possible := !mech.minion_revive_used && rr_mech_get_living_minion(player) != null;
+		if revive_possible {
+			mech.showdown_death_at = 0.0; // a revive is on the table — cancel any pending bleed-out
+		} else if mech.showdown_death_at == 0.0 {
+			mech.showdown_death_at = get_time() + MECH_SHOWDOWN_FAKEDEATH_HOLD;
+		}
+		return;
+	}
+
+	if !mech.showdown_active return;
 	// Lock applied once at showdown start, released on resolution — don't re-add per
 	// frame (ref-counted reason would leak and freeze the Mech after the showdown).
 	if get_time() >= mech.showdown_ends_at {
@@ -5395,6 +5994,120 @@ rr_mech_update_showdown_for_mech :: proc(player: Player, mech: Mech_Module) {
 			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 		}
 	}
+}
+
+// Clears the Showdown re-challenge cooldown on every Guardian. Called once when a Mech awakens APEX
+// (rr_mech_awaken_apex) so the Guardian always gets a fresh challenge against the new titan form.
+rr_mech_reset_guardian_showdown_cooldowns :: proc() {
+	for p: component_iterator(Player) {
+		if p == null continue;
+		guard := p.entity.get_component(Guardian_Module);
+		if guard != null { guard.showdown_cooldown_until = 0.0; }
+	}
+}
+
+// "Call Minion" distress ping fired by a downed (faked-death) Mech: a desperate roar + a red pulse
+// flash at the Mech, plus a direct notification to its living Minion to come revive it. There is NO
+// teleport — the Minion travels over on its own, guided by the world-space arrow drawn in
+// rr_mech_draw_downed_revive_ui.
+rr_mech_call_minion :: proc(mech_player: Player) {
+	if mech_player == null || !#alive(mech_player.entity) return;
+	pos := mech_player.entity.world_position;
+	rr_mech_play_sfx_at("sfx/roar_f23931.wav", pos, 0.45);
+	rr_mech_spawn_flash(pos + v2.{0, 0.7}, 1.3, v4.{1.0, 0.3, 0.3, 0.7}, 0.4);
+	// Red distress shockwave rippling out from the downed Mech so everyone sees the call go up.
+	rr_mech_spawn_shockwave(pos, 0.7, 8.0, v4.{1.0, 0.2, 0.25, 0.8}, 0.6);
+	rr_mech_spawn_shockwave(pos, 0.45, 5.5, v4.{1.0, 0.4, 0.4, 0.65}, 0.45);
+	rr_mech_add_screenshake(mech_player, 0.1, 0.25);
+	mech_player.Notify("Your minion has been called");
+	minion := rr_mech_get_living_minion(mech_player);
+	if minion != null { minion.Notify("Your master is DOWN — get to them and revive!"); }
+}
+
+// "Call Minion" — the ONLY button a downed Mech can use (its kit is hidden while downed). Fires the
+// distress ping. Drawn by rr_mech_draw_abilities only while downed with a living Minion.
+Mech_Call_Minion_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Call_Minion_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Convert_Player_Icon.png"); }
+	can_use :: method() -> bool {
+		if player.player_role != Player_Role.THE_MECH || player.player_state != Player_State.ALIVE return false;
+		mech := player.entity.get_component(Mech_Module);
+		if mech == null || !mech.showdown_downed return false;
+		return rr_mech_get_living_minion(player) != null;
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			rr_mech_call_minion(player);
+			current_cooldown = MECH_CALL_MINION_COOLDOWN;
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Call_Minion_Ability, rect: Rect) { draw_ability_name_label(rect, "Call Minion"); }
+}
+
+// Minion revives its downed master: clears the faked-death/downed state, unlocks movement, and
+// stands the Mech back up in its regular Mech form. Consumes the once-per-game revive. VFX + SFX.
+rr_mech_revive_downed :: proc(mech_player: Player) {
+	if mech_player == null || !#alive(mech_player.entity) return;
+	mech := mech_player.entity.get_component(Mech_Module);
+	if mech == null || !mech.showdown_downed return;
+	mech.showdown_downed = false;
+	mech.showdown_death_at = 0.0;
+	mech.minion_revive_used = true;
+	mech_player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+	// Release both frozen-pose gates so the avatar stands up: track-0 locomotion resumes (Idle/Run)
+	// and the track-1 arm overlay re-mirrors it again instead of holding the death pose.
+	mech.anim_lock_until = get_time();
+	mech.overlay_clear_at = 0.0;
+	mech.last_overlay_anim = "";
+	// Brief kit lock so the Mech can't act on the very frame it gets back up.
+	rr_mech_put_all_abilities_on_cooldown(mech_player, MECH_SHOWDOWN_WINNER_LOCK);
+	pos := mech_player.entity.world_position;
+	rr_mech_spawn_flash(pos + v2.{0, 0.7}, 1.4, v4.{0.4, 1.0, 0.5, 0.8}, 0.45); // healing green
+	rr_mech_spawn_shockwave(pos, 0.6, 6.0, v4.{0.4, 1.0, 0.5, 0.7}, 0.5);
+	rr_mech_add_screenshake(mech_player, 0.14, 0.35);
+	rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", pos, 0.4);
+	mech_player.Notify("Your Minion revived you!");
+}
+
+// Revive Master — a downed Mech's living Minion revives it once per game by getting close. Drawn in
+// rr_minion_draw_abilities while the master is downed and the revive is unspent; can_use gates the
+// proximity so the button only lights up once the Minion is in range.
+Mech_Revive_Master_Ability :: class : Ability_Base {
+	on_init :: proc(a: Mech_Revive_Master_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/doctor/revive.png"); }
+	can_use :: method() -> bool {
+		if player.player_state != Player_State.ALIVE return false;
+		if !rr_mech_is_minion_active(player) return false;
+		owner := rr_mech_get_owner(player);
+		if owner == null return false;
+		mech := owner.entity.get_component(Mech_Module);
+		if mech == null || !mech.showdown_downed || mech.minion_revive_used return false;
+		return in_range(owner.entity.world_position - player.entity.world_position, MECH_SHOWDOWN_REVIVE_RANGE);
+	}
+	on_update :: method(params: ref Ability_Update_Params) {
+		if params.clicked && params.can_use {
+			rr_mech_revive_downed(rr_mech_get_owner(player));
+			current_cooldown = 1.0;
+		}
+	}
+	on_draw_button :: proc(instance: Mech_Revive_Master_Ability, rect: Rect) { draw_ability_name_label(rect, "Revive"); }
+}
+
+// World-space distress arrow drawn for a Minion whose master Mech is downed (faked death) — points
+// the Minion to the body so it can revive. Drawn per local player from player.csl late_update.
+rr_mech_draw_downed_revive_ui :: proc(player: Player) {
+	if player == null || !player.is_local() return;
+	if game_state != Game_State.INGAME return;
+	if !rr_mech_is_minion_active(player) return;
+	owner := rr_mech_get_owner(player);
+	if owner == null || !#alive(owner.entity) return;
+	mech := owner.entity.get_component(Mech_Module);
+	if mech == null || !mech.showdown_downed || mech.minion_revive_used return;
+	options := Tutorial_Arrow.default_options();
+	options.alpha = 0.7;
+	options.far = true;
+	options.near = false; // only guide the Minion in while the body is off-screen; the in-range Revive button takes over up close
+	UI.push_color_multiplier(v4.{1.0, 0.35, 0.4, 1.0}); // urgent red
+	defer UI.pop_color_multiplier();
+	rr_draw_tutorial_arrow(player, owner.entity.world_position, options);
 }
 
 // =====================================================================
@@ -5752,7 +6465,7 @@ rr_mech_draw_rod_timers :: proc(viewer: Player) {
 			radii := viewer.get_local_light_radii();
 			if length(node.entity.world_position - viewer.entity.world_position) > radii.y continue;
 		}
-		rr_mech_draw_world_countdown(node.entity.world_position + v2.{0.0, 1.6}, remaining, v4.{0.55, 0.9, 1.0, 1.0});
+		rr_mech_draw_world_countdown(node.entity.world_position + v2.{0.0, 1.6}, node.entity.world_position.y, remaining, v4.{0.55, 0.9, 1.0, 1.0});
 	}
 }
 
@@ -5773,17 +6486,19 @@ rr_mech_draw_helmet_timers :: proc(viewer: Player) {
 			radii := viewer.get_local_light_radii();
 			if length(helm.entity.world_position - viewer.entity.world_position) > radii.y continue;
 		}
-		rr_mech_draw_world_countdown(helm.entity.world_position + v2.{0.0, 1.9}, remaining, v4.{0.7, 0.9, 1.0, 1.0});
+		rr_mech_draw_world_countdown(helm.entity.world_position + v2.{0.0, 1.9}, helm.entity.world_position.y, remaining, v4.{0.7, 0.9, 1.0, 1.0});
 	}
 }
 
 // Shared world-space countdown pill (ceiled seconds + "s"), matching rr_draw_stun_timers.
-rr_mech_draw_world_countdown :: proc(label_pos: v2, remaining: float, color: v4) {
+// `z` is the sort key: pass the anchor entity's BASE y (NOT the elevated label_pos.y) so the
+// pill draws in FRONT of a tall sprite like the Magnet Rod instead of being occluded by it.
+rr_mech_draw_world_countdown :: proc(label_pos: v2, z: float, remaining: float, color: v4) {
 	secs_i := remaining.(int);
 	if remaining - secs_i.(float) > 0.001 { secs_i += 1; }
 	if secs_i < 1 { secs_i = 1; }
 
-	UI.push_z(label_pos.y);
+	UI.push_z(z);
 	defer UI.pop_z();
 
 	bg_rect := Rect{label_pos, label_pos}.grow(0.18, 0.45, 0.18, 0.45);
@@ -5827,8 +6542,9 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 	mech := owner.entity.get_component(Mech_Module);
 	if mech == null return;
 	if is_mech && mech.workbench_ui_open return;
-	// Hide the progression checklist while the Showdown HUD owns the screen.
-	if mech.showdown_active return;
+	// Hide the progression checklist while the Showdown HUD owns the screen, or while the Mech is
+	// downed (faked death) — nothing to track until it's revived or dies.
+	if mech.showdown_active || mech.showdown_downed return;
 
 	UI.push_layer(1600);
 	defer UI.pop_layer();
@@ -6017,8 +6733,11 @@ rr_mech_draw_titan_buttons :: proc(player: Player) {
 	mech := player.entity.get_component(Mech_Module);
 	if mech == null return;
 	// Hide the normal kit (incl. the End Game / APEX buttons) while the Showdown HUD owns the
-	// screen — only the mash button should be live during the clash.
-	if mech.showdown_active return;
+	// screen — only the mash button should be live during the clash — and while downed (faked
+	// death), where only "Call Minion" is allowed.
+	if mech.showdown_active || mech.showdown_downed return;
+	// Hide the Awaken APEX / End Game buttons while driving the Ram car — the drive owns the kit.
+	if rr_mech_car_is_active(player) return;
 
 	show_apex := rr_mech_can_awaken_apex(player) && mech.is_mech_form;
 	// Show End Game as soon as it's unlocked, but keep it visibly locked (countdown over

@@ -76,6 +76,14 @@ Mech_Module :: class : Component {
 	showdown_opponent_id: u64;
 	showdown_mashes: int;
 	showdown_ends_at: float;
+	// Lost a Showdown while NOT in APEX form: the Mech is downed (frozen on the Lose_Death last
+	// frame, kit hidden) awaiting a Minion revive. If a living Minion revives it (once per game) it
+	// gets back up; otherwise — no living Minion or the revive already spent — it actually dies, with
+	// the kill firing at showdown_death_at (killer = the Guardian who won, like a lost-Showdown death).
+	showdown_downed: bool;
+	showdown_death_at: float;
+	showdown_death_killer_id: u64;
+	minion_revive_used: bool;
 
 	// End Game cinematic: the Mech floats up and barrages the whole map before the round ends.
 	endgame_active: bool;
@@ -128,6 +136,10 @@ Guardian_Module :: class : Component {
 	// 0 when no death is pending; killer is showdown_death_killer_id (the APEX Mech).
 	showdown_death_at: float;
 	showdown_death_killer_id: u64;
+	// Long cooldown gating repeat Showdowns (re-armed each time one resolves). Auto-reset once
+	// when the Mech awakens APEX so the Guardian always gets a fresh shot at the titan form.
+	// 0 (the default) reads as "ready" since get_time() is always >= 0.
+	showdown_cooldown_until: float;
 
 	creature_entity: Entity;
 	creature_animator: Spine_Animator;
