@@ -509,6 +509,8 @@ Player :: class : Player_Base {
 				rr_draw_lily_debuff_timers(this);
 				// Draw stun countdown timers above stunned players' heads.
 				rr_draw_stun_timers(this);
+				// Minion loot readout above each Minion's head (traitors only).
+				rr_mech_draw_minion_carried_items(this);
 				// Magnet Rod disappear timers + Magnet Helmet auto-release timers.
 				rr_mech_draw_rod_timers(this);
 				rr_mech_draw_helmet_timers(this);
@@ -1552,6 +1554,11 @@ rr_draw_stun_timers :: proc(viewer: Player) {
 		remaining := rr_get_stun_remaining(p);
 		if remaining <= 0.0 continue;
 
+		// Players zapped by a Magnet Rod: the rod already shows its own countdown, so skip the
+		// redundant per-victim stun timer for them.
+		mss := p.entity.get_component(Mech_Stun_Status);
+		if mss != null && mss.active && mss.from_rod continue;
+
 		// Skip players hidden in shadow / outside the viewer's LOS.
 		if viewer != null {
 			radii := viewer.get_local_light_radii();
@@ -1695,7 +1702,7 @@ draw_player_role_hud :: proc(player: Player) {
 		defer UI.pop_layer();
 
 		// Mobile scale boost (no-op on PC).
-		_pushed_scale := rr_push_mobile_ui_scale(player);
+		_pushed_scale := rr_push_task_ui_scale(player);
 		defer rr_pop_mobile_ui_scale(_pushed_scale);
 
 		safe := UI.get_safe_screen_rect();
@@ -1830,7 +1837,7 @@ draw_player_role_hud :: proc(player: Player) {
 		defer UI.pop_layer();
 
 		// Mobile scale boost (no-op on PC).
-		_pushed_scale := rr_push_mobile_ui_scale(player);
+		_pushed_scale := rr_push_task_ui_scale(player);
 		defer rr_pop_mobile_ui_scale(_pushed_scale);
 
 		// Left-side panel with unlock progress (task list style).
@@ -1926,7 +1933,7 @@ draw_player_role_hud :: proc(player: Player) {
 		defer UI.pop_layer();
 
 		// Mobile scale boost (no-op on PC).
-		_pushed_scale := rr_push_mobile_ui_scale(player);
+		_pushed_scale := rr_push_task_ui_scale(player);
 		defer rr_pop_mobile_ui_scale(_pushed_scale);
 
 		safe := UI.get_safe_screen_rect();
@@ -2057,7 +2064,7 @@ draw_ggg_role_hud :: proc(player: Player) {
 	UI.push_layer(1600);
 	defer UI.pop_layer();
 
-	_pushed_scale := rr_push_mobile_ui_scale(player);
+	_pushed_scale := rr_push_task_ui_scale(player);
 	defer rr_pop_mobile_ui_scale(_pushed_scale);
 
 	safe := UI.get_safe_screen_rect();
@@ -2226,7 +2233,7 @@ draw_mimicer_role_hud :: proc(player: Player) {
 	UI.push_layer(1600);
 	defer UI.pop_layer();
 
-	_pushed_scale := rr_push_mobile_ui_scale(player);
+	_pushed_scale := rr_push_task_ui_scale(player);
 	defer rr_pop_mobile_ui_scale(_pushed_scale);
 
 	mm := player.entity.get_component(Mimicer_Module);
@@ -2392,7 +2399,7 @@ draw_lily_role_hud :: proc(player: Player) {
 	UI.push_layer(1600);
 	defer UI.pop_layer();
 
-	_pushed_scale := rr_push_mobile_ui_scale(player);
+	_pushed_scale := rr_push_task_ui_scale(player);
 	defer rr_pop_mobile_ui_scale(_pushed_scale);
 
 	safe := UI.get_safe_screen_rect();
@@ -2732,7 +2739,11 @@ rr_draw_traitor_abilities :: proc(player: Player, idx: int) -> int {
 		if minion != null {
 			abilityIndex = rr_draw_role_abilities(player, minion.original_role, minion.original_type, abilityIndex, true);
 		}
-		return rr_minion_draw_abilities(player, abilityIndex);
+		abilityIndex = rr_minion_draw_abilities(player, abilityIndex);
+		// Minions are part of the traitor team — give them the sabotage quick-access button too
+		// (this branch returns early, so it would otherwise skip the shared call below).
+		draw_traitor_sabotage_map_button(player);
+		return abilityIndex;
 	}
 
 	// Hitman replaces the default kill with Neck Snap.
@@ -3709,6 +3720,9 @@ Task_Interactable :: class : Component {
 	task_id_override: string @ao_serialize;
 	mech_smashed: bool;
 	mech_wreckage_entity: Entity;
+	// Serialized hold time captured at startup so normal task interaction keeps its configured
+	// length; the smashed-task "Repair" temporarily overrides it with a longer hold.
+	base_hold_time: float;
 
 	get_task_id :: proc(using this: Task_Interactable) -> string {
 		if task_id_override.count > 0 {
@@ -3722,6 +3736,7 @@ Task_Interactable :: class : Component {
 			return;
 		}
         interactable.set_listener(this);
+		base_hold_time = interactable.required_hold_time;
 
         // Register this interactable's world position as a destination for its task id.
 		rr_register_task_destination(this.get_task_id(), this.entity.world_position);
@@ -3730,9 +3745,13 @@ Task_Interactable :: class : Component {
 	ao_update :: proc(using this: Task_Interactable, dt: float) {
 		if interactable == null return;
 		if mech_smashed {
+			// Repairing a smashed panel is a deliberate hold, tripled to match the smash channel.
 			interactable.set_text("Repair");
+			interactable.set_hold_text("Repairing...");
+			interactable.required_hold_time = MECH_REPAIR_HOLD_TIME;
 		} else {
 			interactable.set_text(get_task_display_name(this.get_task_id()));
+			interactable.required_hold_time = base_hold_time;
 		}
 	}
 
@@ -4197,6 +4216,31 @@ rr_draw_task_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, color: v4)
 	}
 }
 
+// Map marker for the Mech / its Minions: a task pin tinted by the component the panel drops when
+// wrecked, with that component's icon overlaid, so smashers can see at a glance what each panel
+// yields and plan which to break for the parts they still need.
+rr_draw_task_wreck_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, kind: int) {
+	p_ui := rr_minimap_world_to_ui(map_rect, world_pos);
+	size := map_rect.height() * 0.026;
+	if size < 12.0 { size = 12.0; }
+	if size > 30.0 { size = 30.0; }
+	r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
+
+	ct := rr_mech_component_tint(kind);
+	pin := get_asset(Texture_Asset, "sprites/task_icon.png");
+	if pin != null {
+		UI.quad(r.fit_aspect(pin.get_aspect()), pin, v4.{ct.x, ct.y, ct.z, 1.0});
+	} else {
+		UI.quad(r, core_globals.white_sprite, v4.{ct.x, ct.y, ct.z, 1.0});
+	}
+
+	comp := get_asset(Texture_Asset, rr_mech_component_sprite_path(kind));
+	if comp != null {
+		icon_r := r.inset(size * 0.4);
+		UI.quad(icon_r.fit_aspect(comp.get_aspect()), comp, v4.{1, 1, 1, 1});
+	}
+}
+
 // Returns one of 12 vivid hues by sequential index (mod 12), spanning the
 // blue-green-purple-magenta arc to avoid clashing with burning red/orange props.
 rr_pyro_room_color :: proc(idx: int) -> v4 {
@@ -4340,6 +4384,21 @@ rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 	if rr_comms_outage_active && player.player_type != Player_Type.TRAITOR {
 		if world_references != null && world_references.rr_comms_lever_entity != null && #alive(world_references.rr_comms_lever_entity) {
 			rr_draw_task_marker_on_minimap(map_rect, world_references.rr_comms_lever_entity.world_position, v4.{1.0, 0.3, 0.3, 1.0});
+		}
+		return;
+	}
+
+	// The Mech and its Minions see, on every panel, the component it drops when wrecked, so they
+	// can plan which panels to smash for the parts they still need.
+	is_mech_smasher := rr_mech_is_minion_active(player);
+	if !is_mech_smasher && player.player_role == Player_Role.THE_MECH {
+		if player.entity.get_component(Mech_Module) != null { is_mech_smasher = true; }
+	}
+	if is_mech_smasher {
+		for i: 0..rr_task_destination_entries.elements.count-1 {
+			e := rr_task_destination_entries.elements[i];
+			if e == null continue;
+			rr_draw_task_wreck_marker_on_minimap(map_rect, e.pos, rr_mech_task_drop_kind_at_pos(e.pos));
 		}
 		return;
 	}
@@ -4840,7 +4899,10 @@ draw_traitor_sabotage_map_button :: proc(player: Player) {
 	if !player.is_local_or_server() return;
 	if game_state != Game_State.INGAME return;
 	if player.player_state != Player_State.ALIVE return;
-	if player.player_type != Player_Type.TRAITOR && !rr_is_hacker(player) return;
+	// Minions are part of the traitor team (their player_type is forced to TRAITOR), but check the
+	// effect directly too so the sabotage button is guaranteed to show for them like other traitors
+	// — mirrors the gate in rr_draw_sabotages_next_to_minimap.
+	if player.player_type != Player_Type.TRAITOR && !rr_is_hacker(player) && !rr_mech_is_minion_active(player) return;
 
 	safe := UI.get_safe_screen_rect();
 

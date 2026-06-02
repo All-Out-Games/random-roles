@@ -4,6 +4,9 @@ DOCTOR_RESURRECT_COOLDOWN_SECONDS :: 200.0;
 DOCTOR_RESURRECTS_PER_ROUND :: 2;
 
 KILL_COOLDOWN_SECONDS :: 30.0;
+// Default melee kill reach for the base Kill_Ability (mech schleem form + standard traitors).
+// Roles with a custom reach (GGG creature, Mimicer, Lily) override this locally.
+KILL_RANGE :: 3.0;
 
 // --- Hitman ---
 HITMAN_NECK_SNAP_COOLDOWN_SECONDS :: 60.0;
@@ -88,7 +91,7 @@ Kill_Ability :: class : Ability_Base {
 		if player.entity == null || !#alive(player.entity) return null;
 		if player.bc_cocooned return null;
 		// GGG creature form has extended kill range (lunge)
-		kill_range := 5.0;
+		kill_range := KILL_RANGE;
 		if player.player_role == Player_Role.GOO_GOO_GAGA {
 			gm := player.entity.get_component(GGG_Module);
 			if gm != null && gm.is_creature_form {
@@ -117,6 +120,15 @@ Kill_Ability :: class : Ability_Base {
             // Traitors shouldn't be able to melee-kill other traitors.
             if player.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR {
                 continue;
+            }
+            // The Mech's default attack can't kill the Guardian — their fight is the Showdown. A
+            // Guardian already in combat form stays off-limits, but a still-human one is targetable:
+            // swinging at them flushes them out into their combat form (handled in on_update).
+            if player.player_role == Player_Role.THE_MECH && target.player_role == Player_Role.GUARDIAN {
+                tg := target.entity.get_component(Guardian_Module);
+                if tg == null || tg.is_guardian_form {
+                    continue;
+                }
             }
             finder.check(target, target.entity.world_position);
         }
@@ -161,6 +173,14 @@ Kill_Ability :: class : Ability_Base {
 					rr_mech_play_avatar_anim(player, "009SG/Kill", false);
 				} else {
 					player.set_trigger("traitor_kill");
+				}
+
+				// The Mech can't kill the Guardian — the swing instead flushes a still-human
+				// Guardian out of disguise into their combat form (their real fight is the Showdown).
+				if player.player_role == Player_Role.THE_MECH && closest_alive_player.player_role == Player_Role.GUARDIAN {
+					rr_guardian_enter_guardian_form(closest_alive_player);
+					current_cooldown = KILL_COOLDOWN_SECONDS;
+					return;
 				}
 
                 closest_alive_player.kill_with_killer(player.entity.id);

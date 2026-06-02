@@ -41,6 +41,22 @@ rr_pop_mobile_ui_scale :: proc(pushed: bool) {
 	}
 }
 
+// Task-style UI (the task list + role task panels) at 1.25x. MULTIPLIES the current resolution-based
+// scale rather than pushing an absolute factor — an absolute push would override the engine's
+// resolution scaling and make the UI a fixed (resolution-INDEPENDENT) size. Mobile keeps its
+// readability factor on top. Only use on top-level panels (compounds if nested in another push).
+RR_TASK_UI_SCALE :: 1.25;
+
+rr_push_task_ui_scale :: proc(player: Player) -> bool {
+	mult := RR_TASK_UI_SCALE;
+	if player != null {
+		if player.device_kind == .PHONE       { mult = mult * RR_MOBILE_UI_SCALE_PHONE; }
+		else if player.device_kind == .TABLET { mult = mult * RR_MOBILE_UI_SCALE_TABLET; }
+	}
+	UI.push_scale_factor(UI.get_current_scale_factor() * mult);
+	return true;
+}
+
 // --- Task SFX helpers (local-only to avoid double-play on host/server) ---
 RR_TASK_SFX_TILE_CLICK   :: "sfx/task_click_tile.wav";
 RR_TASK_SFX_KEY_PRESS    :: "sfx/ui_type_key.wav";
@@ -1082,8 +1098,8 @@ rr_draw_role_help_panel :: proc(player: Player) {
 	UI.push_layer(500);
 	defer UI.pop_layer();
 
-	_pushed_scale := rr_push_mobile_ui_scale(player,1.5);
-	defer rr_pop_mobile_ui_scale(_pushed_scale);
+	// Drawn inside update_tasks_ui, which already pushed rr_push_task_ui_scale — inherit it rather
+	// than pushing again (a relative scale would compound).
 
 	full_screen := UI.get_screen_rect();
 	UI.quad(full_screen, core_globals.white_sprite, v4.{0, 0, 0, 0.72});
@@ -1393,8 +1409,8 @@ update_tasks_ui :: proc(player: Player) {
 	UI.push_layer(100);
 	defer UI.pop_layer();
 
-	// Mobile scale boost (no-op on PC).
-	_pushed_scale := rr_push_mobile_ui_scale(player);
+	// Task UI rendered 1.25x larger, resolution-dependent (see rr_push_task_ui_scale).
+	_pushed_scale := rr_push_task_ui_scale(player);
 	defer rr_pop_mobile_ui_scale(_pushed_scale);
 
 	screen := UI.get_safe_screen_rect();
