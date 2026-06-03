@@ -498,13 +498,13 @@ rr_mech_upgrades_owned_total :: proc(mech: Mech_Module) -> int {
 
 // Cost of the NEXT upgrade given how many are already owned — returns (components, magnet
 // cores). Escalates by purchase order, leaving the Mech free to choose WHICH upgrade fills
-// each slot: 1st = 1 component, 2nd = 2 components, 3rd = 2 components + 1 Magnet Core,
-// 4th and beyond = 3 components + 1 Magnet Core.
+// each slot: 1st = 1 component, 2nd = 2 components, 3rd = 1 component + 1 Magnet Core,
+// 4th and beyond = 2 components + 1 Magnet Core.
 rr_mech_upgrade_cost :: proc(owned: int) -> int, int {
 	if owned <= 0 return 1, 0;
 	if owned == 1 return 2, 0;
-	if owned == 2 return 2, 1;
-	return 3, 1;
+	if owned == 2 return 1, 1;
+	return 2, 1;
 }
 
 // Magnet Cores can only be farmed once the Magnet Cannon is built (it's what magnetises
@@ -729,6 +729,7 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.carried_player_id = 0;
 	mech.carried_corpse_id = 0;
 	mech.workbench_ui_open = false;
+	mech.visited_workbench = false;
 	mech.magnet_cam_hold_until = 0.0;
 	mech.missile_aim_active = false;
 	mech.missile_aim_center = v2.{0, 0};
@@ -1789,6 +1790,19 @@ rr_mech_smash_on_cooldown :: proc(player: Player) -> bool {
 	return get_time() < rr_mech_smash_cooldown_until(player);
 }
 
+// True if this player has the role/form to smash task panels right now — IGNORING the cooldown
+// and the specific panel's state. Shared by the Smash prompt's can_use and its cooldown-countdown
+// so both agree on who is a smasher.
+rr_mech_player_can_smash :: proc(player: Player) -> bool {
+	if player == null return false;
+	if player.player_state != Player_State.ALIVE return false;
+	if player.player_role == Player_Role.THE_MECH {
+		mech := player.entity.get_component(Mech_Module);
+		return mech != null && (mech.is_mech_form || mech.is_apex);
+	}
+	return rr_mech_is_minion_active(player);
+}
+
 rr_mech_arm_smash_cooldown :: proc(player: Player) {
 	if player == null return;
 	until := get_time() + MECH_SMASH_COOLDOWN;
@@ -1803,7 +1817,9 @@ rr_mech_arm_smash_cooldown :: proc(player: Player) {
 // visibly keeps swinging for the whole 3-loop channel.
 rr_mech_play_smash_gesture :: proc(player: Player, pos: v2) {
 	if player == null return;
-	player.set_trigger("punch");
+	if !rr_mech_is_transformed(player) {
+		player.set_trigger("punch");
+	}
 	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false); // no-op for a non-transformed Minion
 	rr_mech_spawn_flash(pos, 0.7, v4.{1.0, 0.55, 0.08, 0.45}, 0.2);
 	rr_mech_add_screenshake(player, 0.05, 0.12);
@@ -1827,7 +1843,9 @@ rr_mech_smash_task :: proc(player: Player, task: Task_Interactable) {
 	rr_mech_spawn_component_pickup(task.entity.world_position, kind, player);
 
 	// Final break impact (heavier than the per-loop channel swings).
-	player.set_trigger("punch");
+	if !rr_mech_is_transformed(player) {
+		player.set_trigger("punch");
+	}
 	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false);
 	rr_mech_spawn_flash(task.entity.world_position, 0.95, v4.{1.0, 0.55, 0.08, 0.65}, 0.28);
 	rr_mech_add_screenshake(player, 0.08, 0.2);
@@ -2441,7 +2459,10 @@ Mech_Workbench_Interactable :: class : Interactable {
 	}
 	on_interact :: method(player: Player) {
 		mech := player.entity.get_component(Mech_Module);
-		if mech != null { mech.workbench_ui_open = true; }
+		if mech != null {
+			mech.workbench_ui_open = true;
+			mech.visited_workbench = true; // completes the "Go to R&D Workbench" first objective
+		}
 		rr_mech_spawn_flash(entity.world_position + v2.{0, 0.55}, 0.75, v4.{0.25, 0.8, 1.0, 0.55}, 0.28);
 		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", entity.world_position, 0.35);
 	}
@@ -2630,30 +2651,43 @@ Mech_Smash_Interactable :: class : Interactable {
 		prompt_offset = v2.{0, 1.4};
 		priority = 90;
 	}
+	ao_update :: method(dt: float) {
+		// While the local smasher is on cooldown, keep the prompt visible but show a live
+		// countdown instead of hiding it. Drop the hold time to 0 so the disabled prompt can't
+		// fill a fake hold-bar (the on_interact guard blocks the smash regardless). Prompt text
+		// renders per-client, so we key off the LOCAL player's own cooldown.
+		lp, ok := Game.get_local_player();
+		if ok && rr_mech_player_can_smash(lp) && rr_mech_smash_on_cooldown(lp) {
+			remaining := (rr_mech_smash_cooldown_until(lp) - get_time()).(int) + 1;
+			this.set_text(format_string("Smash (%s)", {remaining}));
+			required_hold_time = 0.0;
+		} else {
+			this.set_text("Smash");
+			required_hold_time = MECH_SMASH_HOLD_TIME;
+		}
+	}
 	can_use :: method(player: Player) -> bool {
 		if player == null return false;
-		if player.player_state != Player_State.ALIVE return false;
-		if player.player_role == Player_Role.THE_MECH {
-			mech := player.entity.get_component(Mech_Module);
-			if mech == null || (!mech.is_mech_form && !mech.is_apex) return false;
-		} else if !rr_mech_is_minion_active(player) {
-			return false;
-		}
-		// On cooldown after a recent smash — hide the prompt until it's ready again.
-		if rr_mech_smash_on_cooldown(player) return false;
+		if !rr_mech_player_can_smash(player) return false;
 		task := entity.get_component(Task_Interactable);
 		if task == null return false;
 		if task.mech_smashed return false;
+		// On cooldown: keep the prompt visible (ao_update shows the countdown); the on_interact
+		// guard blocks the actual smash until it's ready.
 		return rr_mech_task_is_smashable(task);
 	}
 	on_holding :: method(player: Player) {
 		if player == null return;
+		// Disabled mid-cooldown — no smash swing while the countdown prompt is showing.
+		if rr_mech_smash_on_cooldown(player) return;
 		// Re-fire the smash swing once per anim loop so it visibly loops during the hold.
 		if get_time() < next_swing_at return;
 		next_swing_at = get_time() + MECH_SMASH_ANIM_LOOP;
 		rr_mech_play_smash_gesture(player, entity.world_position);
 	}
 	on_interact :: method(player: Player) {
+		// Still cooling down — the prompt shows the countdown only, no smash.
+		if rr_mech_smash_on_cooldown(player) return;
 		task := entity.get_component(Task_Interactable);
 		if task == null return;
 		rr_mech_smash_task(player, task);
@@ -6481,7 +6515,7 @@ rr_mech_draw_row_cost :: proc(slot: Rect, comp_kind: int, qty: int, cores: int, 
 	if isz > 22.0 { isz = 22.0; }
 
 	ts := base_ts;
-	ts.size = 15;
+	ts.size = 16;
 	ts.halign = .LEFT;
 	ts.valign = .CENTER;
 	ts.color = v4.{0.95, 0.97, 1.0, 1.0};
@@ -6492,7 +6526,7 @@ rr_mech_draw_row_cost :: proc(slot: Rect, comp_kind: int, qty: int, cores: int, 
 		if comp_icon != null { UI.quad(c_slot.fit_aspect(comp_icon.get_aspect()), comp_icon, v4.{1, 1, 1, 1}); }
 	} else {
 		at := base_ts;
-		at.size = 12;
+		at.size = 14;
 		at.halign = .LEFT;
 		at.valign = .CENTER;
 		at.color = v4.{0.82, 0.86, 0.96, 1.0};
@@ -6524,19 +6558,19 @@ rr_mech_draw_upgrade_row :: proc(row: Rect, mech: Mech_Module, upgrade_id: int, 
 	cb_slot := rc.cut_left(rc.height());
 	cb_tex := owned ? checkbox_filled : checkbox;
 	if cb_tex != null { UI.quad(cb_slot.fit_aspect(cb_tex.get_aspect()), cb_tex, v4.{1, 1, 1, 1}); }
-	rc.cut_left(5.0);
+	rc.cut_left(4.0);
 
 	icon := get_asset(Texture_Asset, icon_path);
 	if icon != null {
 		icon_slot := rc.cut_left(rc.height());
 		UI.quad(icon_slot.fit_aspect(icon.get_aspect()), icon, owned ? v4.{1, 1, 1, 1} : v4.{0.72, 0.72, 0.78, 1});
-		rc.cut_left(6.0);
+		rc.cut_left(3.0);
 	}
 
 	// Right side: "BUILT" once owned, else the specific component cost for the next build.
 	if owned {
 		sts := base_ts;
-		sts.size = 13;
+		sts.size = 16;
 		sts.halign = .RIGHT;
 		sts.color = v4.{0.6, 1.0, 0.5, 1.0};
 		UI.text(rc.cut_right(58.0), sts, "BUILT");
@@ -6548,10 +6582,10 @@ rr_mech_draw_upgrade_row :: proc(row: Rect, mech: Mech_Module, upgrade_id: int, 
 	}
 
 	nts := base_ts;
-	nts.size = 16;
+	nts.size = 20;
 	nts.do_autofit = true;
-	nts.autofit_min_size = 11;
-	nts.autofit_max_size = 17;
+	nts.autofit_min_size = 16;
+	nts.autofit_max_size = 20;
 	nts.color = owned ? v4.{0.6, 1.0, 0.55, 1.0} : v4.{0.92, 0.94, 1.0, 1.0};
 	UI.text(rc, nts, name);
 }
@@ -6879,6 +6913,21 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 	// downed (faked death) — nothing to track until it's revived or dies.
 	if mech.showdown_active || mech.showdown_downed return;
 
+	// First objective: guide the Mech to the R&D Workbench with a world-space arrow until it's
+	// first used. Local Mech only (minions don't build); drawn outside task_list_open so it shows
+	// even with the checklist collapsed.
+	if is_mech && player.is_local() && !mech.visited_workbench && mech_workbench_entity != null && #alive(mech_workbench_entity) {
+		wb_pos := mech_workbench_entity.world_position;
+		arrow_opts := Tutorial_Arrow.default_options();
+		dist := length(player.entity.world_position - wb_pos);
+		arrow_opts.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
+		arrow_opts.far = true;
+		arrow_opts.near = true;
+		arrow_opts.bob_scale = 0.5;
+		arrow_opts.bob_bias = 1.5;
+		rr_draw_tutorial_arrow(player, wb_pos, arrow_opts);
+	}
+
 	UI.push_layer(1600);
 	defer UI.pop_layer();
 
@@ -6891,17 +6940,18 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 	LIST_PAD :: 12.0;
 	DROPDOWN_SLICE_PX :: 16.0;
 
-	LABEL_H :: 18.0;
-	UPG_H   :: 28.0;
-	RES_H   :: 24.0;
-	APEX_H  :: 34.0;
+	LABEL_H :: 20.0;
+	UPG_H   :: 32.0;
+	RES_H   :: 28.0;
+	APEX_H  :: 38.0;
 	GAP     :: 6.0;
 
 	upgrades_owned := rr_mech_upgrades_owned(mech);
 	cores := min(mech.power_cores, MECH_LOOT_CORES_GOAL);
 	apex_ready := rr_mech_can_awaken_apex(owner);
 
-	list_h := LABEL_H + 5.0 * UPG_H + GAP + LABEL_H + RES_H + GAP + APEX_H + LIST_PAD * 2.0;
+	// +1 row (UPG_H) + a GAP for the "Go to R&D Workbench" first objective at the top.
+	list_h := UPG_H + GAP + LABEL_H + 5.0 * UPG_H + GAP + LABEL_H + RES_H + GAP + APEX_H + LIST_PAD * 2.0;
 
 	header_rect := rr_draw_task_list_header(safe, false, player);
 	if !player.task_list_open return;
@@ -6914,21 +6964,40 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 	rr_ui_draw_nine_slice_panel(list_rect, list_bg, DROPDOWN_SLICE_PX);
 
 	base_ts := UI.default_text_settings();
-	base_ts.size = 18;
+	base_ts.size = 20;
 	base_ts.halign = .LEFT;
 	base_ts.valign = .CENTER;
 	base_ts.do_outline = true;
-	base_ts.outline_thickness = 3;
+	base_ts.outline_thickness = 4;
 	base_ts.outline_color = v4.{0, 0, 0, 1};
 
 	content := list_rect.inset(LIST_PAD, LIST_PAD, LIST_PAD, LIST_PAD);
+
+	// --- First objective: get to the R&D Workbench (where every weapon is built). Checks off the
+	// first time the Mech opens it; the world-space arrow above guides them there until then. ---
+	{
+		row := content.cut_top(UPG_H);
+		rc := row.inset(2.0, 3.0, 2.0, 3.0);
+		cb_tex := mech.visited_workbench ? checkbox_filled : checkbox;
+		cb_slot := rc.cut_left(rc.height());
+		if cb_tex != null { UI.quad(cb_slot.fit_aspect(cb_tex.get_aspect()), cb_tex, v4.{1, 1, 1, 1}); }
+		rc.cut_left(4.0);
+		nts := base_ts;
+		nts.size = 20;
+		nts.do_autofit = true;
+		nts.autofit_min_size = 16;
+		nts.autofit_max_size = 20;
+		nts.color = mech.visited_workbench ? v4.{0.6, 1.0, 0.55, 1.0} : v4.{0.45, 0.85, 1.0, 1.0};
+		UI.text(rc, nts, "Go to R&D Workbench");
+	}
+	content.cut_top(GAP);
 
 	// --- Upgrades: which weapons / utilities are built, and the specific component cost of
 	// each unbuilt one (quantity + cores escalate with build order). ---
 	{
 		lbl := content.cut_top(LABEL_H);
 		ts := base_ts;
-		ts.size = 13;
+		ts.size = 16;
 		ts.color = v4.{0.45, 0.85, 1.0, 1.0};
 		UI.text(lbl, ts, "UPGRADES");
 	}
@@ -6944,13 +7013,13 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 	{
 		lbl := content.cut_top(LABEL_H);
 		ts := base_ts;
-		ts.size = 13;
+		ts.size = 16;
 		ts.color = v4.{0.45, 0.85, 1.0, 1.0};
 		UI.text(lbl, ts, "RESOURCES");
 	}
 	{
 		num_ts := base_ts;
-		num_ts.size = 16;
+		num_ts.size = 20;
 		num_ts.halign = .LEFT;
 		num_ts.valign = .CENTER;
 		num_ts.color = v4.{0.95, 0.97, 1.0, 1.0};
@@ -6992,11 +7061,11 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 		}
 		UI.quad(row, core_globals.white_sprite, fill);
 		ts := base_ts;
-		ts.size = 17;
+		ts.size = 20;
 		ts.halign = .CENTER;
 		ts.do_autofit = true;
-		ts.autofit_min_size = 12;
-		ts.autofit_max_size = 18;
+		ts.autofit_min_size = 16;
+		ts.autofit_max_size = 20;
 		ts.color = apex_color;
 		UI.text(row.inset(8, 0, 8, 0), ts, apex_text);
 	}
