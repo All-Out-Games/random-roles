@@ -109,6 +109,11 @@ Mech_Module :: class : Component {
 	creature_entity: Entity;
 	creature_animator: Spine_Animator;
 	creature_visible: bool;
+	// Tracks whether the real-player invisibility reason (MECH_INVIS_REASON) is currently applied.
+	// Mutated ONLY in lockstep with the add/remove calls in rr_mech_show_avatar — NOT reused for
+	// anything else — so the ref-counted reason can't double-add when a transform-time reconciliation
+	// flips creature_visible mid-transform (which left the mech stuck invisible).
+	player_hidden_applied: bool;
 	last_anim: string;
 	anim_lock_until: float;
 	transform_anim_ends_at: float;
@@ -151,6 +156,9 @@ Guardian_Module :: class : Component {
 	creature_entity: Entity;
 	creature_animator: Spine_Animator;
 	creature_visible: bool;
+	// See Mech_Module.player_hidden_applied — lockstep tracker for MECH_INVIS_REASON so the
+	// ref-counted reason can't leak when reconciliation flips creature_visible mid-transform.
+	player_hidden_applied: bool;
 	last_anim: string;
 	anim_lock_until: float;
 	transform_anim_ends_at: float;
@@ -189,7 +197,10 @@ Mech_Minion_Effect :: class : Effect_Base {
 	effect_update :: method(dt: float) {
 		if player == null { remove_effect(false); return; }
 		if !#alive(player.entity) { remove_effect(false); return; }
-		if game_state != Game_State.INGAME { remove_effect(false); return; }
+		// Persist through meetings/body-reports/voting — those leave INGAME but the round is still
+		// live, so gating on != INGAME stripped Minion status the moment a meeting started. Only drop
+		// the effect when the round actually ends (LOBBY / victory).
+		if !rr_is_round_running() { remove_effect(false); return; }
 		if player.player_state != Player_State.ALIVE { remove_effect(false); return; }
 		if converted_by_mech_id == 0 { remove_effect(false); return; }
 		player.player_type = Player_Type.TRAITOR;

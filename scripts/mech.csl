@@ -65,6 +65,7 @@ MECH_STUN_SECONDS :: 3.0;
 // agent.input_this_frame, NOT by a movement lock (a lock zeroes input_this_frame, killing steering).
 MECH_RAM_SECONDS :: 15.0;
 MECH_CAR_SPEED_MULT :: 2.0;    // car drive speed = baseline_movement_speed * this
+MECH_CAR_AUTO_DRIVE :: false;  // TEMP DISABLED: when true the car barrels forward on its own; when false it only moves while the driver steers
 MECH_RAM_HIT_RADIUS :: 2.2;    // forward reach in front of the car that scoops victims up to be plowed
 MECH_RAM_PLOW_HALF_WIDTH :: 1.4; // sideways half-width of the plow zone (truck is ~1.4 wide)
 MECH_RAM_PLOW_STANDOFF :: 1.1; // caught victims are pinned this far in front of the car (the bumper)
@@ -747,6 +748,7 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.creature_entity = null;
 	mech.creature_animator = null;
 	mech.creature_visible = false;
+	mech.player_hidden_applied = false; // matches the rr_mech_enable_player_hidden(false) above
 	mech.last_anim = "";
 	mech.anim_lock_until = 0.0;
 	mech.transform_anim_ends_at = 0.0;
@@ -781,6 +783,7 @@ rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 	guard.creature_entity = null;
 	guard.creature_animator = null;
 	guard.creature_visible = false;
+	guard.player_hidden_applied = false; // matches the rr_mech_enable_player_hidden(false) above
 	guard.last_anim = "";
 	guard.anim_lock_until = 0.0;
 	guard.transform_anim_ends_at = 0.0;
@@ -791,8 +794,11 @@ rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 // Reverts a transformed Mech / Guardian to their human ("schleem") form for a meeting. Run from
 // setup_voting right after the teleport so the swap is masked by the jump — matching every other
 // transforming role (which is why the Mech is added to rr_force_revert_all_roles_for_meeting).
-// Progression and the once-per-game APEX state are deliberately preserved: the is_mech_form /
-// is_apex / is_guardian_form flags are kept so the avatar auto-restores when gameplay resumes.
+// The Mech's is_mech_form is CLEARED so the revert sticks: after the meeting the Mech stays in
+// schleem and must press Transform again to re-enter mech form — otherwise it would visibly pop
+// back into the titan in the voting circle, outing itself to everyone present. The once-per-game
+// APEX state (is_apex) is preserved (APEX can never be schleem, so it re-shows on resume), as is
+// the Guardian's is_guardian_form (a public hero role — no need to hide its form).
 rr_mech_force_revert :: proc(player: Player) {
 	if player == null || !#alive(player.entity) return;
 	mech := player.entity.get_component(Mech_Module);
@@ -805,6 +811,8 @@ rr_mech_force_revert :: proc(player: Player) {
 	if !transformed_or_showing {
 		// Defensive: make sure no stale transform invis reason is left hiding the real player.
 		rr_mech_enable_player_hidden(player, false);
+		if mech != null { mech.player_hidden_applied = false; }
+		if guard != null { guard.player_hidden_applied = false; }
 		return;
 	}
 
@@ -822,6 +830,11 @@ rr_mech_force_revert :: proc(player: Player) {
 	}
 
 	if mech != null {
+		// Drop out of mech form for good — the player resumes in schleem after the meeting and only
+		// re-transforms when they choose to (Transform ability). APEX is forced back on by the
+		// Transform ability anyway, and auto-re-shows via is_apex, so this is a no-op for APEX.
+		if !mech.is_apex { mech.is_mech_form = false; }
+		mech.transform_anim_ends_at = 0.0;
 		mech.carried_player_id = 0;
 		mech.carried_corpse_id = 0;
 		mech.showdown_active = false;
@@ -1136,18 +1149,31 @@ rr_mech_show_avatar :: proc(player: Player, show: bool) {
 	mech := player.entity.get_component(Mech_Module);
 	guard := player.entity.get_component(Guardian_Module);
 	e: Entity = null;
-	was_visible := false;
-	if mech != null { e = mech.creature_entity; was_visible = mech.creature_visible; mech.creature_visible = show; }
-	if guard != null { e = guard.creature_entity; was_visible = guard.creature_visible; guard.creature_visible = show; }
+	if mech != null { e = mech.creature_entity; mech.creature_visible = show; }
+	if guard != null { e = guard.creature_entity; guard.creature_visible = show; }
 	if e != null && #alive(e) { e.set_local_enabled(show); }
-	// Toggle the real-player invisibility reason only on the hide EDGE. Mech-form -> APEX awaken both
-	// call show_avatar(true) while already hidden; an unconditional re-add stacks the ref-counted
-	// reason, so the single remove on revert left the real player spine permanently invisible.
-	// Always clear on show=false so a stale/half-applied transform can never stay hidden.
+	// Toggle the real-player invisibility reason against a DEDICATED applied-flag (NOT creature_visible).
+	// The reason is ref-counted, so it must be added and removed exactly once per hide episode. Gating
+	// on creature_visible was unsafe: a transform-time reconciliation (e.g. being stunned by Charlie
+	// mid-transform) could flip creature_visible back to false while the reason was still applied, so
+	// the next show_avatar(true) re-added it — and the single remove on revert left the player stuck
+	// invisible. player_hidden_applied changes ONLY here, in lockstep with the add/remove, so unrelated
+	// state can't desync it and the ref count stays balanced. Always clears on hide.
+	already_applied := false;
+	if mech != null { already_applied = mech.player_hidden_applied; }
+	if guard != null { already_applied = guard.player_hidden_applied; }
 	if show {
-		if !was_visible { rr_mech_enable_player_hidden(player, true); }
+		if !already_applied {
+			rr_mech_enable_player_hidden(player, true);
+			if mech != null { mech.player_hidden_applied = true; }
+			if guard != null { guard.player_hidden_applied = true; }
+		}
 	} else {
-		rr_mech_enable_player_hidden(player, false);
+		if already_applied {
+			rr_mech_enable_player_hidden(player, false);
+			if mech != null { mech.player_hidden_applied = false; }
+			if guard != null { guard.player_hidden_applied = false; }
+		}
 	}
 	if show {
 		rr_mech_apply_avatar_skins(player);
@@ -1498,6 +1524,21 @@ rr_mech_is_carried :: proc(target: Player) -> bool {
 	return s != null && s.active;
 }
 
+// Frees `target` from whoever is carrying it: any Guardian or Mech holding it drops
+// the grab (carried_player_id = 0), which stops Mech_Carried_Status being refreshed so
+// the movement lock auto-clears. Used by Minion recall to pull it out of a Guardian's grab.
+rr_mech_release_carried :: proc(target: Player) {
+	if target == null || !#alive(target.entity) return;
+	for g: component_iterator(Guardian_Module) {
+		if g != null && g.carried_player_id == target.entity.id { g.carried_player_id = 0; }
+	}
+	for m: component_iterator(Mech_Module) {
+		if m != null && m.carried_player_id == target.entity.id { m.carried_player_id = 0; }
+	}
+	s := target.entity.get_component(Mech_Carried_Status);
+	if s != null { s.clear(); }
+}
+
 // True while `target` is carried by an alive Guardian — makes Civilian allies
 // invincible while held (per spec).
 rr_guardian_is_protecting :: proc(target: Player) -> bool {
@@ -1582,6 +1623,25 @@ rr_mech_find_pickup_target :: proc(player: Player) -> Player {
 		finder.check(p, p.entity.world_position);
 	}
 	return finder.closest;
+}
+
+// A Mech and a Guardian can grab the SAME victim from each other. When a new carrier grabs a
+// victim, any other titan already holding them must immediately let go — the steal is free, with
+// no cooldown to the previous holder (grabbing never costs a cooldown; only throwing does).
+// Clearing carried_player_id stops Mech_Carried_Status being refreshed, releasing the previous
+// holder's carry movement-lock on its own (ref-counted, single owner).
+rr_mech_steal_carried_from_others :: proc(new_carrier: Player, victim_id: u64) {
+	if new_carrier == null || victim_id == 0 return;
+	for mech: component_iterator(Mech_Module) {
+		if mech == null || mech.entity == null continue;
+		if mech.entity.id == new_carrier.entity.id continue;
+		if mech.carried_player_id == victim_id { mech.carried_player_id = 0; }
+	}
+	for guard: component_iterator(Guardian_Module) {
+		if guard == null || guard.entity == null continue;
+		if guard.entity.id == new_carrier.entity.id continue;
+		if guard.carried_player_id == victim_id { guard.carried_player_id = 0; }
+	}
 }
 
 rr_mech_find_nearby_corpse :: proc(player: Player) -> Corpse {
@@ -2092,11 +2152,6 @@ rr_mech_convert_target :: proc(mech_player: Player, target: Player) {
 	rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position, 0.35);
 }
 
-rr_mech_revert_minion :: proc(target: Player) {
-	if target == null return;
-	remove_effect(target.entity, Mech_Minion_Effect, false);
-}
-
 rr_mech_get_throw_direction :: proc(player: Player) -> v2 {
 	// Throw straight ahead in the facing direction (rr_mech_update_carried uses the same
 	// scale sign), so it launches where they look rather than the last aim point.
@@ -2393,15 +2448,12 @@ rr_mech_draw_abilities :: proc(player: Player, idx: int) -> int {
 	if mech.magnet_cannon_unlocked && abilityIndex < 6 { draw_ability_button(player, Mech_Magnet_Cannon_Ability, abilityIndex); abilityIndex += 1; }
 	if mech.missile_barrage_unlocked && abilityIndex < 6 { draw_ability_button(player, Mech_Missile_Barrage_Ability, abilityIndex); abilityIndex += 1; }
 
-	// Recall Minion — only while a living Minion exists. Drawn before Pickup/Throw so it keeps a
-	// slot once a Minion is out (conversion is already spent by then, so Grab matters less).
-	if rr_mech_get_living_minion(player) != null && abilityIndex < 6 { draw_ability_button(player, Mech_Invoke_Minion_Ability, abilityIndex); abilityIndex += 1; }
+	// Recall Minion is intentionally NOT shown in Mech / APEX form — it only appears on the
+	// schleem (human) kit. The Mech recalls its Minion before transforming.
 
-	// Pickup/Throw — only while carrying something or with a target/corpse in reach.
-	show_pickup := mech.carried_player_id != 0 || mech.carried_corpse_id != 0
-		|| rr_mech_find_pickup_target(player) != null
-		|| rr_drag_body_get_closest_draggable_corpse(player) != null;
-	if show_pickup && abilityIndex < 6 { draw_ability_button(player, Mech_Pickup_Throw_Ability, abilityIndex); abilityIndex += 1; }
+	// Pickup/Throw — always shown; greyed out (via can_use) when nothing is carried and no
+	// target/corpse is in reach. Subject to the 6-slot bar cap.
+	if abilityIndex < 6 { draw_ability_button(player, Mech_Pickup_Throw_Ability, abilityIndex); abilityIndex += 1; }
 
 	// Smash (above task panels) and Convert (hovers over nearest civ) are world
 	// interactables now, not bar buttons — see Mech_Smash_Interactable / Mech_Convert_Interactable.
@@ -2601,6 +2653,11 @@ rr_mech_invoke_minion :: proc(mech_player: Player) {
 	if mech_player == null || !#alive(mech_player.entity) return;
 	minion := rr_mech_get_living_minion(mech_player);
 	if minion == null return;
+
+	// Recall yanks the Minion out of any Guardian's (or Mech's) grab — clearing the
+	// carrier's carried_player_id stops Mech_Carried_Status being refreshed, so the
+	// movement lock / magnetised pose auto-release within a frame.
+	rr_mech_release_carried(minion);
 
 	from := minion.entity.world_position;
 	// Land the Minion just beside the Mech, clamped onto walkable navmesh.
@@ -3419,6 +3476,54 @@ rr_mech_mark_magnetised :: proc(player: Player, danger: bool) {
 	s.refresh(danger);
 }
 
+// Looping electric-arc overlay shown over a GUARDIAN caught in a live magnet rod's current. Refreshed
+// each frame the Guardian is within shock range (the rod field loop); self-tears-down ~0.25s after it
+// stops being refreshed, mirroring Mech_Magnetised_Status. Purely cosmetic — the rod's stun still applies.
+Mech_Guardian_Shock_Vfx :: class : Component {
+	spine_entity: Entity;
+	expires_at: float;
+	active: bool;
+
+	refresh :: proc(using this: Mech_Guardian_Shock_Vfx) {
+		expires_at = get_time() + 0.25;
+		active = true;
+		if spine_entity != null && #alive(spine_entity) return;
+		e := Scene.create_entity();
+		e.set_parent(entity, false);
+		e.set_local_position(v2.{0, 0.6});
+		anim := e.add_component(Spine_Animator);
+		anim.awaken();
+		anim.layer = 9;
+		if anim.instance != null {
+			anim.instance.set_skeleton(get_asset(Spine_Asset, MECH_WRECKAGE_SPARK_RIG));
+			anim.instance.set_animation("loop", true, 0);
+		}
+		spine_entity = e;
+	}
+
+	ao_update :: method(dt: float) {
+		if !active return;
+		if get_time() >= expires_at {
+			if spine_entity != null && #alive(spine_entity) { spine_entity.destroy(); }
+			spine_entity = null;
+			active = false;
+		}
+	}
+
+	ao_end :: method() {
+		if spine_entity != null && #alive(spine_entity) { spine_entity.destroy(); }
+		spine_entity = null;
+	}
+}
+
+rr_mech_mark_guardian_shocked :: proc(player: Player) {
+	if player == null return;
+	if !#alive(player.entity) return;
+	s := player.entity.get_component(Mech_Guardian_Shock_Vfx);
+	if s == null { s = player.entity.add_component(Mech_Guardian_Shock_Vfx); }
+	s.refresh();
+}
+
 Mech_Stun_Status :: class : Component {
 	active: bool;
 	ends_at: float;
@@ -3727,6 +3832,12 @@ Mech_Magnet_Node :: class : Component {
 			dist := length(to_node);
 			if dist > MECH_MAGNET_RADIUS continue;
 
+			// Guardians caught in the rod's current get a looping electric-arc overlay while too
+			// close (cosmetic only — the stun/magnetise effects below still apply as normal).
+			if p.player_role == Player_Role.GUARDIAN && dist <= MECH_MAGNET_SHOCK_RADIUS {
+				rr_mech_mark_guardian_shocked(p);
+			}
+
 			helmet := p.entity.get_component(Mech_Helmeted_Status);
 			helmeted := helmet != null && helmet.active;
 			if !helmeted {
@@ -3831,6 +3942,10 @@ Mech_Car_Push :: class : Component {
 // palette so it reads as the rod overloading.
 rr_mech_car_try_rod_kill :: proc(driver: Player, victim: Player) -> bool {
 	if driver == null || victim == null return false;
+	// A transformed Guardian is a titan, not a magnetisable victim — the two titans settle things
+	// through a Showdown, never a one-shot rod overload. Leave them out of the car/rod kill entirely.
+	gvic := victim.entity.get_component(Guardian_Module);
+	if gvic != null && gvic.is_guardian_form return false;
 	for node: component_iterator(Mech_Magnet_Node) {
 		if node == null || !#alive(node.entity) continue;
 		if !node.landed continue;
@@ -4059,11 +4174,20 @@ Mech_Ram_Charge_Status :: class : Component {
 		// BEFORE we overwrite it below to drive. No deadzone snap — small nudges just bend the
 		// heading. BOTH forms steer; APEX is just faster + boostable.
 		steer := p.agent.input_this_frame;
-		if length_squared(steer) > 0.04 {
+		steering := length_squared(steer) > 0.04;
+		if steering {
 			desired := normalize(steer);
 			dir = normalize(lerp(dir, desired, clamp(dt * MECH_APEX_RAM_TURN_RATE, 0.0, 1.0)));
 		}
 		update_truck(this, p);
+
+		// Blast straight through linked portals (no standing channel) — keeps heading so the car
+		// shoots out the far side still charging; pinned victims (plowed below off the new car_pos)
+		// ride through with it. SFX + a poof at both mouths to sell the warp.
+		if rr_portal_try_instant_teleport(p) {
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position, 0.3);
+			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.4}, 1.0, v4.{0.5, 0.4, 1.0, 0.7}, 0.25);
+		}
 
 		// --- APEX turbo boost: time out the surge, spew the fire jet. ---
 		apex := mech != null && mech.is_apex;
@@ -4083,7 +4207,9 @@ Mech_Ram_Charge_Status :: class : Component {
 		car_speed := base * MECH_CAR_SPEED_MULT;
 		if boosting { car_speed = car_speed * MECH_CAR_BOOST_MULT; }
 		p.agent.movement_speed = car_speed;
-		p.agent.input_this_frame = dir;
+		// Auto-drive TEMP DISABLED: only carry the car forward while the driver is actually steering;
+		// otherwise it sits still (flip MECH_CAR_AUTO_DRIVE to restore the always-forward behaviour).
+		p.agent.input_this_frame = (MECH_CAR_AUTO_DRIVE || steering) ? dir : v2.{0, 0};
 		p.set_facing_right(dir.x >= 0.0);
 		// Continuous ground-rumble while driving (re-armed each frame with a short decay window so the
 		// amplitude stays roughly steady; the per-hit jolts below still punch through on top).
@@ -4812,6 +4938,8 @@ Mech_Pickup_Throw_Ability :: class : Ability_Base {
 			}
 			target := rr_mech_find_pickup_target(player);
 			if target != null {
+				// Steal from any Guardian/other Mech already holding them — ends their grab instantly, no cd.
+				rr_mech_steal_carried_from_others(player, target.entity.id);
 				mech.carried_player_id = target.entity.id;
 				// Movement lock comes from Mech_Carried_Status (edge-triggered). Grab plays
 				// on overlay track 1 so track-0 locomotion keeps running; carry pose held after.
@@ -5693,6 +5821,8 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 			target := rr_mech_find_melee_target(player, true);
 			if target != null {
 				if rr_mech_is_transformed(target) return;
+				// Steal from any Mech/other Guardian already holding them — ends their grab instantly, no cd.
+				rr_mech_steal_carried_from_others(player, target.entity.id);
 				guard.carried_player_id = target.entity.id;
 				// Movement lock comes from Mech_Carried_Status (edge-triggered). Grab plays on
 				// overlay track 1 so track-0 locomotion keeps going; carry pose held after.
@@ -6382,7 +6512,7 @@ rr_mech_call_minion :: proc(mech_player: Player) {
 	rr_mech_add_screenshake(mech_player, 0.1, 0.25);
 	mech_player.Notify("Your minion has been called");
 	minion := rr_mech_get_living_minion(mech_player);
-	if minion != null { minion.Notify("Your master is DOWN — get to them and revive!"); }
+	if minion != null { minion.Notify("The Mech is DOWN — get to them and revive!"); }
 }
 
 // "Call Minion" — the ONLY button a downed Mech can use (its kit is hidden while downed). Fires the
@@ -6435,7 +6565,7 @@ rr_mech_revive_downed :: proc(mech_player: Player) {
 Mech_Downed_Revive_Interactable :: class : Interactable {
 	ao_start :: method() {
 		this.set_listener(this);
-		this.set_text("Revive Master");
+		this.set_text("Revive Mech");
 		this.set_hold_text("Reviving...");
 		required_hold_time = 1.5;
 		radius = MECH_SHOWDOWN_REVIVE_RANGE;
@@ -6590,12 +6720,39 @@ rr_mech_draw_upgrade_row :: proc(row: Rect, mech: Mech_Module, upgrade_id: int, 
 	UI.text(rc, nts, name);
 }
 
+// Renders an upgrade's build cost as ICONS for a workbench card footer — [component icon] N
+// (+ [core icon] M) — instead of the old "Need 3 Schematics + 2 Magnet Cores" text.
+rr_mech_draw_card_cost_icons :: proc(comp_kind: int, qty: int, cores: int) {
+	row := UIK.layout_row(UIK.flex(1), UIK.fit(), 6);
+	row.main_align = .CENTER;
+	row.cross_align = .CENTER;
+	row.show_background = false;
+	UIK.panel_begin(row);
+
+	if comp_kind != 0 {
+		UIK.currency(get_asset(Texture_Asset, rr_mech_component_sprite_path(comp_kind)), qty, UIK.text_body());
+	} else {
+		// Wreckage Warp accepts any component, so there's no single icon — keep a compact text tag.
+		// Disable word wrap so "x1" stays on the same line as "ANY" in the narrow footer.
+		// Must use set_word_wrap (sets the override flag) — assigning .word_wrap alone is ignored.
+		any_ts := UIK.text_body();
+		any_ts.set_word_wrap(false);
+		UIK.text(format_string("ANY x%", .{qty}), any_ts);
+	}
+
+	if cores > 0 {
+		UIK.text("+", UIK.text_body());
+		UIK.currency(get_asset(Texture_Asset, MECH_MAGNET_CORE_TEX), cores, UIK.text_body());
+	}
+
+	UIK.panel_end();
+}
+
 rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id: int, orient: UIK.Card_Orientation, height: UIK.Size) -> Interact_Result {
 	name, icon_path, comp_kind, tint := rr_mech_upgrade_info(upgrade_id);
 	// Dynamic, order-based cost: the QUANTITY + cores scale with how many upgrades are owned,
 	// but each weapon is built from its OWN component type (any for Wreckage Warp).
 	qty, core_cost := rr_mech_next_upgrade_cost(mech);
-	cost_label := rr_mech_cost_label(comp_kind, qty, core_cost);
 
 	owned := rr_mech_upgrade_owned(mech, upgrade_id);
 	affordable := rr_mech_upgrade_can_afford(player, upgrade_id);
@@ -6605,13 +6762,6 @@ rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id:
 		display_tint = v4.{0.16, 0.45, 0.24, 1};
 	} else if !affordable {
 		display_tint = v4.{0.18, 0.18, 0.22, 1};
-	}
-
-	footer_text := cost_label;
-	if owned {
-		footer_text = "OWNED";
-	} else if !affordable {
-		footer_text = format_string("Need %", .{cost_label});
 	}
 
 	media_f := 0.5; header_f := 0.2; footer_f := 0.24;
@@ -6638,14 +6788,18 @@ rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id:
 		nm := UIK.text_button_auto();
 		nm.set_halign(.CENTER);
 		UIK.text(name, nm);
-		ft := UIK.text_button_auto();
-		ft.set_halign(.CENTER);
-		UIK.text(footer_text, ft);
+		if owned {
+			ft := UIK.text_button_auto();
+			ft.set_halign(.CENTER);
+			UIK.text("OWNED", ft);
+		} else {
+			rr_mech_draw_card_cost_icons(comp_kind, qty, core_cost);
+		}
 		UIK.panel_end();
 		UIK.card_zone_end();
 	} else {
-		// Auto-shrink so long names ("Missile Barrage") and cost strings ("Need 3 Schematics +
-		// 2 Magnet Cores") fit the narrow quarter-width cards instead of spilling past the edge.
+		// Auto-shrink so long names ("Missile Barrage") fit the narrow quarter-width cards instead
+		// of spilling past the edge; the cost shows as component/core icons rather than text.
 		UIK.card_zone(.HEADER);
 		nm := UIK.text_button_auto();
 		nm.set_halign(.CENTER);
@@ -6653,9 +6807,13 @@ rr_mech_draw_upgrade_card :: proc(player: Player, mech: Mech_Module, upgrade_id:
 		UIK.card_zone_end();
 
 		UIK.card_zone(.FOOTER);
-		ft := UIK.text_button_auto();
-		ft.set_halign(.CENTER);
-		UIK.text(footer_text, ft);
+		if owned {
+			ft := UIK.text_button_auto();
+			ft.set_halign(.CENTER);
+			UIK.text("OWNED", ft);
+		} else {
+			rr_mech_draw_card_cost_icons(comp_kind, qty, core_cost);
+		}
 		UIK.card_zone_end();
 	}
 

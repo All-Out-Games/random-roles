@@ -374,6 +374,48 @@ rr_update_portal_teleport_for_player :: proc(player: Player, dt: float) {
 	player.portal_standing_seconds = 0.0;
 }
 
+// Instantly teleport `player` through a linked portal they're standing on — NO standing channel.
+// Preserves the post-teleport bounce-block so they don't ping-pong, and keeps their heading/velocity
+// so they shoot out the far side still moving. Used by the Mech ram car, which never stands still
+// long enough for the normal 2s channel (rr_update_portal_teleport_for_player). Returns true if it teleported.
+rr_portal_try_instant_teleport :: proc(player: Player) -> bool {
+	if player == null || !#alive(player.entity) return false;
+
+	// Respect the bounce-block: don't re-teleport while still on the destination we just arrived at.
+	if player.portal_blocked_portal != null && #alive(player.portal_blocked_portal) {
+		if in_range(player.entity.world_position - player.portal_blocked_portal.world_position, PORTAL_MAKER_PORTAL_RADIUS) {
+			return false;
+		}
+		player.portal_blocked_portal = null;
+	} else {
+		player.portal_blocked_portal = null;
+	}
+
+	best: RR_Portal;
+	best_dist_sq := 999999.0;
+	radius_sq := PORTAL_MAKER_PORTAL_RADIUS * PORTAL_MAKER_PORTAL_RADIUS;
+	for portal: component_iterator(RR_Portal) {
+		if portal == null continue;
+		if !#alive(portal.entity) continue;
+		delta := player.entity.world_position - portal.entity.world_position;
+		dist_sq := length_squared(delta);
+		if dist_sq <= radius_sq && dist_sq < best_dist_sq {
+			best = portal;
+			best_dist_sq = dist_sq;
+		}
+	}
+	if best == null return false;
+
+	dest := best.linked_portal;
+	if dest == null || !#alive(dest) return false;
+
+	player.entity.set_local_position(dest.world_position);
+	player.portal_blocked_portal = dest;
+	player.portal_standing_on_portal = null;
+	player.portal_standing_seconds = 0.0;
+	return true;
+}
+
 // Local helper: abilities.csl has its own lookup; keep this one file-local and uniquely named.
 rr_get_player_by_entity_id :: proc(entity_id: u64) -> Player {
 	if entity_id == 0 return null;

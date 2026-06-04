@@ -28,13 +28,11 @@
   }
 },
 {
-  "cid": 2,
-  "aoid": 1274401429,
+  "cid": 3,
+  "aoid": 2564455047,
   "component_type": "Internal_Component",
-  "internal_component_type": "Polygon_Collider",
+  "internal_component_type": "Navmesh_Loop",
   "data": {
-    "make_navmesh_loop": true,
-    "flip_navmesh_loop": true,
     "points": [
       {
         "X": -1.8119363784790039,
@@ -84,6 +82,7 @@
         "X": -1.7958059310913086,
         "Y": 0.0203762054443359
       }
-    ]
+    ],
+    "flip_inside_outside": true
   }
 }
