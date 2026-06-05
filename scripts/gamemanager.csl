@@ -2845,6 +2845,13 @@ ao_update_ingame :: proc(dt: float) {
 
 	// If an end-game is queued, wait a beat before showing victory.
 	if rr_end_game_pending {
+		// Recording safeguard: if auto-victory was force-disabled while an end-game
+		// was queued, cancel it so the round doesn't end on its own.
+		if rr_disable_auto_victory {
+			rr_end_game_pending = false;
+			rr_end_game_pending_started_at = 0.0;
+			return;
+		}
 		// Hold the popup while a Lily deathbraid cinematic is still playing.
 		if rr_lily_any_deathbraid_active() return;
 		if (get_time() - rr_end_game_pending_started_at) >= RR_END_GAME_DELAY_AFTER_FINAL_KILL_SECONDS {
@@ -2876,6 +2883,12 @@ ao_update_ingame :: proc(dt: float) {
 		if p.player_state != Player_State.ALIVE continue;
 		if p.player_type != Player_Type.ANARCHIST continue;
 		prankster_check_unlock_jester_win(p);
+	}
+
+	// Recording safeguard: skip all automatic win-condition checks so a round
+	// never ends on its own. Manual /end still works. Toggle with /noautowin.
+	if rr_disable_auto_victory {
+		return;
 	}
 
 	// -- Traitor: All non-traitors are infected (mini-werewolves)
