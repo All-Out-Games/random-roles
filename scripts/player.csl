@@ -3920,6 +3920,9 @@ Report_Corpse_Interactable :: class : Interactable {
 		if player.werewolf_infected return false;
 		// Once a Mech has gone APEX, body reports are locked for the final showdown.
 		if rr_any_mech_apex_active() return false;
+		// A transformed Mech can't report bodies — it has to revert to schleem form first.
+		mech := player.entity.get_component(Mech_Module);
+		if mech != null && (mech.is_mech_form || mech.is_apex) return false;
 		// Brief lockout after an unwrap so report doesn't fire in the same gesture.
 		if get_time() < cooldown_ends_at return false;
 		// Disable during Lily's Deathbraid cinematic.
@@ -4219,15 +4222,31 @@ rr_draw_task_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, color: v4)
 // Map marker for the Mech / its Minions: a task pin tinted by the component the panel drops when
 // wrecked, with that component's icon overlaid, so smashers can see at a glance what each panel
 // yields and plan which to break for the parts they still need.
-rr_draw_task_wreck_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, kind: int) {
+rr_draw_task_wreck_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, kind: int, flash := false) {
 	p_ui := rr_minimap_world_to_ui(map_rect, world_pos);
 	size := map_rect.height() * 0.026;
 	if size < 12.0 { size = 12.0; }
 	if size > 30.0 { size = 30.0; }
-	r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
 
 	ct := rr_mech_component_tint(kind);
 	pin := get_asset(Texture_Asset, "sprites/task_icon.png");
+
+	// When this component is the one the Mech clicked-but-couldn't-afford, pulse a bright halo
+	// behind the pin and breathe the pin size so it pops out of the cluster of other markers.
+	if flash {
+		osc := sin(get_time() * 9.0); // -1..1
+		halo := size * (1.9 + osc * 0.4);
+		halo_r := Rect{p_ui, p_ui}.grow_unscaled(halo, halo, halo, halo);
+		halo_a := osc * 0.3 + 0.55; // 0.25..0.85
+		if pin != null {
+			UI.quad(halo_r.fit_aspect(pin.get_aspect()), pin, v4.{1.0, 1.0, 0.6, halo_a});
+		} else {
+			UI.quad(halo_r, core_globals.white_sprite, v4.{1.0, 1.0, 0.6, halo_a});
+		}
+		size *= 1.15 + osc * 0.18;
+	}
+
+	r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
 	if pin != null {
 		UI.quad(r.fit_aspect(pin.get_aspect()), pin, v4.{ct.x, ct.y, ct.z, 1.0});
 	} else {
@@ -4236,7 +4255,9 @@ rr_draw_task_wreck_marker_on_minimap :: proc(map_rect: Rect, world_pos: v2, kind
 
 	comp := get_asset(Texture_Asset, rr_mech_component_sprite_path(kind));
 	if comp != null {
-		icon_r := r.inset(size * 0.4);
+		// `r` is built with grow_unscaled (raw pixels), so inset the overlay UNSCALED too —
+		// inset() would re-apply the UI scale factor and make the icon resolution-dependent.
+		icon_r := r.inset_unscaled(size * 0.4);
 		UI.quad(icon_r.fit_aspect(comp.get_aspect()), comp, v4.{1, 1, 1, 1});
 	}
 }
@@ -4395,10 +4416,16 @@ rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 		if player.entity.get_component(Mech_Module) != null { is_mech_smasher = true; }
 	}
 	if is_mech_smasher {
+		// Active "missing component" hint from a workbench click: flash the panels that drop the
+		// needed component. Lives on the Mech's own module (hint_kind 0 == any → flash them all).
+		mech := player.entity.get_component(Mech_Module);
+		hint_active := mech != null && get_time() < mech.minimap_hint_until;
 		for i: 0..rr_task_destination_entries.elements.count-1 {
 			e := rr_task_destination_entries.elements[i];
 			if e == null continue;
-			rr_draw_task_wreck_marker_on_minimap(map_rect, e.pos, rr_mech_task_drop_kind_at_pos(e.pos));
+			kind := rr_mech_task_drop_kind_at_pos(e.pos);
+			flash := hint_active && (mech.minimap_hint_kind == 0 || mech.minimap_hint_kind == kind);
+			rr_draw_task_wreck_marker_on_minimap(map_rect, e.pos, kind, flash);
 		}
 		return;
 	}

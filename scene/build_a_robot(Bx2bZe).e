@@ -5,8 +5,8 @@
   "name": "build_a_robot",
   "local_enabled": true,
   "local_position": {
-    "X": 40.8474845886230469,
-    "Y": 27.8872203826904297
+    "X": 41.2424964904785156,
+    "Y": 27.0190467834472656
   },
   "local_rotation": 0,
   "local_scale": {

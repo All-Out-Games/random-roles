@@ -2904,22 +2904,33 @@ ao_update_ingame :: proc(dt: float) {
 		return;
 	}
 	// -- Traitor: Numerical advantage (traitors >= all non-traitors), win by brute force.
-	// Exception: exact 1v1 traitor-vs-sheriff — the sheriff can fight back.
+	// Exception: exact 1v1 where the lone survivor can fight back — the sheriff (can shoot the
+	// traitor) or the guardian (the Mech's hard counter). The round must actually be settled in
+	// combat, so the traitor doesn't get a free automatic win.
 	non_traitor_count := civilian_count + anarchist_count;
 	if traitor_count > 0 && non_traitor_count > 0 && traitor_count >= non_traitor_count {
-		// In a 1v1, the sheriff can shoot the traitor, so don't auto-end.
+		// In a 1v1, a sheriff can always shoot the traitor; a guardian can only fight back when the
+		// lone traitor is the Mech (the guardian is the Mech's counter — vs any other traitor it has
+		// no answer and should auto-lose).
 		should_end := true;
 		if traitor_count == 1 && non_traitor_count == 1 {
+			survivor_is_sheriff := false;
+			survivor_is_guardian := false;
+			traitor_is_mech := false;
 			for i: 0..players.elements.count-1 {
 				p := players.elements[i];
 				if p == null continue;
 				if !#alive(p.entity) continue;
 				if p.player_state != Player_State.ALIVE continue;
-				if p.player_type == Player_Type.TRAITOR continue;
-				if p.player_role == Player_Role.SHERIFF {
-					should_end = false;
+				if p.player_type == Player_Type.TRAITOR {
+					if p.player_role == Player_Role.THE_MECH { traitor_is_mech = true; }
+					continue;
 				}
+				if p.player_role == Player_Role.SHERIFF  { survivor_is_sheriff = true; }
+				if p.player_role == Player_Role.GUARDIAN { survivor_is_guardian = true; }
 			}
+			if survivor_is_sheriff { should_end = false; }
+			if survivor_is_guardian && traitor_is_mech { should_end = false; }
 		}
 		if should_end {
 			rr_queue_end_game_with_victor(Player_Type.TRAITOR);
