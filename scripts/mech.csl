@@ -133,6 +133,10 @@ MECH_MISSILE_RETICLE_RADIUS :: 1.75;         // aim reticle icon sized to match 
 MECH_FIRE_PILLAR_SCALE :: 3.0;       // fire_column rig is 1.04 wide -> ~3.1 here (a tall, imposing pillar)
 MECH_MISSILE_CAM_HOLD :: 2.5;        // keep the camera parked over the strike zone this long AFTER the salvo fires
 MECH_MISSILE_PAN_SPEED :: 16.0;      // free-cam roam speed (world units/sec) while placing missile markers
+MECH_MISSILE_MOBILE_MIN_RANGE :: 3.0;  // mobile drag-aim: nearest forward strike point (a tiny drag)
+MECH_MISSILE_MOBILE_MAX_RANGE :: 16.0; // mobile drag-aim: farthest forward strike point (a full drag)
+MECH_MISSILE_MOBILE_DEADZONE :: 0.18;  // mobile drag-aim: ignore drags shorter than this (normalized 0-1)
+MECH_MISSILE_CLUSTER_SPREAD :: 2.2;    // radius of the salvo cluster dropped around the mobile aim point
 MECH_MISSILE_AIM_LOS_RADIUS :: 25.0; // recording-aid: LOS radius while it follows the zoomed-out aim camera (fills the framed view)
 MECH_FIRE_PILLAR_SECONDS :: 8.0;     // how long a passage-blocking fire pillar burns in the crater
 MECH_FIRE_PILLAR_BLOCK_RADIUS :: 1.4; // players cannot walk within this radius of a fire pillar (~matches the flame base)
@@ -5183,6 +5187,20 @@ rr_mech_fire_magnet_cannon :: proc(player: Player, spot: v2) {
 	rr_mech_add_screenshake(player, 0.07, 0.2);
 }
 
+// Lay out a center-weighted cluster of strike points around `center`: one dead-center plus a
+// ring of the rest. The mobile drag-aim barrage scatters its whole salvo at once with this so a
+// single gesture still saturates an area (vs PC, which places each point by hand).
+rr_mech_missile_cluster_points :: proc(center: v2, count: int, spread: float, out: ref [..]v2) {
+	if count <= 0 return;
+	out.append(center);
+	ring := count - 1;
+	if ring <= 0 return;
+	for i: 0..ring-1 {
+		ang := (i.(float) / ring.(float)) * 2.0 * PI;
+		out.append(center + v2.{cos(ang), sin(ang)} * spread);
+	}
+}
+
 // Ground-placement barrage: lob one ballistic missile per chosen marker point. Each rocket
 // arcs from a shoulder muzzle and crashes down on its fixed point, stunning every enemy caught
 // in the blast (AOE) and planting a passage-blocking fire pillar in the crater.
@@ -5437,7 +5455,67 @@ Mech_Missile_Barrage_Ability :: class : Ability_Base {
 		was_targeting = false;
 		was_activate = false;
 	}
+	// Mobile has no mouse cursor or free-cam roam, so the PC click-N-points flow is unusable there.
+	// Instead: hold the button and drag to aim a forward strike point (direction = drag direction,
+	// distance = drag magnitude), release to drop the entire salvo as a cluster on that point.
+	update_mobile :: proc(using this: Mech_Missile_Barrage_Ability, params: ref Ability_Update_Params) {
+		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
+		if !targeted.targeting { stop_targeting(this); return; }
+		if !params.can_use { player.active_ability = null; stop_targeting(this); return; }
+
+		mech := player.entity.get_component(Mech_Module);
+		if mech == null { player.active_ability = null; stop_targeting(this); return; }
+
+		was_targeting = true;
+		shots_needed := mech.is_apex ? 6 : 3;
+
+		// Zoom out on client AND server (camera is synced) so the forward strike zone is framed.
+		if player.is_local_or_server() { player.camera.size = max(player.camera.size, MECH_AIM_CAMERA_SIZE); }
+
+		// Map the drag off the button onto a forward strike point.
+		origin := player.entity.world_position;
+		drag_mag := clamp(length(params.drag_offset), 0.0, 1.0);
+		aiming := drag_mag > MECH_MISSILE_MOBILE_DEADZONE;
+		aim_point := origin;
+		if aiming {
+			dist := lerp(MECH_MISSILE_MOBILE_MIN_RANGE, MECH_MISSILE_MOBILE_MAX_RANGE, drag_mag);
+			aim_point = origin + params.drag_direction * dist;
+			// Face the strike point (synced) so the body and launched rockets agree for everyone.
+			if abs(params.drag_direction.x) > 0.01 { player.set_facing_right(params.drag_direction.x >= 0); }
+		}
+
+		// Preview the cluster the salvo will saturate.
+		if aiming && player.is_local() {
+			UI.push_world_draw_context();
+			defer UI.pop_draw_context();
+			preview: [..]v2;
+			rr_mech_missile_cluster_points(aim_point, shots_needed, MECH_MISSILE_CLUSTER_SPREAD, ref preview);
+			for i: 0..preview.count-1 {
+				UI.push_z(preview[i].y);
+				rr_mech_draw_ground_reticle(preview[i], MECH_MISSILE_BLAST_STUN_RADIUS, v4.{1.0, 0.45, 0.12, 0.85}, MECH_MISSILE_RETICLE_RADIUS);
+				UI.pop_z();
+			}
+		}
+
+		// Release past the deadzone fires the whole salvo at once.
+		if params.released {
+			if aiming {
+				pts: [..]v2;
+				rr_mech_missile_cluster_points(aim_point, shots_needed, MECH_MISSILE_CLUSTER_SPREAD, ref pts);
+				rr_mech_fire_missile_barrage(player, pts);
+				current_cooldown = 75.0;
+				// Park the camera over the cluster for a beat so the player watches the rockets land
+				// (held by rr_mech_update for MECH_MISSILE_CAM_HOLD seconds, then eased back).
+				mech.missile_aim_center = aim_point;
+				mech.missile_cam_hold_until = get_time() + MECH_MISSILE_CAM_HOLD;
+			}
+			player.active_ability = null;
+			stop_targeting(this);
+		}
+	}
 	on_update :: method(params: ref Ability_Update_Params) {
+		if player.device_kind != .PC { update_mobile(this, ref params); return; }
+
 		targeted := Ability_Utilities.update_targeted_ability(player, this, ref params);
 		targeting := targeted.targeting;
 		if targeting && !params.can_use { player.active_ability = null; stop_targeting(this); return; }

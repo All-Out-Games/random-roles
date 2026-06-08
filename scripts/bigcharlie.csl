@@ -2484,6 +2484,18 @@ rr_bc_apply_shockwave :: proc(player: Player) {
 			dir = normalize(dir);
 		}
 
+		// A transformed Mech caught in the wave is knocked clean OUT of its mech form — the
+		// shockwave is a hard counter. Revert it properly (same path as the Guardian shockwave's
+		// do_revert) BEFORE the knockback so the form flag, avatar, and movement locks all stay
+		// consistent. Without this the form only desyncs visually while is_mech_form stays true,
+		// so the blind Transform toggle (is_mech_form = !is_mech_form) needs two presses to come
+		// back — which reads as "can't transform again". APEX re-shows itself, so it's left in form.
+		mech := p.entity.get_component(Mech_Module);
+		if mech != null && mech.is_mech_form && !mech.is_apex {
+			rr_mech_force_revert(p);
+			mech.is_mech_form = false;
+		}
+
 		knock := p.entity.get_component(BC_Shockwave_Knockback);
 		if knock == null {
 			knock = p.entity.add_component(BC_Shockwave_Knockback);
