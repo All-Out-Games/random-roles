@@ -7,7 +7,7 @@ BACKUP_POLL_INTERVAL :: 0.5;
 // still keeping restored positions reasonably fresh as players walk around.
 BACKUP_POSITION_EPSILON_SQ :: 1.0;
 RR_BACKUP_SAVE_KEY :: "rr_backup_snapshot";
-RR_BACKUP_SCHEMA_VERSION :: 8;
+RR_BACKUP_SCHEMA_VERSION :: 9;
 RR_BACKUP_MAX_SAVE_BYTES :: 200000;
 
 // Enums serialized as ints — JSON support for enums is unspecified, ints are
@@ -66,6 +66,13 @@ Backup_Player_Entry :: class {
 	mech_circuits: int @ao_serialize;
 	mech_schematics: int @ao_serialize;
 	mech_gears: int @ao_serialize;
+
+	minion_master_user_id: string @ao_serialize;
+	minion_original_type_i: int @ao_serialize; // the pre-conversion Player_Type (effect_end restores it)
+	minion_power_cells: int @ao_serialize;
+	minion_circuits: int @ao_serialize;
+	minion_schematics: int @ao_serialize;
+	minion_gears: int @ao_serialize;
 }
 
 // Bit layout for Backup_Player_Entry.role_flags — per-role world-state bools, packed because
@@ -206,6 +213,22 @@ rr_backup_count_completed_tasks :: proc(p: Player) -> int {
 		if t.completed completed += 1;
 	}
 	return completed;
+}
+
+rr_backup_completed_tasks_match :: proc(e: Backup_Player_Entry, p: Player) -> bool {
+	if e == null return false;
+	if e.completed_task_ids.count != rr_backup_count_completed_tasks(p) return false;
+	for k: 0..e.completed_task_ids.count-1 {
+		id := e.completed_task_ids[k];
+		found := false;
+		for j: 0..p.active_tasks.elements.count-1 {
+			t := p.active_tasks.elements[j];
+			if t == null continue;
+			if t.completed && t.id == id { found = true; break; }
+		}
+		if !found return false;
+	}
+	return true;
 }
 
 // --- Persistence (game-level save string, JSON-encoded) --------------------
@@ -380,6 +403,19 @@ rr_backup_fill_entry :: proc(e: Backup_Player_Entry, p: Player) {
 		e.mech_gears = mechm.gears;
 	}
 
+	// Mech Minion — who converted this player + their pre-conversion type and carried parts, so the
+	// conversion can be rebuilt on restore. role_i already holds the Minion's original role.
+	e.minion_master_user_id = "";
+	me := rr_mech_get_minion_effect(p);
+	if me != null && me.converted_by_mech_id != 0 {
+		e.minion_master_user_id = rr_backup_user_id_for_entity_id(me.converted_by_mech_id);
+		e.minion_original_type_i = me.original_type.(int);
+		e.minion_power_cells = me.power_cells;
+		e.minion_circuits = me.circuits;
+		e.minion_schematics = me.schematics;
+		e.minion_gears = me.gears;
+	}
+
 	// Hitman mines — filter global list by owner.
 	e.hitman_mine_positions.clear();
 	if p.player_role == Player_Role.HITMAN {
@@ -490,7 +526,7 @@ rr_backup_state_changed :: proc() -> bool {
 			if e.hitman_kills != rr_backup_get_hitman_kills(p) return true;
 			if e.pirate_treasure != rr_backup_get_pirate_treasure(p) return true;
 			if e.mimicer_kills != rr_backup_get_mimicer_kills(p) return true;
-			if e.completed_task_ids.count != rr_backup_count_completed_tasks(p) return true;
+			if !rr_backup_completed_tasks_match(e, p) return true;
 
 			// Player moved far enough to be worth re-snapshotting (see BACKUP_POSITION_EPSILON_SQ).
 			if length_squared(p.entity.world_position - e.world_pos) >= BACKUP_POSITION_EPSILON_SQ return true;
@@ -527,6 +563,12 @@ rr_backup_state_changed :: proc() -> bool {
 				if e.mech_schematics != mechm.schematics return true;
 				if e.mech_gears != mechm.gears return true;
 			}
+
+			// Minion conversion gained/lost (becoming a Minion also flips type to TRAITOR, but compare
+			// the master directly so a re-convert by a different Mech is caught too).
+			me := rr_mech_get_minion_effect(p);
+			cur_master := me != null && me.converted_by_mech_id != 0 ? rr_backup_user_id_for_entity_id(me.converted_by_mech_id) : "";
+			if e.minion_master_user_id != cur_master return true;
 
 			if p.player_role == Player_Role.HITMAN {
 				live_mines := 0;
@@ -710,6 +752,36 @@ rr_backup_restore_guardian :: proc(p: Player, e: Backup_Player_Entry) {
 	guard.is_guardian_form = (e.role_flags & RBF_GUARDIAN_FORM) != 0;
 }
 
+// Rebuild a Mech Minion conversion: re-add the Mech_Minion_Effect linked to the converting Mech
+// (resolved from its user_id) so the Minion keeps its TRAITOR alignment, per-viewer disguise, and
+// carried-parts. Role-independent — a Minion keeps its original role, so this runs for any role.
+rr_backup_restore_minion :: proc(p: Player, e: Backup_Player_Entry) {
+	if e.minion_master_user_id.count == 0 return;
+	// Already a Minion (status survived through the round) — don't double-add the effect.
+	if rr_mech_get_minion_effect(p) != null return;
+	master := rr_backup_find_player_by_user_id(e.minion_master_user_id);
+	if master == null return; // the converting Mech isn't in this session — can't relink
+	minion := new(Mech_Minion_Effect);
+	minion.converted_by_mech_id = master.entity.id;
+	minion.original_role = e.role_i.(Player_Role);
+	minion.original_type = e.minion_original_type_i.(Player_Type);
+	minion.power_cells = e.minion_power_cells;
+	minion.circuits = e.minion_circuits;
+	minion.schematics = e.minion_schematics;
+	minion.gears = e.minion_gears;
+	// Snapshot the current (un-disguised) cosmetics so effect_end can restore them; the per-viewer
+	// half-cyborg disguise re-applies itself on traitor clients once the effect is live.
+	minion.saved_skins.clear();
+	if p.animator != null && p.animator.instance != null {
+		skins := p.animator.instance.get_skins();
+		for i: 0..skins.count-1 {
+			minion.saved_skins.append(skins[i]);
+		}
+	}
+	minion.saved_color = p.avatar_color;
+	p.entity.add_passive_effect(minion);
+}
+
 rr_backup_find_player_by_user_id :: proc(uid: string) -> Player {
 	if uid.count == 0 return null;
 	for p: component_iterator(Player) {
@@ -798,6 +870,8 @@ rr_backup_apply_to_player :: proc(p: Player, e: Backup_Player_Entry) {
 	if role == Player_Role.MOVIE_STAR rr_backup_restore_movie_star_traps(p, e);
 	if role == Player_Role.THE_MECH rr_backup_restore_mech(p, e);
 	if role == Player_Role.GUARDIAN rr_backup_restore_guardian(p, e);
+	// Minion link is independent of the (original) role — restore it for any role.
+	rr_backup_restore_minion(p, e);
 
 	// Use existing handlers so side effects (ghost nav, voice masks, speed
 	// reset) stay consistent with a normal state transition.

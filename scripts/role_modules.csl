@@ -51,6 +51,11 @@ Mech_Module :: class : Component {
 	// 0 (the default) reads as "ready" since get_time() is always >= 0 (matches showdown_cooldown_until).
 	smash_cooldown_until: float;
 
+	// Last Wreckage Warp time for THIS player — the warp cooldown is now per-player (shared across
+	// every wreckage) rather than per-wreckage. 0 (default) reads as "ready" since warp is gated
+	// behind the built upgrade, long after get_time() passes the 1s cooldown.
+	last_warp_at: float;
+
 	carried_player_id: u64;
 	carried_corpse_id: u64;
 
@@ -70,6 +75,10 @@ Mech_Module :: class : Component {
 	// so the Magnet Cannon's wide framing lingers briefly AFTER the last rod is fired instead
 	// of snapping back the instant placement ends. Synced so client + server agree on the size.
 	magnet_cam_hold_until: float;
+
+	// While > 0 (and not yet elapsed) the follow camera is held pulled out a touch right after a
+	// throw, so the thrower watches the victim's arc instead of the view snapping back instantly.
+	throw_cam_hold_until: float;
 
 	// Missile Barrage free-cam placement. While targeting, the avatar is frozen in place
 	// (movement-input lock) and ONLY the camera roams — missile_aim_center is the detached
@@ -186,6 +195,9 @@ Mech_Minion_Effect :: class : Effect_Base {
 
 	// Smash cooldown for a converted Minion (same role as Mech_Module.smash_cooldown_until).
 	smash_cooldown_until: float;
+
+	// Per-player Wreckage Warp cooldown clock (see Mech_Module.last_warp_at).
+	last_warp_at: float;
 
 	// Conversion timestamp — drives the synced one-shot "You are now a Minion" warning
 	// banner (rr_mech_draw_minion_warning), shown for a fixed window from the server stamp.

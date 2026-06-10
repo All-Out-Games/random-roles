@@ -3,6 +3,9 @@ import "core:ao"
 // --- Global task ids (non-random, injected by game state) ---
 RR_RESTART_GENERATOR_TASK_ID :: "restart_generator";
 RR_ENABLE_COMMUNICATIONS_TASK_ID :: "enable_communications";
+// The Mech's R&D Workbench reuses a task prop for its position, but it is NOT a real player
+// task — it must never appear as a task marker on the map, be hackable, or be smashable.
+RR_WORKBENCH_TASK_ID :: "rnd_workbench";
 
 // Random state used by tasks/roles. Keep this as a class instance (not a top-level u64)
 // to avoid collisions with engine-provided globals in some build configurations.
@@ -2397,6 +2400,9 @@ rr_unstuck_player :: proc(player: Player) {
 	// Lily: clear victim-side effects and end any active Lily abilities owned by this player.
 	rr_lily_unstuck_player(player);
 
+	// Mech: drop any Minion conversion + Mech/Guardian carry/stun/throw locks.
+	rr_mech_unstuck_player(player);
+
 	// Keep visual state coherent after force-clears.
 	player.remove_name_invisibility_reason("werewolf_transform");
 	player.remove_invisibility_reason(MIMICER_INVIS_REASON);
@@ -2828,6 +2834,12 @@ ao_update_ingame :: proc(dt: float) {
 	civilian_count := get_player_count(Player_Type.CIVILIAN);
 	traitor_count := get_player_count(Player_Type.TRAITOR);
 	anarchist_count := get_player_count(Player_Type.ANARCHIST);
+
+	// While a Mech End Game cutscene is rolling, the barrage is busy killing every non-traitor —
+	// don't let the automatic win check end the round (and pop the victory screen) the instant the
+	// last civilian dies mid-salvo. The cutscene ends the round itself in rr_mech_finish_end_game
+	// once the whole spectacle (and the last missiles landing) has played out.
+	if rr_mech_any_endgame_active() return;
 
 	if rr_started_solo_test_mode {
 		// Test mode is only valid while there are <=2 players.

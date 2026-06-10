@@ -242,10 +242,9 @@ Player :: class : Player_Base {
 		// Held by a Mech or Guardian — fully locked out until thrown/dropped.
 		if rr_mech_is_carried(this) return false;
 		// Disrupted by a Guardian shockwave — every ability is hard-locked during the warning window
-		// (while the status is active). After the forced de-transform the status releases and the
-		// lockout is enforced by ability cooldowns instead (see Guardian_Shock_Status).
-		shock := entity.get_component(Guardian_Shock_Status);
-		if shock != null && shock.active return false;
+		// (while the shock effect is present). After the forced de-transform the effect is removed and
+		// the lockout is enforced by ability cooldowns instead (see Guardian_Shock_Status).
+		if rr_guardian_is_shocked(this) return false;
 		// While an aimed ability is mid-targeting it owns the next click — block every OTHER
 		// ability so clicking a different button can't fire it straight through the aim overlay.
 		// Self-heal a dangling target if we can no longer act (e.g. died mid-aim) so the bar,
@@ -3719,6 +3718,7 @@ Task_Interactable :: class : Component {
 	// without relying on the entity name.
 	task_id_override: string @ao_serialize;
 	mech_smashed: bool;
+	mech_smashed_at: float; // when it was smashed; the panel silently auto-repairs after MECH_TASK_AUTO_REPAIR_SECONDS
 	mech_wreckage_entity: Entity;
 	// Serialized hold time captured at startup so normal task interaction keeps its configured
 	// length; the smashed-task "Repair" temporarily overrides it with a longer hold.
@@ -3745,6 +3745,20 @@ Task_Interactable :: class : Component {
 	ao_update :: proc(using this: Task_Interactable, dt: float) {
 		if interactable == null return;
 		if mech_smashed {
+			// Silent auto-repair: a panel left broken for too long fixes itself (no visible
+			// countdown) so the map can't stay permanently crippled if no civilian repairs it.
+			if get_time() - mech_smashed_at >= MECH_TASK_AUTO_REPAIR_SECONDS {
+				mech_smashed = false;
+				if mech_wreckage_entity != null && #alive(mech_wreckage_entity) {
+					w := mech_wreckage_entity.get_component(Mech_Wreckage);
+					if w != null { rr_mech_explode_wreckage(w); } // graceful fade-out, then self-destruct
+					else { mech_wreckage_entity.destroy(); }
+				}
+				mech_wreckage_entity = null;
+				interactable.set_text(get_task_display_name(this.get_task_id()));
+				interactable.required_hold_time = base_hold_time;
+				return;
+			}
 			// Repairing a smashed panel is a deliberate hold, tripled to match the smash channel.
 			interactable.set_text("Repair");
 			interactable.set_hold_text("Repairing...");
@@ -4420,12 +4434,17 @@ rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 		// needed component. Lives on the Mech's own module (hint_kind 0 == any → flash them all).
 		mech := player.entity.get_component(Mech_Module);
 		hint_active := mech != null && get_time() < mech.minimap_hint_until;
-		for i: 0..rr_task_destination_entries.elements.count-1 {
-			e := rr_task_destination_entries.elements[i];
-			if e == null continue;
-			kind := rr_mech_task_drop_kind_at_pos(e.pos);
+		// Iterate the live panels (not just registered positions) so we can skip ones that are
+		// CURRENTLY broken — a smashed panel has no resource to grab until it's repaired, so it
+		// shouldn't be lit up as a place to find components.
+		for t: component_iterator(Task_Interactable) {
+			if t == null || !#alive(t.entity) continue;
+			if !rr_mech_task_is_smashable(t) continue; // skips the workbench prop + non-task panels
+			if t.mech_smashed continue;                // currently broken/locked — nothing to smash here yet
+			pos := t.entity.world_position;
+			kind := rr_mech_task_drop_kind_at_pos(pos);
 			flash := hint_active && (mech.minimap_hint_kind == 0 || mech.minimap_hint_kind == kind);
-			rr_draw_task_wreck_marker_on_minimap(map_rect, e.pos, kind, flash);
+			rr_draw_task_wreck_marker_on_minimap(map_rect, pos, kind, flash);
 		}
 		return;
 	}
@@ -4453,6 +4472,7 @@ rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 		for i: 0..rr_task_destination_entries.elements.count-1 {
 			e := rr_task_destination_entries.elements[i];
 			if e == null continue;
+			if e.task_id == RR_WORKBENCH_TASK_ID continue; // workbench isn't a real task
 			rr_draw_task_marker_on_minimap(map_rect, e.pos, v4.{1, 1, 1, 1});
 		}
 	}
