@@ -52,6 +52,8 @@ MECH_SMASH_RANGE :: 3.0;
 // keeps swinging the whole time), then the panel breaks. Repairing a smashed panel takes the same
 // length. After a smash completes the smasher is on cooldown before they can smash again.
 MECH_SMASH_ANIM_LOOP :: 1.35;                        // one loop of "009SG/Smash_Task" (see rr_mech_anim_duration)
+MECH_SMASH_SWING_INTERVAL :: MECH_SMASH_ANIM_LOOP / 2.0; // re-fire the swing twice per anim loop so it hits twice as often
+MECH_SMASH_IMPACT_DELAY :: 0.45;                     // delay the crunch SFX to land on the hammer impact at the end of each swing
 MECH_SMASH_HOLD_TIME :: MECH_SMASH_ANIM_LOOP * 3.0;  // smash takes 3 anim loops
 MECH_REPAIR_HOLD_TIME :: MECH_SMASH_ANIM_LOOP * 3.0; // civilian repair length, tripled to match the smash
 MECH_SMASH_COOLDOWN :: 8.0;                          // gap between smashes for a single smasher
@@ -179,12 +181,13 @@ mech_workbench_entity: Entity;
 //   mech_missile_los_follows_camera, MECH_CAR_AUTO_DRIVE,
 //   MECH_CAR_SMOOTH_STEER, MECH_ALLOW_MULTIPLE_MINIONS
 
-rr_mech_play_sfx_at :: proc(path: string, pos: v2, volume: float) {
+rr_mech_play_sfx_at :: proc(path: string, pos: v2, volume: float, delay: float = 0) {
 	sfx := SFX.default_sfx_desc();
 	sfx.set_position(pos);
 	sfx.volume = volume;
 	sfx.volume_perturb = 0.06;
 	sfx.speed_perturb = 0.06;
+	sfx.delay = delay; // for lining a crunch up with the hammer landing at the end of the swing
 	rr_play_sfx(path, sfx);
 }
 
@@ -1923,7 +1926,8 @@ rr_mech_play_smash_gesture :: proc(player: Player, pos: v2) {
 	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false); // no-op for a non-transformed Minion
 	rr_mech_spawn_flash(pos, 0.7, v4.{1.0, 0.55, 0.08, 0.45}, 0.2);
 	rr_mech_add_screenshake(player, 0.05, 0.12);
-	rr_mech_play_sfx_at("sfx/ggg_explode.wav", pos, 0.3);
+	// Land the crunch on the hammer impact at the end of the swing, not the start of it — and hit harder.
+	rr_mech_play_sfx_at("sfx/ggg_explode.wav", pos, 0.4, MECH_SMASH_IMPACT_DELAY);
 }
 
 rr_mech_smash_task :: proc(player: Player, task: Task_Interactable) {
@@ -1949,8 +1953,8 @@ rr_mech_smash_task :: proc(player: Player, task: Task_Interactable) {
 	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false);
 	rr_mech_spawn_flash(task.entity.world_position, 0.95, v4.{1.0, 0.55, 0.08, 0.65}, 0.28);
 	rr_mech_add_screenshake(player, 0.08, 0.2);
-	rr_mech_play_sfx_at("sfx/ggg_explode.wav", task.entity.world_position, 0.28);
-	rr_mech_play_sfx_at(MECH_SMASH_SFX, task.entity.world_position, 0.32); // metal-crunch smash on the break
+	rr_mech_play_sfx_at("sfx/ggg_explode.wav", task.entity.world_position, 0.5, MECH_SMASH_IMPACT_DELAY);
+	rr_mech_play_sfx_at(MECH_SMASH_SFX, task.entity.world_position, 0.6, MECH_SMASH_IMPACT_DELAY); // metal-crunch wreck on the break
 
 	// Re-arm the per-smasher cooldown so they can't immediately smash the next panel.
 	rr_mech_arm_smash_cooldown(player);
@@ -2866,9 +2870,9 @@ Mech_Smash_Interactable :: class : Interactable {
 		if player == null return;
 		// Disabled mid-cooldown — no smash swing while the countdown prompt is showing.
 		if rr_mech_smash_on_cooldown(player) return;
-		// Re-fire the smash swing once per anim loop so it visibly loops during the hold.
+		// Re-fire the smash swing twice per anim loop so it visibly hammers during the hold.
 		if get_time() < next_swing_at return;
-		next_swing_at = get_time() + MECH_SMASH_ANIM_LOOP;
+		next_swing_at = get_time() + MECH_SMASH_SWING_INTERVAL;
 		rr_mech_play_smash_gesture(player, entity.world_position);
 	}
 	on_interact :: method(player: Player) {
