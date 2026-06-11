@@ -3,7 +3,7 @@
 // values at role assignment time, the min/max + save scaffolding here will already be ready.
 
 LOADOUT_SAVE_KEY :: "loadout_v2";
-LOADOUT_DATA_VERSION :: 4;
+LOADOUT_DATA_VERSION :: 5;
 
 LOADOUT_EXTRA_TRAITOR_PRODUCT_ID   :: "69f0deeaf910103de110f1cb";
 LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID  :: "69f0deecf910103de110f1cc";
@@ -206,6 +206,8 @@ loadout_role_id_for_idx :: proc(role_idx: int) -> string {
         case 15: return "big_charlie";
         case 16: return "lily_lovebraids";
         case 18: return "hunter";
+        case 19: return "the_mech";
+        case 20: return "guardian";
     }
     return "";
 }
@@ -228,6 +230,8 @@ loadout_idx_for_role_id :: proc(id: string) -> int {
     if id == "big_charlie"    return 15;
     if id == "lily_lovebraids" return 16;
     if id == "hunter"          return 18;
+    if id == "the_mech"        return 19;
+    if id == "guardian"        return 20;
     return -1;
 }
 
@@ -291,6 +295,8 @@ loadout_get_role_small_icon :: proc(role_idx: int) -> string {
         case 15: return "ui/roles_small/charlie_icon (1).png";
         case 16: return "ui/roles_small/lily_icon (1).png";
         case 18: return "ui/roles_small/hunter_icon.png";
+        case 19: return "ui/roles_small/mech_icon.png";
+        case 20: return "ui/roles_small/guardian_icon.png";
     }
     return "";
 }
@@ -313,6 +319,7 @@ loadout_get_team_roles :: proc(tab: int, results: ref [..]int) {
         case LOADOUT_TAB_CIVILIAN: {
             for i: 1..6 append(ref results, i);
             append(ref results, 18);
+            append(ref results, 20);
         }
         case LOADOUT_TAB_ANARCHIST: {
             append(ref results, 7);
@@ -327,6 +334,7 @@ loadout_get_team_roles :: proc(tab: int, results: ref [..]int) {
             append(ref results, 13);
             append(ref results, 14);
             append(ref results, 16);
+            append(ref results, 19);
         }
     }
 }
@@ -597,6 +605,18 @@ _loadout_validate_data :: proc(player: Player, data: Loadout_Data) {
     if data.version < 4 && !_loadout_data_contains(data, LOADOUT_TAB_CIVILIAN, "hunter") && !rg_is_role_locked(player, 18) {
         if _loadout_data_count(data, LOADOUT_TAB_CIVILIAN) < loadout_max_slots(player, LOADOUT_TAB_CIVILIAN) {
             append(ref data.civilians, "hunter");
+        }
+    }
+
+    if data.version < 5 && !_loadout_data_contains(data, LOADOUT_TAB_TRAITOR, "the_mech") && !rg_is_role_locked(player, 19) {
+        if _loadout_data_count(data, LOADOUT_TAB_TRAITOR) < loadout_max_slots(player, LOADOUT_TAB_TRAITOR) {
+            append(ref data.traitors, "the_mech");
+        }
+    }
+
+    if data.version < 5 && !_loadout_data_contains(data, LOADOUT_TAB_CIVILIAN, "guardian") && !rg_is_role_locked(player, 20) {
+        if _loadout_data_count(data, LOADOUT_TAB_CIVILIAN) < loadout_max_slots(player, LOADOUT_TAB_CIVILIAN) {
+            append(ref data.civilians, "guardian");
         }
     }
 
@@ -1343,12 +1363,15 @@ loadout_draw_equipped_list :: proc(player: Player, unlock_present: ref bool, unl
         unlock_ts := UIK.text_body();
         UIK.text_set_color(&unlock_ts, v4.{1, 1, 1, 1});
         UIK.text_set_halign(&unlock_ts, .LEFT);
+        UIK.text_set_word_wrap(&unlock_ts, false);
+        UIK.text_set_size_mult(&unlock_ts, 0.9);
         UIK.text("Unlock Extra Slot", unlock_ts);
 
         price_ts := UIK.text_body();
         UIK.text_set_color(&price_ts, v4.{1.0, 0.9, 0.4, 1});
         UIK.text_set_halign(&price_ts, .LEFT);
-        UIK.text_set_size_mult(&price_ts, 0.85);
+        UIK.text_set_word_wrap(&price_ts, false);
+        UIK.text_set_size_mult(&price_ts, 0.72);
         extra_pid := loadout_extra_product_id(tab);
         extra_price: s64 = 0;
         if extra_pid != "" {

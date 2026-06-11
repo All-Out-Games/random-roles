@@ -3,6 +3,8 @@ MIMICER_PRODUCT_ID :: "69d67dac5a645398b8c19d96";
 LILY_PRODUCT_ID :: "69e7ceac7c51b1e14b7a5611";
 BIG_CHARLIE_PRODUCT_ID :: "69fe2c16961587c2b549b47b";
 HUNTER_PRODUCT_ID :: "6a10ba8b21358247f838dd3d";
+// The Mech (traitor) + Guardian (civilian) bundle: one shared product unlocks both halves.
+MECH_GUARDIAN_PRODUCT_ID :: "6a2ad7240775fcb2de3a28ab";
 
 stamp_product_purchase :: proc(player: Player, product_id: string, reason: string) {
     if Game.is_server() {
@@ -52,6 +54,16 @@ ao_purchase_handler :: proc(player: Player, id: string) -> bool {
         loadout_open_after_purchase(player, 18);
         return true;
     }
+    if id == MECH_GUARDIAN_PRODUCT_ID {
+        stamp_product_purchase(player, MECH_GUARDIAN_PRODUCT_ID, "purchase");
+        player.mech_bought = true;
+        player.guardian_bought = true;
+        Notifier.notify(player, "Mech & Guardian unlocked!");
+        // Bundle unlocks both halves - equip the Guardian (civilian) too, then open on the Mech (traitor).
+        loadout_try_auto_equip(player, 20);
+        loadout_open_after_purchase(player, 19);
+        return true;
+    }
     if loadout_purchase_handler(player, id) return true;
     return false;
 }
@@ -84,6 +96,11 @@ check_owned_products :: proc(player: Player) {
         stamp_product_purchase(player, HUNTER_PRODUCT_ID, "corrective");
         player.hunter_bought = true;
     }
+    if Purchasing.owns_product(player, MECH_GUARDIAN_PRODUCT_ID) {
+        stamp_product_purchase(player, MECH_GUARDIAN_PRODUCT_ID, "corrective");
+        player.mech_bought = true;
+        player.guardian_bought = true;
+    }
     if Purchasing.owns_product(player, LOADOUT_EXTRA_TRAITOR_PRODUCT_ID)   player.loadout_extra_traitor_owned   = true;
     if Purchasing.owns_product(player, LOADOUT_EXTRA_CIVILIAN_PRODUCT_ID)  player.loadout_extra_civilian_owned  = true;
     if Purchasing.owns_product(player, LOADOUT_EXTRA_ANARCHIST_PRODUCT_ID) player.loadout_extra_anarchist_owned = true;
@@ -95,6 +112,8 @@ Pedestal_Role :: enum {
     LILY;
     BIG_CHARLIE;
     HUNTER;
+    THE_MECH;
+    GUARDIAN;
 }
 
 pedestal_get_product_id :: proc(role: Pedestal_Role) -> string {
@@ -104,6 +123,8 @@ pedestal_get_product_id :: proc(role: Pedestal_Role) -> string {
         case .LILY:         return LILY_PRODUCT_ID;
         case .BIG_CHARLIE:  return BIG_CHARLIE_PRODUCT_ID;
         case .HUNTER:       return HUNTER_PRODUCT_ID;
+        case .THE_MECH:     return MECH_GUARDIAN_PRODUCT_ID;
+        case .GUARDIAN:     return MECH_GUARDIAN_PRODUCT_ID;
     }
     return "";
 }
@@ -115,6 +136,8 @@ pedestal_get_display_name :: proc(role: Pedestal_Role) -> string {
         case .LILY:         return "Lily";
         case .BIG_CHARLIE:  return "Big Charlie";
         case .HUNTER:       return "Hunter";
+        case .THE_MECH:     return "The Mech";
+        case .GUARDIAN:     return "Guardian";
     }
     return "";
 }
@@ -126,6 +149,8 @@ pedestal_get_idle_anim :: proc(role: Pedestal_Role) -> string {
         case .LILY:         return "idle";
         case .BIG_CHARLIE:  return "Idle";
         case .HUNTER:       return "Idle";
+        case .THE_MECH:     return "009SG/Idle";
+        case .GUARDIAN:     return "009SG/Idle";
     }
     return "Idle";
 }
@@ -137,6 +162,8 @@ pedestal_get_action_anim :: proc(role: Pedestal_Role) -> string {
         case .LILY:         return "action";
         case .BIG_CHARLIE:  return "Stampede_Roar";
         case .HUNTER:       return "004RAND_hunter/intro_animation";
+        case .THE_MECH:     return "009SG/APEX_transform";
+        case .GUARDIAN:     return "009SG/Showdown_Win";
     }
     return "Idle";
 }
@@ -148,13 +175,17 @@ pedestal_is_bought :: proc(role: Pedestal_Role, player: Player) -> bool {
         case .LILY:         return player.lily_bought;
         case .BIG_CHARLIE:  return player.big_charlie_bought;
         case .HUNTER:       return player.hunter_bought;
+        case .THE_MECH:     return player.mech_bought;
+        case .GUARDIAN:     return player.guardian_bought;
     }
     return false;
 }
 
 pedestal_is_new :: proc(role: Pedestal_Role) -> bool {
     switch role {
-        case .HUNTER: return true;
+        case .HUNTER:   return true;
+        case .THE_MECH: return true;
+        case .GUARDIAN: return true;
     }
     return false;
 }
