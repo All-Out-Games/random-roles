@@ -3626,7 +3626,6 @@ assign_players_to_types :: proc() {
 	append(ref traitor_roles_master, Player_Role.PIRATE);
 	append(ref traitor_roles_master, Player_Role.HITMAN);
 	append(ref traitor_roles_master, Player_Role.WEREWOLF);
-	// The Mech & Guardian are admin-only — never in the random pool, only forced via /r.
 	// Purchase-gated roles: add to master if any connected player owns the product.
 	if rp_any_player_owns(ref players, GGG_PRODUCT_ID) {
 		append(ref traitor_roles_master, Player_Role.GOO_GOO_GAGA);
@@ -3642,6 +3641,11 @@ assign_players_to_types :: proc() {
 	}
 	if rp_any_player_owns(ref players, HUNTER_PRODUCT_ID) {
 		append(ref civilian_roles_master, Player_Role.HUNTER);
+	}
+	// The Mech (traitor) + Guardian (civilian) bundle: one shared product unlocks both halves.
+	if rp_any_player_owns(ref players, MECH_GUARDIAN_PRODUCT_ID) {
+		append(ref traitor_roles_master, Player_Role.THE_MECH);
+		append(ref civilian_roles_master, Player_Role.GUARDIAN);
 	}
 
 	civ_players: List(Player);
@@ -3675,8 +3679,10 @@ assign_players_to_types :: proc() {
 		p.forced_role_next_round = Player_Role.NONE;
 	}
 	
-	// The Mech only appears via /r, so this just gives an admin-forced Mech its Guardian
-	// counter — guarantee one living civilian counter-role when a Mech is present.
+	// Guarantee the Mech its Guardian counter: whenever a Mech is in play (forced via /r OR rolled
+	// by a bundle owner) but no Guardian landed, draft one civilian into the Guardian role. This
+	// balance pairing overrides the purchase gate — the drafted civilian need not own the bundle,
+	// since an uncountered Mech would be oppressive.
 	has_mech := false;
 	has_guardian := false;
 	for i: 0..players.elements.count-1 {

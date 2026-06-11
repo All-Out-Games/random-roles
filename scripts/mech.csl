@@ -87,6 +87,7 @@ MECH_GUARDIAN_SHOCK_RADIUS :: 8.0;     // AOE reach of the shockwave around the 
 MECH_GUARDIAN_SHOCK_WARNING :: 10.0;   // grace window: abilities locked, can still run, before forced de-transform
 MECH_GUARDIAN_SHOCK_LOCKOUT :: 12.0;   // after de-transform: how long abilities + re-transform stay locked
 MECH_GUARDIAN_SHOCK_COOLDOWN :: 50.0;  // cooldown on the Guardian's shockwave ability
+MECH_MAGNET_COOLDOWN :: 35.0;       // magnetise (Magnet Cannon) cooldown — a touch quicker than the Mech's 40s knife kill
 MECH_MAGNET_PULL_SECONDS :: 6.0;
 MECH_MAGNET_LINGER_MECH :: 5.0;  // base Mech form: rods stay live this many seconds past the pull window
 MECH_MAGNET_LINGER_APEX :: 10.0; // APEX form: rods linger this much longer than the base window
@@ -113,6 +114,9 @@ MECH_SHOWDOWN_SEPARATION :: 2.4;   // each fighter is placed this far from the c
 MECH_SHOWDOWN_LOSER_COOLDOWN :: 30.0; // the loser's whole kit goes on cooldown
 MECH_SHOWDOWN_WINNER_LOCK :: 5.0;     // brief kit lock on the winner so leftover mashing can't fire an ability
 MECH_SHOWDOWN_COOLDOWN :: 60.0;       // long re-challenge cooldown so Showdowns can't be spammed (auto-reset on APEX awaken)
+// A Guardian losing a Showdown to a NON-APEX (early) Mech is no longer killed — it's heavily stunned
+// for this long (staying in its titan form, knocked down). Only an APEX-form Mech win is lethal.
+MECH_GUARDIAN_SHOWDOWN_STUN_SECONDS :: 40.0;
 MECH_SHOWDOWN_REVIVE_RANGE :: 3.0;    // a Minion this close to its downed Mech can revive it
 MECH_CALL_MINION_COOLDOWN :: 8.0;     // distress-ping ("Call Minion") button cooldown on the downed Mech
 MECH_SHOWDOWN_FAKEDEATH_HOLD :: 2.5;  // how long the downed Mech holds the faked-death pose before bleeding out to a REAL death (only when no revive is possible)
@@ -2140,7 +2144,7 @@ rr_mech_buy_upgrade :: proc(player: Player, upgrade_id: int) {
 	} else if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE {
 		mech.missile_barrage_unlocked = true; player.Notify("Unlocked Missile Barrage."); adds_body_part = true;
 	} else if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP {
-		mech.wreckage_warp_unlocked = true; player.Notify("Unlocked Wreckage Warp.");
+		mech.wreckage_warp_unlocked = true; player.Notify("Unlocked Warp.");
 	}
 
 	rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", player.entity.world_position, 0.4);
@@ -2816,7 +2820,7 @@ Mech_Invoke_Minion_Ability :: class : Ability_Base {
 			current_cooldown = MECH_INVOKE_MINION_COOLDOWN;
 		}
 	}
-	on_draw_button :: proc(instance: Mech_Invoke_Minion_Ability, rect: Rect) { draw_ability_name_label(rect, "Recall"); }
+	on_draw_button :: proc(instance: Mech_Invoke_Minion_Ability, rect: Rect) { draw_ability_name_label(rect, "Summon"); }
 }
 
 // Smash Task as a world interactable (prompt above the task panel) instead of an ability
@@ -3459,7 +3463,7 @@ rr_mech_draw_wreckage_warp_minimap_buttons :: proc(player: Player, map_rect: Rec
 	if !unlocked && any_wreckage {
 		hint: string;
 		if rr_mech_upgrade_can_afford(owner, MECH_UPGRADE_WRECKAGE_WARP) {
-			hint = "Build Wreckage Warp at the Workbench";
+			hint = "Build Warp at the Workbench";
 		} else {
 			qty, _, _ := rr_mech_next_upgrade_cost(mech, MECH_UPGRADE_WRECKAGE_WARP);
 			hint = format_string("Need % to unlock Warp", .{rr_mech_cost_label(0, qty, 0)});
@@ -3784,6 +3788,24 @@ Mech_Helmet_Trap :: class : Component {
 	}
 }
 
+// A planted Helmet Trap on the floor is a HIDDEN trap — only the traitor team should see it (so they
+// can herd civilians onto it); innocents must NOT see it or they'd just walk around it. Fades the
+// trap rig out per-viewer via the spine's color_multiplier alpha (entity stays enabled so the catch
+// loop keeps running). Mirrors GGG_Trap_Visibility. The Magnet Helmet skin clamped onto a caught
+// player is a separate effect and stays visible to everyone.
+Mech_Helmet_Trap_Visibility :: class : Component {
+	ao_update :: method(dt: float) {
+		spine := entity.get_component(Spine_Animator);
+		if spine == null || spine.instance == null return;
+		local_player, ok := Game.get_local_player();
+		if ok && local_player != null && local_player.player_type == Player_Type.TRAITOR {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 1};
+		} else {
+			spine.instance.color_multiplier = v4.{1, 1, 1, 0};
+		}
+	}
+}
+
 // Shocks a non-helmeted player caught in a live magnet rod's field: applies the Mech stun
 // (broken-leg flail) plus a zap flash/SFX on the inactive->active edge, then keeps the stun
 // topped up while they stay in the current so the rod pins them where they stand.
@@ -4061,6 +4083,9 @@ Mech_Ram_Charge_Status :: class : Component {
 	facing_left: bool;  // persisted horizontal facing; only updated on a real horizontal heading
 	ends_at: float;
 	hit: bool;
+	// At most ONE victim can be killed against a Magnet Rod per ram usage — set true on the first
+	// rod overload kill of this drive and re-checked before each subsequent plow rod-kill attempt.
+	rod_kill_used: bool;
 	active: bool;
 	truck_entity: Entity;
 	truck_animator: Spine_Animator;
@@ -4082,6 +4107,7 @@ Mech_Ram_Charge_Status :: class : Component {
 		if abs(dir.x) > 0.01 { facing_left = dir.x < 0.0; }
 		ends_at = get_time() + seconds;
 		hit = false;
+		rod_kill_used = false;
 		truck_swapped = false;
 		boosting = false;
 		boost_ends_at = 0.0;
@@ -4334,8 +4360,11 @@ Mech_Ram_Charge_Status :: class : Component {
 
 			// Lethal combo: pushed into one of the Mech's own Magnet Rods. Available in BOTH the base
 			// Mech form and APEX. Traitors are immune to this kill (it's the only lethal outcome of the
-			// drive) — they're still plowed.
-			if target.player_type != Player_Type.TRAITOR && rr_mech_car_try_rod_kill(p, target) continue;
+			// drive) — they're still plowed. Capped at ONE rod kill per ram usage (rod_kill_used).
+			if !rod_kill_used && target.player_type != Player_Type.TRAITOR && rr_mech_car_try_rod_kill(p, target) {
+				rod_kill_used = true;
+				continue;
+			}
 
 			// Lock their input + grace (so they don't walk away or coast off), then pin them to the
 			// bumper: a fixed standoff straight ahead, keeping their current sideways offset so a
@@ -4972,6 +5001,7 @@ rr_mech_place_helmet_trap :: proc(player: Player, spot: v2) {
 	e.add_component(Spine_Animator);
 	trap := e.add_component(Mech_Helmet_Trap);
 	trap.owner_id = player.entity.id;
+	e.add_component(Mech_Helmet_Trap_Visibility); // traitors-only floor visibility (mirrors GGG_Trap_Visibility)
 	rr_mech_spawn_flash(pos, 0.5, v4.{0.7, 0.9, 1.0, 0.6}, 0.22);
 	rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", pos, 0.28);
 }
@@ -5030,7 +5060,7 @@ Mech_Helmet_Trap_Ability :: class : Ability_Base {
 			cleanup_targeting();
 		}
 	}
-	on_draw_button :: proc(instance: Mech_Helmet_Trap_Ability, rect: Rect) { draw_ability_name_label(rect, "Helmet"); }
+	on_draw_button :: proc(instance: Mech_Helmet_Trap_Ability, rect: Rect) { draw_ability_name_label(rect, "Trap"); }
 }
 
 Mech_Conversion_Ability :: class : Ability_Base {
@@ -5422,7 +5452,7 @@ Mech_Magnet_Cannon_Ability :: class : Ability_Base {
 			if shots_placed < 3 { placed_points[shots_placed] = target_pos; }
 			shots_placed += 1;
 			if shots_placed >= shots_needed {
-				current_cooldown = 45.0;
+				current_cooldown = MECH_MAGNET_COOLDOWN;
 				// Linger on the wide aim framing for a beat before snapping the camera back.
 				if mech != null { mech.magnet_cam_hold_until = get_time() + MECH_MAGNET_CAM_HOLD; }
 				player.active_ability = null;
@@ -6050,7 +6080,7 @@ Mech_End_Game_Ability :: class : Ability_Base {
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use { rr_mech_trigger_end_game(player); }
 	}
-	on_draw_button :: proc(instance: Mech_End_Game_Ability, rect: Rect) { draw_ability_name_label(rect, "End"); }
+	on_draw_button :: proc(instance: Mech_End_Game_Ability, rect: Rect) { draw_ability_name_label(rect, "End Game"); }
 }
 
 Guardian_Pickup_Throw_Ability :: class : Ability_Base {
@@ -6454,22 +6484,44 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 				mech_player.Notify("You defeated the Guardian!");
 			}
 		}
-		death_anim_dur := rr_mech_anim_duration("009SG/Showdown_Lose_Death");
-		rr_mech_play_avatar_anim(player, "009SG/Showdown_Lose_Death", false);
-		// Losing the Showdown is fatal — the Guardian is killed at the end of the death anim.
-		// Keep the lock held (don't release it below) so it can't move during the death throes.
-		guard.showdown_death_at = get_time() + death_anim_dur;
-		guard.showdown_death_killer_id = mech_player != null ? mech_player.entity.id : 0;
-		guard.anim_lock_until = guard.showdown_death_at;
-		// Brutal APEX defeat burst — red-magenta + purple.
-		rr_mech_play_sfx_at("sfx/ggg_explode.wav", clash_pos, 0.45);
-		rr_mech_play_sfx_at("sfx/other_death.wav", player.entity.world_position, 0.4);
-		rr_mech_spawn_flash(clash_pos, 2.0, v4.{1.0, 0.22, 0.42, 0.85}, 0.5);
-		rr_mech_spawn_flash(clash_pos, 1.2, v4.{0.75, 0.3, 1.0, 0.85}, 0.36);
-		rr_mech_spawn_flash(clash_pos, 0.7, v4.{1.0, 0.95, 1.0, 0.95}, 0.3);
-		rr_mech_add_screenshake(player, 0.22, 0.55);
-		rr_mech_add_screenshake(mech_player, 0.22, 0.55);
-		player.Notify("APEX overpowered you...");
+		// Only an APEX-form Mech win is LETHAL. A regular (pre-APEX) Mech win is non-lethal: the
+		// Guardian is heavily stunned instead (it gets killed only once the Mech reaches APEX).
+		if mech != null && mech.is_apex {
+			death_anim_dur := rr_mech_anim_duration("009SG/Showdown_Lose_Death");
+			rr_mech_play_avatar_anim(player, "009SG/Showdown_Lose_Death", false);
+			// Losing the APEX Showdown is fatal — the Guardian is killed at the end of the death anim.
+			// Keep the lock held (don't release it below) so it can't move during the death throes.
+			guard.showdown_death_at = get_time() + death_anim_dur;
+			guard.showdown_death_killer_id = mech_player != null ? mech_player.entity.id : 0;
+			guard.anim_lock_until = guard.showdown_death_at;
+			// Brutal APEX defeat burst — red-magenta + purple.
+			rr_mech_play_sfx_at("sfx/ggg_explode.wav", clash_pos, 0.45);
+			rr_mech_play_sfx_at("sfx/other_death.wav", player.entity.world_position, 0.4);
+			rr_mech_spawn_flash(clash_pos, 2.0, v4.{1.0, 0.22, 0.42, 0.85}, 0.5);
+			rr_mech_spawn_flash(clash_pos, 1.2, v4.{0.75, 0.3, 1.0, 0.85}, 0.36);
+			rr_mech_spawn_flash(clash_pos, 0.7, v4.{1.0, 0.95, 1.0, 0.95}, 0.3);
+			rr_mech_add_screenshake(player, 0.22, 0.55);
+			rr_mech_add_screenshake(mech_player, 0.22, 0.55);
+			player.Notify("APEX overpowered you...");
+		} else {
+			// Early (pre-APEX) loss: STUN the Guardian for 40s — it stays in its titan form, knocked
+			// down. Release the showdown lock (the stun applies its own movement lock) and slap the
+			// kit on cooldown for the stun's full length so it can't act until it recovers.
+			rr_mech_play_avatar_anim(player, "009SG/Showdown_Lose_Survive", false);
+			guard.anim_lock_until = get_time() + MECH_GUARDIAN_SHOWDOWN_STUN_SECONDS;
+			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
+			rr_mech_apply_stun(player, MECH_GUARDIAN_SHOWDOWN_STUN_SECONDS);
+			rr_mech_put_all_abilities_on_cooldown(player, MECH_GUARDIAN_SHOWDOWN_STUN_SECONDS);
+			// Electric "overpowered" burst on the stunned titan — cyan shock palette + lightning.
+			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position, 0.45);
+			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", clash_pos, 0.4);
+			rr_mech_spawn_lightning_strike(player.entity.world_position);
+			rr_mech_spawn_flash(clash_pos, 2.0, v4.{0.45, 0.85, 1.0, 0.8}, 0.5);
+			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.7}, 1.0, v4.{0.7, 0.95, 1.0, 0.9}, 0.3);
+			rr_mech_add_screenshake(player, 0.22, 0.55);
+			rr_mech_add_screenshake(mech_player, 0.18, 0.45);
+			player.Notify("The Mech overpowered you — stunned!");
+		}
 		guard.showdown_active = false;
 		return;
 	}
@@ -6551,13 +6603,22 @@ rr_mech_update_showdown_crowd :: proc(player: Player) {
 	if player == null return;
 
 	guard_p := rr_mech_find_showdown_guardian();
-	is_active := guard_p != null && game_state == Game_State.INGAME;
 	// Resolve the Mech opponent so the two fighters are excluded from the crowd.
 	mech_p := guard_p; // placeholder of type Player; only read when is_active
-	if is_active {
+	mech_is_apex := false;
+	if guard_p != null {
 		guard := guard_p.entity.get_component(Guardian_Module);
-		if guard != null { mech_p = get_player_by_entity_id(guard.showdown_opponent_id); }
+		if guard != null {
+			mech_p = get_player_by_entity_id(guard.showdown_opponent_id);
+			if mech_p != null {
+				mech := mech_p.entity.get_component(Mech_Module);
+				if mech != null { mech_is_apex = mech.is_apex; }
+			}
+		}
 	}
+	// Only the APEX-form Showdown — the one that can unlock the Mech's End Game finisher — rings
+	// every bystander around the clash. Regular-form Showdowns leave everyone else where they are.
+	is_active := guard_p != null && mech_is_apex && game_state == Game_State.INGAME;
 
 	eligible := is_active && player != guard_p && player != mech_p && player.player_state == Player_State.ALIVE;
 
@@ -6977,7 +7038,7 @@ rr_mech_upgrade_info :: proc(upgrade_id: int) -> string, string, int, v4 {
 	if upgrade_id == MECH_UPGRADE_RAM_CHARGE      return "Ram Charge",      "sprites/icons/mech/Ram_Icon.png",             MECH_COMPONENT_POWER_CELL, v4.{0.55, 0.18, 0.14, 1};
 	if upgrade_id == MECH_UPGRADE_MAGNET_CANNON   return "Magnet Cannon",   "sprites/icons/mech/Magnet_Cannon_Icon.png",   MECH_COMPONENT_SCHEMATIC,  v4.{0.16, 0.38, 0.6, 1};
 	if upgrade_id == MECH_UPGRADE_MISSILE_BARRAGE return "Missile Barrage", "sprites/icons/mech/Missile_Barrage_Icon.png", MECH_COMPONENT_CIRCUIT,    v4.{0.55, 0.45, 0.12, 1};
-	if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP   return "Wreckage Warp",   "sprites/icons/mech/Wreckage_Warp_Icon.png",   0,                         v4.{0.25, 0.5, 0.28, 1};
+	if upgrade_id == MECH_UPGRADE_WRECKAGE_WARP   return "Warp",            "sprites/icons/mech/Wreckage_Warp_Icon.png",   0,                         v4.{0.25, 0.5, 0.28, 1};
 	return "", "", 0, v4.{1, 1, 1, 1};
 }
 

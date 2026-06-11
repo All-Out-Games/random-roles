@@ -12,6 +12,9 @@ BIG_CHARLIE_PRODUCT_ID :: "69fe2c16961587c2b549b47b";
 BIG_CHARLIE_USAGE_KEY  :: "purchase_usage_69fe2c16961587c2b549b47b";
 HUNTER_PRODUCT_ID      :: "6a10ba8b21358247f838dd3d";
 HUNTER_USAGE_KEY       :: "purchase_usage_6a10ba8b21358247f838dd3d";
+// One shared product unlocks BOTH the Mech (traitor) and the Guardian (civilian) — a bundle.
+MECH_GUARDIAN_PRODUCT_ID :: "6a2ad7240775fcb2de3a28ab";
+MECH_GUARDIAN_USAGE_KEY  :: "purchase_usage_6a2ad7240775fcb2de3a28ab";
 
 // ── Boost tiers ─────────────────────────────────────────────────────
 RP_BOOST_GUARANTEED      :: 1.0;
@@ -80,6 +83,8 @@ rp_is_purchase_gated :: proc(role: Player_Role) -> bool {
     if role == Player_Role.LILY_LOVEBRAIDS return true;
     if role == Player_Role.BIG_CHARLIE return true;
     if role == Player_Role.HUNTER return true;
+    if role == Player_Role.THE_MECH return true;
+    if role == Player_Role.GUARDIAN return true;
     return false;
 }
 
@@ -99,6 +104,10 @@ rp_is_role_locked :: proc(player: Player, role: Player_Role) -> bool {
     }
     if role == Player_Role.HUNTER {
         return !Purchasing.owns_product(player, HUNTER_PRODUCT_ID);
+    }
+    // Both halves of the bundle are unlocked by the same product.
+    if role == Player_Role.THE_MECH || role == Player_Role.GUARDIAN {
+        return !Purchasing.owns_product(player, MECH_GUARDIAN_PRODUCT_ID);
     }
     return false;
 }
@@ -168,6 +177,27 @@ rp_collect_player_boost_candidates :: proc(player: Player, out: ref [..]Role_Boo
             c.role_type = Player_Type.CIVILIAN;
             c.chance    = chance;
             out.append(c);
+        }
+    }
+    // The bundle boosts BOTH roles (shared usage key). Phase 2 keeps only the candidate that
+    // matches the player's assigned type, so a traitor owner is boosted toward the Mech and a
+    // civilian owner toward the Guardian — no Phase-1 type bias is applied (both types carry a
+    // bundle role, so the owner lands one whichever type they roll).
+    if Purchasing.owns_product(player, MECH_GUARDIAN_PRODUCT_ID) {
+        usage  := Save.get_int(player, MECH_GUARDIAN_USAGE_KEY, 0);
+        chance := rp_get_boost_chance(usage.(int));
+        if chance > 0.0 {
+            mech_c: Role_Boost_Info;
+            mech_c.role      = Player_Role.THE_MECH;
+            mech_c.role_type = Player_Type.TRAITOR;
+            mech_c.chance    = chance;
+            out.append(mech_c);
+
+            guard_c: Role_Boost_Info;
+            guard_c.role      = Player_Role.GUARDIAN;
+            guard_c.role_type = Player_Type.CIVILIAN;
+            guard_c.chance    = chance;
+            out.append(guard_c);
         }
     }
 
@@ -272,6 +302,8 @@ rp_role_must_be_unique :: proc(role: Player_Role) -> bool {
     if role == Player_Role.SHERIFF return true;
     if role == Player_Role.DOCTOR return true;
     if role == Player_Role.PRESIDENT return true;
+    // Civilians allow duplicates, but only ever one Guardian (the Mech's single counter).
+    if role == Player_Role.GUARDIAN return true;
     return false;
 }
 
@@ -309,6 +341,11 @@ rp_record_boost_used :: proc(player: Player, role: Player_Role) {
     if role == Player_Role.HUNTER {
         current := Save.get_int(player, HUNTER_USAGE_KEY, 0);
         Save.set_int(player, HUNTER_USAGE_KEY, current + 1);
+    }
+    // Mech and Guardian share one bundle usage counter.
+    if role == Player_Role.THE_MECH || role == Player_Role.GUARDIAN {
+        current := Save.get_int(player, MECH_GUARDIAN_USAGE_KEY, 0);
+        Save.set_int(player, MECH_GUARDIAN_USAGE_KEY, current + 1);
     }
 }
 
@@ -725,6 +762,7 @@ my_boost :: proc(player: Player) {
     rp_check_boost(player, "Lily", LILY_PRODUCT_ID, LILY_USAGE_KEY, ref found_any);
     rp_check_boost(player, "Charlie", BIG_CHARLIE_PRODUCT_ID, BIG_CHARLIE_USAGE_KEY, ref found_any);
     rp_check_boost(player, "Hunter", HUNTER_PRODUCT_ID, HUNTER_USAGE_KEY, ref found_any);
+    rp_check_boost(player, "Mech & Guardian", MECH_GUARDIAN_PRODUCT_ID, MECH_GUARDIAN_USAGE_KEY, ref found_any);
     if !found_any {
         Chat.server_send_message("You don't own any purchasable roles.", player);
     }

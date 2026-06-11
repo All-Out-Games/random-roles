@@ -905,6 +905,21 @@ rr_backup_apply_to_player :: proc(p: Player, e: Backup_Player_Entry) {
 
 // --- Chat commands ----------------------------------------------------------
 
+// /backup_on — enables snapshot. Captures once immediately on enable.
+backup_on :: proc(player: Player) {
+	if rr_backup_enabled
+		return;
+
+	rr_backup_enabled = true;
+	rr_backup_last_poll_at = 0.0;
+	rr_backup_capture();
+	Chat.server_send_message(
+		format_string("Backup ENABLED. Captured % players + % corpses. JSON=%b.",
+			.{rr_backup_snapshot.entries.count, rr_backup_snapshot.corpses.count,
+			rr_backup_last_saved_bytes}),
+		player);
+} @chat_command @youtuber
+
 // /backup — toggles auto-snapshot. Captures once immediately on enable.
 backup :: proc(player: Player) {
 	rr_backup_enabled = !rr_backup_enabled;
