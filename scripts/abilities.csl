@@ -569,6 +569,13 @@ rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_we
 		if exclude_werewolf && target.player_role == Player_Role.WEREWOLF {
 			continue;
 		}
+		// A Guardian holding a victim is protected — can't be killed mid-grab.
+		if target.player_role == Player_Role.GUARDIAN {
+			tg := target.entity.get_component(Guardian_Module);
+			if tg != null && tg.carried_player_id != 0 {
+				continue;
+			}
+		}
 
 		finder.check(target, target.entity.world_position);
 	}
@@ -596,6 +603,13 @@ rr_werewolf_find_claw_target :: proc(attacker: Player, direction: v2, range: flo
 		if target.player_state != Player_State.ALIVE continue;
 		// Traitors shouldn't be able to melee-kill other traitors.
 		if target.player_type == Player_Type.TRAITOR continue;
+		// A Guardian holding a victim is protected — can't be killed mid-grab.
+		if target.player_role == Player_Role.GUARDIAN {
+			tg := target.entity.get_component(Guardian_Module);
+			if tg != null && tg.carried_player_id != 0 {
+				continue;
+			}
+		}
 
 		offset := target.entity.world_position - apos;
 		dist := length(offset);
@@ -3308,7 +3322,9 @@ Pyromaniac_World_Fire_Ability :: class : Ability_Base {
 				c.arm();
 			}
 
-			current_cooldown = 9999.0;
+			// World Fire ends the game immediately (ANIM_PYRO_WIN), so no real cooldown is needed —
+			// the old 9999s sentinel just surfaced as a bogus ~2.7h cooldown in the UI.
+			current_cooldown = 0.0;
 		}
 	}
 
@@ -3553,8 +3569,9 @@ Jester_Win_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			// Start the cinematic; game will end after 5 seconds.
 			start_jester_win_cinematic(player);
-			// Put the ability on cooldown so it can't be spammed during the cinematic.
-			current_cooldown = 9999.0;
+			// Game ends immediately (ANIM_JESTER_WIN) and can_use is gated on game_state, so the
+			// old 9999s sentinel was unnecessary and showed as a bogus runaway cooldown.
+			current_cooldown = 0.0;
 		}
 	}
 

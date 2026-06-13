@@ -64,6 +64,7 @@ MECH_THROW_DISTANCE :: 10.0;
 // Cooldown re-armed on the grab/throw ability after a throw (and after a Convert, which consumes
 // the grab). Kept short so the Mech / Guardian can keep wrangling victims without a long downtime.
 MECH_GRAB_COOLDOWN :: 8.0;
+MECH_MAX_CARRY_SECONDS :: 20.0; // a Mech/Guardian can't hold a live victim longer than this — auto-release
 MECH_THROW_SLAM_RANGE :: 2.0; // a thrown victim landing this close to a task panel slams into it
 MECH_THROW_SLAM_ELECTROCUTE :: 5.0; // seconds a victim is electrocuted when slammed onto an already-broken task
 MECH_STUN_SECONDS :: 3.0;
@@ -739,6 +740,7 @@ rr_mech_reset_module :: proc(mech: Mech_Module) {
 	mech.conversion_used = false;
 	mech.carried_player_id = 0;
 	mech.carried_corpse_id = 0;
+	mech.grabbed_at = 0.0;
 	mech.workbench_ui_open = false;
 	mech.visited_workbench = false;
 	mech.minimap_hint_kind = 0;
@@ -785,6 +787,7 @@ rr_guardian_reset_module :: proc(guard: Guardian_Module) {
 	}
 	guard.is_guardian_form = false;
 	guard.carried_player_id = 0;
+	guard.grabbed_at = 0.0;
 	guard.showdown_active = false;
 	guard.showdown_opponent_id = 0;
 	guard.showdown_mashes = 0;
@@ -1472,6 +1475,30 @@ rr_mech_update_overlay :: proc(anim: Spine_Animator, carrying: bool) {
 
 rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_corpse_id: u64) {
 	if carrier == null return;
+	// Release the held victim if the grab has lasted MECH_MAX_CARRY_SECONDS (no holding forever) OR
+	// the victim is no longer a live player — e.g. shot dead by a Hunter/Sheriff while held — so the
+	// carrier doesn't stay stuck "holding" a corpse with the Throw prompt up. Clearing
+	// carried_player_id stops Mech_Carried_Status being refreshed, so the movement lock auto-clears.
+	if carried_player_id != 0 {
+		victim := get_player_by_entity_id(carried_player_id);
+		victim_gone := victim == null || !#alive(victim.entity) || victim.player_state != Player_State.ALIVE;
+		mech := carrier.entity.get_component(Mech_Module);
+		if mech != null && mech.carried_player_id == carried_player_id {
+			if victim_gone || (mech.grabbed_at > 0.0 && get_time() - mech.grabbed_at > MECH_MAX_CARRY_SECONDS) {
+				mech.carried_player_id = 0;
+				mech.grabbed_at = 0.0;
+				return;
+			}
+		}
+		guard := carrier.entity.get_component(Guardian_Module);
+		if guard != null && guard.carried_player_id == carried_player_id {
+			if victim_gone || (guard.grabbed_at > 0.0 && get_time() - guard.grabbed_at > MECH_MAX_CARRY_SECONDS) {
+				guard.carried_player_id = 0;
+				guard.grabbed_at = 0.0;
+				return;
+			}
+		}
+	}
 	// Float the grabbed entity well in front of the carrier (facing direction), with
 	// a gentle bob so it visibly hovers in the grip.
 	forward := 1.0;
@@ -1603,7 +1630,8 @@ rr_guardian_is_protecting :: proc(target: Player) -> bool {
 // Allies: pulsing green shield bubble. Enemies: red restraint glow.
 rr_guardian_draw_carry_aura :: proc(carrier: Player, target: Player) {
 	if target == null || !#alive(target.entity) return;
-	ally := target.player_type == Player_Type.CIVILIAN;
+	// Always the protective green shield, regardless of the held player's team — a color/shape that
+	// changed for traitors would let everyone read a grabbed player's allegiance just from the aura.
 	pos := target.entity.world_position + v2.{0, 0.55};
 	pulse := 0.85 + sin(get_time() * 6.0) * 0.15;
 
@@ -1615,24 +1643,38 @@ rr_guardian_draw_carry_aura :: proc(carrier: Player, target: Player) {
 	glow := get_asset(Texture_Asset, "sprites/Shapes/shape_circle_gradient.png");
 
 	// Outer soft halo.
-	color := ally ? v4.{0.45, 1.0, 0.55, 0.55 * pulse} : v4.{1.0, 0.32, 0.32, 0.55 * pulse};
-	size := ally ? 1.5 : 1.3;
+	color := v4.{0.45, 1.0, 0.55, 0.55 * pulse};
+	size := 1.5;
 	r := Rect{pos, pos}.grow(size, size, size, size);
 	UI.quad(r, glow, color);
 
-	// Bright inner core sells the "bubble shield" / restraint cuff feel.
-	inner_color := ally ? v4.{0.85, 1.0, 0.9, 0.7 * pulse} : v4.{1.0, 0.7, 0.55, 0.55 * pulse};
+	// Bright inner core sells the "bubble shield" feel.
+	inner_color := v4.{0.85, 1.0, 0.9, 0.7 * pulse};
 	UI.quad(r.grow(-0.55, -0.55, -0.55, -0.55), glow, inner_color);
 
-	// Allies get a bubble-shield overlay on top for the obvious "protected" read.
-	if ally {
-		shield := get_asset(Texture_Asset, "minigame/Bubble Shield_16bc73.png");
-		if shield != null {
-			scale := 1.6 + sin(get_time() * 3.0) * 0.08;
-			bubble_r := Rect{pos, pos}.grow(scale, scale, scale, scale);
-			UI.quad(bubble_r, shield, v4.{0.7, 1.0, 0.8, 0.65});
-		}
+	// Bubble-shield overlay on top for the obvious "protected" read — shown for every carried player.
+	shield := get_asset(Texture_Asset, "minigame/Bubble Shield_16bc73.png");
+	if shield != null {
+		scale := 1.6 + sin(get_time() * 3.0) * 0.08;
+		bubble_r := Rect{pos, pos}.grow(scale, scale, scale, scale);
+		UI.quad(bubble_r, shield, v4.{0.7, 1.0, 0.8, 0.65});
 	}
+}
+
+// True if a straight line from `from` to `to` isn't blocked by a wall, using the navmesh raycast.
+// Grab/convert target-finding uses this so a Mech/Guardian can't reach a victim through a wall.
+// Fails OPEN (returns true) if the navmesh isn't available so it can never hard-disable grabbing.
+rr_has_line_of_sight :: proc(from: v2, to: v2) -> bool {
+	if world_references == null || world_references.main_navmesh == null return true;
+	delta := to - from;
+	distance := length(delta);
+	if distance < 0.001 return true; // same point
+	direction := delta / distance;
+	hit_pos, has_hit := world_references.main_navmesh.try_raycast(from, direction);
+	if !has_hit return true; // ray left the navmesh nowhere before the target — clear
+	// Blocked only if the wall the ray hit sits BEFORE the target (small tolerance for fp error).
+	hit_distance := length(hit_pos - from);
+	return hit_distance >= distance - 0.2;
 }
 
 rr_mech_find_melee_target :: proc(player: Player, allow_traitor: bool, exclude_transformed: bool = false) -> Player {
@@ -1647,6 +1689,7 @@ rr_mech_find_melee_target :: proc(player: Player, allow_traitor: bool, exclude_t
 		// Conversion can't claim a transformed titan (e.g. a Guardian in their guardian form) —
 		// the two titans settle things through a Showdown, not conversion.
 		if exclude_transformed && rr_mech_is_transformed(p) continue;
+		if !rr_has_line_of_sight(player.entity.world_position, p.entity.world_position) continue;
 		finder.check(p, p.entity.world_position);
 	}
 	return finder.closest;
@@ -1661,6 +1704,7 @@ rr_mech_find_pickup_target :: proc(player: Player) -> Player {
 		if p.player_state != Player_State.ALIVE continue;
 		if !#alive(p.entity) continue;
 		if rr_mech_is_transformed(p) continue;
+		if !rr_has_line_of_sight(player.entity.world_position, p.entity.world_position) continue;
 		finder.check(p, p.entity.world_position);
 	}
 	return finder.closest;
@@ -4836,6 +4880,67 @@ Guardian_Shock_Status :: class : Effect_Base {
 	}
 }
 
+// Visual stun for a trap-caught transformed Guardian/Mech: the 009SG rig has no trap animation
+// states (those triggers only exist on the normal player rig), so traps would lock movement with no
+// feedback and look broken. This reddens the giant body + crackles, mirroring the Guardian shock look.
+// Self-contained timed effect: auto-expires after the passed duration and restores the tint in
+// effect_end, so trap teardown paths need no extra cleanup.
+RR_Trap_Stun_Vfx :: class : Effect_Base {
+	stuns_until: float;
+	next_zap_sfx_at: float;
+	next_spark_vfx_at: float;
+
+	effect_start :: method() {
+		next_zap_sfx_at = get_time();
+		next_spark_vfx_at = get_time();
+	}
+
+	effect_update :: method(dt: float) {
+		if player == null { remove_effect(true); return; }
+		if !#alive(player.entity) { remove_effect(true); return; }
+		// Drop the effect if they're no longer a giant (de-transformed) or the round ended.
+		if !rr_mech_is_transformed(player) { remove_effect(true); return; }
+		if game_state != Game_State.INGAME { remove_effect(true); return; }
+
+		body := rr_mech_transformed_body_animator(player);
+		if body != null && #alive(body.entity) {
+			body.set_tint(v4.{1.0, 0.3, 0.3, 1.0});
+		}
+
+		if get_time() >= next_zap_sfx_at {
+			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position, 0.16);
+			next_zap_sfx_at = get_time() + 0.3;
+		}
+		if get_time() >= next_spark_vfx_at {
+			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.5}, 0.6, v4.{1.0, 0.8, 0.2, 0.6}, 0.15, 5);
+			next_spark_vfx_at = get_time() + 0.4;
+		}
+
+		if get_time() >= stuns_until {
+			remove_effect(false);
+		}
+	}
+
+	effect_end :: method(interrupt: bool) {
+		if player != null { rr_mech_shock_restore_body_tint(player); }
+	}
+}
+
+// Add or refresh the trap stun VFX on a transformed player. Deduplicated via get_effect so a second
+// trap hit extends the duration instead of stacking another reddening effect.
+rr_apply_trap_stun_vfx :: proc(player: Player, duration: float) {
+	if player == null || !#alive(player.entity) return;
+	if !rr_mech_is_transformed(player) return;
+	effect, found := get_effect(player.entity, RR_Trap_Stun_Vfx);
+	if found && effect != null {
+		effect.stuns_until = get_time() + duration;
+	} else {
+		new_effect := new(RR_Trap_Stun_Vfx);
+		new_effect.stuns_until = get_time() + duration;
+		player.entity.add_passive_effect(new_effect);
+	}
+}
+
 // True while a monster is mid-shock (the warning effect is present on them).
 rr_guardian_is_shocked :: proc(p: Player) -> bool {
 	if p == null || !#alive(p.entity) return false;
@@ -4888,9 +4993,14 @@ rr_guardian_apply_shock :: proc(target: Player) {
 Guardian_Shockwave_Ability :: class : Ability_Base {
 	on_init :: proc(a: Guardian_Shockwave_Ability) { a.icon = get_asset(Texture_Asset, "sprites/icons/mech/Smash_Task_Icon.png"); }
 	can_use :: method() -> bool {
-		if player.player_role != Player_Role.GUARDIAN || player.player_state != Player_State.ALIVE return false;
+		if player.player_state != Player_State.ALIVE return false;
 		guard := player.entity.get_component(Guardian_Module);
-		return guard != null && guard.is_guardian_form;
+		// Native Guardian must be in their giant form to slam.
+		if guard != null return guard.is_guardian_form;
+		// No Guardian_Module => a Hacker who stole the Guardian's Shock. They fire it from their
+		// normal form (rr_guardian_fire_shockwave's avatar anim safely no-ops with no creature body),
+		// so they get the disrupt/VFX without transforming and blowing their disguise.
+		return rr_hacker_has_stolen_civilian_role(player, Player_Role.GUARDIAN);
 	}
 	on_update :: method(params: ref Ability_Update_Params) {
 		if params.clicked && params.can_use {
@@ -5102,6 +5212,7 @@ Mech_Pickup_Throw_Ability :: class : Ability_Base {
 			if activation.activate && params.can_use {
 				target := get_player_by_entity_id(mech.carried_player_id);
 				mech.carried_player_id = 0;
+				mech.grabbed_at = 0.0;
 				rr_mech_throw_player(player, target, player.entity.id, activation.direction);
 				current_cooldown = MECH_GRAB_COOLDOWN;
 				was_targeting = false; // throw fired — rr_mech_update owns the camera (throw_cam_hold) now
@@ -5134,6 +5245,7 @@ Mech_Pickup_Throw_Ability :: class : Ability_Base {
 				// Steal from any Guardian/other Mech already holding them — ends their grab instantly, no cd.
 				rr_mech_steal_carried_from_others(player, target.entity.id);
 				mech.carried_player_id = target.entity.id;
+				mech.grabbed_at = get_time();
 				// Movement lock comes from Mech_Carried_Status (edge-triggered). Grab plays
 				// on overlay track 1 so track-0 locomotion keeps running; carry pose held after.
 				rr_mech_play_overlay_oneshot(player, "009SG/cm_pick_up");
@@ -6108,6 +6220,7 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 			if activation.activate && params.can_use {
 				target := get_player_by_entity_id(guard.carried_player_id);
 				guard.carried_player_id = 0;
+				guard.grabbed_at = 0.0;
 				rr_guardian_throw_player(player, target, player.entity.id, activation.direction);
 				current_cooldown = MECH_GRAB_COOLDOWN;
 			}
@@ -6121,13 +6234,15 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 				// Steal from any Mech/other Guardian already holding them — ends their grab instantly, no cd.
 				rr_mech_steal_carried_from_others(player, target.entity.id);
 				guard.carried_player_id = target.entity.id;
+				guard.grabbed_at = get_time();
 				// Movement lock comes from Mech_Carried_Status (edge-triggered). Grab plays on
 				// overlay track 1 so track-0 locomotion keeps going; carry pose held after.
 				rr_mech_play_overlay_oneshot(player, "009SG/cm_pick_up");
-				// Tactile grab: ally-tinted vs enemy-tinted flash at the target + SFX.
+				// Tactile grab: a protective green flash for ANY target — a team-colored flash would leak
+				// the held player's allegiance to onlookers. The personal Notify below is local-only, so
+				// it can stay role-specific.
 				ally := target.player_type == Player_Type.CIVILIAN;
-				color := ally ? v4.{0.45, 1.0, 0.55, 0.7} : v4.{1.0, 0.42, 0.32, 0.7};
-				rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 0.9, color, 0.28);
+				rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 0.9, v4.{0.45, 1.0, 0.55, 0.7}, 0.28);
 				rr_mech_play_sfx_at("sfx/swing_net_catch.wav", target.entity.world_position, 0.32);
 				rr_mech_play_sfx_at("sfx/pick_up_item_a973cc.wav", player.entity.world_position, 0.3);
 				rr_mech_add_screenshake(player, 0.08, 0.18);

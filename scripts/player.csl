@@ -235,8 +235,10 @@ Player :: class : Player_Base {
 
 	// Global ability gate (called after cooldown + ability can_use).
 	ao_can_use_ability :: proc(using this: Player, ability: Ability_Base) -> bool {
-		// While on fire, you can only move.
-		if pyro_on_fire return false;
+		// While on fire you can only move — but only for civilians. Killers (TRAITOR) and anarchists
+		// (incl. Big Charlie) keep their abilities, so a Pyromaniac campfire/fiery room on top of them
+		// can't fully neuter them.
+		if pyro_on_fire && player_type == Player_Type.CIVILIAN return false;
 		// Cocooned by Big Charlie — wrapped up, no abilities.
 		if bc_cocooned return false;
 		// Held by a Mech or Guardian — fully locked out until thrown/dropped.
@@ -1374,11 +1376,16 @@ Player :: class : Player_Base {
 		if rr_lily_should_intercept_remote_body_kill(this) {
 			return;
 		}
-		// Civilian allies held by Guardian are invincible while in the Guardian's arms.
+		// Civilian allies held by Guardian are invincible while in the Guardian's arms —
+		// EXCEPT to ranged shots from the Hunter and Sheriff, which can still pick them off.
 		if rr_guardian_is_protecting(this) {
-			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
-			rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.55}, 0.85, v4.{0.45, 1.0, 0.55, 0.65}, 0.28);
-			return;
+			shooter_bypasses := killer_check != null && killer_check.player_type == Player_Type.CIVILIAN &&
+				(killer_check.player_role == Player_Role.HUNTER || killer_check.player_role == Player_Role.SHERIFF);
+			if !shooter_bypasses {
+				rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
+				rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.55}, 0.85, v4.{0.45, 1.0, 0.55, 0.65}, 0.28);
+				return;
+			}
 		}
 		// APEX-form Mech is immune to the anti-traitor roles (Hacker / Hunter / Sheriff).
 		if rr_mech_apex_blocks_kill(this, killer_check) {
@@ -2906,6 +2913,10 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 }
 
     revive :: method() {
+        // Clear any ability that was mid-aim when we died — ao_can_use_ability only
+        // self-heals a dangling active_ability while DEAD, so a stale one left across the
+        // revive (now ALIVE) would block every OTHER ability until the next death.
+        this.active_ability = null;
         this.set_trigger("RESET");
     }
 

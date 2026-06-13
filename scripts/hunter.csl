@@ -256,6 +256,14 @@ Hunter_Crossbow_Bolt :: class : Component {
                 if !rr_hunter_is_player_pierced(target) {
                     continue;
                 }
+                // A Hunter converted into a Mech Minion keeps the gun, but must NOT be able to kill
+                // their own master — the bolt passes straight through the converting Mech.
+                if owner_player != null {
+                    owner_minion := rr_mech_get_minion_effect(owner_player);
+                    if owner_minion != null && owner_minion.converted_by_mech_id != 0 && target.entity.id == owner_minion.converted_by_mech_id {
+                        continue;
+                    }
+                }
                 killer_id: u64 = 0;
                 if owner_alive killer_id = owner.id;
                 target.set_trigger("hunter_killed_by_crossbow");
@@ -283,6 +291,12 @@ Hunter_Crossbow_Bolt :: class : Component {
                 // Cripple: apply Pierce on both client+server so client prediction
                 // matches the server-reconciled state (per CLAUDE.md guidance).
                 if owner_player != null {
+                    // A converted Minion can't even pierce its own Mech master (no kill-shot setup).
+                    owner_minion := rr_mech_get_minion_effect(owner_player);
+                    if owner_minion != null && owner_minion.converted_by_mech_id != 0 && target.entity.id == owner_minion.converted_by_mech_id {
+                        destroy_self = true;
+                        break;
+                    }
                     eff := target.entity.get_component(Hunter_Pierce_Effect);
                     if eff == null {
                         eff = target.entity.add_component(Hunter_Pierce_Effect);
