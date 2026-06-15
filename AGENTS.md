@@ -212,6 +212,18 @@ Round based games should reset economy in player ao_start with Economy.delete_sa
 ## UI
 - Reference the `UIK` skill for any game UI. Do not mix UIK and UI APIs. 
 
+## Interpolation
+- Litmus test: if a visual is drawn from an entity/component's current transform, or inside an anchored component callback, you do not need manual interpolation.
+- You must use interpolation for custom immediate-mode/world-space drawing that follows a moving entity outside an anchored callback, or for non-entity positions that you update yourself.
+
+Example: drawing a world-space prompt that follows an entity from player UI code:
+```csl
+UI.begin_world_space_ui(target_entity);
+defer UI.end_world_space_ui();
+
+UI.text(rect, ts, "+1 Gold");
+```
+
 ## Inventory & Items
 - When players acquire items (e.g. from a shop or interacting with the world), you MUST use the All Out inventory system documented in the `inventory` skill.
 - For placing items in the world use the `inventory-placeable-items` skill. 
@@ -228,6 +240,12 @@ Round based games should reset economy in player ao_start with Economy.delete_sa
 - p.device_kind -> .PHONE, .TABLET, .PC 
 - p.add_freeze_reason(reason: string)
 - p.add_invisibility_reason(reason: string)
+
+### Leaderboard package
+`core:global_leaderboard` adds a reusable `Global_Leaderboard : Component` for world-space ranked scoreboards backed by ordered saves
+Import it with `import "core:global_leaderboard"` and add `Global_Leaderboard` to a scene entity
+Set `leaderboard_id` on the component, optionally set `optional_title`
+On the server, call `Global_Leaderboard.increment_score(player, leaderboard_id, amount)` to add to a player's score
 
 ## Best Practices
 - Do not write your own input. Movement is handled by default (speed = 300). If you need to consume it use player.agent.inputs_this_frame and ability buttons.
