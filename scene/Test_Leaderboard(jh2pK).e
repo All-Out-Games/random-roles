@@ -20,7 +20,7 @@
   "cid": 1,
   "aoid": 3064241181,
   "component_type": "Internal_Component",
-  "internal_component_type": "Leaderboard",
+  "internal_component_type": "Global_Leaderboard",
   "data": {
     "leaderboard_id": "wins",
     "optional_title": "Wins",
