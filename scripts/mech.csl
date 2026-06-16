@@ -5878,6 +5878,23 @@ rr_mech_apex_blocks_kill :: proc(victim: Player, killer: Player) -> bool {
 	return role == Player_Role.HACKER || role == Player_Role.HUNTER || role == Player_Role.SHERIFF;
 }
 
+rr_mech_showdown_blocks_kill :: proc(victim: Player, killer: Player) -> bool {
+	if victim == null || killer == null return false;
+
+	mech := victim.entity.get_component(Mech_Module);
+	if mech != null && mech.showdown_active {
+		role := killer.player_role;
+		if role == Player_Role.HUNTER || role == Player_Role.SHERIFF return true;
+	}
+
+	guard := victim.entity.get_component(Guardian_Module);
+	if guard != null && guard.showdown_active {
+		if killer.player_type == Player_Type.TRAITOR return true;
+	}
+
+	return false;
+}
+
 // End Game cinematic — begins the "float up + barrage the whole map" cutscene. The
 // actual kills + round end happen at the end of the cinematic in rr_mech_finish_end_game.
 // Self-guarded (endgame_active) so a held button or client+server double-entry is harmless.

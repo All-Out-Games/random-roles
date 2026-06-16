@@ -8,7 +8,7 @@ LOBBY_MINIGAME_STOP_START_TIMER_SECONDS :: 10.0;
 LOBBY_MINIGAME_SPAWN_SHIELD_SECONDS :: 2.0;
 LOBBY_MINIGAME_RESPAWN_SECONDS :: 3.0;
 LOBBY_MINIGAME_RESPAWN_REASON :: "lobby_minigame_respawn";
-LOBBY_MINIGAME_SHAKE_SECONDS :: 0.28;
+LOBBY_MINIGAME_SHAKE_SECONDS :: 0.16;
 LOBBY_MINIGAME_INTRO_SECONDS :: 2.6;
 LOBBY_MINIGAME_INTRO_SLIDE_IN :: 0.45;
 LOBBY_MINIGAME_INTRO_HOLD_END :: 1.9;
@@ -70,6 +70,7 @@ Lobby_Minigame_Effect :: class : Effect_Base {
 		this.draw_world();
 		this.draw_intro();
 		this.draw_leaderboard();
+		this.draw_waiting_subtext();
 	}
 
 	effect_end :: method(interrupt: bool) {
@@ -411,6 +412,20 @@ Lobby_Minigame_Effect :: class : Effect_Base {
 			UI.text(hud_rect, hud_ts, "Respawning %", .{secs});
 		}
 	}
+
+	draw_waiting_subtext :: method() {
+		screen := UI.get_safe_screen_rect();
+		sub_rect := screen.bottom_center_rect().offset(0, 70).grow(400, 20, 400, 20);
+		ts := UI.default_text_settings();
+		ts.size = 24;
+		ts.color = v4.{1.0, 1.0, 1.0, 0.7};
+		ts.halign = .CENTER;
+		ts.valign = .CENTER;
+		ts.do_outline = true;
+		ts.outline_thickness = 3;
+		ts.outline_color = v4.{0, 0, 0, 0.7};
+		UI.text(sub_rect, ts, "Just a warm-up — the round begins once enough players join.");
+	}
 }
 
 rr_get_lobby_minigame_effect :: proc(player: Player) -> Lobby_Minigame_Effect {
@@ -557,15 +572,6 @@ rr_lobby_minigame_burst :: proc(pos: v2, shield_pop: bool) {
 	}
 }
 
-// Only the attacker and target should feel the hit — bystanders shouldn't have their
-// cameras shaken every time anyone in the lobby gets tagged.
-rr_lobby_minigame_add_hit_screenshake :: proc(attacker: Player, target: Player, intensity: float) {
-	a := rr_get_lobby_minigame_effect(attacker);
-	if a != null a.shake(intensity);
-	t := rr_get_lobby_minigame_effect(target);
-	if t != null t.shake(intensity);
-}
-
 rr_lobby_minigame_player_can_act :: proc(player: Player) -> bool {
 	if game_state != Game_State.LOBBY return false;
 	if !lobby_minigame_active return false;
@@ -604,7 +610,6 @@ rr_lobby_minigame_handle_projectile_hit :: proc(attacker: Player, target: Player
 		t_mg.shield_until = 0.0;
 		t_mg.shield_active = false;
 		rr_lobby_minigame_burst(hit_pos, true);
-		rr_lobby_minigame_add_hit_screenshake(attacker, target, 0.05);
 		rr_lobby_minigame_play_sfx_at("minigame/shield_block_390d4b.wav", hit_pos, 0.125, 0.12);
 		rr_lobby_minigame_play_sfx_at("minigame/bubble_pop_92af67.wav", hit_pos, 0.08, 0.2);
 		return;
@@ -616,7 +621,7 @@ rr_lobby_minigame_handle_projectile_hit :: proc(attacker: Player, target: Player
 	t_mg.shield_until = t_mg.respawn_until + LOBBY_MINIGAME_SPAWN_SHIELD_SECONDS;
 	t_mg.shield_active = false;
 	rr_lobby_minigame_burst(hit_pos, false);
-	rr_lobby_minigame_add_hit_screenshake(attacker, target, 0.09);
+	t_mg.shake(0.035);
 	world_references.teleport_near_lobby(target);
 	rr_lobby_minigame_spawn_pop_vfx(target.entity.world_position, "minigame/Bubble Shield_16bc73.png", v4.{0.35, 1.0, 0.45, 0.75}, 0.4, 1.9);
 	target.set_trigger("RESET");
