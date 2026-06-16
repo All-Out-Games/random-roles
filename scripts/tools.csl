@@ -1,5 +1,94 @@
 import "core:ao"
 
+My_Tutorial_Arrow :: struct {
+    Tutorial_Arrow_Options :: struct {
+        alpha: float;
+        far: bool;
+        near: bool;
+        fade_out_based_on_aim_direction: bool;
+        bob_scale: float;
+        bob_bias: float;
+        arrow_sprite_override: Texture_Asset;
+        far_layer: int;
+        near_layer: int;
+    }
+
+    default_options :: proc() -> Tutorial_Arrow_Options {
+        result: Tutorial_Arrow_Options;
+        result.alpha = 1;
+        result.far  = true;
+        result.near = true;
+        result.bob_scale = 0.5;
+        result.bob_bias = 1.5;
+        result.arrow_sprite_override = null;
+        result.far_layer = 100;
+        return result;
+    }
+
+    draw :: proc(player: Player, target: Entity, options: Tutorial_Arrow_Options) {
+        UI.push_world_draw_context();
+        defer UI.pop_draw_context();
+
+        max_distance := player.camera.size * 0.8;
+        offset_to_target := normalize_vector_to_radius(target.world_position - player.entity.world_position, max_distance) * max_distance;
+        arrow_position := player.entity.world_position + offset_to_target;
+
+        alpha := options.alpha;
+        if options.fade_out_based_on_aim_direction {
+            aim_d := dot(player.last_aim_direction, normalize(target.world_position - player.entity.world_position));
+            alpha_t := linear_step(0.85, 1.0, aim_d);
+            alpha *= lerp(1.0, 0.25, alpha_t);
+        }
+
+        UI.push_color_multiplier({1, 1, 1, alpha});
+        defer UI.pop_color_multiplier();
+
+        arrow_sprite := options.arrow_sprite_override;
+        if arrow_sprite == null {
+            arrow_sprite = core_globals.tutorial_arrow;
+        }
+
+        arrow_rect := Rect{arrow_position, arrow_position}.grow(0.5).fit_aspect(arrow_sprite.get_aspect());
+
+        if length_squared(arrow_position - target.world_position) > 0.1 {
+            if options.far {
+                UI.push_layer(options.far_layer);
+                defer UI.pop_layer();
+
+                UI.push_z(target.world_position.y);
+                defer UI.pop_z();
+
+                UI.push_interpolation_anchor(player.entity);
+                defer UI.pop_interpolation_anchor();
+
+                dir := normalize(offset_to_target);
+                rads := atan2(dir.y, dir.x);
+                UI.push_matrix(Matrix4.rotate_about_point(arrow_rect.center(), to_degrees(rads)));
+                defer UI.pop_matrix();
+                UI.quad(arrow_rect, arrow_sprite);
+            }
+        }
+        else {
+            if options.near {
+                UI.push_layer(options.near_layer);
+                defer UI.pop_layer();
+
+                UI.push_z(target.world_position.y);
+                defer UI.pop_z();
+
+                UI.push_interpolation_anchor(target);
+                defer UI.pop_interpolation_anchor();
+
+                y := (sin(2 * PI * get_time()) * 0.5 + 0.5) * options.bob_scale;
+                arrow_rect = arrow_rect.offset(0, options.bob_bias + y);
+                UI.push_matrix(Matrix4.rotate_about_point(arrow_rect.center(), 270));
+                defer UI.pop_matrix();
+                UI.quad(arrow_rect, arrow_sprite);
+            }
+        }
+    }
+}
+
 Finder :: struct(T: typeid) {
     position: v2;
     closest_distance: float;
@@ -137,12 +226,13 @@ rr_ui_draw_modal_panel :: proc(rect: Rect) {
     UI.begin_button(rect, bs, {}, ""); { defer UI.end_button(); }
 }
 
-rr_draw_tutorial_arrow :: proc(player: Player, target_position: v2, options: Tutorial_Arrow.Tutorial_Arrow_Options) {
+rr_draw_tutorial_arrow :: proc(player: Player, target: Entity, options: My_Tutorial_Arrow.Tutorial_Arrow_Options) {
+	if target == null || !#alive(target) return;
 	arrow := get_asset(Texture_Asset, RR_TUTORIAL_ARROW_SPRITE_PATH);
 	if arrow != null {
 		options.arrow_sprite_override = arrow;
 	}
-	Tutorial_Arrow.draw(player, target_position, options);
+	My_Tutorial_Arrow.draw(player, target, options);
 }
 
 Leaderboard_Increment_Data :: class {

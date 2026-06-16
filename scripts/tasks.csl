@@ -86,15 +86,18 @@ NUM_TASKS: int : 10;
 Task_Destination_Entry :: class {
 	task_id: string;
 	pos: v2;
+	entity: Entity;
 }
 
 rr_task_destination_entries: List(Task_Destination_Entry);
 rr_task_destination_version: int;
 
-rr_register_task_destination :: proc(task_id: string, pos: v2) {
-	if task_id.count == 0 {
+rr_register_task_destination :: proc(task_id: string, entity: Entity) {
+	if task_id.count == 0 || entity == null {
 		return;
 	}
+
+	pos := entity.world_position;
 
 	// De-dupe: same task id + (almost) same position.
 	for i: 0..rr_task_destination_entries.elements.count-1 {
@@ -110,6 +113,7 @@ rr_register_task_destination :: proc(task_id: string, pos: v2) {
 	entry := new(Task_Destination_Entry);
 	entry.task_id = task_id;
 	entry.pos = pos;
+	entry.entity = entity;
 	append(ref rr_task_destination_entries, entry);
 	rr_task_destination_version += 1;
 }
@@ -122,14 +126,14 @@ rr_refresh_task_destinations_for_task :: proc(task: Task_Base) {
 		return;
 	}
 
-	task.destinations = List(v2).{};
+	task.destinations = List(Entity).{};
 	for i: 0..rr_task_destination_entries.elements.count-1 {
 		e := rr_task_destination_entries.elements[i];
 		if e == null {
 			continue;
 		}
-		if e.task_id == task.id {
-			append(ref task.destinations, e.pos);
+		if e.task_id == task.id && e.entity != null && #alive(e.entity) {
+			append(ref task.destinations, e.entity);
 		}
 	}
 	task.destinations_version = rr_task_destination_version;
@@ -142,7 +146,7 @@ Task_Base :: class {
 	// Incremented every time the task is (re)started. Used by task minigames to
 	// detect a new attempt even though `start_attempt` isn't dynamically dispatched.
 	attempt_id: int;
-	destinations: List(v2);
+	destinations: List(Entity);
 	destinations_version: int;
 
 	start_attempt :: proc(using this: Task_Base, player: Player) {
@@ -1440,14 +1444,14 @@ update_tasks_ui :: proc(player: Player) {
 
 		// Draw objective arrow to the generator for local player.
 		if player.is_local() {
-			tutorial_arrow_options := Tutorial_Arrow.default_options();
+			tutorial_arrow_options := My_Tutorial_Arrow.default_options();
 			dist := length(player.entity.world_position - rr_get_power_outage_generator_pos());
 			tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
 			tutorial_arrow_options.far = true;
 			tutorial_arrow_options.near = true;
 			tutorial_arrow_options.bob_scale = 0.5;
 			tutorial_arrow_options.bob_bias = 1.5;
-			rr_draw_tutorial_arrow(player, rr_get_power_outage_generator_pos(), tutorial_arrow_options);
+			rr_draw_tutorial_arrow(player, rr_get_power_outage_generator_entity(), tutorial_arrow_options);
 		}
 
 		// Find generator task state (should be injected for everyone by the server).
@@ -1541,14 +1545,14 @@ update_tasks_ui :: proc(player: Player) {
 		if player.is_local() {
 			if world_references != null && world_references.rr_comms_lever_entity != null && #alive(world_references.rr_comms_lever_entity) {
 				lever_pos := world_references.rr_comms_lever_entity.world_position;
-				tutorial_arrow_options := Tutorial_Arrow.default_options();
+				tutorial_arrow_options := My_Tutorial_Arrow.default_options();
 				dist := length(player.entity.world_position - lever_pos);
 				tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
 				tutorial_arrow_options.far = true;
 				tutorial_arrow_options.near = true;
 				tutorial_arrow_options.bob_scale = 0.5;
 				tutorial_arrow_options.bob_bias = 1.5;
-				rr_draw_tutorial_arrow(player, lever_pos, tutorial_arrow_options);
+				rr_draw_tutorial_arrow(player, world_references.rr_comms_lever_entity, tutorial_arrow_options);
 			}
 		}
 
@@ -1637,7 +1641,7 @@ update_tasks_ui :: proc(player: Player) {
 	}
 
 	if(player.is_local()) {
-		tutorial_arrow_options := Tutorial_Arrow.default_options();
+		tutorial_arrow_options := My_Tutorial_Arrow.default_options();
 		// Show objective arrows both near and far, and keep them readable.
 		tutorial_arrow_options.far = false;
 		tutorial_arrow_options.near = true;
@@ -1657,9 +1661,11 @@ update_tasks_ui :: proc(player: Player) {
 			rr_refresh_task_destinations_for_task(task);
 
 			for d: 0..task.destinations.elements.count-1 {
-				dist := length(player.entity.world_position - task.destinations.elements[d]);
+				dest := task.destinations.elements[d];
+				if dest == null || !#alive(dest) continue;
+				dist := length(player.entity.world_position - dest.world_position);
 				tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-				rr_draw_tutorial_arrow(player, task.destinations.elements[d], tutorial_arrow_options);
+				rr_draw_tutorial_arrow(player, dest, tutorial_arrow_options);
 			}
 		}
 	}

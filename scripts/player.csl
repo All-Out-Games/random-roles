@@ -3749,8 +3749,8 @@ Task_Interactable :: class : Component {
         interactable.set_listener(this);
 		base_hold_time = interactable.required_hold_time;
 
-        // Register this interactable's world position as a destination for its task id.
-		rr_register_task_destination(this.get_task_id(), this.entity.world_position);
+        // Register this interactable's entity as a destination for its task id.
+		rr_register_task_destination(this.get_task_id(), this.entity);
     }
 
 	ao_update :: proc(using this: Task_Interactable, dt: float) {
@@ -4475,7 +4475,9 @@ rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 			rr_refresh_task_destinations_for_task(task);
 
 			for d: 0..task.destinations.elements.count-1 {
-				rr_draw_task_marker_on_minimap(map_rect, task.destinations.elements[d], v4.{1, 1, 1, 1});
+				dest := task.destinations.elements[d];
+				if dest == null || !#alive(dest) continue;
+				rr_draw_task_marker_on_minimap(map_rect, dest.world_position, v4.{1, 1, 1, 1});
 			}
 		}
 	} else {
@@ -5005,11 +5007,11 @@ draw_traitor_sabotage_map_button :: proc(player: Player) {
 
 // --- Pirate treasure guidance (local-only arrows + cleanup) ---
 
-rr_find_nearest_pirate_dig_spot_pos :: proc(player: Player) -> v2, bool {
-	if player == null return {}, false;
+rr_find_nearest_pirate_dig_spot :: proc(player: Player) -> Entity, bool {
+	if player == null return null, false;
 
 	best_dist_sq := 0.0;
-	best_pos: v2;
+	best_entity: Entity;
 	found := false;
 
 	for spot: component_iterator(Pirate_Treasure_Dig_Spot) {
@@ -5021,12 +5023,12 @@ rr_find_nearest_pirate_dig_spot_pos :: proc(player: Player) -> v2, bool {
 		dist_sq := length_squared(d);
 		if !found || dist_sq < best_dist_sq {
 			best_dist_sq = dist_sq;
-			best_pos = spot.entity.world_position;
+			best_entity = spot.entity;
 			found = true;
 		}
 	}
 
-	return best_pos, found;
+	return best_entity, found;
 }
 
 rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
@@ -5036,8 +5038,9 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 	if player.player_state != Player_State.ALIVE return;
 	if player.player_role != Player_Role.PIRATE return;
 
-	target_pos, ok := rr_find_nearest_pirate_dig_spot_pos(player);
-	if !ok return;
+	target_entity, ok := rr_find_nearest_pirate_dig_spot(player);
+	if !ok || target_entity == null || !#alive(target_entity) return;
+	target_pos := target_entity.world_position;
 
 	dirt_texture := get_asset(Texture_Asset, PIRATE_DIRT_PILE_TEXTURE_PATH);
 	if dirt_texture == null {
@@ -5056,7 +5059,7 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 		UI.quad(dirt_rect.fit_aspect(dirt_texture.get_aspect()), dirt_texture, v4.{1, 1, 1, pulse});
 	}
 
-	tutorial_arrow_options := Tutorial_Arrow.default_options();
+	tutorial_arrow_options := My_Tutorial_Arrow.default_options();
 	tutorial_arrow_options.far = true;
 	tutorial_arrow_options.near = true;
 	tutorial_arrow_options.bob_scale = 0.5;
@@ -5064,7 +5067,7 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 
 	dist := length(player.entity.world_position - target_pos);
 	tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-	rr_draw_tutorial_arrow(player, target_pos, tutorial_arrow_options);
+	rr_draw_tutorial_arrow(player, target_entity, tutorial_arrow_options);
 }
 
 destroy_pirate_dig_spots_for_player :: proc(player_entity_id: u64) {
