@@ -213,6 +213,7 @@ Round based games should reset economy in player ao_start with Economy.delete_sa
 - Reference the `UIK` skill for any game UI. Do not mix UIK and UI APIs. 
 
 ## Interpolation
+
 - Litmus test: if a visual is drawn from an entity/component's current transform, or inside an anchored component callback, you do not need manual interpolation.
 - You must use interpolation for custom immediate-mode/world-space drawing that follows a moving entity outside an anchored callback, or for non-entity positions that you update yourself.
 

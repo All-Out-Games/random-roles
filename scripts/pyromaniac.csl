@@ -373,6 +373,20 @@ rr_pyro_extinguish_all_fires :: proc() {
 	}
 }
 
+rr_pyro_is_task_room :: proc(player: Player, room_entity: Entity) -> bool {
+	if player == null return false;
+	if room_entity == null return false;
+	if !#alive(room_entity) return false;
+	for i: 0..player.active_tasks.elements.count-1 {
+		t := player.active_tasks.elements[i];
+		if t == null continue;
+		if t.#type != RR_Pyro_Room_Task continue;
+		rt := t.(RR_Pyro_Room_Task);
+		if rt.room_entity == room_entity return true;
+	}
+	return false;
+}
+
 rr_pyro_find_task :: proc(player: Player, task_id: string) -> Task_Base {
 	if player == null return null;
 	if task_id.count == 0 return null;
@@ -440,11 +454,13 @@ rr_pyro_register_corpse_burned :: proc(player: Player) {
 	rr_pyro_check_objectives(player);
 }
 
-rr_pyro_register_room_burned_out :: proc(player: Player) {
+rr_pyro_register_room_burned_out :: proc(player: Player, room_entity: Entity) {
 	// Server authoritative; counters are replicated.
 	if !Game.is_server() return;
 	if player == null return;
 	if player.player_role != Player_Role.PYROMANIAC return;
+	// Only assigned task rooms count toward the win condition.
+	if !rr_pyro_is_task_room(player, room_entity) return;
 	pyro := player.entity.get_component(Pyro_Module);
 	if pyro == null return;
 	pyro.rooms_burned_out += 1;
@@ -792,7 +808,7 @@ RR_Prop_Fire_Target :: class : Component {
 					room_state.burnout_awarded = true;
 					if by != null {
 						room_state.burned_by_player_entity_id = by.entity.id;
-						rr_pyro_register_room_burned_out(by);
+						rr_pyro_register_room_burned_out(by, room_root);
 						by.Notify("Room burned out!");
 					}
 					rr_pyro_spawn_burnout_fires(room_root);

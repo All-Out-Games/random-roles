@@ -354,8 +354,10 @@ rr_ggg_check_nest_consumption :: proc(player: Player) {
 			// Check consume bonuses
 			rr_ggg_check_consume_bonus(player, gm, victim_role);
 			player.Notify(format_string("Live feed! +3 nest points (%)", .{gm.nest_points}));
-			// Hold drag anim during consume arc, then clear
-			gm.nest_consume_hold_drag_until = get_time() + GGG_CONSUME_DURATION;
+			// Clear immediately — if kill_with_killer doesn't update player_state in the
+			// same frame (e.g. Guardian also holding victim), this prevents re-triggering.
+			gm.dragging_live_player_id = 0;
+			gm.nest_consume_hold_drag_until = 0.0;
 		}
 		return;
 	}
