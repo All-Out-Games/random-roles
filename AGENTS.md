@@ -181,7 +181,7 @@ desc.delay = 0; // For lining up with animations
 desc.loop = false;
 desc.volume = 0.4;
 desc.speed_perturb = 0.1;
-desc.specific_to_player = player; // For sounds only one player should hear (UI clicks, coin earning, etc):
+desc.specific_to_player = player; // For sounds only one player should hear (UI clicks, coin earning, music, etc). Do NOT wrap any SFX calls with is_local
 sound_id := SFX.play(sound_asset, desc);
 
 SFX.stop(sound_id);

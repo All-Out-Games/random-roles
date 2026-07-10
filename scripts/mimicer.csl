@@ -590,6 +590,15 @@ rr_mimicer_update :: proc(player: Player, dt: float) {
 rr_mimicer_start_prowl :: proc(player: Player) {
 	mm := player.entity.get_component(Mimicer_Module);
 	if mm == null return;
+	if mm.is_prowling return;
+
+	// Prowl owns the player's speed while active. Remove Void Tether before
+	// capturing the restore value so ending Prowl cannot restore an already
+	// tether-boosted speed and let the passive add the same bonus again.
+	if mm.tether_speed_active {
+		player.agent.movement_speed = player.agent.movement_speed / (1.0 + MIMICER_VOID_TETHER_SPEED_BONUS);
+		mm.tether_speed_active = false;
+	}
 
 	mm.is_prowling = true;
 	mm.prowl_near_wall = false;
@@ -2005,6 +2014,8 @@ Mimicer_Transform_Ability :: class : Ability_Base {
 		if mm == null return false;
 		if mm.void_lunge_active return false;
 		if mm.unleash_placing return false;
+		lock := player.entity.get_component(Mimicer_Transform_Lock);
+		if lock != null && lock.active return false;
 		return true;
 	}
 
@@ -2129,6 +2140,8 @@ Mimicer_Prowl_Ability :: class : Ability_Base {
 		mm := player.entity.get_component(Mimicer_Module);
 		if mm == null return false;
 		if mm.void_lunge_active return false;
+		lock := player.entity.get_component(Mimicer_Transform_Lock);
+		if lock != null && lock.active return false;
 		return true;
 	}
 
