@@ -247,9 +247,18 @@ Hunter_Crossbow_Bolt :: class : Component {
             if target.player_state != Player_State.ALIVE continue;
             if owner_alive && target.entity == owner continue;
 
-            if !in_range(target.entity.world_position - entity.world_position, HUNTER_BOLT_HIT_RADIUS) {
-                continue;
-            }
+			if !in_range(target.entity.world_position - entity.world_position, HUNTER_BOLT_HIT_RADIUS) {
+				continue;
+			}
+
+			// Guardian carry protection resolves before Pierce/Kill Shot checks so neither
+			// outcome can reveal the held player's team.
+			if rr_guardian_is_carrying(target) {
+				rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", target.entity.world_position, 0.4);
+				rr_mech_spawn_flash(entity.world_position, 0.7, v4.{0.45, 1.0, 0.55, 0.75}, 0.22);
+				destroy_self = true;
+				break;
+			}
 
             if is_kill_shot {
                 // Kill Shot: only hurts already-pierced targets; otherwise pass through.

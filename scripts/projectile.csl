@@ -52,12 +52,22 @@ RR_Projectile :: class : Component {
 					mg := rr_get_lobby_minigame_effect(player);
 					if mg == null continue;
 					if get_time() < mg.respawn_until continue;
-					if in_range(player.entity.world_position - entity.world_position, hit_radius) {
+				if in_range(player.entity.world_position - entity.world_position, hit_radius) {
 						rr_lobby_minigame_handle_projectile_hit(owner_player, player, entity.world_position);
 						destroy_self = true;
 						break;
 					}
 					continue;
+				}
+
+				// Resolve the Guardian's carry shield before any team-dependent filtering.
+				// Every held target must produce the same collision outcome or the shot is
+				// still an allegiance oracle for roles beyond Sheriff/Hunter.
+				if in_range(player.entity.world_position - entity.world_position, hit_radius) && rr_guardian_is_carrying(player) {
+					rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", player.entity.world_position, 0.4);
+					rr_mech_spawn_flash(entity.world_position, 0.7, v4.{0.45, 1.0, 0.55, 0.75}, 0.22);
+					destroy_self = true;
+					break;
 				}
 
 				// Traitors shouldn't be able to projectile-kill other traitors — except a Mech Minion

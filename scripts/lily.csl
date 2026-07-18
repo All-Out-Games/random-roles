@@ -346,6 +346,15 @@ rr_lily_reattach_body_from_origin :: proc(player: Player) {
 	lm.ability_creature_was_visible = false;
 }
 
+// The actual Player entity follows Lily's spider/tube while her real body remains at
+// the saved origin. Titan grab/shock systems must treat that controller proxy as remote,
+// not as a physical player body.
+rr_lily_remote_body_active :: proc(player: Player) -> bool {
+	if player == null || !#alive(player.entity) return false;
+	lm := player.entity.get_component(Lily_Module);
+	return lm != null && lm.ability_body_detached;
+}
+
 // Toggle ability invisibility: invisible to non-traitors, semi-transparent to Lily herself.
 rr_lily_set_ability_invis :: proc(player: Player, active: bool) {
 	lm := player.entity.get_component(Lily_Module);
@@ -3577,19 +3586,27 @@ rr_lily_draw_web_sense :: proc(player: Player) {
 		target := get_player_by_entity_id(lm.strung_player_ids[i]);
 		if target == null continue;
 		if target.player_state != Player_State.ALIVE continue;
+		if !#alive(target.entity) continue;
 
 		target_pos := target.entity.world_position;
-		Tutorial_Arrow.draw(player, target_pos, options);
+		Tutorial_Arrow.draw(player, target.entity, options);
 
 		// Draw name next to the arrow (replicate arrow positioning)
 		max_distance := player.camera.size * 0.8;
 		offset_to_target := normalize_vector_to_radius(target_pos - player.entity.world_position, max_distance) * max_distance;
 		arrow_pos := player.entity.world_position + offset_to_target;
+		previous_player_pos := player.entity.world_position - player.entity.calculate_interpolation_offset();
+		previous_target_pos := target_pos - target.entity.calculate_interpolation_offset();
+		previous_max_distance := player.camera.size_last_frame * 0.8;
+		previous_offset_to_target := normalize_vector_to_radius(previous_target_pos - previous_player_pos, previous_max_distance) * previous_max_distance;
+		previous_arrow_pos := previous_player_pos + previous_offset_to_target;
 
 		is_far := length_squared(arrow_pos - target_pos) > 0.1;
 
 		UI.push_world_draw_context();
 		defer UI.pop_draw_context();
+		UI.push_interpolation_offset(arrow_pos - previous_arrow_pos);
+		defer UI.pop_interpolation_offset();
 		UI.push_layer(101);
 		defer UI.pop_layer();
 		UI.push_z(target_pos.y);
@@ -4287,9 +4304,6 @@ rr_lily_update :: proc(player: Player, dt: float) {
 
 	// Mind control picker is drawn in ao_late_update (see rr_lily_late_update_ui)
 	// per the engine rule that UI must be issued in late_update.
-
-	// Web sense arrows (local only UI)
-	rr_lily_draw_web_sense(player);
 
 	// Braid points HUD (local only UI)
 	rr_lily_draw_hud(player);

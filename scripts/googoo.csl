@@ -316,7 +316,6 @@ rr_ggg_update_nest_burn_recovery :: proc(gm: GGG_Module) {
 // Check if GGG is dragging a body near the nest. If so, consume it.
 rr_ggg_check_nest_consumption :: proc(player: Player) {
 	if player == null return;
-	if !Game.is_server() return;
 	gm := player.entity.get_component(GGG_Module);
 	if gm == null return;
 	if !gm.nest_placed return;
@@ -332,8 +331,9 @@ rr_ggg_check_nest_consumption :: proc(player: Player) {
 		victim := get_player_by_entity_id(gm.dragging_live_player_id);
 		if victim != null && #alive(victim.entity) && victim.player_state == Player_State.ALIVE {
 			victim_role := victim.player_role;
-			// Release drag lock before killing
-			victim.remove_disable_movement_input_reason(GGG_LIVE_DRAG_REASON);
+			// Release every legacy duplicate before killing. Live-drag is edge-triggered now,
+			// but draining here also heals victims grabbed before this fix hot-reloaded.
+			rr_remove_movement_reason_all(victim, GGG_LIVE_DRAG_REASON);
 			// Kill the live player (consumed by nest)
 			victim.kill_with_killer(player.entity.id);
 			// Animate corpse into the nest
@@ -785,6 +785,9 @@ GGG_Transform_Lock :: class : Component {
 	arm :: method(seconds: float) {
 		if seconds <= 0.0 { seconds = 0.1; }
 		end_time = get_time() + seconds;
+		// Movement reasons are reference-counted. Re-arming only extends this one lock;
+		// it must never add another copy that a single timer expiry cannot remove.
+		if active return;
 		active = true;
 		p := entity.get_component(Player);
 		if p != null {
@@ -792,18 +795,26 @@ GGG_Transform_Lock :: class : Component {
 		}
 	}
 
+	clear :: method() {
+		p := entity.get_component(Player);
+		if p != null {
+			// Drain legacy duplicates left by transform spam before this fix.
+			rr_remove_movement_reason_all(p, GGG_TRANSFORM_LOCK_REASON);
+		}
+		active = false;
+		end_time = 0.0;
+	}
+
 	ao_update :: method(dt: float) {
 		if !active return;
 		p := entity.get_component(Player);
-		if p == null { active = false; return; }
+		if p == null { active = false; end_time = 0.0; return; }
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
-			p.remove_disable_movement_input_reason(GGG_TRANSFORM_LOCK_REASON);
-			active = false;
+			clear();
 			return;
 		}
 		if get_time() >= end_time {
-			p.remove_disable_movement_input_reason(GGG_TRANSFORM_LOCK_REASON);
-			active = false;
+			clear();
 		}
 	}
 }
@@ -822,6 +833,9 @@ rr_ggg_update :: proc(player: Player, dt: float) {
 
 	// Dead GGG reverts
 	if player.player_state != Player_State.ALIVE {
+		if gm.dragging_live_player_id != 0 {
+			rr_ggg_stop_live_drag(player);
+		}
 		if gm.is_creature_form || gm.creature_visible {
 			rr_ggg_force_revert(player);
 		}
@@ -831,6 +845,9 @@ rr_ggg_update :: proc(player: Player, dt: float) {
 	// Meetings: stop updating but defer visual revert until teleport
 	// (setup_voting handles the actual revert so nearby players don't see it)
 	if game_state != Game_State.INGAME {
+		if gm.dragging_live_player_id != 0 {
+			rr_ggg_stop_live_drag(player);
+		}
 		return;
 	}
 
@@ -920,6 +937,8 @@ rr_ggg_begin_revert :: proc(player: Player) {
 	gm.is_creature_form = false;
 	gm.skeleton_swap_at = 0.0;
 	rr_ggg_swap_to_player(player);
+	lock := player.entity.get_component(GGG_Transform_Lock);
+	if lock != null { lock.clear(); }
 	player.set_trigger("ggg_revert");
 }
 
@@ -927,6 +946,7 @@ rr_ggg_force_revert :: proc(player: Player) {
 	if player == null return;
 	gm := player.entity.get_component(GGG_Module);
 	if gm == null return;
+	rr_ggg_stop_live_drag(player);
 	rr_ggg_end_crawl(player);
 	gm.is_creature_form = false;
 	gm.skeleton_swap_at = 0.0;
@@ -950,7 +970,9 @@ rr_ggg_force_revert :: proc(player: Player) {
 	}
 
 	player.set_trigger("RESET");
-	player.remove_disable_movement_input_reason(GGG_TRANSFORM_LOCK_REASON);
+	lock := player.entity.get_component(GGG_Transform_Lock);
+	if lock != null { lock.clear(); }
+	else { rr_remove_movement_reason_all(player, GGG_TRANSFORM_LOCK_REASON); }
 }
 
 
@@ -1179,9 +1201,10 @@ GGG_Trap_Root_Effect :: class : Component {
 		if blind_seconds <= 0.0 { blind_seconds = 0.1; }
 		now := get_time();
 		if active {
-			// Extend existing timers instead of resetting
-			root_end_time = root_end_time + root_seconds;
-			blind_end_time = blind_end_time + blind_seconds;
+			// Refresh to the strongest current duration instead of stacking every hit.
+			// A swarm can therefore keep someone rooted, but cannot build minutes of CC.
+			root_end_time = max(root_end_time, now + root_seconds);
+			blind_end_time = max(blind_end_time, now + blind_seconds);
 			is_blinded = true;
 		} else {
 			root_end_time = now + root_seconds;
@@ -1211,7 +1234,6 @@ GGG_Trap_Root_Effect :: class : Component {
 
 	ao_update :: method(dt: float) {
 		if !active return;
-		if !Game.is_server() return;
 		p := entity.get_component(Player);
 		if p == null { active = false; return; }
 		if game_state != Game_State.INGAME || p.player_state != Player_State.ALIVE {
@@ -1273,7 +1295,6 @@ rr_ggg_draw_trap_blind_overlay :: proc(player: Player) {
 }
 
 update_ggg_traps :: proc() {
-	if !Game.is_server() return;
 	if ggg_traps.count <= 0 return;
 	now := get_time();
 
@@ -1723,7 +1744,7 @@ GGG_Decoy :: class : Component {
 		target_pos := target.entity.world_position;
 
 		// Check contact: root on touch
-		if Game.is_server() && !has_rooted {
+		if !has_rooted {
 			dist := length(target_pos - entity.world_position);
 			if dist < 0.8 {
 				root := target.entity.get_component(GGG_Trap_Root_Effect);
@@ -1915,6 +1936,10 @@ rr_ggg_start_live_drag :: proc(player: Player, target: Player) {
 	if target == null return;
 	gm := player.entity.get_component(GGG_Module);
 	if gm == null return;
+	// Repeated presses on the same victim are idempotent; switching victims first
+	// releases the old victim so the ref-counted movement reason stays balanced.
+	if gm.dragging_live_player_id == target.entity.id return;
+	if gm.dragging_live_player_id != 0 { rr_ggg_stop_live_drag(player); }
 	gm.dragging_live_player_id = target.entity.id;
 	target.add_disable_movement_input_reason(GGG_LIVE_DRAG_REASON);
 }
@@ -1926,7 +1951,9 @@ rr_ggg_stop_live_drag :: proc(player: Player) {
 	if gm.dragging_live_player_id == 0 return;
 	target := get_player_by_entity_id(gm.dragging_live_player_id);
 	if target != null && #alive(target.entity) {
-		target.remove_disable_movement_input_reason(GGG_LIVE_DRAG_REASON);
+		// Drain any duplicate left by the old non-idempotent start path as well as the
+		// single balanced reason used by the fixed path.
+		rr_remove_movement_reason_all(target, GGG_LIVE_DRAG_REASON);
 	}
 	gm.dragging_live_player_id = 0;
 }
@@ -1941,13 +1968,13 @@ rr_ggg_update_live_drag :: proc(player: Player, gm: GGG_Module, dt: float) {
 	}
 	if gm.nest_consume_hold_drag_until > 0.0 {
 		gm.nest_consume_hold_drag_until = 0.0;
-		gm.dragging_live_player_id = 0;
+		rr_ggg_stop_live_drag(player);
 		return;
 	}
 
 	target := get_player_by_entity_id(gm.dragging_live_player_id);
 	if target == null || !#alive(target.entity) || target.player_state != Player_State.ALIVE {
-		gm.dragging_live_player_id = 0;
+		rr_ggg_stop_live_drag(player);
 		return;
 	}
 

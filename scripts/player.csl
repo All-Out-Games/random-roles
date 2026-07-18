@@ -498,9 +498,7 @@ Player :: class : Player_Base {
 			rr_draw_mim_jumpscare(this, delta_time);
 			// Global civilian progress bar – always visible at top-center (except lobby/cinematics).
 			rr_draw_civilian_progress_bar(this);
-            update_tasks_ui(this);
-			update_minimap_ui(this);
-			rr_draw_pirate_treasure_guidance_if_needed(this);
+			update_tasks_ui(this);
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
 			draw_player_role_hud(this);
 			if this.is_local() {
@@ -539,8 +537,6 @@ Player :: class : Player_Base {
 			}
 			// Guardian vs APEX Showdown — cinematic letterbox + top winner bar + mash button.
 			rr_mech_draw_showdown_hud(this);
-			// Distress arrow pointing a Minion to its downed (faked-death) master so it can revive.
-			rr_mech_draw_downed_revive_ui(this);
 			if game_state == Game_State.ANIM_VOTE_EJECT {
 				this.draw_vote_eject_cinematic_ui();
 			}
@@ -1288,6 +1284,16 @@ Player :: class : Player_Base {
 			// spawn frame's camera/zoom takes effect immediately (no 1-frame lag).
 			rr_lily_apply_eye_machine_camera(this);
 
+			// World-space guidance is issued only after every gameplay camera update for
+			// this frame. Drawing these in ao_update makes their interpolated positions
+			// disagree with the final camera transform and visibly step at the sim rate.
+			rr_draw_task_objective_arrows(this);
+			rr_draw_pirate_treasure_guidance_if_needed(this);
+			rr_mech_draw_workbench_guidance_arrow(this);
+			rr_mech_draw_downed_revive_ui(this);
+			rr_lily_draw_web_sense(this);
+			update_minimap_ui(this);
+
 			if show_analytics {
 				rr_analytics_draw_ui(this);
 			}
@@ -1339,16 +1345,13 @@ Player :: class : Player_Base {
 		if rr_lily_should_intercept_remote_body_kill(this) {
 			return;
 		}
-		// Civilian allies held by Guardian are invincible while in the Guardian's arms —
-		// EXCEPT to ranged shots from the Hunter and Sheriff, which can still pick them off.
+		// Civilian allies held by Guardian are invincible while in the Guardian's arms.
+		// Projectile collision resolves the team-neutral shield before Sheriff/Hunter
+		// false-fire logic, so those roles cannot probe the held player's allegiance.
 		if rr_guardian_is_protecting(this) {
-			shooter_bypasses := killer_check != null && killer_check.player_type == Player_Type.CIVILIAN &&
-				(killer_check.player_role == Player_Role.HUNTER || killer_check.player_role == Player_Role.SHERIFF);
-			if !shooter_bypasses {
-				rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
-				rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.55}, 0.85, v4.{0.45, 1.0, 0.55, 0.65}, 0.28);
-				return;
-			}
+			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
+			rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.55}, 0.85, v4.{0.45, 1.0, 0.55, 0.65}, 0.28);
+			return;
 		}
 		// APEX-form Mech is immune to the anti-traitor roles (Hacker / Hunter / Sheriff).
 		if rr_mech_apex_blocks_kill(this, killer_check) {
@@ -4151,6 +4154,10 @@ Corpse :: class : Component {
 	}
 }
 
+rr_point_in_rect :: proc(point: v2, rect: Rect) -> bool {
+	return point.x >= rect.min.x && point.x <= rect.max.x && point.y >= rect.min.y && point.y <= rect.max.y;
+}
+
 draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
 	// Size scales with the window so it stays readable across resolutions.
 	size := window_rect.height() * 0.065;
@@ -4185,7 +4192,7 @@ draw_minimap_close_button :: proc(window_rect: Rect) -> bool {
 		UI.text(btn, ts, "X");
 	}
 
-	return interact.clicked;
+	return interact.clicked && rr_point_in_rect(interact.mouse_position, btn);
 }
 
 rr_rects_overlap :: proc(a: Rect, b: Rect) -> bool {
@@ -4614,7 +4621,6 @@ update_minimap_ui :: proc(player: Player) {
 	}
 
 	UI.push_id("minimap_toggle");
-	defer UI.pop_id();
 
 	// Tab key toggle (raw input, works regardless of UI layers).
 	if player.device_kind == .PC && get_input_down(Input.TAB, true) {
@@ -4637,8 +4643,9 @@ update_minimap_ui :: proc(player: Player) {
 		UI.text(btn_rect, ts, "MAP");
 	}
 	if interact.clicked {
-		player.show_minimap = !player.show_minimap;
+		player.show_minimap = true;
 	}
+	UI.pop_id();
 
 	if !player.show_minimap {
 		return;
@@ -4664,7 +4671,8 @@ update_minimap_ui :: proc(player: Player) {
 		dismiss_bs.hovered_color = v4.{0, 0, 0, 0};
 		dismiss_bs.pressed_color = v4.{0, 0, 0, 0};
 		dismiss_bs.background_color_multiplier = v4.{0, 0, 0, 0};
-		if UI.button(screen, dismiss_bs, .{}, "").clicked {
+		dismiss_interact := UI.button(screen, dismiss_bs, .{}, "");
+		if dismiss_interact.clicked && !rr_point_in_rect(dismiss_interact.mouse_position, btn_rect) {
 			player.show_minimap = false;
 		}
 	}
@@ -4973,28 +4981,27 @@ draw_traitor_sabotage_map_button :: proc(player: Player) {
 
 // --- Pirate treasure guidance (local-only arrows + cleanup) ---
 
-rr_find_nearest_pirate_dig_spot_pos :: proc(player: Player) -> v2, bool {
-	if player == null return {}, false;
+rr_find_nearest_pirate_dig_spot :: proc(player: Player) -> Entity {
+	if player == null return null;
 
 	best_dist_sq := 0.0;
-	best_pos: v2;
-	found := false;
+	best: Entity;
 
 	for spot: component_iterator(Pirate_Treasure_Dig_Spot) {
 		if spot == null continue;
+		if !#alive(spot.entity) continue;
 		if spot.owner_player_entity_id != player.entity.id continue;
 		if spot.is_dug continue;
 
 		d := spot.entity.world_position - player.entity.world_position;
 		dist_sq := length_squared(d);
-		if !found || dist_sq < best_dist_sq {
+		if best == null || dist_sq < best_dist_sq {
 			best_dist_sq = dist_sq;
-			best_pos = spot.entity.world_position;
-			found = true;
+			best = spot.entity;
 		}
 	}
 
-	return best_pos, found;
+	return best;
 }
 
 rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
@@ -5004,16 +5011,17 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 	if player.player_state != Player_State.ALIVE return;
 	if player.player_role != Player_Role.PIRATE return;
 
-	target_pos, ok := rr_find_nearest_pirate_dig_spot_pos(player);
-	if !ok return;
+	target := rr_find_nearest_pirate_dig_spot(player);
+	if target == null || !#alive(target) return;
+	target_pos := target.world_position;
 
 	dirt_texture := get_asset(Texture_Asset, PIRATE_DIRT_PILE_TEXTURE_PATH);
 	if dirt_texture == null {
 		dirt_texture = get_asset(Texture_Asset, PIRATE_DIRT_PILE_FALLBACK_TEXTURE_PATH);
 	}
 	if dirt_texture != null {
-		UI.push_world_draw_context();
-		defer UI.pop_draw_context();
+		UI.begin_world_space_ui(target);
+		defer UI.end_world_space_ui();
 		UI.push_z(target_pos.y);
 		defer UI.pop_z();
 
@@ -5032,7 +5040,7 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 
 	dist := length(player.entity.world_position - target_pos);
 	tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-	rr_draw_tutorial_arrow(player, target_pos, tutorial_arrow_options);
+	rr_draw_tutorial_arrow(player, target, tutorial_arrow_options);
 }
 
 destroy_pirate_dig_spots_for_player :: proc(player_entity_id: u64) {
@@ -5287,4 +5295,3 @@ rr_intro_cleanup_role_spine :: proc(player: Player) {
 		player.intro_role_spine_ready = false;
 	}
 }
-

@@ -3724,6 +3724,14 @@ assign_players_to_types :: proc() {
 				dm = p.entity.add_component(Doctor_Module);
 			}
 			dm.resurrects_used = 0;
+			// Ability instances persist across rounds. Reset Doctor's actual ability timer
+			// together with its per-round use count so consecutive Doctor rolls start ready.
+			for ability: p.abilities {
+				if ability != null && ability.type == Resurrect_Ability {
+					ability.current_cooldown = 0.0;
+					break;
+				}
+			}
 		}
 		if p.player_role == Player_Role.GUARDIAN {
 			guard := p.entity.get_component(Guardian_Module);

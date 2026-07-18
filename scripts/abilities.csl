@@ -349,7 +349,7 @@ Drag_Body_Ability :: class : Ability_Base {
 		}
 
 		// Toggle grab/drop.
-		if params.clicked && params.can_use && Game.is_server() {
+		if params.clicked && params.can_use {
 			if dragging {
 				rr_drag_body_force_drop_for_player(player);
 				return;
@@ -2726,8 +2726,10 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 	nearest: Player = null;
 	nearest_dist_sq := 0.0;
 	owner_id: u64 = 0;
+	owner_player: Player = null;
 	if #alive(owner) {
 		owner_id = owner.id;
+		owner_player = owner.get_component(Player);
 	}
 
 	// First pass: determine the nearest victim in the blast.
@@ -2735,6 +2737,10 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 		if p.player_state != Player_State.ALIVE continue;
 		// Pirate cannot kill themselves with their own keg.
 		if owner_id != 0 && #alive(p.entity) && p.entity.id == owner_id continue;
+		// Match normal traitor projectile policy: Pirate explosives do not kill teammates.
+		if owner_player != null && owner_player.player_type == Player_Type.TRAITOR && p.player_type == Player_Type.TRAITOR {
+			continue;
+		}
 		d := p.entity.world_position - position;
 		dist_sq := length_squared(d);
 		if dist_sq > POWDER_KEG_EXPLOSION_RADIUS * POWDER_KEG_EXPLOSION_RADIUS continue;
@@ -2768,6 +2774,11 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 	for p: component_iterator(Player) {
 		if p.player_state != Player_State.ALIVE continue;
 		if nearest != null && p == nearest continue;
+		// Teammates are excluded from both lethal damage and blast displacement.
+		// The owner still receives the original self-knockback behavior.
+		if owner_player != null && p != owner_player && owner_player.player_type == Player_Type.TRAITOR && p.player_type == Player_Type.TRAITOR {
+			continue;
+		}
 
 		d := p.entity.world_position - position;
 		dist_sq := length_squared(d);
@@ -3135,7 +3146,7 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 				options.alpha = 1.0;
 				options.far  = true;
 				options.near = true;
-				rr_draw_tutorial_arrow(player, target.world_position, options);
+				rr_draw_tutorial_arrow(player, target, options);
 			} else {
 				// Arrow toward nest if no prop
 				nest := rr_pyro_get_closest_nest(player);
@@ -3144,7 +3155,7 @@ Pyromaniac_Light_Fire_Ability :: class : Ability_Base {
 					options.alpha = 1.0;
 					options.far  = true;
 					options.near = true;
-					rr_draw_tutorial_arrow(player, nest.entity.world_position, options);
+					rr_draw_tutorial_arrow(player, nest.entity, options);
 				}
 			}
 		}

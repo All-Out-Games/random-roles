@@ -1062,11 +1062,24 @@ rr_mech_apply_minion_disguise_for_viewer :: proc(viewer: Player) {
 	}
 }
 
+// Mech_Module and Guardian_Module are intentionally retained and reset between rounds.
+// Always select by the CURRENT role so a player who changes roles cannot have last
+// round's inactive module steal the avatar, skins, animation, or update path.
+rr_mech_active_module :: proc(player: Player) -> Mech_Module {
+	if player == null || player.player_role != Player_Role.THE_MECH return null;
+	return player.entity.get_component(Mech_Module);
+}
+
+rr_guardian_active_module :: proc(player: Player) -> Guardian_Module {
+	if player == null || player.player_role != Player_Role.GUARDIAN return null;
+	return player.entity.get_component(Guardian_Module);
+}
+
 rr_mech_is_transformed :: proc(player: Player) -> bool {
 	if player == null return false;
-	mech := player.entity.get_component(Mech_Module);
+	mech := rr_mech_active_module(player);
 	if mech != null return mech.is_mech_form || mech.is_apex;
-	guard := player.entity.get_component(Guardian_Module);
+	guard := rr_guardian_active_module(player);
 	if guard != null return guard.is_guardian_form;
 	return false;
 }
@@ -1084,11 +1097,21 @@ rr_mech_enable_player_hidden :: proc(player: Player, hidden: bool) {
 
 rr_mech_ensure_avatar :: proc(player: Player) {
 	if player == null return;
-	mech := player.entity.get_component(Mech_Module);
-	guard := player.entity.get_component(Guardian_Module);
+	mech := rr_mech_active_module(player);
+	guard := rr_guardian_active_module(player);
 	if mech == null && guard == null return;
-	if mech != null && mech.creature_entity != null && #alive(mech.creature_entity) return;
-	if guard != null && guard.creature_entity != null && #alive(guard.creature_entity) return;
+	if mech != null && mech.creature_entity != null && #alive(mech.creature_entity) {
+		if mech.creature_animator != null && mech.creature_animator.instance != null return;
+		mech.creature_entity.destroy();
+		mech.creature_entity = null;
+		mech.creature_animator = null;
+	}
+	if guard != null && guard.creature_entity != null && #alive(guard.creature_entity) {
+		if guard.creature_animator != null && guard.creature_animator.instance != null return;
+		guard.creature_entity.destroy();
+		guard.creature_entity = null;
+		guard.creature_animator = null;
+	}
 
 	e := Scene.create_entity();
 	e.set_parent(player.entity, false);
@@ -1119,8 +1142,8 @@ rr_mech_ensure_avatar :: proc(player: Player) {
 
 rr_mech_apply_avatar_skins :: proc(player: Player) {
 	if player == null return;
-	mech := player.entity.get_component(Mech_Module);
-	guard := player.entity.get_component(Guardian_Module);
+	mech := rr_mech_active_module(player);
+	guard := rr_guardian_active_module(player);
 	anim: Spine_Animator = null;
 	ce: Entity = null;
 	if mech != null { anim = mech.creature_animator; ce = mech.creature_entity; }
@@ -1167,10 +1190,32 @@ rr_mech_apply_avatar_skins :: proc(player: Player) {
 	anim.instance.refresh_skins();
 }
 
+// Stream readiness is local to each simulation/client, so do not cache it in a synced
+// module field. Inspect the actual local Spine instance and retry only while its expected
+// base skin is missing.
+rr_mech_avatar_has_expected_skin :: proc(player: Player) -> bool {
+	if player == null return false;
+	mech := rr_mech_active_module(player);
+	guard := rr_guardian_active_module(player);
+	anim: Spine_Animator = null;
+	if mech != null { anim = mech.creature_animator; }
+	if guard != null { anim = guard.creature_animator; }
+	if anim == null || anim.instance == null return false;
+	if anim.instance.get_skeleton() == null return false;
+
+	expected := "Full/Mecha_skeleton";
+	if guard != null { expected = "Full/Guardian"; }
+	else if mech != null && mech.is_apex && mech.apex_skin_revealed { expected = "Full/Mecha_APEX"; }
+	for skin: anim.instance.get_skins() {
+		if skin == expected return true;
+	}
+	return false;
+}
+
 rr_mech_show_avatar :: proc(player: Player, show: bool) {
 	rr_mech_ensure_avatar(player);
-	mech := player.entity.get_component(Mech_Module);
-	guard := player.entity.get_component(Guardian_Module);
+	mech := rr_mech_active_module(player);
+	guard := rr_guardian_active_module(player);
 	e: Entity = null;
 	if mech != null { e = mech.creature_entity; mech.creature_visible = show; }
 	if guard != null { e = guard.creature_entity; guard.creature_visible = show; }
@@ -1208,8 +1253,8 @@ rr_mech_show_avatar :: proc(player: Player, show: bool) {
 
 rr_mech_play_avatar_anim :: proc(player: Player, anim_name: string, loop: bool) {
 	if player == null return;
-	mech := player.entity.get_component(Mech_Module);
-	guard := player.entity.get_component(Guardian_Module);
+	mech := rr_mech_active_module(player);
+	guard := rr_guardian_active_module(player);
 	anim: Spine_Animator = null;
 	if mech != null {
 		anim = mech.creature_animator;
@@ -1234,8 +1279,8 @@ rr_mech_play_avatar_anim :: proc(player: Player, anim_name: string, loop: bool) 
 rr_mech_update_avatar_locomotion :: proc(player: Player) {
 	if player == null return;
 	if !rr_mech_is_transformed(player) return;
-	mech := player.entity.get_component(Mech_Module);
-	guard := player.entity.get_component(Guardian_Module);
+	mech := rr_mech_active_module(player);
+	guard := rr_guardian_active_module(player);
 	anim: Spine_Animator = null;
 	if guard != null { anim = guard.creature_animator; }
 	else if mech != null { anim = mech.creature_animator; }
@@ -1262,8 +1307,8 @@ rr_mech_update_avatar_locomotion :: proc(player: Player) {
 
 rr_mech_update :: proc(player: Player, dt: float) {
 	if player == null return;
-	mech := player.entity.get_component(Mech_Module);
-	guard := player.entity.get_component(Guardian_Module);
+	mech := rr_mech_active_module(player);
+	guard := rr_guardian_active_module(player);
 	if mech != null {
 		if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE {
 			// Defer the visual transform-revert for meetings to teleport time (rr_mech_force_revert
@@ -1347,8 +1392,16 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			// Enforce visibility each frame (survives reconciliation); keep the
 			// avatar visible while a transform-out anim is still playing.
 			target_visible := mech.is_mech_form || mech.is_apex || get_time() < mech.transform_anim_ends_at;
+			// A remote client can receive the synced visible/form flags before its
+			// runtime avatar entity exists. Build the local entity before comparing flags.
+			if target_visible { rr_mech_ensure_avatar(player); }
 			if mech.creature_visible != target_visible {
 				rr_mech_show_avatar(player, target_visible);
+			}
+			// The streamed rig may not have been ready when show_avatar first applied its
+			// skins. Retry on the actual local instance until the correct form is present.
+			if target_visible && get_frame_number() % 4 == 0 && !rr_mech_avatar_has_expected_skin(player) {
+				rr_mech_apply_avatar_skins(player);
 			}
 			// Release the APEX-transform movement lock once the transform anim has played out.
 			if mech.apex_transform_locked && get_time() >= mech.transform_anim_ends_at {
@@ -1424,8 +1477,12 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			player.remove_disable_movement_input_reason(MECH_LOCK_REASON);
 		} else {
 			target_visible := guard.is_guardian_form || get_time() < guard.transform_anim_ends_at;
+			if target_visible { rr_mech_ensure_avatar(player); }
 			if guard.creature_visible != target_visible {
 				rr_mech_show_avatar(player, target_visible);
+			}
+			if target_visible && get_frame_number() % 4 == 0 && !rr_mech_avatar_has_expected_skin(player) {
+				rr_mech_apply_avatar_skins(player);
 			}
 			rr_mech_update_carried(player, guard.carried_player_id, 0);
 			rr_mech_update_showdown_for_guardian(player, guard);
@@ -1447,8 +1504,8 @@ rr_mech_update :: proc(player: Player, dt: float) {
 // trigger; the gesture plays out then clears the track on its own.
 rr_mech_play_overlay_oneshot :: proc(player: Player, anim_name: string) {
 	if player == null return;
-	mech := player.entity.get_component(Mech_Module);
-	guard := player.entity.get_component(Guardian_Module);
+	mech := rr_mech_active_module(player);
+	guard := rr_guardian_active_module(player);
 	anim: Spine_Animator = null;
 	until := get_time() + rr_mech_anim_duration(anim_name);
 	if mech != null { anim = mech.creature_animator; mech.overlay_clear_at = until; mech.last_overlay_anim = anim_name; }
@@ -1482,6 +1539,9 @@ rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_
 	if carried_player_id != 0 {
 		victim := get_player_by_entity_id(carried_player_id);
 		victim_gone := victim == null || !#alive(victim.entity) || victim.player_state != Player_State.ALIVE;
+		// Lily's player entity temporarily follows her spider/tube. It is not a grabbable
+		// body; release any legacy grab immediately instead of fighting Lily's controller.
+		if !victim_gone && rr_lily_remote_body_active(victim) { victim_gone = true; }
 		mech := carrier.entity.get_component(Mech_Module);
 		if mech != null && mech.carried_player_id == carried_player_id {
 			if victim_gone || (mech.grabbed_at > 0.0 && get_time() - mech.grabbed_at > MECH_MAX_CARRY_SECONDS) {
@@ -1626,6 +1686,20 @@ rr_guardian_is_protecting :: proc(target: Player) -> bool {
 	return false;
 }
 
+// Team-neutral carry check used by projectile collision before Sheriff/Hunter
+// false-fire logic. The shield must resolve before reading the victim's team or the
+// different death outcome becomes an allegiance oracle.
+rr_guardian_is_carrying :: proc(target: Player) -> bool {
+	if target == null || !#alive(target.entity) return false;
+	for g: component_iterator(Guardian_Module) {
+		if g == null || !#alive(g.entity) continue;
+		if g.carried_player_id != target.entity.id continue;
+		carrier := g.entity.get_component(Player);
+		if carrier != null && carrier.player_state == Player_State.ALIVE return true;
+	}
+	return false;
+}
+
 // Draws the world-space aura on the held player.
 // Allies: pulsing green shield bubble. Enemies: red restraint glow.
 rr_guardian_draw_carry_aura :: proc(carrier: Player, target: Player) {
@@ -1685,6 +1759,7 @@ rr_mech_find_melee_target :: proc(player: Player, allow_traitor: bool, exclude_t
 		if p == player continue;
 		if p.player_state != Player_State.ALIVE continue;
 		if !#alive(p.entity) continue;
+		if rr_lily_remote_body_active(p) continue;
 		if !allow_traitor && p.player_type == Player_Type.TRAITOR continue;
 		// Conversion can't claim a transformed titan (e.g. a Guardian in their guardian form) —
 		// the two titans settle things through a Showdown, not conversion.
@@ -1703,6 +1778,7 @@ rr_mech_find_pickup_target :: proc(player: Player) -> Player {
 		if p == player continue;
 		if p.player_state != Player_State.ALIVE continue;
 		if !#alive(p.entity) continue;
+		if rr_lily_remote_body_active(p) continue;
 		if rr_mech_is_transformed(p) continue;
 		if !rr_has_line_of_sight(player.entity.world_position, p.entity.world_position) continue;
 		finder.check(p, p.entity.world_position);
@@ -2328,9 +2404,26 @@ rr_mech_is_near_magnet_node :: proc(pos: v2) -> bool {
 }
 
 rr_mech_find_throw_path_hit :: proc(carrier: Player, target: Player, start_pos: v2, dir: v2, end_pos: ref v2, killer_id: u64) -> bool {
-	traveled := MECH_THROW_STEP;
-	last_valid := start_pos;
-	while traveled <= MECH_THROW_DISTANCE {
+	desired_end := end_pos;
+	travel_limit := length(desired_end - start_pos);
+	wall_hit := false;
+	// A navmesh ray catches thin walls/holes that point sampling can hop across.
+	if world_references != null && world_references.main_navmesh != null {
+		hit_pos, has_hit := world_references.main_navmesh.try_raycast(start_pos, dir);
+		if has_hit {
+			hit_distance := length(hit_pos - start_pos);
+			if hit_distance < travel_limit {
+				travel_limit = max(0.0, hit_distance - 0.35);
+				wall_hit = true;
+			}
+		}
+	}
+
+	// If the launch offset itself sits over a boundary, fall back to the victim's
+	// current legal position rather than preserving an off-mesh start sample.
+	last_valid := rr_mech_clamp_to_ground(target.entity.world_position);
+	traveled := min(MECH_THROW_STEP, travel_limit);
+	while traveled <= travel_limit && travel_limit > 0.0 {
 		sample := start_pos + dir * traveled;
 		nav_point: v2;
 		tri_hint: s64;
@@ -2341,7 +2434,8 @@ rr_mech_find_throw_path_hit :: proc(carrier: Player, target: Player, start_pos: 
 			rr_mech_play_sfx_at("minigame/bonk_staff_77864c.wav", end_pos, 0.24);
 			return true;
 		}
-		last_valid = sample;
+		// Store the actual walkable point, never the nearby off-mesh sample.
+		last_valid = nav_point;
 
 		for m: component_iterator(Mech_Magnet_Node) {
 			if m == null || !#alive(m.entity) continue;
@@ -2377,6 +2471,28 @@ rr_mech_find_throw_path_hit :: proc(carrier: Player, target: Player, start_pos: 
 		}
 
 		traveled += MECH_THROW_STEP;
+	}
+
+	if wall_hit {
+		end_pos = last_valid;
+		rr_mech_apply_stun(target, MECH_STUN_SECONDS);
+		rr_mech_spawn_flash(end_pos, 0.55, v4.{1.0, 0.7, 0.3, 0.55}, 0.22);
+		rr_mech_play_sfx_at("minigame/bonk_staff_77864c.wav", end_pos, 0.24);
+		return true;
+	}
+
+	// Even a clear throw lands on the navmesh point returned by the engine.
+	final_nav: v2;
+	final_hint: s64;
+	if try_find_closest_point_on_navmesh(desired_end, ref final_nav, ref final_hint) &&
+		length(final_nav - desired_end) <= MECH_THROW_WALL_TOLERANCE {
+		end_pos = final_nav;
+	} else {
+		end_pos = last_valid;
+		rr_mech_apply_stun(target, MECH_STUN_SECONDS);
+		rr_mech_spawn_flash(end_pos, 0.55, v4.{1.0, 0.7, 0.3, 0.55}, 0.22);
+		rr_mech_play_sfx_at("minigame/bonk_staff_77864c.wav", end_pos, 0.24);
+		return true;
 	}
 	return false;
 }
@@ -2415,6 +2531,14 @@ Mech_Thrown_Arc :: class : Component {
 	settle :: proc(using this: Mech_Thrown_Arc) {
 		p := entity.get_component(Player);
 		if p == null || !#alive(p.entity) return;
+		// Re-snap only when the returned point is still nearby. A nearest-point query
+		// must never teleport the victim across a newly closed wall at touchdown.
+		touchdown_nav: v2;
+		touchdown_hint: s64;
+		if try_find_closest_point_on_navmesh(end_pos, ref touchdown_nav, ref touchdown_hint) &&
+			length(touchdown_nav - end_pos) <= MECH_THROW_WALL_TOLERANCE {
+			end_pos = touchdown_nav;
+		}
 		p.entity.set_local_position(end_pos);
 		p.agent.velocity = v2.{0, 0};
 		p.remove_disable_movement_input_reason(MECH_THROW_REASON);
@@ -2502,8 +2626,11 @@ rr_mech_throw_player :: proc(carrier: Player, target: Player, killer_id: u64, ai
 	dir := aim_dir;
 	if length(dir) < 0.01 { dir = rr_mech_get_throw_direction(carrier); }
 	else { dir = normalize(dir); }
-	start_pos := carrier.entity.world_position + dir * 0.8;
-	end_pos := carrier.entity.world_position + dir * MECH_THROW_DISTANCE;
+	// Begin at the carrier's nearest legal navmesh point. Starting after a visual hand
+	// offset could put the first ray sample on the far side of a thin wall, letting the
+	// victim escape the room before collision validation even began.
+	start_pos := rr_mech_clamp_to_ground(carrier.entity.world_position);
+	end_pos := start_pos + dir * MECH_THROW_DISTANCE;
 	path_hit := rr_mech_find_throw_path_hit(carrier, target, start_pos, dir, ref end_pos, killer_id);
 	// Toss the victim along a natural arc from the carrier to the landing spot
 	// instead of teleporting them. Dead targets (hit a hazard) just snap to the spot.
@@ -4753,7 +4880,7 @@ rr_player_is_transformed_monster :: proc(p: Player) -> bool {
 	bc := p.entity.get_component(Big_Charlie_Module);
 	if bc != null && bc.is_big_charlie_form return true;
 	lm := p.entity.get_component(Lily_Module);
-	if lm != null && lm.is_lily_form return true;
+	if lm != null && lm.is_lily_form && !lm.ability_body_detached return true;
 	return false;
 }
 
@@ -7139,7 +7266,7 @@ rr_mech_draw_downed_revive_ui :: proc(player: Player) {
 	options.near = false; // only guide the Minion in while the body is off-screen; the in-range Revive button takes over up close
 	UI.push_color_multiplier(v4.{1.0, 0.35, 0.4, 1.0}); // urgent red
 	defer UI.pop_color_multiplier();
-	rr_draw_tutorial_arrow(player, owner.entity.world_position, options);
+	rr_draw_tutorial_arrow(player, owner.entity, options);
 }
 
 // =====================================================================
@@ -7658,6 +7785,27 @@ rr_mech_draw_resource_row :: proc(owner: Player, mech: Mech_Module, row: Rect, b
 	rr_mech_draw_resource_chip(row.cut_left_unscaled(chip_w), get_asset(Texture_Asset, MECH_POWER_CORE_TEX), mech.power_cores, num_ts);
 }
 
+rr_mech_draw_workbench_guidance_arrow :: proc(player: Player) {
+	if player == null || !player.is_local() return;
+	if player.player_role != Player_Role.THE_MECH return;
+	owner := rr_mech_get_owner(player);
+	if owner == null return;
+	mech := owner.entity.get_component(Mech_Module);
+	if mech == null || mech.workbench_ui_open return;
+	if mech.showdown_active || mech.showdown_downed return;
+	if mech.visited_workbench || mech_workbench_entity == null || !#alive(mech_workbench_entity) return;
+
+	wb_pos := mech_workbench_entity.world_position;
+	options := Tutorial_Arrow.default_options();
+	dist := length(player.entity.world_position - wb_pos);
+	options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
+	options.far = true;
+	options.near = true;
+	options.bob_scale = 0.5;
+	options.bob_bias = 1.5;
+	rr_draw_tutorial_arrow(player, mech_workbench_entity, options);
+}
+
 // Side checklist HUD for The Mech AND its Minions — drawn from draw_mech_role_hud in
 // player.csl. Minions read the exact same checklist as their master: it's driven entirely
 // by the owner's Mech_Module and the shared (mech + minions) component pool, so they can
@@ -7677,21 +7825,6 @@ rr_mech_draw_checklist_panel :: proc(player: Player) {
 	// Hide the progression checklist while the Showdown HUD owns the screen, or while the Mech is
 	// downed (faked death) — nothing to track until it's revived or dies.
 	if mech.showdown_active || mech.showdown_downed return;
-
-	// First objective: guide the Mech to the R&D Workbench with a world-space arrow until it's
-	// first used. Local Mech only (minions don't build); drawn outside task_list_open so it shows
-	// even with the checklist collapsed.
-	if is_mech && player.is_local() && !mech.visited_workbench && mech_workbench_entity != null && #alive(mech_workbench_entity) {
-		wb_pos := mech_workbench_entity.world_position;
-		arrow_opts := Tutorial_Arrow.default_options();
-		dist := length(player.entity.world_position - wb_pos);
-		arrow_opts.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-		arrow_opts.far = true;
-		arrow_opts.near = true;
-		arrow_opts.bob_scale = 0.5;
-		arrow_opts.bob_bias = 1.5;
-		rr_draw_tutorial_arrow(player, wb_pos, arrow_opts);
-	}
 
 	UI.push_layer(1600);
 	defer UI.pop_layer();

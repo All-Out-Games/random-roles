@@ -2469,6 +2469,12 @@ rr_bc_apply_shockwave :: proc(player: Player) {
 		if p.player_state != Player_State.ALIVE continue;
 		if p.bc_cocooned continue;
 		if p.entity == null || !#alive(p.entity) continue;
+		// Showdown owns both fighters' form, position and mash counters until it resolves.
+		// Charlie must not force-revert or displace either participant mid-clash.
+		mech_showdown := p.entity.get_component(Mech_Module);
+		guard_showdown := p.entity.get_component(Guardian_Module);
+		if (mech_showdown != null && mech_showdown.showdown_active) ||
+			(guard_showdown != null && guard_showdown.showdown_active) continue;
 
 		d := p.entity.world_position - origin;
 		dist_sq := length_squared(d);

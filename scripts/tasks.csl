@@ -1384,6 +1384,75 @@ rr_draw_role_help_panel :: proc(player: Player) {
 	}
 }
 
+rr_draw_task_objective_arrows :: proc(player: Player) {
+	if player == null || !player.is_local() return;
+	if game_state != Game_State.INGAME return;
+	if player.player_state != Player_State.ALIVE && player.player_type != Player_Type.CIVILIAN return;
+	if player.active_tasks.elements.count == 0 {
+		if player.player_type == Player_Type.TRAITOR return;
+		if !rr_power_outage_active && !rr_comms_outage_active return;
+	}
+
+	// Match the task UI's established layer and resolution scaling while issuing the
+	// world-space draw commands in Player.ao_late_update after the camera settles.
+	UI.push_layer(100);
+	defer UI.pop_layer();
+	_pushed_scale := rr_push_task_ui_scale(player);
+	defer rr_pop_mobile_ui_scale(_pushed_scale);
+
+	if rr_power_outage_active && player.player_type != Player_Type.TRAITOR {
+		options := Tutorial_Arrow.default_options();
+		generator_pos := rr_get_power_outage_generator_pos();
+		dist := length(player.entity.world_position - generator_pos);
+		options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
+		options.far = true;
+		options.near = true;
+		options.bob_scale = 0.5;
+		options.bob_bias = 1.5;
+		generator_entity: Entity;
+		if world_references != null && world_references.sabotage_generator_interactable != null {
+			generator_entity = world_references.sabotage_generator_interactable.entity;
+		}
+		if generator_entity != null && #alive(generator_entity) {
+			rr_draw_tutorial_arrow(player, generator_entity, options);
+		} else {
+			rr_draw_tutorial_arrow(player, generator_pos, options);
+		}
+		return;
+	}
+
+	if rr_comms_outage_active && player.player_type != Player_Type.TRAITOR {
+		if world_references != null && world_references.rr_comms_lever_entity != null && #alive(world_references.rr_comms_lever_entity) {
+			lever_pos := world_references.rr_comms_lever_entity.world_position;
+			options := Tutorial_Arrow.default_options();
+			dist := length(player.entity.world_position - lever_pos);
+			options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
+			options.far = true;
+			options.near = true;
+			options.bob_scale = 0.5;
+			options.bob_bias = 1.5;
+			rr_draw_tutorial_arrow(player, world_references.rr_comms_lever_entity, options);
+		}
+		return;
+	}
+
+	options := Tutorial_Arrow.default_options();
+	options.far = false;
+	options.near = true;
+	options.bob_scale = 0.5;
+	options.bob_bias = 1.5;
+	for t: 0..player.active_tasks.elements.count-1 {
+		task := player.active_tasks.elements[t];
+		if task == null || task.completed || task.started continue;
+		rr_refresh_task_destinations_for_task(task);
+		for d: 0..task.destinations.elements.count-1 {
+			dist := length(player.entity.world_position - task.destinations.elements[d]);
+			options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
+			rr_draw_tutorial_arrow(player, task.destinations.elements[d], options);
+		}
+	}
+}
+
 update_tasks_ui :: proc(player: Player) {
 	// Task UI is drawn during gameplay. Ghost civilians can still complete tasks.
 	if !player.is_local_or_server() {
@@ -1437,18 +1506,6 @@ update_tasks_ui :: proc(player: Player) {
 
 	// --- Power outage override: show ONLY the generator task for non-traitors ---
 	if rr_power_outage_active && player.player_type != Player_Type.TRAITOR {
-
-		// Draw objective arrow to the generator for local player.
-		if player.is_local() {
-			tutorial_arrow_options := Tutorial_Arrow.default_options();
-			dist := length(player.entity.world_position - rr_get_power_outage_generator_pos());
-			tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-			tutorial_arrow_options.far = true;
-			tutorial_arrow_options.near = true;
-			tutorial_arrow_options.bob_scale = 0.5;
-			tutorial_arrow_options.bob_bias = 1.5;
-			rr_draw_tutorial_arrow(player, rr_get_power_outage_generator_pos(), tutorial_arrow_options);
-		}
 
 		// Find generator task state (should be injected for everyone by the server).
 		gen_task: Task_Base;
@@ -1537,21 +1594,6 @@ update_tasks_ui :: proc(player: Player) {
 	// --- Comms outage override: show ONLY the comms restore task for non-traitors ---
 	if rr_comms_outage_active && player.player_type != Player_Type.TRAITOR {
 
-		// Draw objective arrow to the comms lever for local player.
-		if player.is_local() {
-			if world_references != null && world_references.rr_comms_lever_entity != null && #alive(world_references.rr_comms_lever_entity) {
-				lever_pos := world_references.rr_comms_lever_entity.world_position;
-				tutorial_arrow_options := Tutorial_Arrow.default_options();
-				dist := length(player.entity.world_position - lever_pos);
-				tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-				tutorial_arrow_options.far = true;
-				tutorial_arrow_options.near = true;
-				tutorial_arrow_options.bob_scale = 0.5;
-				tutorial_arrow_options.bob_bias = 1.5;
-				rr_draw_tutorial_arrow(player, lever_pos, tutorial_arrow_options);
-			}
-		}
-
 		// Find comms task state (should be injected for everyone by the server).
 		comms_task: Task_Base;
 		for i: 0..player.active_tasks.elements.count-1 {
@@ -1634,34 +1676,6 @@ update_tasks_ui :: proc(player: Player) {
 		UI.text(help_rect, help_ts, "Go to Comms (Phota) and flip the lever to restore proximity chat.");
 
 		return;
-	}
-
-	if(player.is_local()) {
-		tutorial_arrow_options := Tutorial_Arrow.default_options();
-		// Show objective arrows both near and far, and keep them readable.
-		tutorial_arrow_options.far = false;
-		tutorial_arrow_options.near = true;
-		tutorial_arrow_options.bob_scale = 0.5;
-		tutorial_arrow_options.bob_bias = 1.5;
-
-		// Draw objective arrows toward each task's destination(s).
-		for t: 0..player.active_tasks.elements.count-1 {
-			task := player.active_tasks.elements[t];
-			if task == null {
-				continue;
-			}
-			if task.completed || task.started {
-				continue;
-			}
-
-			rr_refresh_task_destinations_for_task(task);
-
-			for d: 0..task.destinations.elements.count-1 {
-				dist := length(player.entity.world_position - task.destinations.elements[d]);
-				tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
-				rr_draw_tutorial_arrow(player, task.destinations.elements[d], tutorial_arrow_options);
-			}
-		}
 	}
 
 	// Civilians see their normal tasks; anarchist role objectives and infected mini-werewolves use this list too.
