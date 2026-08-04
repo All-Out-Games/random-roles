@@ -6,6 +6,7 @@ You will be developing a multiplayer game in a custom scripting language (.csl)
 - All gameplay state is automatically synced. You do not need to write RPCs or manually replicate state.
 - The client runs the same gameplay code as the server. The server's authoritative result pushed to the client every 4 frames — you get correctness **and** responsiveness for free.
 - Do not forget that **multiple players will be connecting**. Avoid global state that will break with multiple players. Store these as fields on the player.
+- `ao_start()` is not replayed for late-joining clients — rebuild client-local presentation from synced state in `ao_on_state_sync()` (see the client-specific-state skill); spawn/destroy networked entities in the shared predicted path (never gated to server or local); and store cross-entity ownership as user-id strings (`player.get_user_id()`), never as synced Player/Entity references or entity-creation order.
 
 There are two player methods that control where code runs:
 ```csl
@@ -52,6 +53,7 @@ other := e.get_component(Other_Component);
 
 e.destroy();
 ```
+`add_component()` runs the new component's `ao_start()` before returning; use its `on_before_start` callback for any fields that startup must read instead of assigning them afterward.
 
 ### Iterating Entities
 ```csl
@@ -151,17 +153,18 @@ random_float := rng_range_float(ref rng, 0, 1);
 random_int := rng_range_int(ref rng, 1, 10);
 ```
 
-## Strings
+## String Templating
+NO $ before the interpolated pieces. Just plain {value}
+
 ```csl
-format_string("Value: %", {42});
-format_string("health: 100%%");
+`Value: {42}`;
+`health: 100%`;
 
 hp := 67;
-// %0 as alias for % when you want either multiple args next to eachother ("%0%") or an arg then a percent literal ("%0%%")
-format_string("health: %0%%", {hp}); // health: 67%
+`health: {hp}%`; // health: 67%
 
 // Decimal rounding
-format_string("pi: %", {format_float(PI, decimals=2)}); // "pi: 3.14"
+`pi: {format_float(PI, decimals=2)}`; // "pi: 3.14"
 ```
 
 my_str.count gets length 
@@ -181,14 +184,14 @@ desc.delay = 0; // For lining up with animations
 desc.loop = false;
 desc.volume = 0.4;
 desc.speed_perturb = 0.1;
-desc.specific_to_player = player; // For sounds only one player should hear (UI clicks, coin earning, etc):
+desc.specific_to_player = player; // For sounds only one player should hear (UI clicks, coin earning, music, etc). Do NOT wrap any SFX calls with is_local
 sound_id := SFX.play(sound_asset, desc);
 
 SFX.stop(sound_id);
 ```
 
 ## Economy
-> Automatically persists currencies (cash, points, etc...)
+> Persists across sessions
 ```csl
 Economy.register_currency("Coins", coin_texture_asset);
 
@@ -201,10 +204,18 @@ if Economy.can_withdraw_currency(player, "Coins", COST) {
     Economy.withdraw_currency(player, "Coins", COST);
 }
 ```
-Any time players receive item or currencies you MUST play a sick animation of the item/coins going up or lerping over and have tactile sfx. 
+When players receive items or currencies you MUST play a sick animation of the item/coins going up or lerping over and have tactile sfx.
 
 ## UI
-Reference the `UIK` skill for any screen space UI, world space UI can use the root UI library
+- Reference the `uidoc` skill for screen-space game UI.
+- Reference the `world-space-ui` skill for world-space overlays, tutorial arrows, and immediate-mode helper drawing. Use interpolation for moving/following visuals.
+
+## Interpolation
+
+- Litmus test: if a visual is drawn from an entity/component's current transform, or inside an anchored component callback, you do not need manual interpolation.
+- You must use interpolation for custom immediate-mode/world-space drawing that follows a moving entity outside an anchored callback, or for non-entity positions that you update yourself.
+
+Example: drawing a world-space prompt that follows an entity from player UI code:
 ```csl
 UI.begin_world_space_ui(target_entity);
 defer UI.end_world_space_ui();
@@ -213,7 +224,7 @@ UI.text(rect, ts, "+1 Gold");
 ```
 
 HP MUST be overlayed above players in world space, never screen space UI text. Use the minimal amount of UI to convey what is needed, which is sometimes none at all.
-Never abbreviate words, instead just use FEWER words. Prefer using icons where relevant or use smart layouts when words are _required_
+Never abbreviate words, instead just use CONCISE words. Prefer using icons where you can.
 
 ## Inventory & Items
 - When players acquire items (e.g. from a shop or interacting with the world), you MUST use the All Out inventory system documented in the `inventory` skill.
@@ -229,30 +240,27 @@ Never abbreviate words, instead just use FEWER words. Prefer using icons where r
 - p.get_user_id() -> string
 - p.avatar_color -> Color_Replace_Color 
 - p.device_kind -> .PHONE, .TABLET, .PC 
-- p.add_freeze_reason(reason: string) - NOT indempotent. If you call this repeatedly the player will get permanently stuck. 
+- p.add_freeze_reason(reason: string) - NOT idempotent. If you call this repeatedly the player will get permanently stuck.
 - p.add_invisibility_reason(reason: string)
 - p.add_name_invisibility_reason(reason: string)
 - p.remove_name_invisibility_reason(reason: string)
 
-### Leaderboard package
-`core:global_leaderboard` adds a reusable `Global_Leaderboard : Component` for world-space ranked scoreboards backed by ordered saves
-Import it with `import "core:global_leaderboard"` and add `Global_Leaderboard` to a scene entity
-Set `leaderboard_id` on the component, optionally set `optional_title`
-On the server, call `Global_Leaderboard.increment_score(player, leaderboard_id, amount)` to add to a player's score
+### Leaderboard
+If leaderboards are requested `import "core:global_leaderboard"` and add `Global_Leaderboard` to a scene entity
+Set `leaderboard_id` on the component, call `Global_Leaderboard.increment_score(player, leaderboard_id, amount)`
 
 ## Best Practices
 - Do not write your own input. Movement is handled by default (speed = 300). player.agent.input_this_frame and ability buttons are available
-- When unsure about an API signature find the appropriate skill. If no results are found you may grep api_references/core/ao/core.csl_engine
-- You MUST fundamentally design your games to account for multiple players. No global tycoons, everything must either be plot based (tycoons) or round based (shooters)
+- When unsure about an API signature find the appropriate skill. If none you may grep the core library in scripts/.ao_core
+- You MUST fundamentally design your games to account for multiple players. Everything must either be plot based (tycoons) or round based (shooters)
 - If asked for Brainrot use get_remote_assets_that_work_well_with tool with catalogId 05604152b758f509 (these are usually collection based games where brainrots obtained are placed in your plot and generate money)
-- All games with plots start the player in their plot and have a UIK button to teleport back. Plots MUST have very clear visual boundaries
+- All games with plots start the player in their plot and have a button to teleport back. Plots MUST have very clear visual boundaries
 - Only use the Notifier API for critical messages there is no other way to convey. Skip notifications if there's a more natural way to convey something
 - For player onboarding use world-space objective arrows insetad of tutorial text. Reference the `world-space-ui` skill and use `Tutorial_Arrow.default_options()` + `Tutorial_Arrow.draw(player, target_position, options)`. Pay special attention to avoid pointing an arrow somewhere a player can't go (already mined resource, collider blocking, teleport actually required to get there)
 - Any games involving weapons MUST clone https://github.com/All-Out-Games/reusable-weapons-csl.git repo with curl and follow its README
 
 ### Text / copy
 - Don't use text in UI if a texture icon would suffice. Players won't spend time reading text
-- If you use text in UI make CERTAIN it fits within its container. UIK does not wrap automatically and you have a tendancy to overflow container bounds. Meticulously check that everything fits with screenshot tests. 
 - Don't explain the game with UI/text. Put effort into making the game clear via INTUITIVE GAMEPLAY
 
 ### Maps
