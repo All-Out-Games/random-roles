@@ -24,6 +24,7 @@ RP_BOOST_THRESHOLD_HIGH  :: 2;
 RP_BOOST_THRESHOLD_MID   :: 4;
 RP_BOOST_THRESHOLD_GONE  :: 6;
 RP_ROLE_TYPE_BOOST_CHANCE :: 0.60;
+RP_REWARDED_AD_LUCK_BONUS :: 0.20;
 
 // ── Per-player boost descriptor (transient, rebuilt each round) ─────
 Role_Boost_Info :: struct {
@@ -201,6 +202,12 @@ rp_collect_player_boost_candidates :: proc(player: Player, out: ref [..]Role_Boo
         }
     }
 
+    if player.round_start_ad_luck_pending && out.count > 0 {
+        for i: 0..out.count - 1 {
+            out[i].chance = min(1.0, out[i].chance + RP_REWARDED_AD_LUCK_BONUS);
+        }
+    }
+
     if out.count <= 1 return;
     for a: 0..out.count - 2 {
         best := a;
@@ -278,6 +285,10 @@ rp_get_player_boost :: proc(player: Player) -> Role_Boost_Info {
             info.role_type = Player_Type.CIVILIAN;
             info.chance    = chance;
         }
+    }
+
+    if info.has_boost && player.round_start_ad_luck_pending {
+        info.chance = min(1.0, info.chance + RP_REWARDED_AD_LUCK_BONUS);
     }
 
     return info;
@@ -408,15 +419,20 @@ rp_assign_player_types :: proc(
     for i: 0..count - 1 {
         if type_locked[i] continue;
 
+        type_boost_chance := RP_ROLE_TYPE_BOOST_CHANCE;
+        if unforced[i].round_start_ad_luck_pending {
+            type_boost_chance = min(1.0, type_boost_chance + RP_REWARDED_AD_LUCK_BONUS);
+        }
+
         candidates: [..]Role_Boost_Info;
         if loadout_role_boost_remaining(loadouts[i], Player_Type.TRAITOR) > 0 {
-            rp_set_type_boost_candidate(ref candidates, Player_Type.TRAITOR, RP_ROLE_TYPE_BOOST_CHANCE);
+            rp_set_type_boost_candidate(ref candidates, Player_Type.TRAITOR, type_boost_chance);
         }
         if loadout_role_boost_remaining(loadouts[i], Player_Type.ANARCHIST) > 0 {
-            rp_set_type_boost_candidate(ref candidates, Player_Type.ANARCHIST, RP_ROLE_TYPE_BOOST_CHANCE);
+            rp_set_type_boost_candidate(ref candidates, Player_Type.ANARCHIST, type_boost_chance);
         }
         if loadout_role_boost_remaining(loadouts[i], Player_Type.CIVILIAN) > 0 {
-            rp_set_type_boost_candidate(ref candidates, Player_Type.CIVILIAN, RP_ROLE_TYPE_BOOST_CHANCE);
+            rp_set_type_boost_candidate(ref candidates, Player_Type.CIVILIAN, type_boost_chance);
         }
         rp_sort_boost_candidates(ref candidates);
 

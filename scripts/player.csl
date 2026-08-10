@@ -43,12 +43,24 @@ PIRATE_DIRT_PILE_FALLBACK_TEXTURE_PATH :: "sprites/icons/pirate/dig_for_treasure
 RR_HUB_GAME_ID :: "692f424cd0b237adf50fdab0";
 RR_STAGING_GAME_ID :: "6995f6ba5278898412324a23";
 RR_STAGING_HUB_GAME_ID :: "69a5d8e2058efef5b1fe759f";
+RR_JOIN_REWARDED_AD_DELAY_FRAMES :: 64u64;
+RR_ROUND_START_REWARDED_AD_ID :: "round_start_ad";
 
 rr_get_hub_game_id :: proc() -> string {
 	if Game.get_game_id() == RR_STAGING_GAME_ID {
 		return RR_STAGING_HUB_GAME_ID;
 	}
 	return RR_HUB_GAME_ID;
+}
+
+ao_ads_reward_handler :: proc(player: Player, reward_id: string) -> bool {
+	if player == null return false;
+	if reward_id == RR_ROUND_START_REWARDED_AD_ID {
+		player.round_start_ad_luck_pending = true;
+		Notifier.notify(player, "20% role luck added for the next round!");
+		return true;
+	}
+	return false;
 }
 
 Player :: class : Player_Base {
@@ -74,6 +86,9 @@ Player :: class : Player_Base {
 	task_help_open: bool;
 	task_help_page: int;
 	lobby_waiting_since_time: float;
+	join_rewarded_ad_state: int; // 0 = unscheduled, 1 = scheduled, 2 = consumed
+	join_rewarded_ad_request_frame: u64;
+	round_start_ad_luck_pending: bool;
 
 	gun_skin_active: string;
 	gun_visible_until: float;
@@ -453,6 +468,28 @@ Player :: class : Player_Base {
     }
 
 	ao_update :: proc(using this: Player, delta_time: float) {
+		// Schedule through the shared predicted path. The delay lets the server's
+		// schedule reach the joining client before the one-shot update frame.
+		frame := get_frame_number();
+		if join_rewarded_ad_state == 0 {
+			join_rewarded_ad_state = 1;
+			join_rewarded_ad_request_frame = frame + RR_JOIN_REWARDED_AD_DELAY_FRAMES;
+		} else if join_rewarded_ad_state == 1 && join_rewarded_ad_request_frame != 0 && frame >= join_rewarded_ad_request_frame {
+			request_on_this_frame := frame == join_rewarded_ad_request_frame;
+			join_rewarded_ad_state = 2;
+			if request_on_this_frame && this.is_local() && game_state == Game_State.LOBBY && rr_lobby_seconds_until_round_start() > 10.0 && !Ads.is_ad_showing() {
+				log_warning("Prompting rewarded ad from the waiting lobby.");
+				icon := get_asset(Texture_Asset, "sprites/task_icon.png");
+				Ads.prompt_rewarded_ad(
+					this,
+					RR_ROUND_START_REWARDED_AD_ID,
+					"20% Role Luck",
+					"Watch a short ad for 20% more role luck next round.",
+					icon
+				);
+			}
+		}
+
 		now := get_time();
 		if this.lily_no_eyes_unlock_at > 0.0 && now >= this.lily_no_eyes_unlock_at {
 			rr_remove_freeze_reason_all(this, LILY_EYE_MACHINE_FREEZE_REASON);
