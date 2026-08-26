@@ -143,7 +143,9 @@ Global_Leaderboard :: class : Component {
                     entry_rect := content_cut.cut_top(h);
                     if i == 0 { entry_rect = entry_rect.grow(0, 0.075, 0, 0); }
 
-                    this.draw_entry(entry_rect, i);
+                    if entry_rect.overlaps(viewport_rect) {
+                        this.draw_entry(entry_rect, i);
+                    }
                     UI.expand_current_scroll_view(entry_rect);
                     content_cut.cut_top(0.05);
                 }
@@ -310,12 +312,10 @@ Global_Leaderboard :: class : Component {
         data.leaderboard_id = leaderboard_id;
         data.user_id = player.get_user_id();
         data.amount = amount;
-        #rootify_object(data);
         Save.ordered_get(leaderboard_id, data.user_id, 0.0, data, proc(entry: Ordered_Save_Entry, userdata: Object) {
             d := userdata.(Increment_Data);
             new_score := entry.value + d.amount;
             Save.ordered_set(d.leaderboard_id, d.user_id, new_score);
-            #free_root(d);
         });
     }
 

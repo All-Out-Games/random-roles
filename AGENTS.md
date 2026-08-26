@@ -97,6 +97,7 @@ Lifecycle methods
 ao_start
 ao_update
 ao_late_update
+ao_draw - cosmetic-only; skipped on resim. Interactive UI must use ao_update/ao_late_update.
 ao_end - when destroyed
 
 ```csl
@@ -264,7 +265,7 @@ Set `leaderboard_id` on the component, call `Global_Leaderboard.increment_score(
 - Don't explain the game with UI/text. Put effort into making the game clear via INTUITIVE GAMEPLAY
 
 ### Maps
-- Every map must be a large comprehensive game **world**, not a demo.
+- Every map must be cohesive, focused, and built to support gameplay with clear paths, uniform consistent plots if required, pixel perfect layouts, and no randomly scattered objects.
 - Layer 0 is best for most items like towers, world props, trees, since it naturally layers with the player. 
 
 After you make script changes run the All Out MCP compile tool.
