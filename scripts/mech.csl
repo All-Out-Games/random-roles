@@ -1620,12 +1620,16 @@ Mech_Carried_Status :: class : Component {
 	clear :: proc(using this: Mech_Carried_Status) {
 		if !active return;
 		active = false;
+		// ao_end runs while the entity is being torn down: sibling components (the
+		// Player, its Spine_Animator) may already be destroyed, and a dead handle
+		// still compares non-null but throws "Null reference exception" on access.
+		if !#alive(entity) return;
 		p := entity.get_component(Player);
-		if p == null return;
+		if !#alive(p) return;
 		p.remove_disable_movement_input_reason(MECH_CARRY_REASON);
 		// Hand prediction back to the (former) victim's own client — see rr_mech_update_carried.
 		p.player_for_prediction = null;
-		if p.animator != null && p.animator.state_machine != null {
+		if #alive(p.animator) && p.animator.state_machine != null {
 			p.animator.state_machine.set_bool("mech_magnetized", false);
 		}
 	}

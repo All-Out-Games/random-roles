@@ -2103,11 +2103,23 @@ Save :: struct {
         return try_get_json_raw(player, key, (&out_value).(*u8), T);
     }
 
-    set_game_string       :: proc(key: string, value: string)                                      #foreign "save_set_game_string";
+    // Compatibility bridge: old clients do not relocate the pending game-key deletion list.
+    // Game-string writes have no client-visible optimistic update; deletes can temporarily
+    // reconcile from server state. Keep both operations server-only until the next
+    // engine-memory-version boundary makes the native list safe for every client.
+    _set_game_string_native :: proc(key: string, value: string)                                    #foreign "save_set_game_string";
+    set_game_string       :: proc(key: string, value: string) {
+        if !Game.is_server() return;
+        _set_game_string_native(key, value);
+    }
     get_game_string       :: proc(key: string, default: string) -> string                          #foreign "save_get_game_string";
     increment_game_int    :: proc(key: string, amount: s64, optimistic_update: bool = true)        #foreign "save_increment_game_int";
     get_game_int          :: proc(key: string, default: s64) -> s64                                #foreign "save_get_game_int";
-    delete_game_key       :: proc(key: string)                                                     #foreign "save_delete_game_key";
+    _delete_game_key_native :: proc(key: string)                                                   #foreign "save_delete_game_key";
+    delete_game_key       :: proc(key: string) {
+        if !Game.is_server() return;
+        _delete_game_key_native(key);
+    }
     get_all_game_strings  :: proc() -> []Save_Game_String                                          #foreign "save_get_all_game_strings";
     get_all_game_ints     :: proc() -> []Save_Game_Int                                             #foreign "save_get_all_game_ints";
     get_all_game_keys     :: proc() -> []Save_Game_Key                                             #foreign "save_get_all_game_keys";
@@ -2501,6 +2513,9 @@ Player_Base :: class : AO_Player {
     add_name_offset_reason    :: method(reason: string, offset: float) #foreign "player_add_name_offset_reason";
     remove_name_offset_reason :: method(reason: string) #foreign "player_remove_name_offset_reason";
 
+    // Synchronized and restored for late joiners; do not reapply in ao_on_state_sync.
+    // Reasons are counted (each add needs one remove); removing an absent reason is a no-op.
+    // This changes built-in player presentation only, not collision or gameplay targeting.
     add_ghost_reason    :: method(reason: string) #foreign "player_add_ghost_reason";
     remove_ghost_reason :: method(reason: string) #foreign "player_remove_ghost_reason";
 
@@ -3406,7 +3421,7 @@ draw_ability_button :: proc(player: Player, $T: typeid, index: int) {
                 drag_start := ability_button_rect.center();
                 outward_direction := normalize(drag_start - UI.get_screen_rect().center());
                 drag_direction := -outward_direction;
-                hand_position := drag_start + drag_direction * ability_button_rect.width() * 0.9 * hint_drag_t;
+                hand_position := drag_start + drag_direction * ability_button_rect.width() * 0.9 * 2.2 * hint_drag_t;
                 hand_size := ability_button_rect.width();
                 hand_rect := Rect{hand_position, hand_position}.grow(0, hand_size * 0.5, hand_size, hand_size * 0.5).fit_aspect(core_globals.tutorial_hand.get_aspect()).offset(hand_size * 0.125, 0);
                 hand_rotation := to_degrees(atan2(outward_direction.y, outward_direction.x)) - 90;
@@ -3455,11 +3470,11 @@ draw_ability_button :: proc(player: Player, $T: typeid, index: int) {
     }
 
     if ability.is_aimed_ability && player.is_mobile() {
-        if ability.max_drag_offset_this_press > AIMED_ABILITY_DRAG_THRESHOLD {
+        if (params.active || params.released) && ability.max_drag_offset_this_press > AIMED_ABILITY_DRAG_THRESHOLD {
             player.failed_aimed_ability_tap_count = 0;
             player.aimed_ability_drag_hint = null;
         }
-        else if params.released && params.can_use {
+        else if params.released && params.can_use && player.aimed_ability_drag_hint == null {
             now := get_time();
             if player.failed_aimed_ability_tap_count > 0 && now - player.last_failed_aimed_ability_tap_time <= 5.0 {
                 player.failed_aimed_ability_tap_count = 0;

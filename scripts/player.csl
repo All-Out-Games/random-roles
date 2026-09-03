@@ -3636,15 +3636,21 @@ rr_player_clear_gun_state :: proc(player: Player) {
 }
 
 rr_drag_body_force_drop_for_player :: proc(player: Player) {
-	if player == null return;
+	// This also runs from ao_end while the player's entity is being torn down,
+	// so the entity and sibling components may already be dead: a dead handle
+	// compares non-null but throws "Null reference exception" on member access.
+	if !#alive(player) return;
 	if player.dragging_corpse_entity_id == 0 return;
+
+	player_entity_id: u64 = 0;
+	if #alive(player.entity) player_entity_id = player.entity.id;
 
 	// Clear corpse ownership if it still exists.
 	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
 		if corpse.entity.id != player.dragging_corpse_entity_id continue;
-		if corpse.dragged_by_player_entity_id == player.entity.id {
+		if player_entity_id != 0 && corpse.dragged_by_player_entity_id == player_entity_id {
 			corpse.dragged_by_player_entity_id = 0;
 		}
 		break;
@@ -3656,8 +3662,11 @@ rr_drag_body_force_drop_for_player :: proc(player: Player) {
 		SFX.stop(player.drag_body_sfx_id);
 		player.drag_body_sfx_id = 0;
 	}
-	// Ensure we snap back to base locomotion immediately.
-	player.set_trigger("RESET");
+	// Ensure we snap back to base locomotion immediately (skipped when the
+	// animator is already gone, e.g. during entity destruction).
+	if #alive(player.animator) {
+		player.set_trigger("RESET");
+	}
 }
 
 rr_drag_body_update_anim_state :: proc(player: Player, dt: float) {
