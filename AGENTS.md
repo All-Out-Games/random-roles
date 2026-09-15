@@ -6,7 +6,7 @@ You will be developing a multiplayer game in a custom scripting language (.csl)
 - All gameplay state is automatically synced. You do not need to write RPCs or manually replicate state.
 - The client runs the same gameplay code as the server. The server's authoritative result pushed to the client every 4 frames — you get correctness **and** responsiveness for free.
 - Do not forget that **multiple players will be connecting**. Avoid global state that will break with multiple players. Store these as fields on the player.
-- `ao_start()` is not replayed for late-joining clients (nor after a script hotload; declared field initializers are re-seeded, `ao_start`-derived values are not) — rebuild client-local presentation from synced state in `ao_on_state_sync()` (see the client-specific-state skill); spawn/destroy networked entities in the shared predicted path (never gated to server or local); and store cross-entity ownership as user-id strings (`player.get_user_id()`), never as synced Player/Entity references or entity-creation order.
+- `ao_start()` is not replayed for late-joining clients (nor after a script hotload: live instances keep their current values for every field that still exists with the same type, so only newly added or retyped fields pick up their declared initializer; a changed initializer on an existing field or an `ao_start`-derived value needs a game restart) — rebuild client-local presentation from synced state in `ao_on_state_sync()` (see the client-specific-state skill); spawn/destroy networked entities in the shared predicted path (never gated to server or local); and store cross-entity ownership as user-id strings (`player.get_user_id()`), never as synced Player/Entity references or entity-creation order.
 
 There are two player methods that control where code runs:
 ```csl
@@ -40,6 +40,8 @@ spine := get_asset(Spine_Asset, "anims/dog/dog.spine");
 ```
 
 ## Entities
+Players auto-flip X scale; child visuals should keep local X positive. Don't flip yourself.
+
 Runtime spawned entities:
 ```csl
 e := Scene.create_entity();

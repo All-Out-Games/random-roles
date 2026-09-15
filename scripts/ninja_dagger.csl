@@ -1,0 +1,182 @@
+// Nonlethal specialization of the reusable-weapons projectile/line-hit path.
+// An active effect owns the windup and flight, so interruption cancels the teleport.
+Ninja_Dagger_Throw :: class : Effect_Base {
+    destination: v2;
+    origin: v2;
+    flight_position: v2;
+    direction: v2;
+    dagger: Entity;
+    released: bool;
+    landed: bool;
+    release_visual_offset: v2;
+    flight_started: float;
+    throw_overrides: [..]u64;
+    effect_start :: method() {
+        player_specific.freeze_player = true;
+        set_duration(1.5);
+        origin = entity.world_position;
+        direction = normalize(destination - origin);
+        player.set_facing_right(direction.x >= 0);
+        throw_overrides = rr_ninja_start_throw(player);
+        dagger = rr_ninja_create_hand_prop(player, NINJA_DAGGER_TEXTURE, 0.65);
+    }
+    effect_update :: method(dt: float) {
+        if !rr_ninja_throw_can_continue(player) {
+            remove_effect(true);
+            return;
+        }
+        if get_elapsed_time() < 0.25 {
+            if #alive(dagger) dagger.set_local_position(player.animator.get_bone_local_position("Hand_R"));
+            return;
+        }
+        if !released {
+            released = true;
+            flight_position = origin;
+            dagger.set_parent(null, true);
+            release_visual_offset = dagger.world_position - origin;
+            flight_started = get_elapsed_time();
+            dagger.set_local_scale(v2.{abs(dagger.local_scale.x), abs(dagger.local_scale.y)});
+            dagger.set_local_rotation(to_degrees(atan2(direction.y, direction.x)));
+        }
+        next := flight_position + direction * min(18.0 * dt, length(destination - flight_position));
+        // Recheck moving doors during flight, using small steps rather than tunnelling.
+        for i: 1..8 {
+            sample := lerp(flight_position, next, i.(float) / 8.0);
+            if !rr_ninja_point_clear(sample) {
+                destination = rr_ninja_step_destination(origin, direction, length(sample - origin));
+                landed = true;
+                remove_effect(false);
+                return;
+            }
+            hit := reusable_ninja_dagger_hit(player.get_user_id(), lerp(flight_position, next, (i - 1).(float) / 8.0), sample, 0.42);
+            if #alive(hit) {
+                rr_ninja_stun_dagger_target(hit);
+                destination = rr_ninja_behind_target(hit, origin, direction);
+                landed = true;
+                remove_effect(false);
+                return;
+            }
+        }
+        flight_position = next;
+        visual_offset := lerp(release_visual_offset, v2.{0, 0.55}, clamp((get_elapsed_time() - flight_started) / 0.14, 0.0, 1.0));
+        if #alive(dagger) dagger.set_world_position(next + visual_offset);
+        if length_squared(destination - next) < 0.0025 {
+            // Moving obstacles may invalidate the original marker while the dagger flies.
+            destination = rr_ninja_step_destination(origin, direction, length(destination - origin));
+            landed = true;
+            remove_effect(false);
+            return;
+        }
+    }
+    effect_end :: method(interrupt: bool) {
+        if #alive(dagger) dagger.destroy();
+        rr_ninja_end_throw(player, throw_overrides);
+        if !interrupt && landed && rr_ninja_landing_clear(destination) {
+            teleport := new(Ninja_Shadow_Step_Effect);
+            teleport.destination = destination;
+            set_active_effect(entity, teleport);
+        }
+    }
+}
+
+rr_ninja_behind_target :: proc(target: Player, fallback: v2, incoming: v2) -> v2 {
+    // The game's characters face left/right. Prefer directly behind their back.
+    back := v2.{-1, 0};
+    if target.entity.world_scale.x < 0 back.x = 1;
+    center := target.entity.world_position;
+    for i: 0..<5 {
+        offset_y := 0.0;
+        if i == 1 offset_y = 0.4;
+        if i == 2 offset_y = -0.4;
+        if i == 3 offset_y = 0.75;
+        if i == 4 offset_y = -0.75;
+        spot := center + back * 0.85 + v2.{0, offset_y};
+        if rr_ninja_landing_clear(spot) && rr_ninja_landing_clear(lerp(center, spot, 0.5)) return spot;
+    }
+    // A wall directly behind the victim must never put the Ninja inside geometry.
+    return rr_ninja_step_destination(fallback, incoming, max(0.0, length(center - fallback) - 0.7));
+}
+
+rr_ninja_stun_dagger_target :: proc(target: Player) {
+    stun, found := get_effect(target.entity, Ninja_Dagger_Stun);
+    if found {
+        stun.set_duration(stun.get_elapsed_time() + 3.0);
+        return;
+    }
+    add_passive_effect(target.entity, new(Ninja_Dagger_Stun));
+}
+
+Ninja_Dagger_Stun :: class : Effect_Base {
+    stars: [3]Entity;
+    effect_start :: method() {
+        player_specific.freeze_player = true;
+        set_duration(3.0);
+        player.active_ability = null;
+        // Cancel a Ninja throw/step too; frozen actors cannot finish a queued teleport.
+        rr_ninja_cancel_throws(player);
+        player.agent.velocity = v2.{};
+        player.set_trigger("RESET");
+        rr_ninja_start_stun_pose(player);
+        for i: 0..<3 {
+            star := Scene.create_entity();
+            star.set_parent(entity, false);
+            star.set_local_position(v2.{0, 1.5});
+            star.set_local_scale(v2.{0.8, 0.8});
+            sprite := star.add_component(Sprite_Renderer);
+            sprite.set_texture(get_asset(Texture_Asset, "ui/star_gold 2.png"));
+            sprite.layer = 1;
+            stars[i] = star;
+        }
+        update_stars();
+    }
+    update_stars :: method() {
+        for i: 0..<3 {
+            if !#alive(stars[i]) continue;
+            angle := get_elapsed_time() * 5.0 + i.(float) * 2.0 * PI / 3.0;
+            stars[i].set_local_position(v2.{cos(angle) * 0.48, 1.5 + sin(angle) * 0.16});
+            stars[i].set_local_rotation(sin(angle) * 15.0);
+        }
+    }
+    effect_update :: method(dt: float) {
+        if game_state != .INGAME || player.player_state != .ALIVE {
+            remove_effect(true);
+            return;
+        }
+        player.active_ability = null;
+        rr_ninja_start_stun_pose(player);
+        update_stars();
+    }
+    effect_end :: method(interrupt: bool) {
+        rr_ninja_end_stun_pose(player);
+        for star: stars { if #alive(star) star.destroy(); }
+        if player.player_state == .ALIVE && Player.rr_get_stun_remaining(player) <= 0 player.set_trigger("RESET");
+    }
+}
+
+rr_ninja_cancel_throws :: proc(p: Player) {
+    remove_effect(p.entity, Ninja_Dagger_Throw, true);
+    remove_effect(p.entity, Ninja_Shadow_Step_Effect, true);
+    remove_effect(p.entity, Ninja_Smoke_Toss_Effect, true);
+    remove_effect(p.entity, Ninja_Clone_Cast_Effect, true);
+}
+
+rr_ninja_throw_can_continue :: proc(p: Player) -> bool {
+    return game_state == .INGAME && p.player_state == .ALIVE && rr_ninja_has_power(p) &&
+        !rr_mech_is_carried(p) && !p.bc_cocooned && Player.rr_get_stun_remaining(p) <= 0;
+}
+
+rr_ninja_spawn_step_fx :: proc(pos: v2) {
+    e := Scene.create_entity();
+    e.set_world_position(pos + v2.{0, 0.45});
+    e.set_local_scale(v2.{1.2, 1.2});
+    a := e.add_component(Spine_Animator);
+    a.set_skeleton(get_asset(Spine_Asset, NINJA_STEP_RIG));
+    a.enable_skin("default");
+    a.refresh_skins();
+    a.set_animation("shadow_step_effect", false, 0);
+    a.layer = 1;
+    life := new(Ninja_Visual_Lifetime);
+    life.seconds = 0.75;
+    life.tint = v4.{1, 1, 1, 1};
+    add_passive_effect(e, life);
+}

@@ -115,6 +115,7 @@ Kill_Ability :: class : Ability_Base {
             if target.player_state != Player_State.ALIVE {
                 continue;
             }
+			if rr_ninja_smoke_protects(target) continue;
 			if target.bc_cocooned {
 				continue;
 			}
@@ -145,7 +146,7 @@ Kill_Ability :: class : Ability_Base {
         if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
-        return get_closest_alive_player(this, player) != null;
+        return get_closest_alive_player(this, player) != null || rr_ninja_closest_decoy(player, player.entity.world_position, rr_ninja_base_kill_range(player)) != null;
     }
 
     on_update :: method(params: ref Ability_Update_Params) {
@@ -171,6 +172,11 @@ Kill_Ability :: class : Ability_Base {
 
         if params.clicked && params.can_use {
             closest_alive_player := get_closest_alive_player(this, player);
+            if rr_ninja_hit_decoy(player, player.entity.world_position, rr_ninja_base_kill_range(player), closest_alive_player) {
+                current_cooldown = rr_ninja_base_kill_cooldown(player);
+                player.set_trigger("traitor_kill");
+                return;
+            }
             if closest_alive_player != null {
 				// Face the victim and play the base kill animation on the player rig.
 				player.set_facing_right(closest_alive_player.entity.world_position.x > player.entity.world_position.x);
@@ -552,7 +558,7 @@ rr_werewolf_clear_infection :: proc(player: Player) {
 	player.Notify("The infection wore off!");
 }
 
-rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_werewolf: bool) -> Player {
+rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_werewolf: bool, lethal: bool = false) -> Player {
 	if attacker == null return null;
 	finder := make_finder(Player, attacker.entity.world_position, range);
 	for i: 0..players.elements.count-1 {
@@ -561,6 +567,7 @@ rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_we
 		if !#alive(target.entity) continue;
 		if target == attacker continue;
 		if target.player_state != Player_State.ALIVE continue;
+		if lethal && rr_ninja_smoke_protects(target) continue;
 
 		// Traitors shouldn't be able to melee-kill other traitors.
 		if attacker.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR {
@@ -601,6 +608,7 @@ rr_werewolf_find_claw_target :: proc(attacker: Player, direction: v2, range: flo
 		if !#alive(target.entity) continue;
 		if target == attacker continue;
 		if target.player_state != Player_State.ALIVE continue;
+		if rr_ninja_smoke_protects(target) continue;
 		// Traitors shouldn't be able to melee-kill other traitors.
 		if target.player_type == Player_Type.TRAITOR continue;
 		// A Guardian holding a victim is protected — can't be killed mid-grab.
@@ -823,7 +831,7 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 		wm := player.entity.get_component(Werewolf_Module);
 		if wm == null return false;
 		if !wm.is_wolf_form return false;
-		return rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true) != null;
+		return rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true, true) != null || rr_ninja_closest_decoy(player, player.entity.world_position, WEREWOLF_DEVOUR_RANGE) != null;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -833,7 +841,11 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 		current_cooldown = max(current_cooldown, lockout_remaining);
 
 		if params.clicked && params.can_use {
-			target := rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true);
+			target := rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true, true);
+            if rr_ninja_hit_decoy(player, player.entity.world_position, WEREWOLF_DEVOUR_RANGE, target) {
+                current_cooldown = WEREWOLF_DEVOUR_COOLDOWN_SECONDS;
+                return;
+            }
 			if target != null {
 				// Lock movement so the bite animation plays before control returns.
 				lock := player.entity.get_component(Werewolf_Devour_Lock);
@@ -975,6 +987,11 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 			range := rng_range_float(ref rng, WEREWOLF_CLAW_RANGE_MIN, WEREWOLF_CLAW_RANGE_MAX);
 
 			target := rr_werewolf_find_claw_target(player, activation.direction, range);
+            if rr_ninja_hit_decoy_ray(player, player.entity.world_position, activation.direction, range, 1.0, target) {
+                rr_werewolf_spawn_claw_slash_vfx(player, activation.direction);
+                current_cooldown = WEREWOLF_CLAW_COOLDOWN_SECONDS;
+                return;
+            }
 
 			// Face the swing direction and play the slash animation regardless of
 			// whether we connected — the wolf swings either way.
@@ -1329,6 +1346,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 			if !#alive(target.entity) continue;
 			if target == player continue;
 			if target.player_state != Player_State.ALIVE continue;
+			if rr_ninja_smoke_protects(target) continue;
 
 			// No friendly-fire on traitors.
 			if player.player_type == Player_Type.TRAITOR && target.player_type == Player_Type.TRAITOR {
@@ -1347,7 +1365,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
-		return get_closest_alive_target(this, player) != null;
+		return get_closest_alive_target(this, player) != null || rr_ninja_closest_decoy(player, player.entity.world_position, KILL_RANGE) != null;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -1365,6 +1383,10 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 
 		if params.clicked && params.can_use {
 			target := get_closest_alive_target(this, player);
+            if rr_ninja_hit_decoy(player, player.entity.world_position, KILL_RANGE, target) {
+                current_cooldown = HITMAN_NECK_SNAP_COOLDOWN_SECONDS;
+                return;
+            }
 			if target != null {
 				// Lock movement so the animation completes before control returns.
 				lock := player.entity.get_component(Hitman_Neck_Snap_Lock);
@@ -1564,6 +1586,7 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 			if !#alive(p.entity) continue;
 			if p == shooter continue;
 			if p.player_state != Player_State.ALIVE continue;
+			if rr_ninja_smoke_protects(p) continue;
 
 			// Prevent traitor friendly-fire (consistent with Kill/Neck Snap).
 			if shooter.player_type == Player_Type.TRAITOR && p.player_type == Player_Type.TRAITOR {
@@ -1634,6 +1657,12 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 			// Pick target under cursor/touch point (global snipe).
 			target_pos := get_mouse_world_position();
 			target := get_closest_alive_target_at_point(this, player, target_pos, HITMAN_SNIPER_TARGET_PICKUP_RADIUS);
+            if rr_ninja_hit_decoy(player, target_pos, HITMAN_SNIPER_TARGET_PICKUP_RADIUS, target) {
+                current_cooldown = HITMAN_SNIPER_COOLDOWN_SECONDS;
+                this.set_camera_zoom(false);
+                activated_this_session = false;
+                return;
+            }
 			if target == null {
 				// Missed - allow retrying.
 				activated_this_session = false;
@@ -2735,6 +2764,7 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 	// First pass: determine the nearest victim in the blast.
 	for p: component_iterator(Player) {
 		if p.player_state != Player_State.ALIVE continue;
+		if rr_ninja_smoke_protects(p) continue;
 		// Pirate cannot kill themselves with their own keg.
 		if owner_id != 0 && #alive(p.entity) && p.entity.id == owner_id continue;
 		// Match normal traitor projectile policy: Pirate explosives do not kill teammates.
@@ -2751,6 +2781,7 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 		}
 	}
 
+	if rr_ninja_hit_decoy(owner_player, position, POWDER_KEG_EXPLOSION_RADIUS, nearest) { nearest = null; }
 	// Kill the nearest victim.
 	if nearest != null {
 		killer_id: u64 = 0;

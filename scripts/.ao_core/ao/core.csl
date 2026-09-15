@@ -818,7 +818,7 @@ Game :: struct {
     #deprecate_soft "Use Game.get_local_player()"
     try_get_local_player :: proc() -> Player #foreign "try_get_local_player";
 
-    is_editor :: proc() -> bool #foreign "is_editor";
+    is_editor :: proc() -> bool #foreign "is_editor"; // NOT for use in games, editor scripting only
     is_launched_from_editor :: proc() -> bool #foreign "is_launched_from_editor";
     is_server :: proc() -> bool #foreign "game_is_server";
     is_predicted_frame :: proc() -> bool #foreign "game_is_predicted_frame";
@@ -3261,6 +3261,14 @@ draw_aiming_arrows_interpolated :: proc(rect: Rect, previous_rect: Rect, previou
     }
 }
 
+// Use an existing foreign API so newly published games still compile on older clients.
+observe_ability_button :: proc(player: Player, index: int, can_use: bool, aiming_blocked: bool, is_aimed: bool, cooldown: float) {
+    if Game.is_launched_from_editor() && player.is_local() {
+        log_debug("[automation ability] player=% slot=% can_use=% aiming_blocked=% is_aimed=% cooldown=%",
+            {player, index, can_use, aiming_blocked, is_aimed, cooldown});
+    }
+}
+
 draw_ability_button :: proc(player: Player, $T: typeid, index: int) {
     ability: Ability_Base;
     for i: 0..player.abilities.count-1 {
@@ -3341,6 +3349,10 @@ draw_ability_button :: proc(player: Player, $T: typeid, index: int) {
         defer UI.pop_id();
 
         was_aiming := player.was_aiming_ability_frame_number == get_frame_number() || player.was_aiming_ability_frame_number == get_frame_number() - 1;
+        observe_ability_button(player, index, can_use, was_aiming && index != player.was_aiming_ability_index, ability.is_aimed_ability, ability.current_cooldown);
+        if Game.is_launched_from_editor() && player.is_local() {
+            log_debug("[automation ability identity] player=% slot=% ability=%", {player, index, ability});
+        }
 
         disabled := false;
         switch {
@@ -5370,7 +5382,7 @@ Particle_System_Desc :: struct {
             return format_string("Continuous particle system rate must be greater than zero, got %", {emission.rate});
         }
         if prewarm && emission.kind != .CONTINUOUS {
-            return "Particle system prewarm is only valid for continuous emission";
+            return "Particle system prewarm is only valid for continuous emission; set prewarm = false when changing a preset to burst emission";
         }
         if lifetime.min <= 0 || lifetime.max < lifetime.min {
             return format_string("Particle system lifetime must be an ordered positive range, got % to %", {lifetime.min, lifetime.max});

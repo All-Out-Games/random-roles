@@ -417,6 +417,8 @@ Player_Role :: enum {
 	BIG_CHARLIE;
 	LILY_LOVEBRAIDS;
 	THE_MECH;
+	// Append to preserve existing numeric role IDs.
+	NINJA;
 }
 
 rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
@@ -428,6 +430,7 @@ rr_get_role_type :: proc(role: Player_Role) -> Player_Type {
 		case .CORONER:      return Player_Type.CIVILIAN;
 		case .PORTAL_MAKER: return Player_Type.CIVILIAN;
 		case .HUNTER:       return Player_Type.CIVILIAN;
+		case .NINJA:        return Player_Type.CIVILIAN;
 		case .GUARDIAN:     return Player_Type.CIVILIAN;
 		case .PRANKSTER:    return Player_Type.ANARCHIST;
 		case .PYROMANIAC:   return Player_Type.ANARCHIST;
@@ -454,6 +457,7 @@ rr_get_role_display_name :: proc(role: Player_Role) -> string {
 		case .CORONER:      return "coroner";
 		case .PORTAL_MAKER: return "portal_maker";
 		case .HUNTER:       return "hunter";
+		case .NINJA:        return "ninja";
 		case .GUARDIAN:     return "guardian";
 		case .PRANKSTER:    return "prankster";
 		case .PYROMANIAC:   return "pyromaniac";
@@ -485,6 +489,7 @@ rr_to_lower :: proc(s: string) -> string {
 
 rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
 	name := rr_to_lower(role_name);
+	if name == "ninja" return Player_Role.NINJA, true;
 	if name == "none"                                          return Player_Role.NONE, true;
 	if name == "sheriff"                                       return Player_Role.SHERIFF, true;
 	if name == "doctor"                                        return Player_Role.DOCTOR, true;
@@ -698,6 +703,7 @@ update_hitman_mines :: proc() {
 				if !#alive(p.entity) continue;
 				if p.player_state != Player_State.ALIVE continue;
 				if p.entity.id == m.owner_entity_id continue;
+				if rr_ninja_light_feet(p) continue;
 
 				if in_range(p.entity.world_position - m.pos, HITMAN_MINE_TRIGGER_RADIUS) {
 					m.is_triggered = true;
@@ -717,7 +723,7 @@ update_hitman_mines :: proc() {
 
 		if m.is_triggered && get_time() >= m.detonate_at {
 			target := get_player_by_entity_id(m.trigger_target_entity_id);
-			if target == null || !#alive(target.entity) || target.player_state != Player_State.ALIVE || target.entity.id == m.owner_entity_id {
+			if target == null || !#alive(target.entity) || target.player_state != Player_State.ALIVE || target.entity.id == m.owner_entity_id || rr_ninja_light_feet(target) {
 				target = null;
 				for p_i: 0..players.elements.count-1 {
 					p := players.elements[p_i];
@@ -725,6 +731,7 @@ update_hitman_mines :: proc() {
 					if !#alive(p.entity) continue;
 					if p.player_state != Player_State.ALIVE continue;
 					if p.entity.id == m.owner_entity_id continue;
+					if rr_ninja_light_feet(p) continue;
 					if !in_range(p.entity.world_position - m.pos, HITMAN_MINE_TRIGGER_RADIUS) continue;
 					target = p;
 					break;
@@ -835,6 +842,7 @@ update_autograph_traps :: proc() {
 			if !#alive(p.entity) continue;
 			if p.player_state != Player_State.ALIVE continue;
 			if p.entity.id == trap.owner_entity_id continue;
+			if rr_ninja_light_feet(p) continue;
 
 			if in_range(p.entity.world_position - trap.pos, MOVIE_STAR_AUTOGRAPH_TRIGGER_RADIUS) {
 				// Apply stun effect
@@ -2430,7 +2438,7 @@ start :: proc(player: Player) {
 r :: proc(player: Player, role_name: string) {
 	role, ok := rr_parse_role_name(role_name);
 	if !ok {
-		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, warper, prankster, pyromaniac, pirate, hitman, werewolf, googoo, charlie, lily, none.", player);
+		Chat.server_send_message("Unknown role. Try: sheriff, doctor, president, movie_star, coroner, warper, hunter, guardian, ninja, prankster, pyromaniac, hacker, pirate, hitman, werewolf, googoo, mimicer, charlie, lily, mech, none.", player);
 		return;
 	}
 
@@ -3621,6 +3629,7 @@ assign_players_to_types :: proc() {
 	append(ref civilian_roles_master, Player_Role.MOVIE_STAR);
 	append(ref civilian_roles_master, Player_Role.CORONER);
 	append(ref civilian_roles_master, Player_Role.PORTAL_MAKER);
+	append(ref civilian_roles_master, Player_Role.NINJA);
 	append(ref anarchist_roles_master, Player_Role.PRANKSTER);
 	append(ref anarchist_roles_master, Player_Role.PYROMANIAC);
 	append(ref anarchist_roles_master, Player_Role.HACKER);
@@ -3718,6 +3727,7 @@ assign_players_to_types :: proc() {
 	rr_hacker_round_global_cleanup();
 	rr_hunter_round_global_cleanup();
 	rr_mech_round_global_cleanup();
+	rr_ninja_round_global_cleanup();
 
 	// Assign role-specific tasks / objectives
 	for i: 0..players.elements.count-1 {
@@ -3725,6 +3735,7 @@ assign_players_to_types :: proc() {
 		if p == null continue;
 
 		// Per-round resets
+		rr_ninja_reset_for_round(p);
 		if p.player_role == Player_Role.DOCTOR {
 			dm := p.entity.get_component(Doctor_Module);
 			if dm == null {

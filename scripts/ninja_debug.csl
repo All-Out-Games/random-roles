@@ -1,0 +1,337 @@
+// Owner/editor diagnostics for role integration and live multiplayer tests.
+Ninja_Debug :: class : Component {
+    point_clear: bool;
+    landing_clear: bool;
+    destination: v2;
+    smoke_protected: bool;
+    blinded: bool;
+    blind_remaining: float;
+    light_feet: bool;
+    clone_count: int;
+    log_count: int;
+    victim_protected: bool;
+    owner_blinded: bool;
+    trap_test_started: float;
+    trap_test_pending: bool;
+    autograph_immune: bool;
+    mine_immune: bool;
+    chocolate_immune: bool;
+    string_immune: bool;
+    helmet_immune: bool;
+    step_blocked_by_wall: bool;
+    step_stops_before_second: bool;
+    step_blocked_landing: bool;
+    smoke_test_stage: int;
+    smoke_test_started: float;
+    protected_at_start: bool;
+    shot_blocked: bool;
+    smoke_owner_blinded: bool;
+    vision_returns_on_exit: bool;
+    vision_stays_clear: bool;
+    smoke_expired: bool;
+    toss_test_stage: int;
+    toss_test_started: float;
+    toss_right_release: v2;
+    toss_left_release: v2;
+    toss_interruption_clean: bool;
+    toss_right_deployed: bool;
+    toss_left_deployed: bool;
+    smoke_rod_attack_blocked: bool;
+    smoke_rod_preserved: bool;
+    smoke_rod_victim_alive: bool;
+    clone_cooldown: float;
+    clone_meeting_snapshot: float;
+    ao_update :: method(dt: float) {
+        if toss_test_stage > 0 update_toss_test();
+        if trap_test_pending && get_time() - trap_test_started >= 1.0 {
+            autograph_immune = autograph_traps.elements.count == 1;
+            mine_immune = hitman_mines.elements.count == 1 && !hitman_mines.elements[0].is_triggered;
+            chocolate_immune = ggg_traps.count == 1;
+            for trap: component_iterator(Lily_String_Trap) { string_immune = !trap.triggered; }
+            for trap: component_iterator(Mech_Helmet_Trap) { helmet_immune = trap.armed; }
+            trap_test_pending = false;
+        }
+        if smoke_test_stage == 0 return;
+        p := entity.get_component(Player);
+        peer: Player;
+        for other: component_iterator(Player) { if other != p { peer = other; break; } }
+        if !#alive(peer) return;
+        elapsed := get_time() - smoke_test_started;
+        if smoke_test_stage == 1 && elapsed >= 1.0 {
+            protected_at_start = rr_ninja_smoke_protects(peer) && rr_ninja_smoke_protects(p);
+            shot_blocked = p.player_state == Player_State.ALIVE && peer.player_state == Player_State.ALIVE;
+            smoke_owner_blinded = has_effect(peer.entity, Ninja_Blind_Effect);
+            p.entity.set_world_position(v2.{-28, 0});
+            p.entity.mark_teleported();
+            smoke_test_stage = 2;
+        }
+        if smoke_test_stage == 2 && elapsed >= 2.0 {
+            vision_returns_on_exit = !has_effect(p.entity, Ninja_Blind_Effect) && !rr_ninja_smoke_protects(p);
+            smoke_test_stage = 3;
+        }
+        if smoke_test_stage == 3 && elapsed >= 4.3 {
+            vision_stays_clear = !has_effect(p.entity, Ninja_Blind_Effect);
+            smoke_test_stage = 4;
+        }
+        if smoke_test_stage == 4 && elapsed >= 10.2 {
+            smoke_expired = !rr_ninja_smoke_protects(peer);
+            smoke_test_stage = 0;
+        }
+    }
+    update_toss_test :: method() {
+        p := entity.get_component(Player);
+        elapsed := get_time() - toss_test_started;
+        toss, found := get_effect(entity, Ninja_Smoke_Toss_Effect);
+        if toss_test_stage == 1 {
+            if found && toss.released toss_right_release = toss.release_position;
+            if elapsed < 1.0 return;
+            toss_right_deployed = rr_ninja_smoke_protects(p);
+            for cloud: component_iterator(Ninja_Smoke) { cloud.entity.destroy(); }
+            p.set_facing_right(false);
+            toss_test_stage = 2;
+            toss_test_started = get_time();
+            return;
+        }
+        if toss_test_stage == 2 && elapsed >= 0.2 {
+            set_active_effect(entity, new(Ninja_Smoke_Toss_Effect));
+            toss_test_stage = 3;
+            toss_test_started = get_time();
+            return;
+        }
+        if toss_test_stage == 3 {
+            if found && toss.released toss_left_release = toss.release_position;
+            if elapsed < 1.0 return;
+            toss_left_deployed = rr_ninja_smoke_protects(p);
+            for cloud: component_iterator(Ninja_Smoke) { cloud.entity.destroy(); }
+            set_active_effect(entity, new(Ninja_Smoke_Toss_Effect));
+            toss_test_stage = 4;
+            toss_test_started = get_time();
+            return;
+        }
+        if toss_test_stage == 4 && elapsed >= 0.12 {
+            remove_effect(entity, Ninja_Smoke_Toss_Effect, true);
+            toss_test_stage = 5;
+            return;
+        }
+        if toss_test_stage == 5 && elapsed >= 0.9 {
+            toss_interruption_clean = !rr_ninja_smoke_protects(p) && entity.get_active_effect() == null;
+            toss_test_stage = 0;
+        }
+    }
+}
+
+ninja_toss_test :: proc(player: Player) {
+    ninja_fixture(player, "ninja");
+    probe := player.entity.get_component(Ninja_Debug);
+    if probe == null probe = player.entity.add_component(Ninja_Debug);
+    player.set_facing_right(true);
+    probe.toss_test_stage = 1;
+    probe.toss_test_started = get_time();
+    probe.toss_right_deployed = false;
+    probe.toss_left_deployed = false;
+    probe.toss_interruption_clean = false;
+    set_active_effect(player.entity, new(Ninja_Smoke_Toss_Effect));
+} @chat_command @owner_or_editor
+
+// Call the actual Mech combo path with a landed rod under a protected victim.
+ninja_mech_smoke_test :: proc(player: Player) {
+    ninja_fixture(player, "smoke");
+    if !rr_ninja_smoke_protects(player) return;
+    driver: Player;
+    for other: component_iterator(Player) { if other != player { driver = other; break; } }
+    if !#alive(driver) return;
+    probe := player.entity.get_component(Ninja_Debug);
+    if probe == null probe = player.entity.add_component(Ninja_Debug);
+    e := Scene.create_entity();
+    e.set_world_position(player.entity.world_position);
+    node := e.add_component(Mech_Magnet_Node);
+    node.owner_id = driver.entity.id;
+    node.landed = true;
+    node.ends_at = get_time() + 10.0;
+    node.set_enabled(false);
+    probe.smoke_rod_attack_blocked = !rr_mech_car_try_rod_kill(driver, player);
+    probe.smoke_rod_preserved = #alive(e);
+    probe.smoke_rod_victim_alive = player.player_state == Player_State.ALIVE;
+    if #alive(e) e.destroy();
+} @chat_command @owner_or_editor
+
+ninja_probe :: proc(player: Player, dx: float = 1.0, dy: float = 0.0) {
+    probe := player.entity.get_component(Ninja_Debug);
+    if probe == null probe = player.entity.add_component(Ninja_Debug);
+    probe.clone_meeting_snapshot = -1;
+    for i: 0..<player.abilities.count {
+        ability := player.abilities[i];
+        if ability.type == Ninja_Clone_Jutsu_Ability {
+            probe.clone_cooldown = ability.current_cooldown;
+            if i < player.meeting_saved_cooldowns.count probe.clone_meeting_snapshot = player.meeting_saved_cooldowns[i];
+        }
+    }
+    probe.point_clear = rr_ninja_point_clear(player.entity.world_position);
+    probe.landing_clear = rr_ninja_landing_clear(player.entity.world_position);
+    direction := v2.{dx, dy};
+    if length_squared(direction) < 0.001 direction = v2.{1, 0};
+    probe.destination = rr_ninja_step_destination(player.entity.world_position, normalize(direction));
+    if player.active_ability != null && player.active_ability.type == Ninja_Shadow_Step_Ability {
+        probe.destination = player.active_ability.(Ninja_Shadow_Step_Ability).preview_destination;
+    }
+    probe.smoke_protected = rr_ninja_smoke_protects(player);
+    probe.blinded = has_effect(player.entity, Ninja_Blind_Effect);
+    probe.blind_remaining = 0.0;
+    if blind, found := get_effect(player.entity, Ninja_Blind_Effect); found { probe.blind_remaining = blind.get_duration_remaining(); }
+    probe.light_feet = rr_ninja_light_feet(player);
+    for peer: component_iterator(Player) {
+        if peer == player continue;
+        probe.victim_protected = rr_ninja_smoke_protects(peer);
+        probe.owner_blinded = has_effect(peer.entity, Ninja_Blind_Effect);
+    }
+    probe.clone_count = 0;
+    probe.log_count = 0;
+    for d: component_iterator(Ninja_Decoy) {
+        if d.afterimage continue;
+        if d.spent { probe.log_count += 1; } else { probe.clone_count += 1; }
+    }
+} @chat_command @owner_or_editor
+
+// Add temporary blockers on the known straight Teleporter-to-Maintenance path.
+// Inspect the real landing solver, then remove the blockers immediately.
+ninja_walls :: proc(player: Player) {
+    ninja_probe(player);
+    probe := player.entity.get_component(Ninja_Debug);
+    origin := v2.{-43.8, 0};
+    wall := Scene.create_entity();
+    wall.set_world_position(origin + v2.{3, 0});
+    collider := wall.add_component(Box_Collider);
+    collider.size = v2.{0.6, 4};
+    one := rr_ninja_step_destination(origin, v2.{1, 0});
+    // A dagger stops at the first solid obstacle. A second blocker cannot extend it.
+    // Each result must still leave room for the player body at the landing.
+    probe.step_blocked_by_wall = one.x < origin.x + 2.7 && rr_ninja_landing_clear(one);
+    wall2 := Scene.create_entity();
+    wall2.set_world_position(origin + v2.{6, 0});
+    collider2 := wall2.add_component(Box_Collider);
+    collider2.size = v2.{0.6, 4};
+    two := rr_ninja_step_destination(origin, v2.{1, 0});
+    probe.step_stops_before_second = two.x < origin.x + 2.7 && rr_ninja_landing_clear(two);
+    wall2.set_local_enabled(false);
+    wall.set_world_position(origin + v2.{4, 0});
+    blocked := rr_ninja_step_destination(origin, v2.{1, 0});
+    probe.step_blocked_landing = rr_ninja_landing_clear(blocked) && blocked.x < origin.x + 3.7;
+    wall.destroy();
+    wall2.destroy();
+} @chat_command @owner_or_editor
+
+ninja_meeting :: proc(player: Player) {
+    meeting_cooldown_ends_at = 0;
+    start_meeting(false, player);
+} @chat_command @owner_or_editor
+
+ninja_smoke_shot :: proc(player: Player) {
+    peer_found := false;
+    for peer: component_iterator(Player) { if peer != player peer_found = true; }
+    if !peer_found { Notifier.notify(player, "Connect a second player first."); return; }
+    ninja_fixture(player, "sheriff_smoke");
+    ninja_probe(player);
+    shoot_projectile(player.entity.world_position, v2.{-10, 0}, 1, 0.75, player.entity);
+    probe := player.entity.get_component(Ninja_Debug);
+    probe.protected_at_start = false;
+    probe.shot_blocked = false;
+    probe.smoke_owner_blinded = false;
+    probe.vision_returns_on_exit = false;
+    probe.vision_stays_clear = false;
+    probe.smoke_expired = false;
+    probe.smoke_test_stage = 1;
+    probe.smoke_test_started = get_time();
+} @chat_command @owner_or_editor
+
+// Exercise real trap update paths, with all five traps under the Ninja's feet.
+ninja_traps :: proc(player: Player) {
+    ninja_fixture(player, "ninja");
+    peer: Player;
+    for p: component_iterator(Player) { if p != player { peer = p; break; } }
+    if !#alive(peer) return;
+    peer.entity.set_world_position(v2.{-48, -3});
+    peer.entity.mark_teleported();
+    rr_autograph_clear_traps();
+    rr_hitman_clear_mines();
+    rr_ggg_clear_traps();
+    for trap: component_iterator(Lily_String_Trap) { trap.entity.destroy(); }
+    for trap: component_iterator(Mech_Helmet_Trap) { trap.entity.destroy(); }
+    peer.player_role = Player_Role.HITMAN;
+    rr_hitman_place_mine(peer, player.entity.world_position);
+    rr_add_autograph_trap(peer, player.entity.world_position);
+    rr_ggg_place_trap(peer, player.entity.world_position);
+    strings := Scene.create_entity();
+    strings.set_world_position(player.entity.world_position);
+    strings.add_component(Lily_String_Trap).lily_entity_id = peer.entity.id;
+    helmet := Scene.create_entity();
+    helmet.set_world_position(player.entity.world_position);
+    helmet.add_component(Mech_Helmet_Trap).owner_id = peer.entity.id;
+    ninja_probe(player);
+    probe := player.entity.get_component(Ninja_Debug);
+    probe.autograph_immune = false;
+    probe.mine_immune = false;
+    probe.chocolate_immune = false;
+    probe.string_immune = false;
+    probe.helmet_immune = false;
+    probe.trap_test_pending = true;
+    probe.trap_test_started = get_time();
+} @chat_command @owner_or_editor
+
+// Deterministic live-test setup. Uses a real connected peer as the clone owner.
+ninja_fixture :: proc(player: Player, mode: string) {
+    peer: Player;
+    for p: component_iterator(Player) { if p != player { peer = p; break; } }
+    if !#alive(peer) { Notifier.notify(player, "Connect a second player first."); return; }
+    rr_disable_auto_victory = true;
+    game_state = Game_State.INGAME;
+    remove_all_effects(player.entity);
+    remove_all_effects(peer.entity);
+    on_player_go_alive(player);
+    on_player_go_alive(peer);
+    rr_unstuck_player(player);
+    rr_unstuck_player(peer);
+    cd(player);
+    peer.player_role = Player_Role.NINJA;
+    peer.player_type = Player_Type.CIVILIAN;
+    peer.entity.set_world_position(v2.{-45, 0});
+    peer.entity.mark_teleported();
+    player.entity.set_world_position(v2.{-43.8, 0});
+    player.entity.mark_teleported();
+    for d: component_iterator(Ninja_Decoy) { d.entity.destroy(); }
+    for cloud: component_iterator(Ninja_Smoke) { cloud.entity.destroy(); }
+    if mode == "clone" || mode == "sheriff_clone" {
+        rr_ninja_spawn_decoy(peer, false);
+        peer.entity.set_world_position(v2.{-48, -3});
+        peer.entity.mark_teleported();
+        player.player_role = Player_Role.PIRATE;
+        player.player_type = Player_Type.TRAITOR;
+        if mode == "sheriff_clone" {
+            player.player_role = Player_Role.SHERIFF;
+            player.player_type = Player_Type.CIVILIAN;
+            m := player.entity.get_component(Sheriff_Module);
+            if m == null m = player.entity.add_component(Sheriff_Module);
+            m.gun_ammo = 1;
+        }
+    } else if mode == "smoke" || mode == "sheriff_smoke" {
+        player.player_role = Player_Role.PIRATE;
+        player.player_type = Player_Type.TRAITOR;
+        if mode == "sheriff_smoke" {
+            player.player_role = Player_Role.SHERIFF;
+            player.player_type = Player_Type.CIVILIAN;
+            m := player.entity.get_component(Sheriff_Module);
+            if m == null m = player.entity.add_component(Sheriff_Module);
+            m.gun_ammo = 1;
+        }
+        e := Scene.create_entity();
+        e.set_world_position(peer.entity.world_position);
+        e.add_component(Ninja_Smoke, userdata=peer, on_before_start=proc(c: Component, data: Object) {
+            c.(Ninja_Smoke).owner_user_id = data.(Player).get_user_id();
+        });
+    } else if mode == "ninja" {
+        player.player_role = Player_Role.NINJA;
+        player.player_type = Player_Type.CIVILIAN;
+        peer.player_role = Player_Role.PIRATE;
+        peer.player_type = Player_Type.TRAITOR;
+    }
+} @chat_command @owner_or_editor
+

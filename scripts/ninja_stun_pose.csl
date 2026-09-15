@@ -1,0 +1,29 @@
+// Native, prop-free dizzy body loop from the Mech Guardian rig already merged
+// into every player. Track 5 overrides a cast pose without replacing locomotion
+// or the engine's attack, invisibility, and cosmetic layers.
+rr_ninja_start_stun_pose :: proc(p: Player) {
+    if !#alive(p) || !#alive(p.animator) || p.animator.instance == null return;
+    sm := p.animator.state_machine;
+    if sm == null return;
+    if sm.try_get_layer("ninja_dagger_stun") == null {
+        layer := sm.create_layer("ninja_dagger_stun", 5);
+        empty := layer.create_state("__CLEAR_TRACK__", true);
+        layer.set_initial_state(empty);
+        dizzy := layer.create_state("Mech/stunned", true);
+        active := sm.create_variable("ninja_dagger_stunned", .BOOL);
+        layer.create_global_transition(dizzy, false).create_bool_condition(active, true);
+        layer.create_transition(dizzy, empty, false).create_bool_condition(active, false);
+    }
+    // Reasserting this bool is safe during a refreshed stun and lets an effect
+    // rebuild its presentation after a player state-machine reconstruction.
+    sm.set_bool("ninja_dagger_stunned", true);
+}
+
+rr_ninja_end_stun_pose :: proc(p: Player) {
+    if !#alive(p) || !#alive(p.animator) || p.animator.instance == null return;
+    sm := p.animator.state_machine;
+    if sm == null || sm.try_get_layer("ninja_dagger_stun") == null return;
+    // Always clear on expiry, death, meeting, or interruption. The underlying
+    // role animation resumes naturally; this layer never sends a global RESET.
+    sm.set_bool("ninja_dagger_stunned", false);
+}

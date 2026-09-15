@@ -1,0 +1,67 @@
+// The native Summoning Jutsu starts with hand signs and a ground strike.
+// Its fish attachment first keys at 2.4 seconds; stop safely before that beat.
+NINJA_CLONE_CAST_SECONDS :: 2.3125;
+
+Ninja_Clone_Cast_Effect :: class : Effect_Base {
+    fish_override: u64;
+    fish_override_active: bool;
+
+    effect_start :: method() {
+        player_specific.freeze_player = true;
+        set_duration(NINJA_CLONE_CAST_SECONDS);
+        player.active_ability = null;
+        player.agent.velocity = v2.{};
+
+        sm := player.animator.state_machine;
+        layer := sm.try_get_layer("ninja_clone_cast");
+        if layer == null {
+            layer = sm.create_layer("ninja_clone_cast", 4);
+            empty := layer.create_state("__CLEAR_TRACK__", true);
+            layer.set_initial_state(empty);
+            cast_state := layer.create_state("Emote/Summoning_Jutsu", false, NINJA_CLONE_CAST_SECONDS);
+            casting := sm.create_variable("ninja_clone_cast_active", .BOOL);
+            layer.create_transition(empty, cast_state, false).create_bool_condition(casting, true);
+            layer.create_transition(cast_state, empty, false).create_bool_condition(casting, false);
+            layer.create_transition(cast_state, empty, true);
+        }
+        // Suppress the authored fish as well as trimming the clip. This prevents
+        // a one-frame fish flash if animation/event ordering changes in the rig.
+        fish_override = player.animator.instance.override_attachment_sprite("EMOTE_VFX/fish", get_asset(Texture_Asset, "sprites/ninja/transparent.png"));
+        fish_override_active = true;
+        sm.set_bool("ninja_clone_cast_active", true);
+        rr_ninja_play_sound(player, "ninja_despawn_473cf4.wav");
+    }
+
+    effect_update :: method(dt: float) {
+        if !rr_ninja_throw_can_continue(player) || player.werewolf_infected {
+            remove_effect(true);
+            return;
+        }
+    }
+
+    effect_end :: method(interrupt: bool) {
+        if !#alive(player) || !#alive(player.animator) return;
+        sm := player.animator.state_machine;
+        sm.set_bool("ninja_clone_cast_active", false);
+        layer := sm.try_get_layer("ninja_clone_cast");
+        if layer != null layer.reset_to_initial_state();
+        if fish_override_active {
+            player.animator.instance.clear_attachment_sprite_override(fish_override);
+            fish_override_active = false;
+        }
+        player.agent.velocity = v2.{};
+        if interrupt || !rr_ninja_throw_can_continue(player) || player.werewolf_infected return;
+
+        // Retain the previous decoy if interrupted. A successful cast replaces
+        // only this owner's active clone, leaving afterimages and spent logs.
+        for clone: component_iterator(Ninja_Decoy) {
+            if clone.owner_user_id == player.get_user_id() && !clone.spent && !clone.afterimage {
+                clone.spent = true;
+                clone.entity.destroy();
+            }
+        }
+        rr_ninja_spawn_decoy(player, false);
+        rr_ninja_spawn_puff(player.entity.world_position);
+        rr_ninja_play_sound(player, "ninja_spawn_29dab2.wav");
+    }
+}

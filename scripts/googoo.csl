@@ -329,7 +329,7 @@ rr_ggg_check_nest_consumption :: proc(player: Player) {
 	// Check if dragging a live trapped player
 	if gm.dragging_live_player_id != 0 {
 		victim := get_player_by_entity_id(gm.dragging_live_player_id);
-		if victim != null && #alive(victim.entity) && victim.player_state == Player_State.ALIVE {
+		if victim != null && #alive(victim.entity) && victim.player_state == Player_State.ALIVE && !rr_ninja_smoke_protects(victim) {
 			victim_role := victim.player_role;
 			// Release every legacy duplicate before killing. Live-drag is edge-triggered now,
 			// but draining here also heals victims grabbed before this fix hot-reloaded.
@@ -1319,6 +1319,7 @@ update_ggg_traps :: proc() {
 			if p.player_state != Player_State.ALIVE continue;
 			if p.player_type == Player_Type.TRAITOR continue;
 
+			if rr_ninja_light_feet(p) continue;
 			dist := length(p.entity.world_position - t.pos);
 			if dist < GGG_TRAP_TRIGGER_RADIUS {
 				// Get the GGG owner to check consumed_doctor
@@ -1565,7 +1566,7 @@ rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) 
 		target_pos := target.entity.world_position;
 		nest_dist := length(target_pos - gm.nest_world_pos);
 		root := target.entity.get_component(GGG_Trap_Root_Effect);
-		if nest_dist <= GGG_NEST_CONSUME_RANGE && root != null && root.active {
+		if nest_dist <= GGG_NEST_CONSUME_RANGE && root != null && root.active && !rr_ninja_smoke_protects(target) {
 			// Release whip pull
 			target.remove_disable_movement_input_reason(GGG_FOIL_WHIP_PULL_REASON);
 			rr_ggg_whip_release_target(target);

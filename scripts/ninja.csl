@@ -1,0 +1,350 @@
+// Ninja is a non-lethal civilian. All distances are world units, all times seconds.
+NINJA_STEP_DISTANCE :: 5.0;
+NINJA_STEP_COOLDOWN :: 20.0;
+NINJA_STEP_SECONDS :: 0.22;
+NINJA_SMOKE_RADIUS :: 6.0;
+NINJA_SMOKE_SECONDS :: 10.0;
+NINJA_SMOKE_COOLDOWN :: 45.0;
+NINJA_BLIND_LINGER :: 0.1;
+NINJA_CLONE_COOLDOWN :: 60.0;
+NINJA_SMOKE_RIG :: "anims/vfx/Dark Smoke Effect/Dark Smoke Effect.spine";
+NINJA_BLACK_FOG_RIG :: "anims/BlackFog/RAND004_blackfog.spine";
+NINJA_STEP_RIG :: "anims/ninja_shadow_step/BAT003_shadow_step.spine";
+NINJA_DAGGER_TEXTURE :: "sprites/ninja/shinobi_dagger.png";
+NINJA_BOMB_TEXTURE :: "sprites/ninja/smoke_bomb.png";
+
+rr_ninja_base_kill_range :: proc(p: Player) -> float {
+    m := p.entity.get_component(GGG_Module);
+    if p.player_role == Player_Role.GOO_GOO_GAGA && m != null && m.is_creature_form return GGG_CREATURE_KILL_RANGE;
+    return KILL_RANGE;
+}
+rr_ninja_base_kill_cooldown :: proc(p: Player) -> float {
+    if p.player_role == Player_Role.THE_MECH return MECH_KILL_COOLDOWN_SECONDS;
+    if p.player_role == Player_Role.GOO_GOO_GAGA return GGG_KILL_COOLDOWN_SECONDS;
+    return KILL_COOLDOWN_SECONDS;
+}
+rr_ninja_mimicer_kill_range :: proc(p: Player) -> float {
+    m := p.entity.get_component(Mimicer_Module);
+    if m != null && m.is_monster_form return MIMICER_KILL_RANGE_MONSTER;
+    return MIMICER_KILL_RANGE_SCHLEEM;
+}
+rr_ninja_lily_kill_range :: proc(p: Player) -> float {
+    m := p.entity.get_component(Lily_Module);
+    if m != null && m.is_lily_form return LILY_KILL_RANGE_LILY;
+    return LILY_KILL_RANGE_SCHLEEM;
+}
+rr_ninja_lily_kill_origin :: proc(p: Player) -> v2 {
+    m := p.entity.get_component(Lily_Module);
+    if m != null && m.mind_control_active {
+        puppet := get_player_by_entity_id(m.mind_control_target_id);
+        if #alive(puppet) return puppet.entity.world_position;
+    }
+    return p.entity.world_position;
+}
+rr_ninja_lily_cd_multiplier :: proc(p: Player) -> float {
+    m := p.entity.get_component(Lily_Module);
+    if m != null return m.tree_cd_multiplier;
+    return 1.0;
+}
+
+rr_ninja_has_power :: proc(p: Player) -> bool {
+    return #alive(p) && rr_player_has_civilian_power(p, Player_Role.NINJA);
+}
+
+rr_ninja_round_global_cleanup :: proc() {
+    for cloud: component_iterator(Ninja_Smoke) { cloud.entity.destroy(); }
+    for decoy: component_iterator(Ninja_Decoy) { decoy.entity.destroy(); }
+}
+
+rr_ninja_reset_for_round :: proc(p: Player) {
+    remove_effect(p.entity, Ninja_Shadow_Step_Effect, true);
+    remove_effect(p.entity, Ninja_Dagger_Throw, true);
+    remove_effect(p.entity, Ninja_Smoke_Toss_Effect, true);
+    remove_effect(p.entity, Ninja_Clone_Cast_Effect, true);
+    remove_effect(p.entity, Ninja_Blind_Effect, true);
+    remove_effect(p.entity, Ninja_Dagger_Stun, true);
+    if p.active_ability != null && p.active_ability.type == Ninja_Shadow_Step_Ability p.active_ability = null;
+    // All players own these instances, including future stolen/Minion kits.
+    for ability: p.abilities {
+        if ability == null continue;
+        if ability.type == Ninja_Shadow_Step_Ability {
+            ability.current_cooldown = 0;
+            ability.(Ninja_Shadow_Step_Ability).preview_ready = false;
+            ability.(Ninja_Shadow_Step_Ability).preview_distance = 0;
+        } else if ability.type == Ninja_Smoke_Bomb_Ability || ability.type == Ninja_Clone_Jutsu_Ability {
+            ability.current_cooldown = 0;
+        }
+    }
+}
+
+rr_ninja_light_feet :: proc(p: Player) -> bool {
+    return rr_ninja_has_power(p) && p.player_state == Player_State.ALIVE;
+}
+
+rr_ninja_owner :: proc(user_id: string) -> Player {
+    for p: component_iterator(Player) {
+        if p.get_user_id() == user_id return p;
+    }
+    return null;
+}
+
+rr_ninja_smoke_at :: proc(pos: v2) -> bool {
+    if game_state != Game_State.INGAME return false;
+    for cloud: component_iterator(Ninja_Smoke) {
+        if get_time() >= cloud.expires_at continue;
+        if length_squared(pos - cloud.entity.world_position) <= NINJA_SMOKE_RADIUS * NINJA_SMOKE_RADIUS return true;
+    }
+    return false;
+}
+
+rr_ninja_smoke_protects :: proc(p: Player) -> bool {
+    return #alive(p) && p.player_state == Player_State.ALIVE && rr_ninja_smoke_at(p.entity.world_position);
+}
+
+rr_ninja_can_act :: proc(p: Player) -> bool {
+    return rr_ninja_has_power(p) && game_state == Game_State.INGAME &&
+        p.player_state == Player_State.ALIVE && !p.has_task_in_progress() &&
+        p.entity.get_active_effect() == null && !p.werewolf_infected;
+}
+
+rr_ninja_play_sound :: proc(p: Player, path: string) {
+    desc := SFX.default_sfx_desc();
+    desc.entity_to_follow = p.entity.id;
+    desc.volume = 0.28;
+    desc.speed_perturb = 0.05;
+    rr_play_sfx(path, desc);
+}
+
+// Check both the walkable mesh and live colliders (including sabotage doors).
+rr_ninja_point_clear :: proc(pos: v2) -> bool {
+    closest: v2;
+    hint: s64;
+    if !try_find_closest_point_on_navmesh(pos, ref closest, ref hint) return false;
+    if length_squared(closest - pos) > 0.0025 return false;
+    for c: component_iterator(Collider) {
+        if !c.get_enabled() || !c.entity.get_world_enabled() || c.is_trigger continue;
+        if c.entity.get_component(Player) != null continue;
+        if c.overlaps_point(pos) return false;
+    }
+    return true;
+}
+
+rr_ninja_landing_clear :: proc(pos: v2) -> bool {
+    if !rr_ninja_point_clear(pos) return false;
+    // Keep the player's body clear of a wall at either end of the step.
+    for i: 0..<8 {
+        a := i.(float) * PI * 0.25;
+        if !rr_ninja_point_clear(pos + v2.{cos(a), sin(a)} * 0.28) return false;
+    }
+    return true;
+}
+
+rr_ninja_step_destination :: proc(origin: v2, direction: v2, distance: float = NINJA_STEP_DISTANCE) -> v2 {
+    result := origin;
+    distance = clamp(distance, 0.0, NINJA_STEP_DISTANCE);
+    last_clear_sample := 0;
+    for i: 1..100 {
+        pos := origin + direction * (distance * i.(float) / 100.0);
+        blocked := !rr_ninja_point_clear(pos);
+        if blocked break;
+        if !blocked last_clear_sample = i;
+    }
+    // Body clearance only needs checking at the landing end of the ray.
+    while last_clear_sample > 0 {
+        pos := origin + direction * (distance * last_clear_sample.(float) / 100.0);
+        if rr_ninja_landing_clear(pos) return pos;
+        last_clear_sample -= 1;
+    }
+    return result;
+}
+
+Ninja_Shadow_Step_Effect :: class : Effect_Base {
+    destination: v2;
+    effect_start :: method() {
+        player_specific.freeze_player = true;
+        set_duration(NINJA_STEP_SECONDS);
+        rr_drag_body_force_drop_for_player(player);
+        rr_ninja_spawn_decoy(player, true);
+        rr_ninja_spawn_step_fx(entity.world_position);
+        player.add_invisibility_reason("ninja_step");
+        player.add_name_invisibility_reason("ninja_step");
+        entity.set_world_position(destination);
+        entity.mark_teleported();
+        player.agent.velocity = v2.{};
+        rr_ninja_play_sound(player, "ninja_despawn_473cf4.wav");
+    }
+    effect_update :: method(dt: float) {
+        if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE || !rr_ninja_has_power(player) {
+            remove_effect(true);
+            return;
+        }
+    }
+    effect_end :: method(interrupt: bool) {
+        player.remove_invisibility_reason("ninja_step");
+        player.remove_name_invisibility_reason("ninja_step");
+        player.agent.velocity = v2.{};
+        if !interrupt {
+            rr_ninja_spawn_step_fx(entity.world_position);
+            rr_ninja_spawn_arrival(entity.world_position);
+            rr_ninja_play_sound(player, "ninja_spawn_29dab2.wav");
+        }
+    }
+}
+
+// Legacy diagnostic/state compatibility only. Clouds no longer apply this
+// effect, and player vision no longer consumes it.
+Ninja_Blind_Effect :: class : Effect_Base {
+    effect_start :: method() { set_duration(NINJA_BLIND_LINGER); }
+    effect_update :: method(dt: float) {
+        if game_state != Game_State.INGAME || player.player_state != Player_State.ALIVE || rr_ninja_has_power(player) {
+            remove_effect(true);
+            return;
+        }
+    }
+}
+
+Ninja_Visual_Lifetime :: class : Effect_Base {
+    seconds: float;
+    tint: v4 = {0.7, 0.75, 0.9, 0.4};
+    effect_start :: method() { set_duration(seconds); }
+    effect_update :: method(dt: float) {
+        if game_state != Game_State.INGAME {
+            entity.destroy();
+            return;
+        }
+        spine := entity.get_component(Spine_Animator);
+        if spine != null {
+            alpha := clamp(get_duration_remaining() / min(seconds, 0.7), 0.0, 1.0);
+            spine.color_multiplier = v4.{tint.x, tint.y, tint.z, alpha * tint.w};
+        }
+    }
+    effect_end :: method(interrupt: bool) {
+        if !interrupt entity.destroy();
+    }
+}
+
+rr_ninja_spawn_puff :: proc(pos: v2) {
+    e := Scene.create_entity();
+    e.set_world_position(pos);
+    e.set_local_scale(v2.{1.4, 0.7});
+    a := e.add_component(Spine_Animator);
+    a.set_skeleton(get_asset(Spine_Asset, NINJA_SMOKE_RIG));
+    a.enable_skin("default");
+    a.refresh_skins();
+    a.set_animation("010WD2/End", false, 0);
+    a.color_multiplier = v4.{0.8, 0.85, 1, 0.65};
+    life := new(Ninja_Visual_Lifetime);
+    life.seconds = 1.2;
+    life.tint = v4.{0.8, 0.85, 1, 0.65};
+    add_passive_effect(e, life);
+}
+
+Ninja_Shadow_Step_Ability :: class : Ability_Base {
+    NAME :: "Shadow Step";
+    preview_destination: v2;
+    preview_distance: float;
+    previous_destination: v2;
+    preview_ready: bool;
+    aim_range: float;
+    on_init :: method() {
+        name = NAME;
+        icon = get_asset(Texture_Asset, NINJA_DAGGER_TEXTURE);
+        is_aimed_ability = true;
+    }
+    can_use :: method() -> bool { return rr_ninja_can_act(player) && get_time() >= post_meeting_kill_lockout_ends_at; }
+    on_update :: method(params: ref Ability_Update_Params) {
+        current_cooldown = max(current_cooldown, max(0.0, post_meeting_kill_lockout_ends_at - get_time()));
+        if !params.can_use {
+            if player.active_ability == this player.active_ability = null;
+            preview_ready = false;
+            return;
+        }
+        // Use the same engine targeting, arrows, scaling and interpolation as
+        // Hunter/Warper. The landing marker below shows the actual safe endpoint.
+        activation := Ability_Utilities.full_update_targeted_aimed_ability(player, this, ref params);
+        if player.active_ability != this && !activation.activate {
+            preview_ready = false;
+            return;
+        }
+        aim_range = NINJA_STEP_DISTANCE;
+        origin := player.entity.world_position;
+        direction := activation.direction;
+        distance := aim_range;
+        if player.device_kind == .PC {
+            offset := get_mouse_world_position() - origin;
+            distance = min(length(offset), aim_range);
+            if length_squared(offset) > 0.0001 direction = normalize(offset);
+        } else {
+            // The same deadzone as the input helper: every green preview can fire.
+            distance *= clamp((length(params.drag_offset) - AIMED_ABILITY_DRAG_THRESHOLD) / (1.0 - AIMED_ABILITY_DRAG_THRESHOLD), 0.0, 1.0);
+        }
+        if length_squared(direction) < 0.001 direction = v2.{1, 0};
+        preview_destination = rr_ninja_step_destination(origin, direction, distance);
+        preview_distance = length(preview_destination - origin);
+        this.draw_landing_preview(distance);
+        if activation.activate {
+            preview_ready = false;
+            destination := preview_destination;
+            if length_squared(destination - player.entity.world_position) < 0.25 return;
+            effect := new(Ninja_Dagger_Throw);
+            effect.destination = destination;
+            set_active_effect(player.entity, effect);
+            current_cooldown = NINJA_STEP_COOLDOWN;
+        }
+    }
+    draw_landing_preview :: method(requested_distance: float) {
+        // Ground-sized like the other placement abilities: it scales with the
+        // world at every viewport size instead of shrinking relative to players.
+        UI.push_world_draw_context();
+        defer UI.pop_draw_context();
+        UI.push_layer(20);
+        defer UI.pop_layer();
+        if !preview_ready previous_destination = preview_destination;
+        UI.push_interpolation_offset(v2.{});
+        defer UI.pop_interpolation_offset();
+        color := v4.{0.55, 1, 0.82, 1};
+        if preview_distance + 0.3 < requested_distance color = v4.{1, 0.7, 0.2, 1};
+        if preview_distance < 0.5 color = v4.{1, 0.2, 0.2, 1};
+        // Use the neutral ground ring so valid landings can be green and blocked
+        // ones amber/red; the other ground texture has red baked into its art.
+        reticle := get_asset(Texture_Asset, "sprites/ground_reticle_white.png");
+        UI.quad_interpolated(Rect.{preview_destination, preview_destination}.grow(0.8).fit_aspect(reticle.get_aspect()),
+            Rect.{previous_destination, previous_destination}.grow(0.8).fit_aspect(reticle.get_aspect()), reticle, color);
+        previous_destination = preview_destination;
+        preview_ready = true;
+    }
+    on_draw_button :: method(rect: Rect) { draw_ability_name_label(rect, NAME); }
+}
+
+Ninja_Smoke_Bomb_Ability :: class : Ability_Base {
+    NAME :: "Smoke Bomb";
+    on_init :: method() {
+        name = NAME;
+        icon = get_asset(Texture_Asset, NINJA_BOMB_TEXTURE);
+    }
+    can_use :: method() -> bool { return rr_ninja_can_act(player); }
+    on_update :: method(params: ref Ability_Update_Params) {
+        if params.clicked && params.can_use {
+            set_active_effect(player.entity, new(Ninja_Smoke_Toss_Effect));
+            current_cooldown = NINJA_SMOKE_COOLDOWN;
+        }
+    }
+    on_draw_button :: method(rect: Rect) { draw_ability_name_label(rect, NAME); }
+}
+
+Ninja_Clone_Jutsu_Ability :: class : Ability_Base {
+    NAME :: "Clone Jutsu";
+    on_init :: method() {
+        name = NAME;
+        icon = get_asset(Texture_Asset, "Ninja_Schleem_b1d6cf.png");
+    }
+    can_use :: method() -> bool { return rr_ninja_can_act(player); }
+    on_update :: method(params: ref Ability_Update_Params) {
+        if params.clicked && params.can_use {
+            set_active_effect(player.entity, new(Ninja_Clone_Cast_Effect));
+            current_cooldown = NINJA_CLONE_COOLDOWN;
+        }
+    }
+    on_draw_button :: method(rect: Rect) { draw_ability_name_label(rect, NAME); }
+}
+

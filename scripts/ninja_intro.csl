@@ -1,0 +1,124 @@
+// Standalone presentation rigs only: this scene never drives the live avatar,
+// spawns gameplay clones, or changes round timing.
+Ninja_Intro_Clip :: class {
+    rig: Spine_Instance;
+    animation: string;
+    sampled_at: float = -1;
+    position_interp: Position_Interpolation_Helper;
+
+    sample :: method(name: string, seconds: float, loop: bool = false) {
+        seconds = max(0.0, seconds);
+        if animation != name || seconds < sampled_at {
+            animation = name;
+            rig.set_animation(name, loop, 0);
+            sampled_at = 0;
+        }
+        rig.update(max(0.0, seconds - sampled_at));
+        sampled_at = seconds;
+    }
+
+    draw :: method(position: v2, scale: v2) {
+        UI.push_interpolation_offset(position_interp.update(position));
+        defer UI.pop_interpolation_offset();
+        UI.spine(position, rig, scale);
+    }
+}
+
+NINJA_INTRO_SUMMON_SECONDS :: 2.31;
+
+Ninja_Intro :: class {
+    hero: Ninja_Intro_Clip;
+    smoke: Ninja_Intro_Clip;
+    last_elapsed: float = -1;
+    preview_popup: Intro_Popup;
+
+    init :: method(p: Player) {
+        hero = new(Ninja_Intro_Clip);
+        hero.rig = p.intro_role_spine;
+        hero.rig.set_skeleton(p.animator.get_skeleton());
+        rr_intro_copy_player_skins(p);
+        hero.rig.refresh_skins();
+        // Only the hand signs: never show the fish, even in a held preview.
+        hero.rig.override_attachment_sprite("EMOTE_VFX/fish", get_asset(Texture_Asset, "sprites/ninja/transparent.png"));
+        hero.sample("Emote/Summoning_Jutsu", 0);
+
+        smoke = new(Ninja_Intro_Clip);
+        smoke.rig = Spine_Instance.create();
+        smoke.rig.set_skeleton(get_asset(Spine_Asset, NINJA_BLACK_FOG_RIG));
+        smoke.rig.enable_skin("default");
+        smoke.rig.refresh_skins();
+        preview_popup = new(Intro_Popup);
+        preview_popup.init();
+    }
+
+    cleanup :: method() {
+        // The shared intro owns hero.rig and destroys it after this call.
+        if smoke != null { smoke.rig.destroy(); smoke = null; }
+        hero = null;
+    }
+
+    sound :: method(p: Player, elapsed: float, beat: float, path: string, volume: float) {
+        if elapsed < beat || last_elapsed >= beat || p.intro_ninja_preview_at >= 0 return;
+        desc := SFX.default_sfx_desc();
+        desc.specific_to_player = p;
+        desc.volume = volume;
+        rr_play_sfx(path, desc);
+    }
+
+    draw :: method(p: Player, elapsed: float, center: v2) {
+        screen := UI.get_screen_rect();
+        ui_scale := UI.get_current_scale_factor();
+        size := min(1.0, screen.width() / max(1.0, ui_scale * 1100.0));
+        center.y -= 20 * ui_scale;
+        if elapsed < last_elapsed last_elapsed = -1;
+
+        // Freeze at the end of the requested hand signs while the smoke grows.
+        hero.sample("Emote/Summoning_Jutsu", min(elapsed, NINJA_INTRO_SUMMON_SECONDS));
+        UI.push_player_material(p);
+        hero.draw(center, v2.{310, 310} * size);
+        UI.pop_material();
+
+        smoke_age := elapsed - NINJA_INTRO_SUMMON_SECONDS;
+        if smoke_age >= 0 {
+            sound(p, elapsed, NINJA_INTRO_SUMMON_SECONDS, "ninja_despawn_473cf4.wav", 0.35);
+            smoke.sample("smoke_appear", min(smoke_age, 1.08));
+            // The cloud has rounded transparent edges. Overscan the viewport
+            // diagonal so the completed bloom covers every corner at any aspect.
+            diagonal := length(v2.{screen.width(), screen.height()});
+            smoke_scale := diagonal * 1.6 / (3.68 * max(0.01, ui_scale));
+            UI.push_layer(POPUP_UI_LAYER + 1);
+            smoke.draw(screen.center(), v2.{smoke_scale, smoke_scale});
+            UI.pop_layer();
+        }
+        last_elapsed = elapsed;
+    }
+}
+rr_ninja_draw_intro :: proc(p: Player, elapsed: float, center: v2) {
+    if p.intro_ninja != null p.intro_ninja.draw(p, elapsed, center);
+}
+
+// Owner/editor frame review. -2 replays, -1 closes; nonnegative values hold a
+// frame. It uses the same renderer without changing roles or the round clock.
+ninja_intro :: proc(player: Player, seconds: float = -2) {
+    player.intro_ninja_preview_at = seconds;
+    player.intro_ninja_preview_started = get_time();
+    rr_intro_cleanup_role_spine(player);
+} @chat_command @owner_or_editor
+
+rr_ninja_draw_intro_preview :: proc(p: Player) {
+    elapsed := p.intro_ninja_preview_at;
+    if elapsed == -2 {
+        elapsed = get_time() - p.intro_ninja_preview_started;
+        if elapsed >= INTRO_POPUP_DURATION {
+            p.intro_ninja_preview_at = -1;
+            rr_intro_cleanup_role_spine(p);
+            return;
+        }
+    }
+    rr_intro_ensure_role_spine(p, true);
+    popup := p.intro_ninja.preview_popup;
+    popup.set_local_player(p);
+    popup.player_role = Player_Role.NINJA;
+    popup.player_type = Player_Type.CIVILIAN;
+    render_popup(popup, clamp(elapsed, 0.0, INTRO_POPUP_DURATION - 0.01));
+}

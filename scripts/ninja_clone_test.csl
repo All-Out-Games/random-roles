@@ -1,0 +1,191 @@
+// Owner/editor-only lifecycle fixture. It drives the actual cast, player
+// movement, and meeting transition; never attached during ordinary gameplay.
+Ninja_Clone_Test :: class : Component {
+    stage: int;
+    started: float;
+    saved_input: v2;
+    original_clone_position: v2;
+    cast_origin: v2;
+    owner_user_id: string;
+    finished: bool;
+    aborted: bool;
+    cast_pose_played: bool;
+    cast_freezes_movement: bool;
+    interrupted_clone_preserved: bool;
+    interrupt_effect_cleared: bool;
+    interrupt_pose_cleared: bool;
+    interrupt_freeze_released: bool;
+    no_early_replacement: bool;
+    last_pre_completion_sample: float;
+    replacement_observed_at: float;
+    replacement_count: int;
+    exactly_one_replacement: bool;
+    completion_effect_cleared: bool;
+    completion_pose_cleared: bool;
+    completion_freeze_released: bool;
+    meeting_started: bool;
+    meeting_effect_cleared: bool;
+    meeting_pose_cleared: bool;
+    meeting_no_late_clone: bool;
+
+    active_clone_count :: method() -> int {
+        count := 0;
+        for clone: component_iterator(Ninja_Decoy) {
+            if clone.owner_user_id == owner_user_id && !clone.spent && !clone.afterimage count += 1;
+        }
+        return count;
+    }
+
+    clone_at :: method(pos: v2) -> bool {
+        for clone: component_iterator(Ninja_Decoy) {
+            if clone.owner_user_id == owner_user_id && !clone.spent && !clone.afterimage &&
+                length_squared(clone.entity.world_position - pos) < 0.0025 return true;
+        }
+        return false;
+    }
+
+    cast_pose_is :: method(p: Player, name: string) -> bool {
+        layer := p.animator.state_machine.try_get_layer("ninja_clone_cast");
+        if layer == null return false;
+        state := layer.get_current_state();
+        return state != null && state.get_name() == name;
+    }
+
+    restore_input :: method() {
+        p := entity.get_component(Player);
+        if p == null return;
+        p.input_override = saved_input;
+        p.agent.velocity = v2.{};
+    }
+
+    begin_cast :: method(p: Player) {
+        cast_origin = entity.world_position;
+        p.input_override = v2.{1, 0};
+        set_active_effect(entity, new(Ninja_Clone_Cast_Effect));
+        started = get_time();
+    }
+
+    arm :: method(p: Player) {
+        owner_user_id = p.get_user_id();
+        saved_input = p.input_override;
+        stage = 1;
+        started = get_time();
+        finished = false;
+        aborted = false;
+        cast_pose_played = false;
+        cast_freezes_movement = false;
+        interrupted_clone_preserved = false;
+        interrupt_effect_cleared = false;
+        interrupt_pose_cleared = false;
+        interrupt_freeze_released = false;
+        no_early_replacement = true;
+        last_pre_completion_sample = 0;
+        replacement_observed_at = 0;
+        replacement_count = 0;
+        exactly_one_replacement = false;
+        completion_effect_cleared = false;
+        completion_pose_cleared = false;
+        completion_freeze_released = false;
+        meeting_started = false;
+        meeting_effect_cleared = false;
+        meeting_pose_cleared = false;
+        meeting_no_late_clone = false;
+    }
+
+    ao_update :: method(dt: float) {
+        if stage == 0 return;
+        p := entity.get_component(Player);
+        if p == null || p.player_state != .ALIVE || (stage < 7 && game_state != .INGAME) {
+            restore_input();
+            remove_effect(entity, Ninja_Clone_Cast_Effect, true);
+            aborted = true;
+            stage = 0;
+            return;
+        }
+        elapsed := get_time() - started;
+        if stage == 1 && elapsed >= 0.125 {
+            // Allow fixture entity destruction to settle, then give the existing
+            // clone a different position from the replacement cast.
+            original_clone_position = entity.world_position;
+            rr_ninja_spawn_decoy(p, false);
+            entity.set_world_position(original_clone_position + v2.{1.25, 0});
+            entity.mark_teleported();
+            begin_cast(p);
+            stage = 2;
+            return;
+        }
+        if stage == 2 && elapsed >= 0.375 {
+            cast_pose_played = cast_pose_is(p, "Emote/Summoning_Jutsu");
+            cast_freezes_movement = length_squared(entity.world_position - cast_origin) < 0.0025;
+            remove_effect(entity, Ninja_Clone_Cast_Effect, true);
+            stage = 3;
+            return;
+        }
+        if stage == 3 && elapsed >= 0.85 {
+            interrupted_clone_preserved = active_clone_count() == 1 && clone_at(original_clone_position);
+            interrupt_effect_cleared = entity.get_active_effect() == null;
+            interrupt_pose_cleared = cast_pose_is(p, "__CLEAR_TRACK__");
+            interrupt_freeze_released = length_squared(entity.world_position - cast_origin) > 0.01;
+            restore_input();
+            begin_cast(p);
+            stage = 4;
+            return;
+        }
+        if stage == 4 {
+            // The authored hand signs must finish before replacement. Sample
+            // every real simulation tick up to the requested 2.3125 s cutoff.
+            if elapsed < 2.3125 {
+                last_pre_completion_sample = elapsed;
+                if active_clone_count() != 1 || !clone_at(original_clone_position) no_early_replacement = false;
+            } else if replacement_observed_at == 0 && active_clone_count() == 1 && !clone_at(original_clone_position) {
+                replacement_observed_at = elapsed;
+            }
+            if elapsed < 2.6 return;
+            replacement_count = active_clone_count();
+            exactly_one_replacement = replacement_count == 1 && clone_at(cast_origin) && !clone_at(original_clone_position);
+            completion_effect_cleared = entity.get_active_effect() == null;
+            completion_pose_cleared = cast_pose_is(p, "__CLEAR_TRACK__");
+            completion_freeze_released = length_squared(entity.world_position - cast_origin) > 0.01;
+            restore_input();
+            // Real meeting entry interrupts a third cast before its spawn beat.
+            set_active_effect(entity, new(Ninja_Clone_Cast_Effect));
+            started = get_time();
+            stage = 6;
+            return;
+        }
+        if stage == 6 && elapsed >= 0.375 {
+            ninja_meeting(p);
+            meeting_started = game_state != .INGAME;
+            stage = 7;
+            return;
+        }
+        if stage == 7 && elapsed >= 2.8 {
+            meeting_effect_cleared = entity.get_active_effect() == null;
+            meeting_pose_cleared = cast_pose_is(p, "__CLEAR_TRACK__");
+            meeting_no_late_clone = active_clone_count() == 0;
+            restore_input();
+            finished = true;
+            stage = 0;
+        }
+    }
+
+    ao_end :: method() {
+        if stage != 0 restore_input();
+    }
+}
+
+ninja_clone_test :: proc(player: Player) {
+    peer: Player;
+    for other: component_iterator(Player) { if other != player { peer = other; break; } }
+    if !#alive(peer) { Notifier.notify(player, "Connect a second player first."); return; }
+    test := player.entity.get_component(Ninja_Clone_Test);
+    if test != null && test.stage != 0 {
+        test.restore_input();
+        test.stage = 0;
+    }
+    ninja_fixture(player, "ninja");
+    peer.entity.set_world_position(v2.{-48, -3});
+    peer.entity.mark_teleported();
+    if test == null test = player.entity.add_component(Ninja_Clone_Test);
+    test.arm(player);
+} @chat_command @owner_or_editor

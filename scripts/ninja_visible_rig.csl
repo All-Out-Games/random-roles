@@ -1,0 +1,70 @@
+// Resolve presentation without changing skins, opacity, or synced role state.
+rr_ninja_enabled_visible_rig :: proc(rig: Spine_Animator) -> Spine_Animator {
+    if !#alive(rig) || rig.instance == null || !#alive(rig.entity) return null;
+    if !rig.get_enabled() || !rig.entity.get_world_enabled() return null;
+    if rig.color_multiplier.w <= 0.001 return null;
+    return rig;
+}
+
+rr_ninja_visible_player_rig :: proc(viewer: Player, target: Player) -> Spine_Animator {
+    if !#alive(viewer) || !#alive(target) || !#alive(target.entity) return null;
+    if target.player_state != .ALIVE || !target.entity.get_world_enabled() return null;
+    // Smoke highlights must not undo an unrelated hidden-body effect.
+    if target.bc_cocooned || has_effect(target.entity, Ninja_Shadow_Step_Effect) return null;
+
+    lily: Lily_Module;
+    if target.player_role == Player_Role.LILY_LOVEBRAIDS {
+        lily = target.entity.get_component(Lily_Module);
+        if lily != null {
+            // The detached body remains at the origin while the player follows
+            // a remote ability. Never draw that body at the remote position.
+            if lily.ability_body_detached return null;
+            if viewer.player_type != .TRAITOR && (lily.mind_control_active || lily.spider_active || lily.eye_machine_active) return null;
+        }
+    }
+    mim: Mimicer_Module;
+    if target.player_role == Player_Role.MIMICER {
+        mim = target.entity.get_component(Mimicer_Module);
+        if mim != null && mim.is_prowling && mim.prowl_near_wall && viewer.player_type != .TRAITOR return null;
+    }
+
+    // Corruption substitutes a posed creature for other players on one client.
+    // Preserve that substitution rather than revealing their true appearance.
+    if viewer != target && viewer.mimicer_distorted_until > get_time() {
+        child := target.entity.get_first_child();
+        while child != null {
+            halluc := child.get_component(Mim_Halluc_Creature);
+            if halluc != null && halluc.blinded_player_id == viewer.entity.id {
+                return rr_ninja_enabled_visible_rig(halluc.halluc_spine);
+            }
+            child = child.get_next_sibling();
+        }
+        return null;
+    }
+
+    // Modules persist between rounds: select them by the current role first.
+    mech := rr_mech_active_module(target);
+    if mech != null {
+        if mech.creature_visible return rr_ninja_enabled_visible_rig(mech.creature_animator);
+        if mech.player_hidden_applied return null;
+    }
+    guardian := rr_guardian_active_module(target);
+    if guardian != null {
+        if guardian.creature_visible return rr_ninja_enabled_visible_rig(guardian.creature_animator);
+        if guardian.player_hidden_applied return null;
+    }
+    if lily != null && lily.creature_visible return rr_ninja_enabled_visible_rig(lily.creature_animator);
+    if mim != null && mim.creature_visible return rr_ninja_enabled_visible_rig(mim.creature_animator);
+    if target.player_role == Player_Role.GOO_GOO_GAGA {
+        ggg := target.entity.get_component(GGG_Module);
+        if ggg != null && ggg.creature_visible return rr_ninja_enabled_visible_rig(ggg.creature_animator);
+    }
+    if target.player_role == Player_Role.BIG_CHARLIE {
+        charlie := target.entity.get_component(Big_Charlie_Module);
+        if charlie != null && charlie.creature_visible return rr_ninja_enabled_visible_rig(charlie.creature_animator);
+    }
+
+    // Werewolf and ordinary disguises change the player's current rig/skins in
+    // place, so the posed base animator already contains their correct look.
+    return rr_ninja_enabled_visible_rig(target.animator);
+}

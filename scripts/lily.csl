@@ -1313,6 +1313,7 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 					if root != null root.free();
 				}
 				// Absorb the living player into the tree
+				if rr_ninja_smoke_protects(target) return;
 				target.kill_with_killer_no_corpse(player.entity.id);
 				rr_lily_remove_string(player, target.entity.id);
 				lm.kills += 1;
@@ -2831,6 +2832,7 @@ Lily_String_Trap :: class : Component {
 			if p.player_state != Player_State.ALIVE continue;
 			if p.player_type == Player_Type.TRAITOR continue;
 			if p.entity.id == lily_entity_id continue;
+			if rr_ninja_light_feet(p) continue;
 
 			dist := length(p.entity.world_position - trap_pos);
 			if dist < LILY_STRING_TRAP_TRIGGER_RADIUS {
@@ -3353,6 +3355,7 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 				can_deliver_alive := has_request && request == Tree_Request.ALIVE_PLAYER;
 				if can_deliver_alive {
 					// Deliver alive player to tree
+					if rr_ninja_smoke_protects(target) return;
 					target.kill_with_killer_no_corpse(player.entity.id);
 					lm.kills += 1;
 					tree_comp.fulfill_request();
@@ -4338,7 +4341,7 @@ Lily_Kill_Ability :: class : Ability_Base {
 		lm := player.entity.get_component(Lily_Module);
 		if lm == null return false;
 		if lm.tea_party_active return false;
-		return get_closest_kill_target(this, player) != null;
+		return get_closest_kill_target(this, player) != null || rr_ninja_closest_decoy(player, rr_ninja_lily_kill_origin(player), rr_ninja_lily_kill_range(player)) != null;
 	}
 
 	get_closest_kill_target :: proc(instance: Lily_Kill_Ability, player: Player) -> Player {
@@ -4362,6 +4365,7 @@ Lily_Kill_Ability :: class : Ability_Base {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
+			if rr_ninja_smoke_protects(target) continue;
 			if target.player_type == Player_Type.TRAITOR continue;
 			// During Mind Control, don't target the controlled player
 			if lm != null && lm.mind_control_active && target.entity.id == lm.mind_control_target_id continue;
@@ -4377,6 +4381,10 @@ Lily_Kill_Ability :: class : Ability_Base {
 
 		if params.clicked && params.can_use {
 			closest := get_closest_kill_target(this, player);
+            if rr_ninja_hit_decoy(player, rr_ninja_lily_kill_origin(player), rr_ninja_lily_kill_range(player), closest) {
+                current_cooldown = LILY_KILL_COOLDOWN * rr_ninja_lily_cd_multiplier(player);
+                return;
+            }
 			if closest != null {
 				lm := player.entity.get_component(Lily_Module);
 

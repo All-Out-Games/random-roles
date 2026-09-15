@@ -250,10 +250,17 @@ Hunter_Crossbow_Bolt :: class : Component {
         }
 
         // Collision with players.
+        body: Player;
+        if is_kill_shot { body = rr_ninja_projectile_body(owner_player, entity.world_position - velocity * dt, entity.world_position, HUNTER_BOLT_HIT_RADIUS, true); }
+        if is_kill_shot && rr_ninja_hit_decoy_ray(owner_player, entity.world_position - velocity * dt, normalize(velocity), length(velocity) * dt + HUNTER_BOLT_HIT_RADIUS, HUNTER_BOLT_HIT_RADIUS, body) {
+            entity.destroy();
+            return;
+        }
         for target: component_iterator(Player) {
             if target == null continue;
             if !#alive(target.entity) continue;
             if target.player_state != Player_State.ALIVE continue;
+			if is_kill_shot && rr_ninja_smoke_protects(target) continue;
             if owner_alive && target.entity == owner continue;
 
 			if !in_range(target.entity.world_position - entity.world_position, HUNTER_BOLT_HIT_RADIUS) {
@@ -934,6 +941,7 @@ rr_hunter_round_global_cleanup :: proc() {
 rr_hunter_is_stunned :: proc(p: Player) -> bool {
     if p == null return false;
     if !#alive(p.entity) return false;
+    if has_effect(p.entity, Ninja_Dagger_Stun) return true;
 
     hs := p.entity.get_component(Hacker_Electrocuted_Stun);
     if hs != null && hs.active return true;
