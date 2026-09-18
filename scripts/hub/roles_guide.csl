@@ -1,4 +1,4 @@
-RG_NUM_ROLES :: 21;
+RG_NUM_ROLES :: 22;
 
 Rg_Ability_Entry :: struct {
     icon_path: string;
@@ -29,11 +29,13 @@ rg_get_role_name :: proc(idx: int) -> string {
         case 18: return "HUNTER";
         case 19: return "THE MECH";
         case 20: return "GUARDIAN";
+        case NINJA_ROLE_INDEX: return "NINJA";
     }
     return "UNKNOWN";
 }
 
 rg_get_role_team :: proc(idx: int) -> string {
+    if idx == NINJA_ROLE_INDEX return "CIVILIAN";
     if idx == 18             return "CIVILIAN";
     if idx == 20             return "CIVILIAN";
     if idx == 17             return "ANARCHIST";
@@ -44,6 +46,7 @@ rg_get_role_team :: proc(idx: int) -> string {
 }
 
 rg_get_role_color :: proc(idx: int) -> v4 {
+    if idx == NINJA_ROLE_INDEX return v4.{0.1, 0.9, 0.3, 1.0};
     if idx == 18             return v4.{0.1,  0.9,  0.3,  1.0};
     if idx == 20             return v4.{0.1,  0.9,  0.3,  1.0};
     if idx == 17             return v4.{0.9,  0.55, 0.1,  1.0};
@@ -54,6 +57,7 @@ rg_get_role_color :: proc(idx: int) -> v4 {
 }
 
 rg_get_team_badge_bg :: proc(idx: int) -> v4 {
+    if idx == NINJA_ROLE_INDEX return v4.{0.03, 0.20, 0.06, 0.75};
     if idx == 18             return v4.{0.03, 0.20, 0.06, 0.75};
     if idx == 20             return v4.{0.03, 0.20, 0.06, 0.75};
     if idx == 17             return v4.{0.20, 0.12, 0.02, 0.75};
@@ -64,6 +68,7 @@ rg_get_team_badge_bg :: proc(idx: int) -> v4 {
 }
 
 rg_get_role_muted_color :: proc(idx: int) -> v4 {
+    if idx == NINJA_ROLE_INDEX return v4.{0.14, 0.30, 0.18, 1.0};
     if idx == 18             return v4.{0.14, 0.30, 0.18, 1.0};
     if idx == 20             return v4.{0.14, 0.30, 0.18, 1.0};
     if idx == 17             return v4.{0.34, 0.24, 0.10, 1.0};
@@ -89,6 +94,7 @@ rg_get_role_icon :: proc(idx: int) -> string {
         case 18: return "sprites/icons/hunter/killshot.png";
         case 19: return "sprites/icons/transform_evil.png";
         case 20: return "sprites/icons/transform_good.png";
+        case NINJA_ROLE_INDEX: return "ui/roles_small/ninja_dagger.png";
     }
     return "";
 }
@@ -116,6 +122,7 @@ rg_get_role_description :: proc(idx: int) -> string {
         case 18: return "A crossbow-wielding tracker. Cripple suspects to slow them, drop campfires that buff allies and reveal cloaked enemies, and finish off pierced targets with a Kill Shot. Sees scent footprints left by anyone who isn't in schleem form.";
         case 19: return "A hulking war machine hiding as one of the crew. Transform into your Mech to smash tasks and convert downed players into minions. Gather components at the workbench to unlock the Ram Charge, Magnet Cannon, and Missile Barrage, then awaken into your unstoppable APEX form. Only the Guardian can stop you in the final Showdown.";
         case 20: return "The crew's secret protector, engineered to counter the Mech. Hide among civilians until the threat shows itself, then transform into your combat form to shockwave transformed monsters out of disguise, grab and throw them, and stand against the Mech in a decisive Showdown.";
+        case NINJA_ROLE_INDEX: return "An elusive civilian. Teleport with your dagger, cover escapes with smoke, and fool killers with a clone.";
     }
     return "";
 }
@@ -143,6 +150,7 @@ rg_get_role_difficulty :: proc(idx: int) -> string {
         case 18: return "MEDIUM";
         case 19: return "MEDIUM";
         case 20: return "EASY";
+        case NINJA_ROLE_INDEX: return "MEDIUM";
     }
     return "EASY";
 }
@@ -269,11 +277,18 @@ rg_get_role_abilities :: proc(idx: int, results: ref [..]Rg_Ability_Entry) {
             append(ref results, Rg_Ability_Entry.{"sprites/icons/mech/Loot_Icon.png",              "Pickup & Throw",  "Guardian form. Grab a monster and hurl them across the map."});
             append(ref results, Rg_Ability_Entry.{"sprites/icons/mech/Showdown_Icon.png",          "Showdown",        "Confront the Mech in a final Showdown to protect the crew."});
         }
+        case NINJA_ROLE_INDEX: {
+            append(ref results, Rg_Ability_Entry.{"ui/roles_small/ninja_dagger.png", "Shadow Step", "Throw a dagger and teleport to where it lands. Hit a player to stun them and appear behind them."});
+            append(ref results, Rg_Ability_Entry.{"ui/roles_small/ninja_smoke_bomb.png", "Smoke Bomb", "Drop black smoke that hides everyone inside and protects them from kills. You can still spot players through it."});
+            append(ref results, Rg_Ability_Entry.{"ui/roles_small/ninja_icon.png", "Clone Jutsu", "Summon a decoy that turns into a log when attacked, wasting the killer's strike and alerting you."});
+            append(ref results, Rg_Ability_Entry.{"sprites/tasks/cypher/icons/icon_foot.png", "Light Feet", "Passive. Safely cross autographs, mines, chocolate, string traps, and dropped helmets."});
+        }
     }
 }
 
 rg_is_role_locked :: proc(player: Player, idx: int) -> bool {
     switch idx {
+        case NINJA_ROLE_INDEX: return !player.ninja_claimed;
         case 13: return !Purchasing.owns_product(player, GGG_PRODUCT_ID);
         case 14: return !Purchasing.owns_product(player, MIMICER_PRODUCT_ID);
         case 15: return !Purchasing.owns_product(player, BIG_CHARLIE_PRODUCT_ID);
@@ -333,6 +348,7 @@ rg_get_role_tips :: proc(idx: int) -> string {
         case 18: return "Cripple suspects on sight, then finish them with Kill Shot. Drop campfires in choke points to reveal cloaked enemies.";
         case 19: return "Hit the workbench early - your APEX form and best weapons depend on the components you gather. Convert downed players for backup.";
         case 20: return "Stay hidden until the monsters reveal themselves, then transform and shockwave to flush them out. You're the Mech's worst nightmare.";
+        case NINJA_ROLE_INDEX: return "Use smoke to rescue civilians, but remember it protects enemies too.";
     }
     return "";
 }
@@ -430,6 +446,7 @@ rg_get_display_order :: proc(out: ref [..]int) {
     append(ref out, 6);
     append(ref out, 18);
     append(ref out, 20);
+    append(ref out, NINJA_ROLE_INDEX);
     append(ref out, 7);
     append(ref out, 8);
     append(ref out, 17);
@@ -621,8 +638,14 @@ rg_draw_role_list_row :: proc(player: Player, role_idx: int, handles: ref [..]In
 
     UIK.panel_end();
 
-    // Lock icon
-    if is_locked {
+    // Free claim uses its own badge so it never looks like a paid unlock.
+    if is_locked && role_idx == NINJA_ROLE_INDEX {
+        free_ts := UIK.text_body();
+        UIK.text_set_color(&free_ts, v4.{0.4, 1.0, 0.65, 1});
+        UIK.text_set_word_wrap(&free_ts, false);
+        UIK.text_set_size_mult(&free_ts, 0.75);
+        UIK.text("FREE", free_ts);
+    } else if is_locked {
         lock_box := UIK.layout_column();
         lock_box.width  = UIK.pixels(20);
         lock_box.height = UIK.pixels(20);
@@ -733,8 +756,29 @@ rg_draw_role_detail_uik :: proc(player: Player, buy_present: ref bool, buy_handl
 
     UIK.panel_end(); // header
 
-    // ---- Locked banner + Buy CTA ----
-    if is_locked {
+    // ---- Claim location or paid unlock ----
+    if is_locked && idx == NINJA_ROLE_INDEX {
+        claim_banner := UIK.panel_styled(.MODAL_TRANSP_BLACK);
+        claim_banner.width = UIK.flex(1);
+        claim_banner.height = UIK.fit();
+        claim_banner.padding = v4.{12, 14, 12, 14};
+        claim_banner.gap = 6;
+        UIK.panel_begin(claim_banner);
+
+        claim_ts := UIK.text_body();
+        UIK.text_set_color(&claim_ts, v4.{0.4, 1.0, 0.65, 1});
+        UIK.text_set_halign(&claim_ts, .CENTER);
+        UIK.text_set_word_wrap(&claim_ts, false);
+        UIK.text("FREE CLAIM", claim_ts);
+
+        location_ts := UIK.text_body();
+        UIK.text_set_color(&location_ts, v4.{0.95, 0.95, 1, 1});
+        UIK.text_set_halign(&location_ts, .CENTER);
+        UIK.text_set_word_wrap(&location_ts, true);
+        UIK.text("Visit the Ninja pedestal on the right grass, across from Hunter.", location_ts);
+
+        UIK.panel_end();
+    } else if is_locked {
         banner := UIK.layout_row();
         banner.width   = UIK.flex(1);
         banner.height  = UIK.fit();

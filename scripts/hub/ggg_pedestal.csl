@@ -114,6 +114,7 @@ Pedestal_Role :: enum {
     HUNTER;
     THE_MECH;
     GUARDIAN;
+    NINJA;
 }
 
 pedestal_get_product_id :: proc(role: Pedestal_Role) -> string {
@@ -138,6 +139,7 @@ pedestal_get_display_name :: proc(role: Pedestal_Role) -> string {
         case .HUNTER:       return "Hunter";
         case .THE_MECH:     return "The Mech";
         case .GUARDIAN:     return "Guardian";
+        case .NINJA:        return "Ninja";
     }
     return "";
 }
@@ -164,6 +166,7 @@ pedestal_get_action_anim :: proc(role: Pedestal_Role) -> string {
         case .HUNTER:       return "004RAND_hunter/intro_animation";
         case .THE_MECH:     return "009SG/APEX_transform";
         case .GUARDIAN:     return "009SG/Showdown_Win";
+        case .NINJA:        return "Emote/Summoning_Jutsu";
     }
     return "Idle";
 }
@@ -177,6 +180,7 @@ pedestal_is_bought :: proc(role: Pedestal_Role, player: Player) -> bool {
         case .HUNTER:       return player.hunter_bought;
         case .THE_MECH:     return player.mech_bought;
         case .GUARDIAN:     return player.guardian_bought;
+        case .NINJA:        return player.ninja_claimed;
     }
     return false;
 }
@@ -186,6 +190,7 @@ pedestal_is_new :: proc(role: Pedestal_Role) -> bool {
         case .HUNTER:   return true;
         case .THE_MECH: return true;
         case .GUARDIAN: return true;
+        case .NINJA:    return true;
     }
     return false;
 }
@@ -204,10 +209,12 @@ Role_Pedestal :: class : Interactable {
     spine: Spine_Animator @ao_serialize;
     action_timer: float;
     state_machine: State_Machine;
+    ninja_action_remaining: float;
 
     ao_start :: method() {
         this.set_listener(this);
         this.set_text(format_string("Buy %", {pedestal_get_display_name(role)}));
+        if role == .NINJA this.set_text("Free Claim Ninja");
         // Stagger pedestals so their special anims don't all fire in lockstep.
         rng: u64 = rng_root_seed() ^ entity.id;
         action_timer = rng_range_float(ref rng, 0.0, PEDESTAL_ACTION_INTERVAL);
@@ -221,11 +228,16 @@ Role_Pedestal :: class : Interactable {
             layer := state_machine.create_layer("main", 0);
 
             idle_state := layer.create_state(pedestal_get_idle_anim(role), true);
-            action_state := layer.create_state(pedestal_get_action_anim(role), false);
+            action_duration := 0.0;
+            if role == .NINJA {
+                action_duration = 2.31;
+                spine.instance.override_attachment_sprite("EMOTE_VFX/fish", get_asset(Texture_Asset, "ui/roles_small/ninja_transparent.png"));
+            }
+            action_state := layer.create_state(pedestal_get_action_anim(role), false, action_duration);
 
             layer.set_initial_state(idle_state);
 
-            to_action := layer.create_global_transition(action_state, true);
+            to_action := layer.create_global_transition(action_state, false);
             to_action.create_trigger_condition(action_trigger);
 
             action_to_idle := layer.create_transition(action_state, idle_state, true);
@@ -234,26 +246,27 @@ Role_Pedestal :: class : Interactable {
         }
     }
 
-    ao_late_update :: method(dt: float) {
-        if Game.is_server() return;
-
+    draw_for_player :: method(viewer: Player) {
         pos := entity.world_position;
         product_id := pedestal_get_product_id(role);
 
-        UI.push_world_draw_context();
-        defer UI.pop_draw_context();
+        UI.begin_world_space_ui(entity);
+        defer UI.end_world_space_ui();
 
         UI.push_z(pos.y - 10.0);
         defer UI.pop_z();
 
         t := get_time();
         bob := sin(t * 2.5) * 0.06;
+        previous_bob := sin(max(0.0, t - get_fixed_delta_time()) * 2.5) * 0.06;
+        UI.push_interpolation_offset(v2.{0, bob - previous_bob});
+        defer UI.pop_interpolation_offset();
 
         // Floating banner
         banner_y := pos.y + 0.1 + bob;
         banner_pos := v2.{pos.x, banner_y};
 
-        banner_tex := get_asset(Texture_Asset, "$AO/ui/kit/Modal Augments/modal_banner_small/modal_banner_red.png");
+        banner_tex := get_asset(Texture_Asset, "$AO/ui/kit/Game UI/Additional Elements/Banners Fancy/modal_banner_white.png");
 
         if pedestal_is_new(role) {
             banner_rect := Rect.{banner_pos, banner_pos}.grow(0.3, 1.2, 0.3, 1.2);
@@ -290,17 +303,25 @@ Role_Pedestal :: class : Interactable {
         price_ts.do_drop_shadow = true;
         price_ts.drop_shadow_offset = v2.{0.008, -0.008};
         price_ts.drop_shadow_color = v4.{0.0, 0.0, 0.0, 0.6};
-        UI.text(price_rect, price_ts, pedestal_get_price(role));
+        if role == .NINJA {
+            price_ts.size = 0.34;
+            label := "FREE CLAIM";
+            if viewer.ninja_claimed label = "CLAIMED";
+            UI.text(price_rect, price_ts, label);
+        } else {
+            UI.text(price_rect, price_ts, pedestal_get_price(role));
+        }
 
-        if sparks_tex != null {
+        if role != .NINJA && sparks_tex != null {
             SPARK_HALF :: 0.15;
             spark_rect := Rect.{price_pos, price_pos}.offset(0.48, 0).grow(SPARK_HALF, SPARK_HALF, SPARK_HALF, SPARK_HALF);
             UI.quad(spark_rect.fit_aspect(sparks_tex.get_aspect()), sparks_tex, v4.{1.0, 0.9, 0.3, 1.0});
         }
 
-        // Floating sprite/text above pedestal if not bought
-        local_player, lok := Game.get_local_player();
-        if lok && !pedestal_is_bought(role, local_player) && !Purchasing.owns_product(local_player, product_id) || (lok && local_player.is_admin()) {
+        // Ninja's release badge stays visible after the free claim.
+        bought := pedestal_is_bought(role, viewer);
+        if product_id != "" bought = bought || Purchasing.owns_product(viewer, product_id);
+        if role == .NINJA || !bought || viewer.is_admin() {
             if pedestal_is_new(role) {
                 new_role_tex := get_asset(Texture_Asset, "sprites/NewRole.png");
                 if new_role_tex != null {
@@ -317,26 +338,40 @@ Role_Pedestal :: class : Interactable {
     ao_update :: method(dt: float) {
         if spine == null return;
 
+        if role == .NINJA && ninja_action_remaining > 0 {
+            ninja_action_remaining -= dt;
+            if ninja_action_remaining <= 0 ninja_pedestal_puff(spine.entity.world_position);
+        }
+
         action_timer -= dt;
         if action_timer <= 0.0 {
             action_timer = PEDESTAL_ACTION_INTERVAL;
             state_machine.set_trigger("action");
+            if role == .NINJA ninja_action_remaining = 2.31;
         }
     }
 
     can_use :: method(player: Player) -> bool {
         if player == null return false;
+        if role == .NINJA return !player.ninja_claimed && !player.transferring;
         if player.is_admin() return true;
         product_id := pedestal_get_product_id(role);
         if pedestal_is_bought(role, player) || Purchasing.owns_product(player, product_id) {
-            this.set_text("Bought!");
             return false;
         }
-        this.set_text(format_string("Buy %", {pedestal_get_display_name(role)}));
         return true;
     }
 
     on_interact :: method(player: Player) {
+        if role == .NINJA {
+            claim_ninja_role(player);
+            if spine != null {
+                state_machine.set_trigger("action");
+                ninja_action_remaining = 2.31;
+                action_timer = PEDESTAL_ACTION_INTERVAL;
+            }
+            return;
+        }
         Purchasing.prompt_purchase(player, pedestal_get_product_id(role));
     }
 }

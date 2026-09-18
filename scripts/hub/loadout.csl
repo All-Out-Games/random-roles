@@ -208,6 +208,7 @@ loadout_role_id_for_idx :: proc(role_idx: int) -> string {
         case 18: return "hunter";
         case 19: return "the_mech";
         case 20: return "guardian";
+        case NINJA_ROLE_INDEX: return "ninja";
     }
     return "";
 }
@@ -232,6 +233,7 @@ loadout_idx_for_role_id :: proc(id: string) -> int {
     if id == "hunter"          return 18;
     if id == "the_mech"        return 19;
     if id == "guardian"        return 20;
+    if id == "ninja"           return NINJA_ROLE_INDEX;
     return -1;
 }
 
@@ -297,6 +299,7 @@ loadout_get_role_small_icon :: proc(role_idx: int) -> string {
         case 18: return "ui/roles_small/hunter_icon.png";
         case 19: return "ui/roles_small/mech_icon.png";
         case 20: return "ui/roles_small/guardian_icon.png";
+        case NINJA_ROLE_INDEX: return "ui/roles_small/ninja_icon.png";
     }
     return "";
 }
@@ -320,6 +323,7 @@ loadout_get_team_roles :: proc(tab: int, results: ref [..]int) {
             for i: 1..6 append(ref results, i);
             append(ref results, 18);
             append(ref results, 20);
+            append(ref results, NINJA_ROLE_INDEX);
         }
         case LOADOUT_TAB_ANARCHIST: {
             append(ref results, 7);
@@ -386,7 +390,6 @@ loadout_team_for_role :: proc(role_idx: int) -> int {
 // `rg_is_role_locked` is intentionally not checked because purchase ownership
 // state may not be observable yet at the moment the purchase handler fires.
 loadout_try_auto_equip :: proc(player: Player, role_idx: int) -> bool {
-    if !player.is_local_or_server() return false;
     if player.loadout == null return false;
 
     id := loadout_role_id_for_idx(role_idx);
@@ -495,10 +498,12 @@ loadout_fill_to_minimum :: proc(player: Player, tab: int) -> int {
 loadout_strip_unowned :: proc(player: Player, tab: int) -> int {
     if player.loadout == null return 0;
 
-    arr := loadout_tab_array(player, tab);
     removed := 0;
     i := 0;
-    while i < arr.count {
+    // The returned array descriptor is a copy. Refresh it after a removal;
+    // retaining its old count can loop forever on a removed final entry.
+    while i < loadout_equipped_count(player, tab) {
+        arr := loadout_tab_array(player, tab);
         role_idx := loadout_idx_for_role_id(arr[i]);
         if role_idx >= 0 && rg_is_role_locked(player, role_idx) {
             switch tab {
@@ -1009,8 +1014,17 @@ draw_loadout :: proc(player: Player) {
         if UIK.clicked(card_handles[i]) {
             rid := card_role_ids[i];
             if rg_is_role_locked(player, rid) {
-                pid := rg_get_role_product_id(rid);
-                if pid != "" Purchasing.prompt_purchase(player, pid);
+                if rid == NINJA_ROLE_INDEX {
+                    loadout_finalize(player);
+                    player.loadout_open = false;
+                    player.role_boost_shop_open = false;
+                    player.roles_guide_selected = NINJA_ROLE_INDEX;
+                    player.roles_guide_filter = 1;
+                    player.roles_guide_open = true;
+                } else {
+                    pid := rg_get_role_product_id(rid);
+                    if pid != "" Purchasing.prompt_purchase(player, pid);
+                }
             } else {
                 loadout_toggle(player, player.loadout_tab, rid);
             }
@@ -1521,10 +1535,12 @@ loadout_draw_collection :: proc(player: Player, handles: ref [..]Interact_Result
 loadout_draw_collection_card :: proc(player: Player, role_idx: int, handles: ref [..]Interact_Result, role_ids: ref [..]int) {
     is_locked   := rg_is_role_locked(player, role_idx);
     is_equipped := loadout_is_equipped(player, player.loadout_tab, role_idx);
+    is_ninja := role_idx == NINJA_ROLE_INDEX;
 
     dim_alpha: float = 1.0;
     if is_equipped dim_alpha = 0.22;
     if is_locked   dim_alpha = 0.30;
+    if is_locked && is_ninja dim_alpha = 0.65;
 
     cell := UIK.layout_column();
     cell.background      = .BUTTON_BASIC_BLACK;
@@ -1587,7 +1603,45 @@ loadout_draw_collection_card :: proc(player: Player, role_idx: int, handles: ref
         UIK.overlay_end();
     }
 
-    if is_locked {
+    if is_ninja && !is_equipped {
+        UIK.overlay_begin(.CENTER, v2.{0, 0});
+        claim_col := UIK.layout_column();
+        claim_col.width = UIK.fit();
+        claim_col.height = UIK.fit();
+        claim_col.background = .MODAL_TRANSP_BLACK;
+        claim_col.show_background = true;
+        claim_col.padding = v4.{12, 12, 14, 12};
+        claim_col.gap = 4;
+        claim_col.main_align = .CENTER;
+        claim_col.cross_align = .CENTER;
+        UIK.panel_begin(claim_col);
+
+        claim_ts := UIK.text_body();
+        UIK.text_set_color(&claim_ts, v4.{0.4, 1.0, 0.65, 1});
+        UIK.text_set_halign(&claim_ts, .CENTER);
+        UIK.text_set_word_wrap(&claim_ts, false);
+        if is_locked {
+            UIK.text("FREE CLAIM", claim_ts);
+        } else {
+            UIK.text("CLAIMED", claim_ts);
+        }
+
+        hint_ts := UIK.text_body();
+        UIK.text_set_color(&hint_ts, v4.{1, 1, 1, 1});
+        UIK.text_set_halign(&hint_ts, .CENTER);
+        UIK.text_set_word_wrap(&hint_ts, false);
+        UIK.text_set_size_mult(&hint_ts, 0.75);
+        if is_locked {
+            UIK.text("At pedestal", hint_ts);
+        } else if loadout_equipped_count(player, player.loadout_tab) >= loadout_max_slots(player, player.loadout_tab) {
+            UIK.text("Unequip a role first", hint_ts);
+        } else {
+            UIK.text("Tap to equip", hint_ts);
+        }
+
+        UIK.panel_end();
+        UIK.overlay_end();
+    } else if is_locked {
         UIK.overlay_begin(.CENTER, v2.{0, 0});
         lock_col := UIK.layout_column();
         lock_col.width  = UIK.fit();

@@ -1,0 +1,61 @@
+NINJA_ROLE_INDEX :: 21;
+NINJA_CLAIM_KEY :: "role_claim_ninja_v1";
+
+// This entitlement is separate from equipped roles: a full loadout never
+// loses a selection or prevents the free unlock from being saved.
+claim_ninja_role :: proc(player: Player) {
+    if player == null || player.ninja_claimed || player.transferring return;
+    player.ninja_claimed = true;
+    Save.set_int(player, NINJA_CLAIM_KEY, 1);
+    loadout_try_auto_equip(player, NINJA_ROLE_INDEX);
+    player.ninja_claim_feedback_started = get_time();
+    player.ninja_claim_feedback_until = get_time() + 1.1;
+    player.roles_guide_open = false;
+    player.loadout_open = false;
+    player.role_boost_shop_open = false;
+    desc := SFX.default_sfx_desc();
+    desc.specific_to_player = player;
+    desc.entity_to_follow = player.entity.id;
+    desc.volume = 0.5;
+    SFX.play(get_asset(SFX_Asset, "sfx/ninja_claim.wav"), desc);
+}
+
+draw_ninja_claim_feedback :: proc(player: Player) {
+    if player.ninja_claim_feedback_until <= get_time() return;
+    age := clamp((get_time() - player.ninja_claim_feedback_started) / 1.1, 0.0, 1.0);
+    previous_age := clamp((get_time() - get_fixed_delta_time() - player.ninja_claim_feedback_started) / 1.1, 0.0, 1.0);
+    UI.begin_world_space_ui(player.entity);
+    defer UI.end_world_space_ui();
+    UI.push_layer(100);
+    defer UI.pop_layer();
+    position := player.entity.world_position + v2.{0, 1.4 + Ease.out_cubic(age) * 1.0};
+    delta := v2.{0, (Ease.out_cubic(age) - Ease.out_cubic(previous_age)) * 1.0};
+    UI.push_interpolation_offset(player.entity.calculate_interpolation_offset() + delta);
+    defer UI.pop_interpolation_offset();
+    alpha := 1.0 - clamp((age - 0.8) / 0.2, 0.0, 1.0);
+    icon := get_asset(Texture_Asset, "ui/roles_small/ninja_icon.png");
+    UI.quad(Rect.{position, position}.grow(0.48).fit_aspect(icon.get_aspect()), icon, v4.{1, 1, 1, alpha});
+    ts := UI.default_text_settings();
+    ts.size = 0.26;
+    ts.color = v4.{0.65, 1.0, 0.85, alpha};
+    ts.outline_thickness = 0.025;
+    ts.outline_color.w = alpha;
+    UI.text(Rect.{position, position}.offset(0, 0.68).grow(0.2, 1.2, 0.2, 1.2), ts, "NINJA UNLOCKED");
+}
+
+Ninja_Pedestal_Puff :: class : Effect_Base {
+    effect_start :: method() { set_duration(0.75); }
+    effect_end :: method(interrupt: bool) { entity.destroy(); }
+}
+
+ninja_pedestal_puff :: proc(position: v2) {
+    puff := Scene.create_entity();
+    puff.set_world_position(position + v2.{0, 0.5});
+    animator := puff.add_component(Spine_Animator);
+    animator.set_skeleton(get_asset(Spine_Asset, "anims/ninja_shadow_step/BAT003_shadow_step.spine"));
+    animator.enable_skin("default");
+    animator.refresh_skins();
+    animator.set_animation("shadow_step_effect", false, 0);
+    animator.layer = 1;
+    add_passive_effect(puff, new(Ninja_Pedestal_Puff));
+}

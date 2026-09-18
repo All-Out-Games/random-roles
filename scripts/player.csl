@@ -27,6 +27,9 @@ Player :: class : Player_Base {
     hunter_bought: bool;
     mech_bought: bool;
     guardian_bought: bool;
+    ninja_claimed: bool;
+    ninja_claim_feedback_started: float;
+    ninja_claim_feedback_until: float;
 
     loadout_extra_traitor_owned:   bool;
     loadout_extra_civilian_owned:  bool;
@@ -47,6 +50,7 @@ Player :: class : Player_Base {
         this.comms_channel_listen_mask = HUB_VOICE_CHANNEL;
         this.comms_channel_speak_mask = HUB_VOICE_CHANNEL;
 
+        this.ninja_claimed = Save.get_int(this, NINJA_CLAIM_KEY, 0) == 1;
         loadout_load(this);
         rg_load_new_seen(this);
 
@@ -68,6 +72,15 @@ Player :: class : Player_Base {
     ao_update :: proc(using this: Player, delta_time: float) {
         // Hub-only runtime: no per-frame gameplay systems. - checking products for correction
         check_owned_products(this);
+        if this.ninja_claim_feedback_until > 0 && get_time() >= this.ninja_claim_feedback_until {
+            this.ninja_claim_feedback_until = 0;
+            if !this.transferring {
+                this.roles_guide_open = false;
+                this.role_boost_shop_open = false;
+                this.loadout_tab = LOADOUT_TAB_CIVILIAN;
+                this.loadout_open = true;
+            }
+        }
     }
 
     ao_late_update :: proc(using this: Player, delta_time: float) {
@@ -80,6 +93,10 @@ Player :: class : Player_Base {
 
         // Draw world-space leaderboard UI from the player update context.
         if this.is_local_or_server() {
+            for pedestal: component_iterator(Role_Pedestal) {
+                pedestal.draw_for_player(this);
+            }
+            draw_ninja_claim_feedback(this);
             for lb: component_iterator(Global_Leaderboard) {
                 lb.draw();
             }
