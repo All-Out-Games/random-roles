@@ -6,7 +6,7 @@ You will be developing a multiplayer game in a custom scripting language (.csl)
 - All gameplay state is automatically synced. You do not need to write RPCs or manually replicate state.
 - The client runs the same gameplay code as the server. The server's authoritative result pushed to the client every 4 frames — you get correctness **and** responsiveness for free.
 - Do not forget that **multiple players will be connecting**. Avoid global state that will break with multiple players. Store these as fields on the player.
-- `ao_start()` is not replayed for late-joining clients (nor after a script hotload; declared field initializers are re-seeded, `ao_start`-derived values are not) — rebuild client-local presentation from synced state in `ao_on_state_sync()` (see the client-specific-state skill); spawn/destroy networked entities in the shared predicted path (never gated to server or local); and store cross-entity ownership as user-id strings (`player.get_user_id()`), never as synced Player/Entity references or entity-creation order.
+- `ao_start()` is not replayed for late-joining clients (nor after a script hotload: live instances keep their current values for every field that still exists with the same type, so only newly added or retyped fields pick up their declared initializer; a changed initializer on an existing field or an `ao_start`-derived value needs a game restart) — rebuild client-local presentation from synced state in `ao_on_state_sync()` (see the client-specific-state skill); spawn/destroy networked entities in the shared predicted path (never gated to server or local); and store cross-entity ownership as user-id strings (`player.get_user_id()`), never as synced Player/Entity references or entity-creation order.
 
 There are two player methods that control where code runs:
 ```csl
@@ -40,6 +40,8 @@ spine := get_asset(Spine_Asset, "anims/dog/dog.spine");
 ```
 
 ## Entities
+Players auto-flip X scale; child visuals should keep local X positive. Don't flip yourself.
+
 Runtime spawned entities:
 ```csl
 e := Scene.create_entity();
@@ -103,9 +105,9 @@ ao_end - when destroyed
 ```csl
 // orbiter.csl
 Orbiter :: class : Component {
-    follow_entity: Entity @ao_serialize; // Exposes a field in the editor (can be modified with the modify_scene mcp tool). Prefer serialized fields, do not look up entities with e.get_name(); 
-    radius: float @ao_serialize;
-    speed: float @ao_serialize;
+    @ao_serialize follow_entity: Entity; // Exposes a field in the editor (can be modified with the modify_scene mcp tool). Prefer serialized fields, do not look up entities with e.get_name();
+    @ao_serialize radius: float;
+    @ao_serialize speed: float;
     angle: float;
     
     ao_start :: method() {
@@ -137,10 +139,8 @@ Orbiter :: class : Component {
 add_orbiter :: proc(entity: Entity, follow_entity: Entity) -> Orbiter {
     return entity.add_component(
         Orbiter,
-        userdata=follow_entity,
-        on_before_start=proc(component: Component, userdata: Object) {
-            orbiter := component.(Orbiter);
-            orbiter.follow_entity = userdata.(Entity);
+        on_before_start=proc(orbiter: Orbiter) {
+            orbiter.follow_entity = follow_entity;
         },
     );
 }
@@ -225,6 +225,7 @@ When players receive items or currencies you MUST play a sick animation of the i
 
 ## UI
 - Reference the `uidoc` skill for screen-space game UI.
+- Reference the `tutorials` skill for onboarding, guided steps, tutorial progress, Start/Restart, and world/UI guidance.
 - Reference the `world-space-ui` skill for world-space overlays, tutorial arrows, and immediate-mode helper drawing. Use interpolation for moving/following visuals.
 
 ## Interpolation
@@ -248,7 +249,8 @@ Prefer concise words over abbreviation. Prefer using icons where you can.
 - For placing items in the world use the `inventory-droppable-placeable-items` skill.
 
 ## Math Functions
-`sin`, `cos`, `pow`, `sqrt`, `lerp`, `clamp`, `abs`, `min`, `max`, `length`, `length_squared`, `normalize`
+`ceil`, `floor`, `round`, `sin`, `cos`, `atan2`, `pow`, `sqrt`, `Math.exp`, `Math.log`, `lerp`, `clamp`, `abs`, `sign`, `min`, `max`, `length`, `length_squared`, `normalize`, `dot`, `to_degrees`, `to_radians`, `linear_step`, `next_power_of_two`, `mix_u64`, `rng_mix`.
+Floating-point rounding and angle conversions have `f32`/`f64` overloads and preserve the input precision. `round` chooses the nearest integer, with halfway cases away from zero (`round(-2.5)` is `-3.0`). Use `ceil(x).(int)` when an integer is needed and the result is finite and fits. Integer casts truncate toward zero; `floor` rounds toward negative infinity. See [the math reference](docs/scripting/random-math-and-more.md#math-functions) for signatures and behavior.
 
 ### Player_Base Reference
 - p.is_local_or_server() -> bool // true on the local client and on the server; must only be used for UI. 
@@ -257,10 +259,14 @@ Prefer concise words over abbreviation. Prefer using icons where you can.
 - p.get_user_id() -> string
 - p.avatar_color -> Color_Replace_Color 
 - p.device_kind -> .PHONE, .TABLET, .PC 
-- p.add_freeze_reason(reason: string) - NOT idempotent. If you call this repeatedly the player will get permanently stuck.
+- p.add_freeze_reason(reason: string) / p.remove_freeze_reason(reason: string) - counted, NOT idempotent: one remove per add. Calling add every frame will permanently stick the player (the engine logs a warning once a reason stacks 32 deep).
+- p.has_freeze_reason(reason: string) -> bool - check before adding if you need set-like (idempotent) behavior. Every `*_reason` family below has a matching `has_*_reason` and `has_any_*_reason()` query.
+- p.add_disable_movement_input_reason(reason: string) / p.remove_disable_movement_input_reason(reason: string) - for a multi-frame input lock outside an Effect, add once and remove once; never add every frame.
+- p.override_movement_input_for_next_step(input: v2) - replaces input for exactly the next movement step, including with `{0,0}`. It bypasses disable-movement-input reasons; call it once per step for continuous scripted movement, not to implement a stun.
 - p.add_ghost_reason(reason: string)
 - p.remove_ghost_reason(reason: string)
-  - Rreasons are synchronized player state and are restored automatically for late joiners. Do not reapply them in `ao_on_state_sync()`.
+- p.has_ghost_reason(reason: string) -> bool
+  - Reasons are synchronized player state and are restored automatically for late joiners. Do not reapply them in `ao_on_state_sync()`.
   - They are counted, not idempotent: every add stores another occurrence and each remove removes one matching occurrence. Adding the same reason twice requires two removes. Removing an absent reason is a safe no-op.
   - While any reason remains, the built-in player rig is half-visible to that player and other ghosted players, and hidden (along with its built-in name/message) from non-ghosted players. This does not change collision, movement, targeting/damage, or entity/component iteration; custom visuals and gameplay filters must handle ghosting explicitly.
 - p.add_invisibility_reason(reason: string)
@@ -279,7 +285,7 @@ Set `leaderboard_id` on the component (in the scene, or via `add_component`'s `o
 - If asked for Brainrot use get_remote_assets_that_work_well_with tool with catalogId 05604152b758f509 (these are usually collection based games where brainrots obtained are placed in your plot and generate money)
 - All games with plots start the player in their plot and have a button to teleport back. Plots MUST have very clear visual boundaries
 - Only use the Notifier API for critical messages there is no other way to convey. Skip notifications if there's a more natural way to convey something
-- For player onboarding use world-space objective arrows insetad of tutorial text. Reference the `world-space-ui` skill and use `Tutorial_Arrow.default_options()` + `Tutorial_Arrow.draw(player, target_position, options)`. Pay special attention to avoid pointing an arrow somewhere a player can't go (already mined resource, collider blocking, teleport actually required to get there)
+- For guided onboarding use the managed `Tutorial` API in the `tutorials` skill. It owns per-player progress, saves, instruction/progress presentation, and world/UI cues. Use standalone cues when requested or for isolated hints. Point to a reachable target or waypoint.
 - Any games involving weapons MUST use the reusable-weapons library: `curl.exe -fL https://github.com/All-Out-Games/reusable-weapons-csl/archive/refs/heads/master.zip -o reusable-weapons.zip && tar.exe -xf reusable-weapons.zip`, then follow `reusable-weapons-csl-master/README.md`
 - Leverage the tools available to you, like asset generation to make the game unique and incredibly high quality. 
 
