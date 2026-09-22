@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Floor/grass_weird.png",
     "depth_offset": -1.7382686138153076,
-    "tint": {
+    "color": {
       "X": 0.1098039150238037,
       "Y": 0.8039215803146362,
       "Z": 0.5107684731483459,

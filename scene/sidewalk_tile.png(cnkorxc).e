@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Pack Indoor/Ground/sidewalk2_tile.png",
-    "tint": {
+    "color": {
       "Y": 0.9912590980529785,
       "Z": 0.7972830533981323
     },

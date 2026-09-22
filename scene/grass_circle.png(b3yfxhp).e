@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Floor/grass_circle.png",
     "depth_offset": -4.4314332008361816,
-    "tint": {
+    "color": {
       "X": 0.1098039150238037,
       "Y": 0.8039215803146362,
       "Z": 0.5107684731483459,

@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Pack Indoor/Ground/brick_trim_corners.png",
     "depth_offset": 0.1295730024576187,
-    "tint": {
+    "color": {
       "X": 0.7293625473976135,
       "Y": 0.8017867803573608
     },

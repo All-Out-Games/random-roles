@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/Shapes/shape_circle_blurred.png",
-    "tint": {
+    "color": {
       "X": 0.2102695107460022,
       "Y": 0.6068751811981201,
       "Z": 0.7724672555923462,

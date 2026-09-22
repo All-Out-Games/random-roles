@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/grassy_bottom_2.png",
-    "tint": {
+    "color": {
       "X": 0.2627450823783875,
       "Y": 0.5058823823928833,
       "Z": 0.0862745046615601

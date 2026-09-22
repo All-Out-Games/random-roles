@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Pack Indoor/Ground/pavement_floor.png",
-    "tint": {
+    "color": {
       "X": 0.9668489098548889,
       "Z": 0.5935214757919312
     },

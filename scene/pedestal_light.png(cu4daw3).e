@@ -24,7 +24,7 @@
   "data": {
     "texture": "sprites/pedestal_light.png",
     "depth_offset": -1,
-    "tint": {
+    "color": {
       "Y": 0,
       "Z": 0,
       "W": 0.1883809864521027

@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Pack Indoor/Props/RoundTree6.png",
-    "tint": {
+    "color": {
       "X": 0.5098040103912354,
       "Y": 0.5882349014282227,
       "Z": 4.3137254714965820

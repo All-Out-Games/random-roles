@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Pack Indoor/Ground/brick_trim_corners.png",
-    "tint": {
+    "color": {
       "X": 0.4420064687728882,
       "Y": 0.5921582579612732
     },

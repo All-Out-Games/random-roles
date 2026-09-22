@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Pack Indoor/Props/RoundTree1.png",
     "depth_offset": 0.4794645309448242,
-    "tint": {
+    "color": {
       "X": 1.2968456745147705
     }
   }

@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/Shapes/shape_circle.png",
-    "tint": {
+    "color": {
       "X": 0.0588235259056091,
       "Y": 0.2980392277240753,
       "Z": 0.1686274409294128

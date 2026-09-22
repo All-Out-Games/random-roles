@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Pack Indoor/Props/Cloud2_optimized.png",
-    "tint": {
+    "color": {
       "X": 0.1647058725357056,
       "Y": 0.4470586478710175,
       "Z": 0.7450980544090271

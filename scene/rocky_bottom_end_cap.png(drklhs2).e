@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Props/rocky_bottom_end_cap.png",
-    "tint": {
+    "color": {
       "X": 0.1306268274784088,
       "Y": 0.0771274268627167,
       "Z": 0.3101296126842499

@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Building/city_bldg5.png",
     "depth_offset": -4.0114784240722656,
-    "tint": {
+    "color": {
       "X": 0.3101296126842499,
       "Y": 0.2966808676719666,
       "Z": 0.2966808676719666

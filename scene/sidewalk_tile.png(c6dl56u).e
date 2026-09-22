@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/floor/sidewalk_tile.png",
-    "tint": {
+    "color": {
       "X": 0.4367817640304565,
       "Y": 0.5532299280166626
     },
