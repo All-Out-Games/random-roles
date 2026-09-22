@@ -1940,7 +1940,7 @@ Mimicer_Kill_Ability :: class : Ability_Base {
 		if mm == null return false;
 		if mm.void_lunge_active return false;
 		if mm.unleash_placing return false;
-		return get_closest_kill_target(this, player) != null;
+		return get_closest_kill_target(this, player) != null || rr_ninja_closest_decoy(player, player.entity.world_position, rr_ninja_mimicer_kill_range(player)) != null;
 	}
 
 	get_closest_kill_target :: proc(instance: Mimicer_Kill_Ability, player: Player) -> Player {
@@ -1955,6 +1955,7 @@ Mimicer_Kill_Ability :: class : Ability_Base {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
+			if rr_ninja_smoke_protects(target) continue;
 			if target.player_type == Player_Type.TRAITOR continue;
 			finder.check(target, target.entity.world_position);
 		}
@@ -1973,6 +1974,10 @@ Mimicer_Kill_Ability :: class : Ability_Base {
 
 		if params.clicked && params.can_use {
 			closest := get_closest_kill_target(this, player);
+            if rr_ninja_hit_decoy(player, player.entity.world_position, rr_ninja_mimicer_kill_range(player), closest) {
+                current_cooldown = effective_cd;
+                return;
+            }
 			if closest != null {
 				player.set_facing_right(closest.entity.world_position.x > player.entity.world_position.x);
 

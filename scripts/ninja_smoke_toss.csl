@@ -1,0 +1,87 @@
+// Reuse the existing throw gesture, hide its oversized keg, and carry our own
+// explicitly sized prop at the posed hand. All overrides are restored on interruption.
+rr_ninja_start_throw :: proc(p: Player) -> [..]u64 {
+    sm := p.animator.state_machine;
+    if sm.try_get_layer("ninja_smoke_throw") == null {
+        layer := sm.create_layer("ninja_smoke_throw", 3);
+        empty := layer.create_state("__CLEAR_TRACK__", true);
+        layer.set_initial_state(empty);
+        toss := layer.create_state("004RAND_pirate/throw_keg", false, 0.68);
+        start := sm.create_variable("ninja_toss", .TRIGGER);
+        stop := sm.create_variable("ninja_toss_stop", .TRIGGER);
+        layer.create_global_transition(toss, false).create_trigger_condition(start);
+        layer.create_transition(toss, empty, true);
+        layer.create_global_transition(empty, false).create_trigger_condition(stop);
+    }
+    sm.set_trigger("ninja_toss");
+    overrides: [..]u64;
+    blank := get_asset(Texture_Asset, "sprites/ninja/transparent.png");
+    names: []string = {"RAND004/Pirate/powder_keg/powder_keg", "RAND004/Pirate/powder_keg/fuse", "RAND004/Pirate/powder_keg/fuse_fire_1", "RAND004/Pirate/powder_keg/fuse_fire_2", "RAND004/Pirate/powder_keg/fuse_fire_3"};
+    for name: names { overrides.append(p.animator.instance.override_attachment_sprite(name, blank)); }
+    return overrides;
+}
+
+rr_ninja_end_throw :: proc(p: Player, overrides: []u64) {
+    for id: overrides { p.animator.instance.clear_attachment_sprite_override(id); }
+    p.animator.state_machine.set_trigger("ninja_toss_stop");
+}
+
+rr_ninja_create_hand_prop :: proc(p: Player, path: string, width: float) -> Entity {
+    prop := Scene.create_entity();
+    prop.set_parent(p.entity, false);
+    prop.set_local_position(p.animator.get_bone_local_position("Hand_R"));
+    sprite := prop.add_component(Sprite_Renderer);
+    sprite.set_texture(get_asset(Texture_Asset, path));
+    sprite.layer = 1;
+    natural := sprite.get_world_size();
+    scale := width / max(abs(natural.x), 0.01);
+    prop.set_local_scale(v2.{scale, scale});
+    return prop;
+}
+
+Ninja_Smoke_Toss_Effect :: class : Effect_Base {
+    bomb: Entity;
+    deployed: bool;
+    released: bool;
+    release_position: v2;
+    throw_overrides: [..]u64;
+    effect_start :: method() {
+        player_specific.freeze_player = true;
+        set_duration(0.70);
+        throw_overrides = rr_ninja_start_throw(player);
+        bomb = rr_ninja_create_hand_prop(player, NINJA_BOMB_TEXTURE, 0.32);
+    }
+    effect_update :: method(dt: float) {
+        if !rr_ninja_throw_can_continue(player) {
+            remove_effect(true);
+            return;
+        }
+        elapsed := get_elapsed_time();
+        if !released {
+            release_position = player.animator.get_bone_local_position("Hand_R");
+            if elapsed >= 0.25 released = true;
+        }
+        if #alive(bomb) {
+            if !released { bomb.set_local_position(release_position); }
+            else {
+                t := clamp((elapsed - 0.25) / 0.30, 0.0, 1.0);
+                bomb.set_local_position(lerp(release_position, v2.{}, t) + v2.{0, sin(t * PI) * 0.25});
+                bomb.set_local_rotation(t * 160.0);
+            }
+        }
+        if !deployed && elapsed >= 0.55 {
+            deployed = true;
+            if #alive(bomb) bomb.destroy();
+            e := Scene.create_entity();
+            e.set_world_position(entity.world_position);
+            e.add_component(Ninja_Smoke, userdata=player, on_before_start=proc(c: Component, data: Object) {
+                c.(Ninja_Smoke).owner_user_id = data.(Player).get_user_id();
+            });
+            rr_ninja_play_sound(player, "ninja_spawn_29dab2.wav");
+        }
+    }
+    effect_end :: method(interrupt: bool) {
+        if #alive(bomb) bomb.destroy();
+        rr_ninja_end_throw(player, throw_overrides);
+    }
+}

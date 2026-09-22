@@ -1,0 +1,85 @@
+// Match the rendered BlackFog footprint to the gameplay radius.
+Ninja_Smoke :: class : Component {
+    owner_user_id: string;
+    spawned_at: float;
+    expires_at: float;
+    fog: Spine_Animator;
+    ao_start :: method() {
+        spawned_at = get_time();
+        expires_at = spawned_at + NINJA_SMOKE_SECONDS;
+        add_passive_effect(entity, new(Ninja_Smoke_Lifetime));
+        fog = entity.add_component(Spine_Animator);
+        fog.set_skeleton(get_asset(Spine_Asset, NINJA_BLACK_FOG_RIG));
+        fog.enable_skin("default");
+        fog.refresh_skins();
+        fog.scale = v2.{NINJA_SMOKE_RADIUS * 2 / 3.75, NINJA_SMOKE_RADIUS * 2 / 3.68};
+        fog.layer = 12;
+        sm := State_Machine.create();
+        layer := sm.create_layer("cloud", 0);
+        appear := layer.create_state("smoke_appear", false, 1.08);
+        idle := layer.create_state("smoke_idle", true);
+        vanish := layer.create_state("smoke_disappear", false, 0.58);
+        layer.set_initial_state(appear);
+        layer.create_transition(appear, idle, true);
+        ending := sm.create_variable("end", .TRIGGER);
+        layer.create_global_transition(vanish, false).create_trigger_condition(ending);
+        fog.set_state_machine(sm, true);
+        fog.color_multiplier = v4.{1, 1, 1, 1};
+    }
+    ao_update :: method(dt: float) {
+        if game_state != .INGAME || get_time() >= expires_at return;
+        if expires_at - get_time() <= 0.58 && get_time() - get_fixed_delta_time() < expires_at - 0.58 {
+            fog.state_machine.set_trigger("end");
+        }
+        // The dense world asset obscures everyone. Smoke never changes light
+        // radii; only Ninja viewers receive the player highlights below.
+    }
+}
+
+rr_ninja_smoke_highlight_visible :: proc(viewer: Player, target: Player) -> bool {
+    if game_state != .INGAME || viewer.player_state != .ALIVE || !rr_ninja_has_power(viewer) return false;
+    if target.player_state != .ALIVE || !rr_ninja_smoke_at(target.entity.world_position) return false;
+    // Keep ordinary sight range and walls: this only reveals players hidden by
+    // the cloud, never players elsewhere on the map or behind room geometry.
+    radius := viewer.get_local_light_radii().y;
+    if length_squared(target.entity.world_position - viewer.entity.world_position) > radius * radius return false;
+    return rr_has_line_of_sight(viewer.entity.world_position, target.entity.world_position);
+}
+
+// Called in the viewer's Player late_update UI path. Reusing the current posed
+// rig preserves cosmetics/animation and needs no spawned or synced highlight.
+rr_ninja_draw_smoke_highlights :: proc(viewer: Player) {
+    if game_state != .INGAME || viewer.player_state != .ALIVE || !rr_ninja_has_power(viewer) return;
+    for target: component_iterator(Player) {
+        if !rr_ninja_smoke_highlight_visible(viewer, target) continue;
+        rig := rr_ninja_visible_player_rig(viewer, target);
+        if rig == null continue;
+        UI.begin_world_space_ui(rig.entity);
+        defer UI.end_world_space_ui();
+        UI.push_layer(13); // above BlackFog, below ordinary HUD
+        defer UI.pop_layer();
+        is_base := rig == target.animator;
+        if is_base UI.push_unlit_player_material(target);
+        pos := rig.entity.world_position;
+        scale := rig.entity.world_scale * rig.scale;
+        // Four close translucent copies give the visible body a soft rim.
+        UI.push_color_multiplier(v4.{0.35, 1.0, 0.85, 0.32});
+        for i: 0..<4 {
+            angle := i.(float) * PI * 0.5;
+            UI.spine(pos + v2.{cos(angle), sin(angle)} * 0.035, rig.instance, scale);
+        }
+        UI.pop_color_multiplier();
+        UI.push_color_multiplier(v4.{0.65, 1.0, 0.9, 0.9});
+        UI.spine(pos, rig.instance, scale);
+        UI.pop_color_multiplier();
+        if is_base UI.pop_material();
+    }
+}
+
+Ninja_Smoke_Lifetime :: class : Effect_Base {
+    effect_start :: method() { set_duration(NINJA_SMOKE_SECONDS); }
+    effect_update :: method(dt: float) {
+        if game_state != .INGAME { entity.destroy(); return; }
+    }
+    effect_end :: method(interrupt: bool) { if !interrupt entity.destroy(); }
+}

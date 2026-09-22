@@ -1,0 +1,99 @@
+// Owner/editor-only regression fixture. Never attached during normal gameplay.
+Ninja_Revision_Test :: class : Component {
+    started: float;
+    stage: int;
+    camera_before: float;
+    dagger_stuns: bool;
+    behind_target: bool;
+    camera_unchanged: bool;
+    stun_released: bool;
+    bomb_width: float;
+    owner_blinded: bool;
+    peer_blinded: bool;
+    smoke_width: float;
+    smoke_duration: float;
+    smoke_still_active: bool;
+    smoke_expired: bool;
+    vision_restored: bool;
+    inputs_released: bool;
+    owner_vision_before: v2;
+    peer_vision_before: v2;
+    smoke_preserves_vision: bool;
+    smoke_opaque: bool;
+    ninja_highlights_peer: bool;
+    peer_cannot_highlight: bool;
+    ao_update :: method(dt: float) {
+        if stage == 0 return;
+        if game_state != .INGAME { stage = 0; return; }
+        p := entity.get_component(Player);
+        peer: Player;
+        for other: component_iterator(Player) { if other != p { peer = other; break; } }
+        if !#alive(peer) { stage = 0; return; }
+        elapsed := get_time() - started;
+        if stage == 1 && elapsed >= 0.8 {
+            dagger_stuns = has_effect(peer.entity, Ninja_Dagger_Stun);
+            behind_target = p.entity.world_position.x < peer.entity.world_position.x - 0.5 &&
+                length(p.entity.world_position - peer.entity.world_position) < 1.3;
+            camera_unchanged = abs(p.camera.size - camera_before) < 0.001;
+            stage = 2;
+        }
+        if stage == 2 && elapsed >= 3.6 {
+            stun_released = !has_effect(peer.entity, Ninja_Dagger_Stun) && Player.rr_get_stun_remaining(peer) <= 0;
+            p.entity.set_world_position(v2.{-43.8, 0}); p.entity.mark_teleported();
+            peer.entity.set_world_position(v2.{-42, 0}); peer.entity.mark_teleported();
+            owner_vision_before = p.get_local_light_radii();
+            peer_vision_before = peer.get_local_light_radii();
+            set_active_effect(entity, new(Ninja_Smoke_Toss_Effect));
+            started = get_time();
+            stage = 3;
+        }
+        if stage == 3 {
+            if toss, found := get_effect(entity, Ninja_Smoke_Toss_Effect); found {
+                if #alive(toss.bomb) bomb_width = abs(toss.bomb.get_component(Sprite_Renderer).get_world_size().x);
+            }
+            if get_time() - started < 1.0 return;
+            owner_blinded = has_effect(entity, Ninja_Blind_Effect);
+            peer_blinded = has_effect(peer.entity, Ninja_Blind_Effect);
+            smoke_preserves_vision = length_squared(p.get_local_light_radii() - owner_vision_before) < 0.001 &&
+                length_squared(peer.get_local_light_radii() - peer_vision_before) < 0.001;
+            ninja_highlights_peer = rr_ninja_smoke_highlight_visible(p, peer);
+            peer_cannot_highlight = !rr_ninja_smoke_highlight_visible(peer, p);
+            inputs_released = entity.get_active_effect() == null;
+            for cloud: component_iterator(Ninja_Smoke) {
+                smoke_width = NINJA_SMOKE_RADIUS * 2;
+                smoke_duration = cloud.expires_at - cloud.spawned_at;
+                smoke_opaque = cloud.fog.color_multiplier.w == 1.0;
+            }
+            stage = 4;
+        }
+        if stage == 4 && get_time() - started >= 9.8 {
+            smoke_still_active = rr_ninja_smoke_protects(p);
+            stage = 5;
+        }
+        if stage == 5 && get_time() - started >= 11.0 {
+            smoke_expired = !rr_ninja_smoke_protects(p);
+            vision_restored = !has_effect(entity, Ninja_Blind_Effect) && !has_effect(peer.entity, Ninja_Blind_Effect);
+            stage = 0;
+        }
+    }
+}
+
+ninja_revision :: proc(player: Player) {
+    ninja_fixture(player, "ninja");
+    peer: Player;
+    for p: component_iterator(Player) { if p != player { peer = p; break; } }
+    if !#alive(peer) return;
+    post_meeting_kill_lockout_ends_at = 0;
+    player.entity.set_world_position(v2.{-43.8, 0}); player.entity.mark_teleported();
+    peer.entity.set_world_position(v2.{-41.8, 0}); peer.entity.mark_teleported();
+    peer.set_facing_right(true);
+    test := player.entity.get_component(Ninja_Revision_Test);
+    if test == null test = player.entity.add_component(Ninja_Revision_Test);
+    test.camera_before = player.camera.size;
+    test.started = get_time();
+    test.stage = 1;
+    effect := new(Ninja_Dagger_Throw);
+    effect.destination = player.entity.world_position + v2.{4, 0};
+    set_active_effect(player.entity, effect);
+} @chat_command @owner_or_editor
+

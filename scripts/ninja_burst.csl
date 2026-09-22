@@ -1,0 +1,28 @@
+// Short deterministic accents for the Ninja's arrival.
+Ninja_Particle_Lifetime :: class : Effect_Base {
+    seconds: float;
+    effect_start :: method() { set_duration(seconds); }
+    effect_end :: method(interrupt: bool) { if !interrupt entity.destroy(); }
+}
+
+rr_ninja_spawn_arrival :: proc(pos: v2) {
+    e := Scene.create_entity();
+    e.set_world_position(pos);
+    particles := e.add_component(Particle_System_Component);
+    desc := Particle_System_Desc.preset_sparks();
+    desc.emission = Particle_Emission.burst(12);
+    desc.prewarm = false;
+    desc.auto_disable_when_finished = true;
+    desc.spawn_position_radius = 0.15;
+    desc.direction_spread_degrees = 360;
+    desc.speed = Particle_System_Desc.range_float(2.0, 4.5);
+    desc.gravity = v2.{};
+    desc.lifetime = Particle_System_Desc.range_float(0.22, 0.38);
+    desc.size_over_lifetime = Particle_System_Desc.over_lifetime_v2(v2.{0.3, 0.07}, v2.{0.08, 0.025});
+    desc.color_over_lifetime = Particle_System_Desc.over_lifetime_v4(v4.{0.8, 0.72, 1, 0.9}, v4.{0.45, 0.35, 0.7, 0});
+    particles.layer = 1;
+    particles.play(desc);
+    life := new(Ninja_Particle_Lifetime);
+    life.seconds = 0.45;
+    add_passive_effect(e, life);
+}

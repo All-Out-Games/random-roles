@@ -219,6 +219,9 @@ Player :: class : Player_Base {
 
 	// --- Intro role animation (per-player, used by Intro_Popup) ---
 	intro_role_spine: Spine_Instance;
+	intro_ninja: Ninja_Intro;
+	intro_ninja_preview_at: float = -1;
+	intro_ninja_preview_started: float;
 	intro_role_spine_ready: bool;
 	intro_is_creature_rig: bool;
 	intro_second_anim_name: string;
@@ -250,6 +253,7 @@ Player :: class : Player_Base {
 
 	// Global ability gate (called after cooldown + ability can_use).
 	ao_can_use_ability :: proc(using this: Player, ability: Ability_Base) -> bool {
+		if has_effect(entity, Ninja_Shadow_Step_Effect) || has_effect(entity, Ninja_Smoke_Toss_Effect) || has_effect(entity, Ninja_Dagger_Throw) || has_effect(entity, Ninja_Dagger_Stun) || has_effect(entity, Ninja_Clone_Cast_Effect) return false;
 		// While on fire you can only move — but only for civilians. Killers (TRAITOR) and anarchists
 		// (incl. Big Charlie) keep their abilities, so a Pyromaniac campfire/fiery room on top of them
 		// can't fully neuter them.
@@ -437,6 +441,7 @@ Player :: class : Player_Base {
 	}
 
     ao_end :: proc(using this: Player) {
+		rr_intro_cleanup_role_spine(this);
 		rr_drag_body_force_drop_for_player(this);
 
 		rr_portal_maker_cleanup_for_player(this);
@@ -537,6 +542,7 @@ Player :: class : Player_Base {
 			rr_draw_civilian_progress_bar(this);
 			update_tasks_ui(this);
 			rr_draw_comms_deaf_icons_if_needed(this, rr_comms_outage_active);
+			rr_ninja_draw_smoke_highlights(this);
 			draw_player_role_hud(this);
 			if this.is_local() {
 				// Draw fiery-room exposure countdown above the local player's head.
@@ -582,10 +588,12 @@ Player :: class : Player_Base {
                 role_spin_popup.set_local_player(this);
                 role_spin_popup.update(delta_time);
             }
-            if game_state == Game_State.ANIM_INTRO {
+            if intro_ninja_preview_at >= 0 || intro_ninja_preview_at == -2 {
+                rr_ninja_draw_intro_preview(this);
+            } else if game_state == Game_State.ANIM_INTRO {
                 rr_intro_ensure_role_spine(this);
                 if intro_role_spine_ready {
-                    intro_role_spine.update(delta_time);
+                    if intro_ninja == null intro_role_spine.update(delta_time);
                     // Trigger second animation for transforming roles
                     if intro_second_anim_at > 0.0 && !intro_second_anim_started {
                         elapsed := get_time() - intro_popup.show_start_time;
@@ -615,6 +623,8 @@ Player :: class : Player_Base {
                 }
                 intro_popup.set_local_player(this);
                 intro_popup.update(delta_time);
+            } else if intro_ninja != null {
+                rr_intro_cleanup_role_spine(this);
             }
         }
         update_tasks(this);
@@ -649,6 +659,10 @@ Player :: class : Player_Base {
 
 		// Hunter per-frame update (campfire buff aura, scent footprints).
 		rr_hunter_update(this, delta_time);
+		// A hidden or disabled Ninja aim button must never retain targeting ownership.
+		if active_ability != null && active_ability.type == Ninja_Shadow_Step_Ability {
+			if !rr_ninja_can_act(this) || !this.ao_can_use_ability(active_ability) active_ability = null;
+		}
 
 		// Transformers: The Mech / Guardian update.
 		rr_mech_update(this, delta_time);
@@ -1371,6 +1385,8 @@ Player :: class : Player_Base {
 	}
 
 	kill_with_killer_and_corpse :: proc(using this: Player, killer_player_entity_id: u64, spawn_corpse: bool) {
+		// Includes delayed and area kills. Meeting ejections have no killer.
+		if killer_player_entity_id != 0 && rr_ninja_smoke_protects(this) return;
         //freeze_player = true;
 		// Hitman vs disguised Mimicer: Mimicer survives if disguised as contract target.
 		killer_check := get_player_by_entity_id(killer_player_entity_id);
@@ -1444,6 +1460,7 @@ player_role_to_string :: proc(player: Player) -> string {
 		case .CORONER:    return "CORONER";
 		case .PORTAL_MAKER: return "WARPER";
 		case .HUNTER:     return "HUNTER";
+		case .NINJA:      return "NINJA";
 		case .GUARDIAN:   return "GUARDIAN";
 		case .PRANKSTER:  return "PRANKSTER";
 		case .PYROMANIAC: return "PYROMANIAC";
@@ -1468,6 +1485,7 @@ rr_get_stun_remaining :: proc(p: Player) -> float {
 
 	now := get_time();
 	best := 0.0;
+	if ns, found := get_effect(p.entity, Ninja_Dagger_Stun); found { best = ns.get_duration_remaining(); }
 
 	ws := p.entity.get_component(Werewolf_Infection_Stun);
 	if ws != null && ws.active {
@@ -2703,6 +2721,11 @@ rr_draw_role_abilities :: proc(player: Player, role: Player_Role, ptype: Player_
 		if rr_hunter_has_pierced_victim(player) {
 			draw_ability_button(player, Hunter_Kill_Shot_Ability, abilityIndex); abilityIndex += 1;
 		}
+	}
+	if ptype == Player_Type.CIVILIAN && role == Player_Role.NINJA {
+		draw_ability_button(player, Ninja_Shadow_Step_Ability, abilityIndex); abilityIndex += 1;
+		draw_ability_button(player, Ninja_Smoke_Bomb_Ability, abilityIndex); abilityIndex += 1;
+		draw_ability_button(player, Ninja_Clone_Jutsu_Ability, abilityIndex); abilityIndex += 1;
 	}
 	if ptype == Player_Type.CIVILIAN && role == Player_Role.GUARDIAN {
 		abilityIndex = rr_guardian_draw_abilities(player, abilityIndex);
@@ -5166,10 +5189,11 @@ rr_cleanup_door_unlock_interactable :: proc(player: Player) {
 
 // === Intro role animation (per-player Spine_Instance) ===
 
-rr_intro_ensure_role_spine :: proc(player: Player) {
+rr_intro_ensure_role_spine :: proc(player: Player, ninja_preview: bool = false) {
 	if player.intro_role_spine_ready { return; }
 
 	role := player.player_role;
+	if ninja_preview role = Player_Role.NINJA;
 	if role == Player_Role.NONE || role == Player_Role.PRESIDENT {
 		return;
 	}
@@ -5238,7 +5262,10 @@ rr_intro_ensure_role_spine :: proc(player: Player) {
 	}
 
 	// --- Non-transforming roles (role rig with intro/skill anim) ---
-	if role == Player_Role.SHERIFF {
+	if role == Player_Role.NINJA {
+		player.intro_ninja = new(Ninja_Intro);
+		player.intro_ninja.init(player);
+	} else if role == Player_Role.SHERIFF {
 		player.intro_role_spine.set_skeleton(get_asset(Spine_Asset, "anims/roles/Sheriff/RAND004_sheriff.spine"));
 		player.intro_role_spine.enable_skin("004RAND/sheriff");
 		rr_intro_copy_player_skins(player);
@@ -5336,8 +5363,13 @@ rr_intro_copy_player_skins :: proc(player: Player) {
 }
 
 rr_intro_cleanup_role_spine :: proc(player: Player) {
-	if player.intro_role_spine_ready {
-		player.intro_role_spine.destroy();
-		player.intro_role_spine_ready = false;
-	}
+    if player.intro_ninja != null {
+        player.intro_ninja.cleanup();
+        player.intro_ninja = null;
+    }
+    if player.intro_role_spine_ready {
+        player.intro_role_spine.destroy();
+        player.intro_role_spine_ready = false;
+    }
+    player.intro_role_spine = null;
 }

@@ -1,0 +1,135 @@
+// Never a Player: decoys cannot vote, complete tasks, change victory counts,
+// appear on the minimap, produce corpses, or grant any kill-based progression.
+Ninja_Decoy :: class : Component {
+    owner_user_id: string;
+    afterimage: bool;
+    spent: bool;
+    spawned_round: int;
+
+    ao_start :: method() { spawned_round = round_number; }
+    ao_update :: method(dt: float) {
+        if round_number != spawned_round || game_state == Game_State.LOBBY || game_state == Game_State.ANIM_VICTORY {
+            entity.destroy();
+            return;
+        }
+        if spent return; // A revealed log survives meetings, until the round ends.
+        owner := rr_ninja_owner(owner_user_id);
+        if game_state != Game_State.INGAME || !#alive(owner) || owner.player_state != Player_State.ALIVE || !rr_ninja_has_power(owner) {
+            spent = true;
+            entity.destroy();
+            return;
+        }
+    }
+    burst :: method() {
+        if spent || afterimage return;
+        spent = true;
+        a := entity.get_component(Spine_Animator);
+        if a != null a.set_enabled(false);
+        np := entity.get_component(Fake_Nameplate);
+        if np != null np.hidden = true;
+        entity.set_local_scale(v2.{1, 1});
+        s := entity.add_component(Sprite_Renderer);
+        s.set_texture(get_asset(Texture_Asset, "decoy_log_86bf47.png"));
+        s.layer = 0;
+        rr_ninja_spawn_puff(entity.world_position);
+        desc := SFX.default_sfx_desc();
+        desc.entity_to_follow = entity.id;
+        desc.volume = 0.3;
+        rr_play_sfx("ninja_despawn_473cf4.wav", desc);
+        if owner := rr_ninja_owner(owner_user_id); #alive(owner) {
+            Notifier.notify(owner, "Your clone was destroyed!");
+        }
+    }
+}
+
+rr_ninja_spawn_decoy :: proc(p: Player, afterimage: bool) {
+    e := Scene.create_entity();
+    e.set_world_position(p.entity.world_position);
+    e.set_local_scale(p.entity.local_scale);
+    d := e.add_component(Ninja_Decoy);
+    d.owner_user_id = p.get_user_id();
+    d.afterimage = afterimage;
+    a := e.add_component(Spine_Animator);
+    a.set_skeleton(p.animator.get_skeleton());
+    a.disable_all_skins();
+    for skin: p.animator.get_skins() { a.enable_skin(skin); }
+    a.refresh_skins();
+    a.set_color_replace_color(p.avatar_color);
+    a.scale = p.animator.scale;
+    a.set_animation("Idle", true, 0);
+    if !afterimage {
+        np := e.add_component(Fake_Nameplate);
+        np.display_name = p.get_username();
+    }
+    if afterimage {
+        a.color_multiplier = v4.{0.25, 0.3, 0.5, 0.35};
+        life := new(Ninja_Visual_Lifetime);
+        life.seconds = 2.0;
+        add_passive_effect(e, life);
+    }
+}
+
+rr_ninja_closest_decoy :: proc(attacker: Player, origin: v2, range: float) -> Ninja_Decoy {
+    best: Ninja_Decoy;
+    best_dist := range * range;
+    for d: component_iterator(Ninja_Decoy) {
+        if d.spent || d.afterimage || rr_ninja_smoke_at(d.entity.world_position) continue;
+        if #alive(attacker) && d.owner_user_id == attacker.get_user_id() continue;
+        dist := length_squared(d.entity.world_position - origin);
+        if dist <= best_dist { best = d; best_dist = dist; }
+    }
+    return best;
+}
+
+rr_ninja_hit_decoy :: proc(attacker: Player, origin: v2, range: float, real_target: Player) -> bool {
+    d := rr_ninja_closest_decoy(attacker, origin, range);
+    if d == null return false;
+    if #alive(real_target) && length_squared(real_target.entity.world_position - origin) < length_squared(d.entity.world_position - origin) return false;
+    d.burst();
+    return true;
+}
+
+rr_ninja_hit_decoy_ray :: proc(attacker: Player, origin: v2, direction: v2, range: float, radius: float, real_target: Player) -> bool {
+    best: Ninja_Decoy;
+    best_along := range;
+    if #alive(real_target) {
+        delta := real_target.entity.world_position - origin;
+        best_along = min(best_along, max(0.0, delta.x * direction.x + delta.y * direction.y));
+    }
+    for d: component_iterator(Ninja_Decoy) {
+        if d.spent || d.afterimage || rr_ninja_smoke_at(d.entity.world_position) continue;
+        if #alive(attacker) && d.owner_user_id == attacker.get_user_id() continue;
+        delta := d.entity.world_position - origin;
+        along := delta.x * direction.x + delta.y * direction.y;
+        if along < 0 || along > best_along continue;
+        if length_squared(delta - direction * along) > radius * radius continue;
+        best = d;
+        best_along = along;
+    }
+    if best == null return false;
+    best.burst();
+    return true;
+}
+
+// Preserve an actual body's priority when a projectile reaches it before a clone
+// in the same simulation tick. Match each weapon's existing collision filters.
+rr_ninja_projectile_body :: proc(attacker: Player, origin: v2, head: v2, radius: float, hunter: bool) -> Player {
+    best: Player;
+    best_dist := 1000000.0;
+    for p: component_iterator(Player) {
+        if p == attacker || p.player_state != Player_State.ALIVE || rr_ninja_smoke_protects(p) continue;
+        if !in_range(p.entity.world_position - head, radius) continue;
+        if hunter {
+            if !rr_guardian_is_carrying(p) && !rr_hunter_is_player_pierced(p) continue;
+            if #alive(attacker) {
+                m := rr_mech_get_minion_effect(attacker);
+                if m != null && m.converted_by_mech_id == p.entity.id continue;
+            }
+        } else if #alive(attacker) && attacker.player_type == Player_Type.TRAITOR && p.player_type == Player_Type.TRAITOR {
+            if !rr_guardian_is_carrying(p) && !(MECH_MINIONS_KILLABLE && rr_mech_is_minion_active(p)) continue;
+        }
+        dist := length_squared(p.entity.world_position - origin);
+        if dist < best_dist { best = p; best_dist = dist; }
+    }
+    return best;
+}
