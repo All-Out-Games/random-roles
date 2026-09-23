@@ -24,7 +24,7 @@
   "data": {
     "texture": "sprites/phota/Wall/led_strip.png",
     "depth_offset": -0.0773853138089180,
-    "tint": {
+    "color": {
       "Y": 0.6140263080596924,
       "Z": 0
     },

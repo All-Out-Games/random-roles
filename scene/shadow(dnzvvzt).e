@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/Shapes/square_gradient_2.png",
-    "tint": {
+    "color": {
       "X": 0,
       "Y": 0,
       "Z": 0

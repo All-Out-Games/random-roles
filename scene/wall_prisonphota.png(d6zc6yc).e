@@ -24,7 +24,7 @@
   "data": {
     "texture": "sprites/phota/Wall/wall_prisonphota.png",
     "depth_offset": -0.8379077911376953,
-    "tint": {
+    "color": {
       "X": 0.0393552482128143,
       "Y": 0.1624796390533447,
       "Z": 0.2633766829967499

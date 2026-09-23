@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/grass_texture.png",
-    "tint": {
+    "color": {
       "Y": 0.9568834900856018,
       "Z": 0,
       "W": 0.0196078438311815

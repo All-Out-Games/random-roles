@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Archives/box_1.png",
     "depth_offset": 0.0553902462124825,
-    "tint": {
+    "color": {
       "Y": 0.8643751144409180,
       "Z": 0.4106584787368774
     }

@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/ground_texture_tile.png",
-    "tint": {
+    "color": {
       "X": 0,
       "Z": 0.9828574657440186,
       "W": 0.0247371383011341

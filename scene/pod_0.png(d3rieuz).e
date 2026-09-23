@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Archives/pod_0.png",
     "depth_offset": -1.8446013927459717,
-    "tint": {
+    "color": {
       "X": 0.6425974369049072,
       "Y": 0.6425974369049072,
       "Z": 0.6425974369049072

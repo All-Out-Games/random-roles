@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Props/torch/shape_circle.png",
-    "tint": {
+    "color": {
       "Y": 0.8945458531379700,
       "Z": 0,
       "W": 0.0247371681034565

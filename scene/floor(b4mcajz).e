@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/pentagon2_B1_floor.png",
-    "tint": {
+    "color": {
       "X": 0.0234369412064552,
       "Y": 0.0702093243598938,
       "Z": 0.1335065513849258

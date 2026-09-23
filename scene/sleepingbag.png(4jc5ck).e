@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Props/sleepingbag.png",
     "depth_offset": -0.0373744964599609,
-    "tint": {
+    "color": {
       "X": 0.6010390520095825,
       "Y": 0.5985267162322998,
       "Z": 0.5985267162322998

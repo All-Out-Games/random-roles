@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/frame_octagon_rightbot.png",
-    "tint": {
+    "color": {
       "X": 0.6685714721679688,
       "Y": 0.3896818757057190,
       "Z": 0

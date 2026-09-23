@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Decontamination/Decontamination_Room.png",
-    "tint": {
+    "color": {
       "W": 0.2640704214572906
     },
     "layer": -4

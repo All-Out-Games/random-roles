@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Wall/wall_angle.png",
     "depth_offset": -0.0904517769813538,
-    "tint": {
+    "color": {
       "X": 0.3581371307373047,
       "Y": 0.3138250112533569,
       "Z": 0.7361039519309998

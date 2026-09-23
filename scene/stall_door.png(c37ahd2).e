@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Toilets/stall_door.png",
     "depth_offset": -0.3995895385742188,
-    "tint": {
+    "color": {
       "X": 0.7763844728469849,
       "Y": 0.7807986140251160
     }

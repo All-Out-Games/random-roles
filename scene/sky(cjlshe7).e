@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/Shapes/square.png",
     "depth_offset": -3.3420000076293945,
-    "tint": {
+    "color": {
       "X": 0,
       "Y": 0.0197398662567139
     },

@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Background/_Banned_BAN104_template.png",
-    "tint": {
+    "color": {
       "W": 0.4248614907264709
     },
     "layer": -8

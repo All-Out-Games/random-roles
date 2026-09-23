@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/dirt_patch.png",
-    "tint": {
+    "color": {
       "X": 0.1843137294054031,
       "Y": 0.0901960730552673,
       "Z": 0.0470588207244873

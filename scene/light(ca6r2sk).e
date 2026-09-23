@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/Shapes/gradient_bottom.png",
-    "tint": {
+    "color": {
       "X": 0,
       "Y": 0.9859733581542969,
       "W": 0.3586883544921875

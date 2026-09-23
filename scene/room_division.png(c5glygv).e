@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/room_division.png",
-    "tint": {
+    "color": {
       "X": 0.5231169462203979,
       "Y": 0.4757691323757172,
       "Z": 0.1765589416027069

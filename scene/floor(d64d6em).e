@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Floor/pentagon2_D1_floor.png",
     "depth_offset": 0.9743340611457825,
-    "tint": {
+    "color": {
       "X": 0.0844148546457291,
       "Y": 0.2206572741270065,
       "Z": 0.2425974607467651

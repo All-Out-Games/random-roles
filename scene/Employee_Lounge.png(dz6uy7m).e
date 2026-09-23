@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Employee Lounge/Employee_Lounge.png",
-    "tint": {
+    "color": {
       "W": 0.7711816430091858
     },
     "layer": -4

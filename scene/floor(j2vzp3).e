@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/bus_A1_floor.png",
-    "tint": {
+    "color": {
       "X": 0.0346082001924515,
       "Y": 0.0746881365776062,
       "Z": 0.1075325310230255

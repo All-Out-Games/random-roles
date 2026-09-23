@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Floor/ground_texture_tile.png",
     "depth_offset": -0.9020769596099854,
-    "tint": {
+    "color": {
       "X": 0,
       "Y": 0.2010390311479568,
       "Z": 0.1975927054882050,

@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Wall/cave_wall.png",
     "depth_offset": -0.7991294860839844,
-    "tint": {
+    "color": {
       "Y": 0.7529411315917969,
       "Z": 0.4470587968826294
     },

@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Prison/Prison.png",
-    "tint": {
+    "color": {
       "W": 0.0742112398147583
     },
     "layer": -4

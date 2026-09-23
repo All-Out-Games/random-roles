@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Props/torch/shape_circle_gradient.png",
-    "tint": {
+    "color": {
       "Y": 0.4270133972167969,
       "Z": 0,
       "W": 0.0185528770089149

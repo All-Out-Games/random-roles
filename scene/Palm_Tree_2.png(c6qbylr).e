@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Props/Palm_Tree_2.png",
     "depth_offset": -1.6181602478027344,
-    "tint": {
+    "color": {
       "X": 0.5854545831680298,
       "Y": 0.5768898129463196,
       "Z": 0.5768898129463196

@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Floor/frame_octagon_lefttop.png",
     "depth_offset": -2.4283890724182129,
-    "tint": {
+    "color": {
       "X": 0.1814579665660858,
       "Y": 0.1804508566856384,
       "Z": 0.2685714960098267

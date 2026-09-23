@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/Shapes/square.png",
-    "tint": {
+    "color": {
       "X": 0.6529870629310608,
       "Y": 0.1146312355995178,
       "Z": 0.2119543999433517

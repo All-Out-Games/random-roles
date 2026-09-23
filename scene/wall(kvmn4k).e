@@ -24,7 +24,7 @@
   "data": {
     "texture": "sprites/phota/Wall/wall_metalpanels.png",
     "depth_offset": -0.8522300720214844,
-    "tint": {
+    "color": {
       "X": 0.0761503502726555,
       "Y": 0.1179221421480179,
       "Z": 0.0781467333436012

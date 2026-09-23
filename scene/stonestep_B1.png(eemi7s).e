@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/stonestep_B1.png",
-    "tint": {
+    "color": {
       "X": 0.6259610652923584,
       "Y": 0.6247477531433105,
       "Z": 0.7309091687202454

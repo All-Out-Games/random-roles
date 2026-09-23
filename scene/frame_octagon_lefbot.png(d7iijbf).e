@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/frame_octagon_lefbot.png",
-    "tint": {
+    "color": {
       "X": 0.4440251588821411,
       "Y": 0.1389763951301575
     },

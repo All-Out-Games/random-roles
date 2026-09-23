@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Props/Bush1.png",
     "depth_offset": -0.7391433715820312,
-    "tint": {
+    "color": {
       "X": 0.6997403502464294,
       "Y": 0.6456328034400940,
       "Z": 0.6456328034400940

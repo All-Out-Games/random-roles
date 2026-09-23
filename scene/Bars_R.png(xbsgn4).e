@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Archives/Bars_R.png",
     "depth_offset": -0.6271133422851562,
-    "tint": {
+    "color": {
       "X": 0.2633766829967499,
       "Y": 0.2633766829967499,
       "Z": 0.2633766829967499

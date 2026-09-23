@@ -24,7 +24,7 @@
   "data": {
     "texture": "sprites/phota/Maintenance/screen.png",
     "depth_offset": -1.7082786560058594,
-    "tint": {
+    "color": {
       "X": 0.9999961853027344,
       "Y": 3.1768417358398438,
       "Z": 1.2306669950485229

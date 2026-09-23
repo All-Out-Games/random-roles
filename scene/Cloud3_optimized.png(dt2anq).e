@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Props/Cloud3_optimized.png",
     "depth_offset": -0.3573815822601318,
-    "tint": {
+    "color": {
       "W": 0.4928887486457825
     },
     "layer": -50

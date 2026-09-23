@@ -24,7 +24,7 @@
   "data": {
     "texture": "sprites/phota/Maintenance/table.png",
     "depth_offset": -0.0150915794074535,
-    "tint": {
+    "color": {
       "X": 0.0526514127850533,
       "Y": 0.0632256940007210,
       "Z": 0.0919478014111519

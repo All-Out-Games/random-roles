@@ -24,7 +24,7 @@
   "data": {
     "texture": "sprites/phota/Props/dirt.png",
     "depth_offset": -0.0336208343505859,
-    "tint": {
+    "color": {
       "X": 0.2997403144836426,
       "Y": 0.2695117294788361,
       "Z": 0.2405439168214798

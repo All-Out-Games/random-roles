@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/square_B1_floor.png",
-    "tint": {
+    "color": {
       "X": 0.1389044523239136,
       "Y": 0.2062338292598724,
       "Z": 0.0836141705513000

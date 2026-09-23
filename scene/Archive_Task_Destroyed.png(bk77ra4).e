@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Archives/Archive_Task/Archive_Task_Destroyed.png",
     "depth_offset": -0.1476237624883652,
-    "tint": {
+    "color": {
       "X": 0.5023377537727356,
       "Y": 0.5023377537727356,
       "Z": 0.5023377537727356

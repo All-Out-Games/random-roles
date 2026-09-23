@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Extras/Foliage/Trees/Tree2.png",
     "depth_offset": -2.3797798156738281,
-    "tint": {
+    "color": {
       "Y": 2.0636956691741943
     },
     "layer": -5

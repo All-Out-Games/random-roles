@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/Shapes/shape_circle_gradient.png",
-    "tint": {
+    "color": {
       "Y": 0.8754677176475525,
       "Z": 0.3740859031677246,
       "W": 0.1218316927552223

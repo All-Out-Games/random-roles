@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Props/rock_a.png",
     "depth_offset": -0.7435874938964844,
-    "tint": {
+    "color": {
       "X": 0.3996757864952087,
       "Y": 0.5802597999572754,
       "Z": 0.3625866174697876

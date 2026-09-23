@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Dropship/dropship.png",
     "depth_offset": 2.2316572666168213,
-    "tint": {
+    "color": {
       "X": 0.6062338352203369,
       "Y": 0.6062338352203369,
       "Z": 0.6062338352203369

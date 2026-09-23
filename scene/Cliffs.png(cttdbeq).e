@@ -24,7 +24,7 @@
   "data": {
     "texture": "sprites/phota/Background/bg/Cliffs.png",
     "depth_offset": -9.2000007629394531,
-    "tint": {
+    "color": {
       "W": 0.7031540274620056
     },
     "layer": -5

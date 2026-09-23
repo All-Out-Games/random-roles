@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Props/torch/square_blurred.png",
     "depth_offset": -0.8343263268470764,
-    "tint": {
+    "color": {
       "X": 0,
       "Y": 0,
       "Z": 0,

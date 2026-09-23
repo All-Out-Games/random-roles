@@ -23,7 +23,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/octagon_frame.png",
-    "tint": {
+    "color": {
       "X": 0.1921568661928177,
       "Y": 0.5607843399047852,
       "Z": 0.1176470518112183

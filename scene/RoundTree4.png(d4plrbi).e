@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Extras/Foliage/Trees/RoundTree4.png",
     "depth_offset": -1.6349999904632568,
-    "tint": {
+    "color": {
       "X": 0.4132565259933472,
       "Y": 0.4008901119232178,
       "Z": 4.3137254714965820

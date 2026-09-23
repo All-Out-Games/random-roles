@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/Stain_2.png",
-    "tint": {
+    "color": {
       "X": 0,
       "Y": 0.0113842617720366,
       "Z": 0.1387013643980026,

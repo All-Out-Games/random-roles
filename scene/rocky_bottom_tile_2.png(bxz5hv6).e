@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Props/rocky_bottom_tile_2.png",
-    "tint": {
+    "color": {
       "X": 0.1490909755229950,
       "Y": 0.0912883430719376,
       "Z": 0.0581096857786179

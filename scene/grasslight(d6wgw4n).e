@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/grass_weird.png",
-    "tint": {
+    "color": {
       "X": 0.3805581629276276,
       "Y": 0.8036364316940308,
       "Z": 0.1116864681243896,

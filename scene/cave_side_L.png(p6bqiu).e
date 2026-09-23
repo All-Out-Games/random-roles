@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Wall/cave_side_L.png",
     "depth_offset": -9.1567153930664062,
-    "tint": {
+    "color": {
       "Y": 0.7529411315917969,
       "Z": 0.4470587968826294
     },

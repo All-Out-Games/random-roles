@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Maintenance/Maintenance_Room.png",
-    "tint": {
+    "color": {
       "W": 0.6907858252525330
     },
     "layer": -4

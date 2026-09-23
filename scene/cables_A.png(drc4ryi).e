@@ -25,7 +25,7 @@
   "data": {
     "texture": "sprites/phota/Maintenance/cables_A.png",
     "depth_offset": 0.0474777221679688,
-    "tint": {
+    "color": {
       "X": 0.2997403144836426,
       "Y": 0.2997403144836426,
       "Z": 0.2997403144836426

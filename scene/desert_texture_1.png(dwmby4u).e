@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/desert_texture_1.png",
-    "tint": {
+    "color": {
       "X": 0.2549019753932953,
       "Y": 0.1058823540806770,
       "Z": 0.0588235259056091

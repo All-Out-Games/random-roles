@@ -24,7 +24,7 @@
   "internal_component_type": "Sprite_Renderer",
   "data": {
     "texture": "sprites/phota/Floor/neutral_street_tile.png",
-    "tint": {
+    "color": {
       "X": 0.3647059202194214,
       "Y": 0.5960782766342163
     },
