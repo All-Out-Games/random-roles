@@ -22,7 +22,7 @@
   "component_type": "Internal_Component",
   "internal_component_type": "Spine_Animator",
   "data": {
-    "skeleton_data_asset": "player.merged_spine_rig#output",
+    "skeleton_data_asset": "player_composed/player.spine",
     "ordered_skins": [
       "base/crewchsia",
       "weapons/crossbow"
