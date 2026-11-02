@@ -30,12 +30,12 @@ My_Tutorial_Arrow :: struct {
         defer UI.pop_draw_context();
 
         max_distance := player.camera.size * 0.8;
-        offset_to_target := normalize_vector_to_radius(target.world_position - player.entity.world_position, max_distance) * max_distance;
-        arrow_position := player.entity.world_position + offset_to_target;
+        offset_to_target := normalize_vector_to_radius(target.world_position.xy - player.entity.world_position.xy, max_distance) * max_distance;
+        arrow_position := player.entity.world_position.xy + offset_to_target;
 
         alpha := options.alpha;
         if options.fade_out_based_on_aim_direction {
-            aim_d := dot(player.last_aim_direction, normalize(target.world_position - player.entity.world_position));
+            aim_d := dot(player.last_aim_direction, normalize(target.world_position.xy - player.entity.world_position.xy));
             alpha_t := linear_step(0.85, 1.0, aim_d);
             alpha *= lerp(1.0, 0.25, alpha_t);
         }
@@ -50,7 +50,7 @@ My_Tutorial_Arrow :: struct {
 
         arrow_rect := Rect{arrow_position, arrow_position}.grow(0.5).fit_aspect(arrow_sprite.get_aspect());
 
-        if length_squared(arrow_position - target.world_position) > 0.1 {
+        if length_squared(arrow_position - target.world_position.xy) > 0.1 {
             if options.far {
                 UI.push_layer(options.far_layer);
                 defer UI.pop_layer();
@@ -94,7 +94,7 @@ Finder :: struct(T: typeid) {
     closest_distance: float;
     closest: T;
 
-    check :: proc(using f: *Finder(T), item: T, item_position: v2, required_range: float = -1) {
+    check :: proc(using f: ref Finder(T), item: T, item_position: v2, required_range: float = -1) {
         distance := length_squared(position - item_position);
         if distance > (required_range*required_range) {
             return;
@@ -105,8 +105,8 @@ Finder :: struct(T: typeid) {
         }
     }
 
-    check :: proc(using f: *Finder(T), item: T, required_range: float = -1) {
-        distance := length_squared(position - item.entity.world_position);
+    check :: proc(using f: ref Finder(T), item: T, required_range: float = -1) {
+        distance := length_squared(position - item.entity.world_position.xy);
         if distance > (required_range*required_range) {
             return;
         }
