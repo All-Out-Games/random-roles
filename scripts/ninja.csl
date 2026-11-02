@@ -37,9 +37,9 @@ rr_ninja_lily_kill_origin :: proc(p: Player) -> v2 {
     m := p.entity.get_component(Lily_Module);
     if m != null && m.mind_control_active {
         puppet := get_player_by_entity_id(m.mind_control_target_id);
-        if #alive(puppet) return puppet.entity.world_position;
+        if #alive(puppet) return puppet.entity.world_position.xy;
     }
-    return p.entity.world_position;
+    return p.entity.world_position.xy;
 }
 rr_ninja_lily_cd_multiplier :: proc(p: Player) -> float {
     m := p.entity.get_component(Lily_Module);
@@ -92,13 +92,13 @@ rr_ninja_smoke_at :: proc(pos: v2) -> bool {
     if game_state != Game_State.INGAME return false;
     for cloud: component_iterator(Ninja_Smoke) {
         if get_time() >= cloud.expires_at continue;
-        if length_squared(pos - cloud.entity.world_position) <= NINJA_SMOKE_RADIUS * NINJA_SMOKE_RADIUS return true;
+        if length_squared(pos - cloud.entity.world_position.xy) <= NINJA_SMOKE_RADIUS * NINJA_SMOKE_RADIUS return true;
     }
     return false;
 }
 
 rr_ninja_smoke_protects :: proc(p: Player) -> bool {
-    return #alive(p) && p.player_state == Player_State.ALIVE && rr_ninja_smoke_at(p.entity.world_position);
+    return #alive(p) && p.player_state == Player_State.ALIVE && rr_ninja_smoke_at(p.entity.world_position.xy);
 }
 
 rr_ninja_can_act :: proc(p: Player) -> bool {
@@ -165,7 +165,7 @@ Ninja_Shadow_Step_Effect :: class : Effect_Base {
         set_duration(NINJA_STEP_SECONDS);
         rr_drag_body_force_drop_for_player(player);
         rr_ninja_spawn_decoy(player, true);
-        rr_ninja_spawn_step_fx(entity.world_position);
+        rr_ninja_spawn_step_fx(entity.world_position.xy);
         player.add_invisibility_reason("ninja_step");
         player.add_name_invisibility_reason("ninja_step");
         entity.set_world_position(destination);
@@ -184,8 +184,8 @@ Ninja_Shadow_Step_Effect :: class : Effect_Base {
         player.remove_name_invisibility_reason("ninja_step");
         player.agent.velocity = v2.{};
         if !interrupt {
-            rr_ninja_spawn_step_fx(entity.world_position);
-            rr_ninja_spawn_arrival(entity.world_position);
+            rr_ninja_spawn_step_fx(entity.world_position.xy);
+            rr_ninja_spawn_arrival(entity.world_position.xy);
             rr_ninja_play_sound(player, "ninja_spawn_29dab2.wav");
         }
     }
@@ -267,7 +267,7 @@ Ninja_Shadow_Step_Ability :: class : Ability_Base {
             return;
         }
         aim_range = NINJA_STEP_DISTANCE;
-        origin := player.entity.world_position;
+        origin := player.entity.world_position.xy;
         direction := activation.direction;
         distance := aim_range;
         if player.device_kind == .PC {
@@ -285,7 +285,7 @@ Ninja_Shadow_Step_Ability :: class : Ability_Base {
         if activation.activate {
             preview_ready = false;
             destination := preview_destination;
-            if length_squared(destination - player.entity.world_position) < 0.25 return;
+            if length_squared(destination - player.entity.world_position.xy) < 0.25 return;
             effect := new(Ninja_Dagger_Throw);
             effect.destination = destination;
             set_active_effect(player.entity, effect);

@@ -487,7 +487,7 @@ rr_to_lower :: proc(s: string) -> string {
 	return result;
 }
 
-rr_parse_role_name :: proc(role_name: string) -> Player_Role, bool {
+rr_parse_role_name :: proc(role_name: string) -> (Player_Role, bool) {
 	name := rr_to_lower(role_name);
 	if name == "ninja" return Player_Role.NINJA, true;
 	if name == "none"                                          return Player_Role.NONE, true;
@@ -705,7 +705,7 @@ update_hitman_mines :: proc() {
 				if p.entity.id == m.owner_entity_id continue;
 				if rr_ninja_light_feet(p) continue;
 
-				if in_range(p.entity.world_position - m.pos, HITMAN_MINE_TRIGGER_RADIUS) {
+				if in_range(p.entity.world_position.xy - m.pos, HITMAN_MINE_TRIGGER_RADIUS) {
 					m.is_triggered = true;
 					m.trigger_target_entity_id = p.entity.id;
 					m.detonate_at = get_time() + HITMAN_MINE_PRE_EXPLODE_SECONDS;
@@ -732,7 +732,7 @@ update_hitman_mines :: proc() {
 					if p.player_state != Player_State.ALIVE continue;
 					if p.entity.id == m.owner_entity_id continue;
 					if rr_ninja_light_feet(p) continue;
-					if !in_range(p.entity.world_position - m.pos, HITMAN_MINE_TRIGGER_RADIUS) continue;
+					if !in_range(p.entity.world_position.xy - m.pos, HITMAN_MINE_TRIGGER_RADIUS) continue;
 					target = p;
 					break;
 				}
@@ -844,7 +844,7 @@ update_autograph_traps :: proc() {
 			if p.entity.id == trap.owner_entity_id continue;
 			if rr_ninja_light_feet(p) continue;
 
-			if in_range(p.entity.world_position - trap.pos, MOVIE_STAR_AUTOGRAPH_TRIGGER_RADIUS) {
+			if in_range(p.entity.world_position.xy - trap.pos, MOVIE_STAR_AUTOGRAPH_TRIGGER_RADIUS) {
 				// Apply stun effect
 				eff := p.entity.get_component(Stunned_By_Autograph_Effect);
 				if eff == null {
@@ -1200,7 +1200,7 @@ rr_try_start_lockdown :: proc(caller: Player) {
 	// Server-authoritative SFX (play once for everyone).
 	sfx := SFX.default_sfx_desc();
 	if caller != null {
-		sfx.set_position(caller.entity.world_position);
+		sfx.set_position(caller.entity.world_position.xy);
 	}
 	sfx.volume = 0.9;
 	sfx.volume_perturb = 0.05;

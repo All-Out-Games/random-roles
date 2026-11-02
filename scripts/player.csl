@@ -796,7 +796,7 @@ Player :: class : Player_Base {
 		for fog: component_iterator(Black_Flag) {
 			if fog == null continue;
 			if !#alive(fog.entity) continue;
-			distance := length(this.entity.world_position - fog.entity.world_position);
+			distance := length(this.entity.world_position.xy - fog.entity.world_position.xy);
 			if distance < BLACK_FLAG_RADIUS {
 				is_owner := #alive(fog.owner_entity) && fog.owner_entity == this.entity;
 				if !is_owner {
@@ -1044,7 +1044,7 @@ Player :: class : Player_Base {
 			}
 			if apex_flying {
 				this.camera.follow_player = false;
-				this.camera.position = this.entity.world_position + v2.{0, MECH_APEX_CAMERA_Y_OFFSET};
+				this.camera.position.xy = this.entity.world_position.xy + v2.{0, MECH_APEX_CAMERA_Y_OFFSET};
 				mech_apex_cam_overriding = true;
 			} else if mech_apex_cam_overriding {
 				this.camera.follow_player = true;
@@ -1113,7 +1113,7 @@ Player :: class : Player_Base {
 					}
 					target := get_player_by_entity_id(rr_vote_eject_player_id);
 					if target != null && #alive(target.entity) {
-						this.camera.position = target.entity.world_position;
+						this.camera.position.xy = target.entity.world_position.xy;
 					}
 					t := clamp((elapsed - RR_VOTE_EJECT_TEXT_SECONDS) / RR_VOTE_EJECT_CAMERA_ZOOM_SECONDS, 0.0, 1.0);
 					this.camera.size = lerp(vote_eject_camera_original_size, VOTE_EJECT_CAMERA_ZOOMED_IN_SIZE, t);
@@ -1136,7 +1136,7 @@ Player :: class : Player_Base {
 				if bc_target != null && #alive(bc_target.entity) {
 					bc_mass_birth_camera_override_active = true;
 					if this.is_local() {
-						target_pos := bc_target.entity.world_position;
+						target_pos := bc_target.entity.world_position.xy;
 
 						shake_x := 0.0;
 						shake_y := 0.0;
@@ -1155,7 +1155,7 @@ Player :: class : Player_Base {
 						if camera_default_size_saved {
 							this.camera.size = camera_default_size;
 						}
-						this.camera.position = v2.{target_pos.x + shake_x, target_pos.y + BC_MASS_BIRTH_CAM_Y_OFFSET + shake_y};
+						this.camera.position.xy = v2.{target_pos.x + shake_x, target_pos.y + BC_MASS_BIRTH_CAM_Y_OFFSET + shake_y};
 
 						// Detach the local LOS light and pin it to Charlie so the cinematic
 						// view isn't dark for spectators. Mirrors lily deathbraid (lily.csl:4167).
@@ -1402,19 +1402,19 @@ Player :: class : Player_Base {
 		// Projectile collision resolves the team-neutral shield before Sheriff/Hunter
 		// false-fire logic, so those roles cannot probe the held player's allegiance.
 		if rr_guardian_is_protecting(this) {
-			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
-			rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.55}, 0.85, v4.{0.45, 1.0, 0.55, 0.65}, 0.28);
+			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position.xy, 0.32);
+			rr_mech_spawn_flash(this.entity.world_position.xy + v2.{0, 0.55}, 0.85, v4.{0.45, 1.0, 0.55, 0.65}, 0.28);
 			return;
 		}
 		// APEX-form Mech is immune to the anti-traitor roles (Hacker / Hunter / Sheriff).
 		if rr_mech_apex_blocks_kill(this, killer_check) {
-			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
-			rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.7}, 0.9, v4.{1.0, 0.4, 0.1, 0.7}, 0.32);
+			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position.xy, 0.32);
+			rr_mech_spawn_flash(this.entity.world_position.xy + v2.{0, 0.7}, 0.9, v4.{1.0, 0.4, 0.1, 0.7}, 0.32);
 			return;
 		}
 		if rr_mech_showdown_blocks_kill(this, killer_check) {
-			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position, 0.32);
-			rr_mech_spawn_flash(this.entity.world_position + v2.{0, 0.7}, 0.9, v4.{1.0, 0.4, 0.1, 0.7}, 0.32);
+			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", this.entity.world_position.xy, 0.32);
+			rr_mech_spawn_flash(this.entity.world_position.xy + v2.{0, 0.7}, 0.9, v4.{1.0, 0.4, 0.1, 0.7}, 0.32);
 			return;
 		}
 		// If we were dragging a body, drop it immediately.
@@ -1594,7 +1594,7 @@ rr_draw_stun_timers :: proc(viewer: Player) {
 		// Skip players hidden in shadow / outside the viewer's LOS.
 		if viewer != null {
 			radii := viewer.get_local_light_radii();
-			dist := length(p.entity.world_position - viewer.entity.world_position);
+			dist := length(p.entity.world_position.xy - viewer.entity.world_position.xy);
 			if dist > radii.y continue;
 		}
 
@@ -1604,7 +1604,7 @@ rr_draw_stun_timers :: proc(viewer: Player) {
 		if frac > 0.001 { secs_i += 1; }
 		if secs_i < 1 { secs_i = 1; }
 
-		pos := p.entity.world_position;
+		pos := p.entity.world_position.xy;
 
 		UI.push_z(pos.y);
 		defer UI.pop_z();
@@ -1660,11 +1660,11 @@ rr_draw_lily_debuff_timers :: proc(viewer: Player) {
 		// Skip players hidden in shadow / outside the viewer's LOS.
 		if viewer != null {
 			radii := viewer.get_local_light_radii();
-			dist := length(p.entity.world_position - viewer.entity.world_position);
+			dist := length(p.entity.world_position.xy - viewer.entity.world_position.xy);
 			if dist > radii.y continue;
 		}
 
-		pos := p.entity.world_position;
+		pos := p.entity.world_position.xy;
 
 		UI.push_z(pos.y);
 		defer UI.pop_z();
@@ -3629,7 +3629,7 @@ rr_mimicer_draw_abilities :: proc(player: Player, idx: int) -> int {
 				// Force the cinematic actor to face right and lock the camera once.
 				p.set_facing_right(true);
 				this.camera.follow_player = false;
-				this.camera.position = p.entity.world_position;
+				this.camera.position.xy = p.entity.world_position.xy;
 				return true;
 			}
 		}
@@ -3722,7 +3722,7 @@ rr_drag_body_update_anim_state :: proc(player: Player, dt: float) {
 	}
 
 	// Movement detection from position delta.
-	pos := player.entity.world_position;
+	pos := player.entity.world_position.xy;
 	if player.drag_body_last_pos_inited {
 		delta := pos - player.drag_body_last_pos;
 		if dragging {
@@ -3790,7 +3790,7 @@ Task_Interactable :: class : Component {
 		base_hold_time = interactable.required_hold_time;
 
         // Register this interactable's world position as a destination for its task id.
-		rr_register_task_destination(this.get_task_id(), this.entity.world_position);
+		rr_register_task_destination(this.get_task_id(), this.entity.world_position.xy);
     }
 
 	ao_update :: proc(using this: Task_Interactable, dt: float) {
@@ -3830,7 +3830,7 @@ Task_Interactable :: class : Component {
 			}
 			mech_wreckage_entity = null;
 			player.Notify("Task repaired.");
-			rr_mech_play_sfx_at("sfx/task_success.wav", entity.world_position, 0.25);
+			rr_mech_play_sfx_at("sfx/task_success.wav", entity.world_position.xy, 0.25);
 			return;
 		}
 		if rr_hacker_try_trigger_hacked_task(this, player) {
@@ -4152,12 +4152,12 @@ Corpse :: class : Component {
 				if !p.is_local() continue;
 				if p.player_state != Player_State.ALIVE continue;
 
-				dist := length(p.entity.world_position - entity.world_position);
+				dist := length(p.entity.world_position.xy - entity.world_position.xy);
 				if dist < 3.0 {
 					UI.push_world_draw_context();
 					defer UI.pop_draw_context();
 
-					text_pos := entity.world_position + v2.{0, 1.0};
+					text_pos := entity.world_position.xy + v2.{0, 1.0};
 					UI.push_z(text_pos.y);
 					defer UI.pop_z();
 
@@ -4208,15 +4208,15 @@ Corpse :: class : Component {
 			scale_x := dragger.entity.world_scale.x;
 			// Keep corpse on the "grab side" (opposite facing).
 			sign := scale_x >= 0.0 ? -1.0 : 1.0;
-			target := dragger.entity.world_position + v2.{sign * DRAG_BODY_FOLLOW_DISTANCE, -0.15};
-			cur := entity.world_position;
+			target := dragger.entity.world_position.xy + v2.{sign * DRAG_BODY_FOLLOW_DISTANCE, -0.15};
+			cur := entity.world_position.xy;
 			alpha := clamp(dt * 6.0, 0.0, 1.0); // smoother follow (less jitter)
 			new_pos := v2.{lerp(cur.x, target.x, alpha), lerp(cur.y, target.y, alpha)};
 
 			entity.set_local_position(new_pos);
 			entity.set_local_rotation(dragger.entity.world_rotation);
 			// Flip corpse via scale instead of rotation.
-			corpse_scale := dragger.entity.world_scale;
+			corpse_scale := dragger.entity.world_scale.xy;
 			corpse_scale.x = -corpse_scale.x;
 			entity.set_local_scale(corpse_scale);
 		}
@@ -4422,7 +4422,7 @@ rr_draw_pyro_prop_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 						}
 					}
 
-					p_ui := rr_minimap_world_to_ui(map_rect, child.world_position);
+					p_ui := rr_minimap_world_to_ui(map_rect, child.world_position.xy);
 					size := map_rect.height() * 0.022;
 					if size < 10.0 { size = 10.0; }
 					if size > 26.0 { size = 26.0; }
@@ -4473,7 +4473,7 @@ rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 
 	if rr_comms_outage_active && player.player_type != Player_Type.TRAITOR {
 		if world_references != null && world_references.rr_comms_lever_entity != null && #alive(world_references.rr_comms_lever_entity) {
-			rr_draw_task_marker_on_minimap(map_rect, world_references.rr_comms_lever_entity.world_position, v4.{1.0, 0.3, 0.3, 1.0});
+			rr_draw_task_marker_on_minimap(map_rect, world_references.rr_comms_lever_entity.world_position.xy, v4.{1.0, 0.3, 0.3, 1.0});
 		}
 		return;
 	}
@@ -4496,7 +4496,7 @@ rr_draw_task_markers_on_minimap :: proc(player: Player, map_rect: Rect) {
 			if t == null || !#alive(t.entity) continue;
 			if !rr_mech_task_is_smashable(t) continue; // skips the workbench prop + non-task panels
 			if t.mech_smashed continue;                // currently broken/locked — nothing to smash here yet
-			pos := t.entity.world_position;
+			pos := t.entity.world_position.xy;
 			kind := rr_mech_task_drop_kind_at_pos(pos);
 			flash := hint_active && (mech.minimap_hint_kind == 0 || mech.minimap_hint_kind == kind);
 			rr_draw_task_wreck_marker_on_minimap(map_rect, pos, kind, flash);
@@ -4753,7 +4753,7 @@ update_minimap_ui :: proc(player: Player) {
 
 	// Local player marker
 	{
-		p_ui := rr_minimap_world_to_ui(map_rect, player.entity.world_position);
+		p_ui := rr_minimap_world_to_ui(map_rect, player.entity.world_position.xy);
 		dot_size := map_rect.height() * 0.018;
 		if dot_size < 10.0 { dot_size = 10.0; }
 		if dot_size > 22.0 { dot_size = 22.0; }
@@ -4783,7 +4783,7 @@ update_minimap_ui :: proc(player: Player) {
 				if spot.owner_player_entity_id != player.entity.id continue;
 				if spot.is_dug continue;
 
-				p_ui := rr_minimap_world_to_ui(map_rect, spot.entity.world_position);
+				p_ui := rr_minimap_world_to_ui(map_rect, spot.entity.world_position.xy);
 				r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
 				UI.quad(r.fit_aspect(icon.get_aspect()), icon, v4.{1, 1, 1, 1});
 			}
@@ -4839,7 +4839,7 @@ update_minimap_ui :: proc(player: Player) {
 		if nest_icon2 != null {
 			n_size := map_rect.height() * 0.035;
 			if n_size < 16.0 { n_size = 16.0; }
-			n_ui := rr_minimap_world_to_ui(map_rect, nest_comp.entity.world_position);
+			n_ui := rr_minimap_world_to_ui(map_rect, nest_comp.entity.world_position.xy);
 			n_r := Rect{n_ui, n_ui}.grow_unscaled(n_size, n_size, n_size, n_size);
 			UI.quad(n_r.fit_aspect(nest_icon2.get_aspect()), nest_icon2, v4.{1.0, 0.3, 0.3, 1.0});
 		}
@@ -4854,7 +4854,7 @@ update_minimap_ui :: proc(player: Player) {
 				tree_size := map_rect.height() * 0.035;
 				if tree_size < 16.0 { tree_size = 16.0; }
 				if tree_size > 48.0 { tree_size = 48.0; }
-				tree_ui := rr_minimap_world_to_ui(map_rect, lily_mod.hair_tree_entity.world_position);
+				tree_ui := rr_minimap_world_to_ui(map_rect, lily_mod.hair_tree_entity.world_position.xy);
 				tree_r := Rect{tree_ui, tree_ui}.grow_unscaled(tree_size, tree_size, tree_size, tree_size);
 				UI.quad(tree_r.fit_aspect(tree_icon.get_aspect()), tree_icon, v4.{0.8, 0.4, 0.9, 1.0});
 			}
@@ -4876,7 +4876,7 @@ update_minimap_ui :: proc(player: Player) {
 
 					is_active := !vp_comp.is_smoldered;
 
-					pillar_ui := rr_minimap_world_to_ui(map_rect, pillar_ent.world_position);
+					pillar_ui := rr_minimap_world_to_ui(map_rect, pillar_ent.world_position.xy);
 					pillar_size := map_rect.height() * 0.035;
 					if pillar_size < 16.0 { pillar_size = 16.0; }
 					if pillar_size > 48.0 { pillar_size = 48.0; }
@@ -4920,7 +4920,7 @@ update_minimap_ui :: proc(player: Player) {
 					if up_ent == null continue;
 					if !#alive(up_ent) continue;
 
-					up_ui := rr_minimap_world_to_ui(map_rect, up_ent.world_position);
+					up_ui := rr_minimap_world_to_ui(map_rect, up_ent.world_position.xy);
 					pillar_size := map_rect.height() * 0.04;
 					if pillar_size < 18.0 { pillar_size = 18.0; }
 					if pillar_size > 52.0 { pillar_size = 52.0; }
@@ -4941,7 +4941,7 @@ update_minimap_ui :: proc(player: Player) {
 						}
 
 						if up_interact.clicked && can_tp {
-							pos := up_ent.world_position;
+							pos := up_ent.world_position.xy;
 							player.entity.set_local_position(pos);
 							rr_mimicer_spawn_vfx(pos, "004RAND/Teleport", 1.5);
 							mm_map.teleport_cooldown = MIMICER_TELEPORT_COOLDOWN;
@@ -5062,7 +5062,7 @@ rr_find_nearest_pirate_dig_spot :: proc(player: Player) -> Entity {
 		if spot.owner_player_entity_id != player.entity.id continue;
 		if spot.is_dug continue;
 
-		d := spot.entity.world_position - player.entity.world_position;
+		d := spot.entity.world_position.xy - player.entity.world_position.xy;
 		dist_sq := length_squared(d);
 		if best == null || dist_sq < best_dist_sq {
 			best_dist_sq = dist_sq;
@@ -5082,7 +5082,7 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 
 	target := rr_find_nearest_pirate_dig_spot(player);
 	if target == null || !#alive(target) return;
-	target_pos := target.world_position;
+	target_pos := target.world_position.xy;
 
 	dirt_texture := get_asset(Texture_Asset, PIRATE_DIRT_PILE_TEXTURE_PATH);
 	if dirt_texture == null {
@@ -5107,7 +5107,7 @@ rr_draw_pirate_treasure_guidance_if_needed :: proc(player: Player) {
 	tutorial_arrow_options.bob_scale = 0.5;
 	tutorial_arrow_options.bob_bias = 1.5;
 
-	dist := length(player.entity.world_position - target_pos);
+	dist := length(player.entity.world_position.xy - target_pos);
 	tutorial_arrow_options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
 	rr_draw_tutorial_arrow(player, target, tutorial_arrow_options);
 }
@@ -5153,7 +5153,7 @@ rr_update_door_unlock_interactable :: proc(player: Player) {
 	}
 
 	// Find the nearest closed door within search radius.
-	player_pos := player.entity.world_position;
+	player_pos := player.entity.world_position.xy;
 	best_door: Door = null;
 	best_dist_sq := DOOR_UNLOCK_SEARCH_RADIUS * DOOR_UNLOCK_SEARCH_RADIUS;
 
@@ -5162,7 +5162,7 @@ rr_update_door_unlock_interactable :: proc(player: Player) {
 		if !#alive(door.entity) continue;
 		if door.is_open continue;
 
-		dist_sq := length_squared(door.entity.world_position - player_pos);
+		dist_sq := length_squared(door.entity.world_position.xy - player_pos);
 		if dist_sq < best_dist_sq {
 			best_dist_sq = dist_sq;
 			best_door = door;
@@ -5171,7 +5171,7 @@ rr_update_door_unlock_interactable :: proc(player: Player) {
 
 	if best_door != null {
 		interactable.target_door = best_door;
-		player.door_unlock_entity.set_local_position(best_door.entity.world_position);
+		player.door_unlock_entity.set_local_position(best_door.entity.world_position.xy);
 	} else {
 		interactable.target_door = null;
 		player.door_unlock_entity.set_local_position(v2.{-9999, -9999});

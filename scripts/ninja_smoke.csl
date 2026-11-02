@@ -38,12 +38,12 @@ Ninja_Smoke :: class : Component {
 
 rr_ninja_smoke_highlight_visible :: proc(viewer: Player, target: Player) -> bool {
     if game_state != .INGAME || viewer.player_state != .ALIVE || !rr_ninja_has_power(viewer) return false;
-    if target.player_state != .ALIVE || !rr_ninja_smoke_at(target.entity.world_position) return false;
+    if target.player_state != .ALIVE || !rr_ninja_smoke_at(target.entity.world_position.xy) return false;
     // Keep ordinary sight range and walls: this only reveals players hidden by
     // the cloud, never players elsewhere on the map or behind room geometry.
     radius := viewer.get_local_light_radii().y;
-    if length_squared(target.entity.world_position - viewer.entity.world_position) > radius * radius return false;
-    return rr_has_line_of_sight(viewer.entity.world_position, target.entity.world_position);
+    if length_squared(target.entity.world_position.xy - viewer.entity.world_position.xy) > radius * radius return false;
+    return rr_has_line_of_sight(viewer.entity.world_position.xy, target.entity.world_position.xy);
 }
 
 // Called in the viewer's Player late_update UI path. Reusing the current posed
@@ -60,8 +60,8 @@ rr_ninja_draw_smoke_highlights :: proc(viewer: Player) {
         defer UI.pop_layer();
         is_base := rig == target.animator;
         if is_base UI.push_unlit_player_material(target);
-        pos := rig.entity.world_position;
-        scale := rig.entity.world_scale * rig.scale;
+        pos := rig.entity.world_position.xy;
+        scale := rig.entity.world_scale.xy * rig.scale;
         // Four close translucent copies give the visible body a soft rim.
         UI.push_color_multiplier(v4.{0.35, 1.0, 0.85, 0.32});
         for i: 0..<4 {

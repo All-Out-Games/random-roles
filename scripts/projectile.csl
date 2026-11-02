@@ -39,8 +39,8 @@ RR_Projectile :: class : Component {
 
 		// A decoy is a world target, not a player and never a false-fire victim.
         if !lobby_minigame && !destroy_self && #alive(owner) {
-            from := entity.world_position - velocity * dt;
-            body := rr_ninja_projectile_body(owner.get_component(Player), from, entity.world_position, hit_radius, false);
+            from := entity.world_position.xy - velocity * dt;
+            body := rr_ninja_projectile_body(owner.get_component(Player), from, entity.world_position.xy, hit_radius, false);
             if rr_ninja_hit_decoy_ray(owner.get_component(Player), from, normalize(velocity), length(velocity) * dt + hit_radius, hit_radius, body) {
                 destroy_self = true;
             }
@@ -60,8 +60,8 @@ RR_Projectile :: class : Component {
 					mg := rr_get_lobby_minigame_effect(player);
 					if mg == null continue;
 					if get_time() < mg.respawn_until continue;
-				if in_range(player.entity.world_position - entity.world_position, hit_radius) {
-						rr_lobby_minigame_handle_projectile_hit(owner_player, player, entity.world_position);
+				if in_range(player.entity.world_position.xy - entity.world_position.xy, hit_radius) {
+						rr_lobby_minigame_handle_projectile_hit(owner_player, player, entity.world_position.xy);
 						destroy_self = true;
 						break;
 					}
@@ -72,9 +72,9 @@ RR_Projectile :: class : Component {
                 // Resolve the Guardian's carry shield before any team-dependent filtering.
 				// Every held target must produce the same collision outcome or the shot is
 				// still an allegiance oracle for roles beyond Sheriff/Hunter.
-				if in_range(player.entity.world_position - entity.world_position, hit_radius) && rr_guardian_is_carrying(player) {
-					rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", player.entity.world_position, 0.4);
-					rr_mech_spawn_flash(entity.world_position, 0.7, v4.{0.45, 1.0, 0.55, 0.75}, 0.22);
+				if in_range(player.entity.world_position.xy - entity.world_position.xy, hit_radius) && rr_guardian_is_carrying(player) {
+					rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", player.entity.world_position.xy, 0.4);
+					rr_mech_spawn_flash(entity.world_position.xy, 0.7, v4.{0.45, 1.0, 0.55, 0.75}, 0.22);
 					destroy_self = true;
 					break;
 				}
@@ -87,7 +87,7 @@ RR_Projectile :: class : Component {
 					}
 				}
 
-                if in_range(player.entity.world_position - entity.world_position, hit_radius) {
+                if in_range(player.entity.world_position.xy - entity.world_position.xy, hit_radius) {
 					killer_id: u64 = 0;
 					if #alive(owner) {
 						killer_id = owner.id;
@@ -98,9 +98,9 @@ RR_Projectile :: class : Component {
 							owner_player.Notify("TARGET IS GUARDIAN");
 						}
 						// Shield deflect: dedicated bounce SFX + golden ring flash at impact.
-						rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", player.entity.world_position, 0.4);
-						rr_mech_spawn_flash(entity.world_position, 0.7, v4.{1.0, 0.95, 0.45, 0.75}, 0.22);
-						rr_mech_spawn_flash(entity.world_position, 0.4, v4.{1.0, 1.0, 0.85, 0.9}, 0.16);
+						rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", player.entity.world_position.xy, 0.4);
+						rr_mech_spawn_flash(entity.world_position.xy, 0.7, v4.{1.0, 0.95, 0.45, 0.75}, 0.22);
+						rr_mech_spawn_flash(entity.world_position.xy, 0.4, v4.{1.0, 1.0, 0.85, 0.9}, 0.16);
 						destroy_self = true;
 						break;
 					}
@@ -119,7 +119,7 @@ RR_Projectile :: class : Component {
                             destroy_self = true;
                             {
                                 sfx := SFX.default_sfx_desc();
-                                sfx.set_position(player.entity.world_position);
+                                sfx.set_position(player.entity.world_position.xy);
                                 sfx.volume = 0.75;
                                 sfx.volume_perturb = 0.1;
                                 sfx.speed_perturb = 0.2;
@@ -135,7 +135,7 @@ RR_Projectile :: class : Component {
                     destroy_self = true;
                     {
                         sfx := SFX.default_sfx_desc();
-                        sfx.set_position(player.entity.world_position);
+                        sfx.set_position(player.entity.world_position.xy);
                         sfx.volume = 0.75;
                         sfx.volume_perturb = 0.1;
                         sfx.speed_perturb = 0.2;
@@ -161,7 +161,7 @@ RR_Projectile :: class : Component {
 					if nest == null continue;
 					if nest.destroyed continue;
 					if nest.entity == null || !#alive(nest.entity) continue;
-					if in_range(nest.entity.world_position - entity.world_position, hit_radius + 1.0) {
+					if in_range(nest.entity.world_position.xy - entity.world_position.xy, hit_radius + 1.0) {
 						nest.sheriff_revealed = true;
 						nest.sheriff_reveal_ends_at = get_time() + GGG_NEST_SHERIFF_REVEAL_SECONDS;
 						for pi: 0..players.elements.count-1 {
@@ -183,8 +183,8 @@ RR_Projectile :: class : Component {
 
         if !destroy_self {
             point: v2;
-            if try_find_closest_point_on_navmesh(entity.world_position, ref point, ref triangle_hint) {
-                if !in_range(point - entity.world_position, 0.01) {
+            if try_find_closest_point_on_navmesh(entity.world_position.xy, ref point, ref triangle_hint) {
+                if !in_range(point - entity.world_position.xy, 0.01) {
                     destroy_self = true;
                 }
             }
@@ -195,7 +195,7 @@ RR_Projectile :: class : Component {
             effect := Scene.instantiate(hit_effect);
             rng := rng_seed(entity.id);
             effect.get_first_child().set_local_rotation(rng_range_float(ref rng, 0, 360));
-            effect.set_local_position(entity.world_position);
+            effect.set_local_position(entity.world_position.xy);
             effect.queue_for_destruction(0.5);
             entity.destroy();
         }

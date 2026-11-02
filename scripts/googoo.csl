@@ -192,7 +192,7 @@ GGG_Nest_Visibility :: class : Component {
 			return;
 		}
 		// Other players only see the nest when close
-		dist := length(local_player.entity.world_position - entity.world_position);
+		dist := length(local_player.entity.world_position.xy - entity.world_position.xy);
 		if dist <= GGG_NEST_VISIBILITY_RANGE {
 			alpha := 1.0 - clamp((dist - GGG_NEST_VISIBILITY_RANGE + 2.0) / 2.0, 0.0, 1.0);
 			alpha = clamp(alpha, 0.0, 1.0);
@@ -322,7 +322,7 @@ rr_ggg_check_nest_consumption :: proc(player: Player) {
 	if gm.nest_destroyed return;
 
 	nest_pos := gm.nest_world_pos;
-	player_pos := player.entity.world_position;
+	player_pos := player.entity.world_position.xy;
 	dist := length(player_pos - nest_pos);
 	if dist > GGG_NEST_CONSUME_RANGE return;
 
@@ -522,7 +522,7 @@ GGG_Nest_Gulp :: class : Component {
 
 	trigger :: method() {
 		start_time = get_time();
-		base_scale = entity.local_scale;
+		base_scale = entity.local_scale.xy;
 		active = true;
 	}
 
@@ -545,10 +545,10 @@ rr_ggg_start_consume_anim :: proc(target: Entity, nest_pos: v2, nest_entity: Ent
 	if !#alive(target) return;
 
 	anim := target.add_component(GGG_Nest_Consume_Anim);
-	anim.start_pos = target.world_position;
+	anim.start_pos = target.world_position.xy;
 	anim.end_pos = nest_pos;
 	anim.start_time = get_time();
-	anim.start_scale = target.local_scale;
+	anim.start_scale = target.local_scale.xy;
 	if nest_entity != null && #alive(nest_entity) {
 		anim.nest_entity_id = nest_entity.id;
 	}
@@ -986,7 +986,7 @@ rr_ggg_start_crawl :: proc(player: Player) {
 	if gm == null return;
 	gm.is_crawling = true;
 	gm.crawl_ends_at = get_time() + GGG_CRAWL_DURATION_SECONDS;
-	gm.crawl_original_scale = player.entity.world_scale;
+	gm.crawl_original_scale = player.entity.world_scale.xy;
 	player.entity.set_local_scale(v2.{GGG_CRAWL_SCALE_X, GGG_CRAWL_SCALE_Y});
 	gm.crawl_speed_original = player.agent.movement_speed;
 	gm.crawl_speed_active = true;
@@ -1320,7 +1320,7 @@ update_ggg_traps :: proc() {
 			if p.player_type == Player_Type.TRAITOR continue;
 
 			if rr_ninja_light_feet(p) continue;
-			dist := length(p.entity.world_position - t.pos);
+			dist := length(p.entity.world_position.xy - t.pos);
 			if dist < GGG_TRAP_TRIGGER_RADIUS {
 				// Get the GGG owner to check consumed_doctor
 				ggg_owner := get_player_by_entity_id(t.owner_entity_id);
@@ -1428,7 +1428,7 @@ GGG_Foil_Whip_Projectile :: class : Component {
 			if p.entity.id == owner_entity_id continue;
 			if p.player_type == Player_Type.TRAITOR continue;
 
-			dist := length(p.entity.world_position - entity.world_position);
+			dist := length(p.entity.world_position.xy - entity.world_position.xy);
 			if dist < 0.8 {
 				// Hit! Start pulling
 				hit = true;
@@ -1438,8 +1438,8 @@ GGG_Foil_Whip_Projectile :: class : Component {
 					if gm != null {
 						gm.foil_whip_active = true;
 						gm.foil_whip_target_id = p.entity.id;
-						gm.foil_whip_pull_start_pos = p.entity.world_position;
-						gm.foil_whip_pull_end_pos = owner.entity.world_position;
+						gm.foil_whip_pull_start_pos = p.entity.world_position.xy;
+						gm.foil_whip_pull_end_pos = owner.entity.world_position.xy;
 						gm.foil_whip_pull_start_time = now;
 						gm.foil_whip_pull_duration = GGG_FOIL_WHIP_PULL_DURATION;
 						p.add_disable_movement_input_reason(GGG_FOIL_WHIP_PULL_REASON);
@@ -1462,7 +1462,7 @@ rr_ggg_fire_foil_whip :: proc(player: Player, direction: v2) {
 	if !Game.is_server() return;
 
 	proj_e := Scene.create_entity();
-	proj_e.set_local_position(player.entity.world_position);
+	proj_e.set_local_position(player.entity.world_position.xy);
 	proj_e.set_local_scale(v2.{0.5, 0.5});
 
 	// TODO: add proper foil whip visual asset
@@ -1521,8 +1521,8 @@ rr_ggg_draw_whip_chord_if_needed :: proc(player: Player) {
 	if target == null || !#alive(target.entity) return;
 
 	WHIP_CHORD_Y_OFFSET :: 0.7;
-	from := player.entity.world_position + v2.{0, WHIP_CHORD_Y_OFFSET};
-	to := target.entity.world_position + v2.{0, WHIP_CHORD_Y_OFFSET};
+	from := player.entity.world_position.xy + v2.{0, WHIP_CHORD_Y_OFFSET};
+	to := target.entity.world_position.xy + v2.{0, WHIP_CHORD_Y_OFFSET};
 	rr_ggg_draw_whip_chord(from, to);
 }
 
@@ -1542,11 +1542,11 @@ rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) 
 	t := elapsed / gm.foil_whip_pull_duration;
 
 	// Update pull end position slightly behind GGG (avoids z-overlap).
-	pull_dir := player.entity.world_position - gm.foil_whip_pull_start_pos;
+	pull_dir := player.entity.world_position.xy - gm.foil_whip_pull_start_pos;
 	pull_len := length(pull_dir);
 	if pull_len > 0.1 {
 		offset := pull_dir * (1.0 / pull_len) * -0.1;
-		gm.foil_whip_pull_end_pos = player.entity.world_position + offset;
+		gm.foil_whip_pull_end_pos = player.entity.world_position.xy + offset;
 	} else {
 		gm.foil_whip_pull_end_pos = gm.foil_whip_pull_start_pos;
 	}
@@ -1563,7 +1563,7 @@ rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) 
 
 	// Check if pulled target enters nest range while trapped → auto-consume
 	if Game.is_server() && gm.nest_placed && !gm.nest_destroyed {
-		target_pos := target.entity.world_position;
+		target_pos := target.entity.world_position.xy;
 		nest_dist := length(target_pos - gm.nest_world_pos);
 		root := target.entity.get_component(GGG_Trap_Root_Effect);
 		if nest_dist <= GGG_NEST_CONSUME_RANGE && root != null && root.active && !rr_ninja_smoke_protects(target) {
@@ -1606,7 +1606,7 @@ rr_ggg_update_foil_whip_pull :: proc(player: Player, gm: GGG_Module, dt: float) 
 		rr_ggg_creature_trigger(player, "pounce");
 		if Game.is_server() {
 			pounce_sfx := SFX.default_sfx_desc();
-			pounce_sfx.set_position(target.entity.world_position);
+			pounce_sfx.set_position(target.entity.world_position.xy);
 			pounce_sfx.volume = 0.15;
 			pounce_sfx.speed_perturb = 0.05;
 			rr_play_sfx("sfx/ggg_pounce_wrap.wav", pounce_sfx);
@@ -1702,9 +1702,9 @@ GGG_Decoy :: class : Component {
 
 		// Burst scatter phase — move outward from nest before chasing
 		if now < burst_until {
-			new_pos := entity.world_position + burst_dir * GGG_SWARM_BURST_SPEED * dt;
+			new_pos := entity.world_position.xy + burst_dir * GGG_SWARM_BURST_SPEED * dt;
 			entity.set_local_position(new_pos);
-			s := entity.local_scale;
+			s := entity.local_scale.xy;
 			if burst_dir.x > 0.01 {
 				entity.set_local_scale(v2.{abs(s.x), s.y});
 			} else if burst_dir.x < -0.01 {
@@ -1742,11 +1742,11 @@ GGG_Decoy :: class : Component {
 		}
 		if target == null return;
 
-		target_pos := target.entity.world_position;
+		target_pos := target.entity.world_position.xy;
 
 		// Check contact: root on touch
 		if !has_rooted {
-			dist := length(target_pos - entity.world_position);
+			dist := length(target_pos - entity.world_position.xy);
 			if dist < 0.8 {
 				root := target.entity.get_component(GGG_Trap_Root_Effect);
 				if root == null {
@@ -1769,10 +1769,10 @@ GGG_Decoy :: class : Component {
 		if agent != null {
 			result := agent.set_path_target(target_pos, speed);
 			if result.success {
-				new_pos := entity.world_position + result.move_direction * speed * dt;
+				new_pos := entity.world_position.xy + result.move_direction * speed * dt;
 				entity.set_local_position(new_pos);
 
-				s := entity.local_scale;
+				s := entity.local_scale.xy;
 				if result.move_direction.x > 0.01 {
 					entity.set_local_scale(v2.{abs(s.x), s.y});
 				} else if result.move_direction.x < -0.01 {
@@ -1876,7 +1876,7 @@ rr_ggg_get_closest_decoy_in_range :: proc(pos: v2, range: float) -> Entity, bool
 		d := ggg_decoys[i];
 		if d.decoy_entity == null continue;
 		if !#alive(d.decoy_entity) continue;
-		dist := length(d.decoy_entity.world_position - pos);
+		dist := length(d.decoy_entity.world_position.xy - pos);
 		if dist < closest_dist {
 			closest_dist = dist;
 			closest_entity = d.decoy_entity;
@@ -1923,7 +1923,7 @@ rr_ggg_get_closest_draggable_trapped_player :: proc(player: Player) -> Player {
 		// Check not already being dragged
 		gm := player.entity.get_component(GGG_Module);
 		if gm != null && gm.dragging_live_player_id == p.entity.id continue;
-		dist := length(p.entity.world_position - player.entity.world_position);
+		dist := length(p.entity.world_position.xy - player.entity.world_position.xy);
 		if dist < best_dist {
 			best_dist = dist;
 			best = p;
@@ -1987,11 +1987,11 @@ rr_ggg_update_live_drag :: proc(player: Player, gm: GGG_Module, dt: float) {
 	}
 
 	// Move victim to follow GGG
-	player_pos := player.entity.world_position;
-	target_pos := target.entity.world_position;
+	player_pos := player.entity.world_position.xy;
+	target_pos := target.entity.world_position.xy;
 	follow_pos := player_pos;
 	// Offset behind the player
-	s := player.entity.local_scale;
+	s := player.entity.local_scale.xy;
 	offset_x := -0.5;
 	if s.x < 0.0 { offset_x = 0.5; }
 	follow_pos.x = follow_pos.x + offset_x;
@@ -2111,7 +2111,7 @@ GGG_Place_Nest_Ability :: class : Ability_Base {
 
 		target_pos := get_mouse_world_position();
 		{
-			origin := player.entity.world_position;
+			origin := player.entity.world_position.xy;
 			delta := target_pos - origin;
 			max_r := GGG_NEST_PLACE_DISTANCE;
 			if length_squared(delta) > max_r * max_r {
@@ -2225,7 +2225,7 @@ GGG_Transform_Ability :: class : Ability_Base {
 
 				if Game.is_server() {
 					sfx := SFX.default_sfx_desc();
-					sfx.set_position(player.entity.world_position);
+					sfx.set_position(player.entity.world_position.xy);
 					sfx.volume = 0.9 * 0.25;
 					sfx.volume_perturb = 0.05 * 0.25;
 					sfx.speed_perturb = 0.05;
@@ -2236,7 +2236,7 @@ GGG_Transform_Ability :: class : Ability_Base {
 					if rr_power_outage_active {
 						ggg_sfx.volume = 0.225;
 					} else {
-						ggg_sfx.set_position(player.entity.world_position);
+						ggg_sfx.set_position(player.entity.world_position.xy);
 						ggg_sfx.volume = 0.225;
 					}
 					rr_play_sfx(rr_ggg_random_voice_sfx(), ggg_sfx);
@@ -2409,7 +2409,7 @@ GGG_Chocolate_Trap_Ability :: class : Ability_Base {
 
 		target_pos := get_mouse_world_position();
 		{
-			origin := player.entity.world_position;
+			origin := player.entity.world_position.xy;
 			delta := target_pos - origin;
 			max_r := GGG_TRAP_PLACE_DISTANCE;
 			if length_squared(delta) > max_r * max_r {

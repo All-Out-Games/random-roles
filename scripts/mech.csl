@@ -441,7 +441,7 @@ rr_mech_spawn_shockwave :: proc(pos: v2, start_scale: float, end_scale: float, c
 rr_mech_shake_players_near :: proc(center: v2, radius: float, intensity: float, seconds: float) {
 	for p: component_iterator(Player) {
 		if p == null || !#alive(p.entity) continue;
-		d := length(p.entity.world_position - center);
+		d := length(p.entity.world_position.xy - center);
 		if d > radius continue;
 		falloff := 1.0 - clamp(d / radius, 0.0, 1.0);
 		rr_mech_add_screenshake(p, intensity * falloff, seconds);
@@ -620,11 +620,11 @@ Mech_Part_Reveal :: class : Component {
 			applied = true;
 			settle_at = get_time() + 0.22;
 
-			impact_pos := p.entity.world_position + part_offset;
+			impact_pos := p.entity.world_position.xy + part_offset;
 			rr_mech_spawn_lightning_strike(impact_pos, 0.9); // bolt VFX + lightning SFX
-			rr_mech_play_sfx_at("sfx/metal_hit_827869.wav", p.entity.world_position, 0.5);
+			rr_mech_play_sfx_at("sfx/metal_hit_827869.wav", p.entity.world_position.xy, 0.5);
 			rr_mech_spawn_flash(impact_pos, 0.9, v4.{0.55, 0.85, 1.0, 0.75}, 0.26);
-			rr_mech_spawn_shockwave(p.entity.world_position + v2.{0, 0.5}, 0.4, 4.0, v4.{0.6, 0.9, 1.0, 0.7}, 0.4);
+			rr_mech_spawn_shockwave(p.entity.world_position.xy + v2.{0, 0.5}, 0.4, 4.0, v4.{0.6, 0.9, 1.0, 0.7}, 0.4);
 			rr_mech_add_screenshake(p, 0.14, 0.28);
 			return;
 		}
@@ -667,17 +667,17 @@ rr_mech_begin_part_reveal :: proc(player: Player, new_bits: int) {
 		player.add_disable_movement_input_reason(MECH_LOCK_REASON);
 		back_dir := v2.{0, -1};
 		if mech_workbench_entity != null && #alive(mech_workbench_entity) {
-			away := player.entity.world_position - mech_workbench_entity.world_position;
+			away := player.entity.world_position.xy - mech_workbench_entity.world_position.xy;
 			if length(away) > 0.01 { back_dir = normalize(away); }
 		}
-		player.entity.set_local_position(player.entity.world_position + back_dir * MECH_PART_REVEAL_BACK_DISTANCE);
+		player.entity.set_local_position(player.entity.world_position.xy + back_dir * MECH_PART_REVEAL_BACK_DISTANCE);
 		mech.part_reveal_started_at = get_time();
 	}
 	mech.part_reveal_active = true;
 	mech.part_reveal_ends_at = max(mech.part_reveal_ends_at, get_time() + slam_dur + MECH_PART_REVEAL_SETTLE);
 
 	rr_mech_spawn_part_transform_vfx(player, offset, 0.85, slam_dur);
-	rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", player.entity.world_position, 0.35);
+	rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", player.entity.world_position.xy, 0.35);
 
 	e := Scene.create_entity();
 	r := e.add_component(Mech_Part_Reveal);
@@ -1369,7 +1369,7 @@ rr_mech_update :: proc(player: Player, dt: float) {
 			if player.is_local_or_server() && mech.missile_cam_hold_until > 0.0 && player.camera_default_size_saved {
 				if get_time() < mech.missile_cam_hold_until {
 					player.camera.follow_player = false;
-					player.camera.position = mech.missile_aim_center;
+					player.camera.position.xy = mech.missile_aim_center;
 					player.camera.size = max(player.camera.size, MECH_AIM_CAMERA_SIZE);
 				} else {
 					player.camera.follow_player = true;
@@ -1416,12 +1416,12 @@ rr_mech_update :: proc(player: Player, dt: float) {
 				rr_mech_apply_avatar_skins(player);
 				if player.is_local() {
 					rr_mech_spawn_part_transform_vfx(player, v2.{0, 0.7}, 1.1, 0.6);
-					rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.6}, 1.4, v4.{1.0, 0.45, 0.1, 0.75}, 0.4);
+					rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.6}, 1.4, v4.{1.0, 0.45, 0.1, 0.75}, 0.4);
 					// Heavy double shockwave + harder shake at the morph climax — the body bursts into APEX.
-					rr_mech_spawn_shockwave(player.entity.world_position, 0.8, 9.0, v4.{1.0, 0.35, 0.1, 0.9}, 0.7);
-					rr_mech_spawn_shockwave(player.entity.world_position, 0.5, 6.5, v4.{0.85, 0.3, 1.0, 0.8}, 0.55);
+					rr_mech_spawn_shockwave(player.entity.world_position.xy, 0.8, 9.0, v4.{1.0, 0.35, 0.1, 0.9}, 0.7);
+					rr_mech_spawn_shockwave(player.entity.world_position.xy, 0.5, 6.5, v4.{0.85, 0.3, 1.0, 0.8}, 0.55);
 					rr_mech_add_screenshake(player, 0.32, 0.5);
-					rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.4);
+					rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position.xy, 0.4);
 				}
 			}
 			// Smoothly grow the avatar from its mech size to full APEX size across the whole
@@ -1568,7 +1568,7 @@ rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_
 	if carried_player_id != 0 {
 		target := get_player_by_entity_id(carried_player_id);
 		if target != null && target.player_state == Player_State.ALIVE {
-			target.entity.set_local_position(carrier.entity.world_position + offset);
+			target.entity.set_local_position(carrier.entity.world_position.xy + offset);
 			target.agent.velocity = v2.{0, 0};
 
 			// Route the held player's prediction through the carrier so its synced position
@@ -1594,7 +1594,7 @@ rr_mech_update_carried :: proc(carrier: Player, carried_player_id: u64, carried_
 	if carried_corpse_id != 0 {
 		c := rr_drag_body_find_corpse_by_entity_id(carried_corpse_id);
 		if c != null {
-			c.entity.set_local_position(carrier.entity.world_position + offset);
+			c.entity.set_local_position(carrier.entity.world_position.xy + offset);
 		}
 	}
 }
@@ -1710,7 +1710,7 @@ rr_guardian_draw_carry_aura :: proc(carrier: Player, target: Player) {
 	if target == null || !#alive(target.entity) return;
 	// Always the protective green shield, regardless of the held player's team — a color/shape that
 	// changed for traitors would let everyone read a grabbed player's allegiance just from the aura.
-	pos := target.entity.world_position + v2.{0, 0.55};
+	pos := target.entity.world_position.xy + v2.{0, 0.55};
 	pulse := 0.85 + sin(get_time() * 6.0) * 0.15;
 
 	UI.push_world_draw_context();
@@ -1756,7 +1756,7 @@ rr_has_line_of_sight :: proc(from: v2, to: v2) -> bool {
 }
 
 rr_mech_find_melee_target :: proc(player: Player, allow_traitor: bool, exclude_transformed: bool = false) -> Player {
-	finder := make_finder(Player, player.entity.world_position, MECH_MELEE_RANGE);
+	finder := make_finder(Player, player.entity.world_position.xy, MECH_MELEE_RANGE);
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
@@ -1768,14 +1768,14 @@ rr_mech_find_melee_target :: proc(player: Player, allow_traitor: bool, exclude_t
 		// Conversion can't claim a transformed titan (e.g. a Guardian in their guardian form) —
 		// the two titans settle things through a Showdown, not conversion.
 		if exclude_transformed && rr_mech_is_transformed(p) continue;
-		if !rr_has_line_of_sight(player.entity.world_position, p.entity.world_position) continue;
-		finder.check(p, p.entity.world_position);
+		if !rr_has_line_of_sight(player.entity.world_position.xy, p.entity.world_position.xy) continue;
+		finder.check(p, p.entity.world_position.xy);
 	}
 	return finder.closest;
 }
 
 rr_mech_find_pickup_target :: proc(player: Player) -> Player {
-	finder := make_finder(Player, player.entity.world_position, MECH_MELEE_RANGE);
+	finder := make_finder(Player, player.entity.world_position.xy, MECH_MELEE_RANGE);
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
 		if p == null continue;
@@ -1784,8 +1784,8 @@ rr_mech_find_pickup_target :: proc(player: Player) -> Player {
 		if !#alive(p.entity) continue;
 		if rr_lily_remote_body_active(p) continue;
 		if rr_mech_is_transformed(p) continue;
-		if !rr_has_line_of_sight(player.entity.world_position, p.entity.world_position) continue;
-		finder.check(p, p.entity.world_position);
+		if !rr_has_line_of_sight(player.entity.world_position.xy, p.entity.world_position.xy) continue;
+		finder.check(p, p.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -1810,12 +1810,12 @@ rr_mech_steal_carried_from_others :: proc(new_carrier: Player, victim_id: u64) {
 }
 
 rr_mech_find_nearby_corpse :: proc(player: Player) -> Corpse {
-	finder := make_finder(Corpse, player.entity.world_position, MECH_LOOT_RANGE);
+	finder := make_finder(Corpse, player.entity.world_position.xy, MECH_LOOT_RANGE);
 	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
 		if corpse.mech_core_looted continue;
-		finder.check(corpse, corpse.entity.world_position);
+		finder.check(corpse, corpse.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -1859,7 +1859,7 @@ rr_mech_task_drop_kind_at_pos :: proc(pos: v2) -> int {
 
 rr_mech_task_drop_kind :: proc(task: Task_Interactable) -> int {
 	if task == null return MECH_COMPONENT_POWER_CELL;
-	return rr_mech_task_drop_kind_at_pos(task.entity.world_position);
+	return rr_mech_task_drop_kind_at_pos(task.entity.world_position.xy);
 }
 
 // True if this component kind can still be spent on an upgrade the Mech hasn't bought yet.
@@ -1957,7 +1957,7 @@ rr_mech_find_nearest_collector :: proc(pos: v2, max_range: float) -> Player {
 	finder := make_finder(Player, pos, max_range);
 	for p: component_iterator(Player) {
 		if !rr_mech_is_valid_pickup_collector(p) continue;
-		finder.check(p, p.entity.world_position);
+		finder.check(p, p.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -1993,13 +1993,13 @@ rr_mech_spawn_component_pickup :: proc(pos: v2, kind: int, smasher: Player) {
 }
 
 rr_mech_find_smashable_task :: proc(player: Player) -> Task_Interactable {
-	finder := make_finder(Task_Interactable, player.entity.world_position, MECH_SMASH_RANGE);
+	finder := make_finder(Task_Interactable, player.entity.world_position.xy, MECH_SMASH_RANGE);
 	for t: component_iterator(Task_Interactable) {
 		if t == null continue;
 		if !#alive(t.entity) continue;
 		if t.mech_smashed continue;
 		if !rr_mech_task_is_smashable(t) continue;
-		finder.check(t, t.entity.world_position);
+		finder.check(t, t.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -2066,23 +2066,23 @@ rr_mech_smash_task :: proc(player: Player, task: Task_Interactable) {
 	task.mech_smashed_at = get_time(); // drives the silent auto-repair timeout (Task_Interactable.ao_update)
 
 	w := Scene.create_entity();
-	w.set_local_position(task.entity.world_position);
+	w.set_local_position(task.entity.world_position.xy);
 	w.set_local_scale(v2.{0.9, 0.9});
 	wreck := w.add_component(Mech_Wreckage);
 	wreck.owner_id = player.entity.id;
 	task.mech_wreckage_entity = w;
 
-	rr_mech_spawn_component_pickup(task.entity.world_position, kind, player);
+	rr_mech_spawn_component_pickup(task.entity.world_position.xy, kind, player);
 
 	// Final break impact (heavier than the per-loop channel swings).
 	if !rr_mech_is_transformed(player) {
 		player.set_trigger("punch");
 	}
 	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false);
-	rr_mech_spawn_flash(task.entity.world_position, 0.95, v4.{1.0, 0.55, 0.08, 0.65}, 0.28);
+	rr_mech_spawn_flash(task.entity.world_position.xy, 0.95, v4.{1.0, 0.55, 0.08, 0.65}, 0.28);
 	rr_mech_add_screenshake(player, 0.08, 0.2);
-	rr_mech_play_sfx_at("sfx/ggg_explode.wav", task.entity.world_position, 0.5, MECH_SMASH_IMPACT_DELAY);
-	rr_mech_play_sfx_at(MECH_SMASH_SFX, task.entity.world_position, 0.6, MECH_SMASH_IMPACT_DELAY); // metal-crunch wreck on the break
+	rr_mech_play_sfx_at("sfx/ggg_explode.wav", task.entity.world_position.xy, 0.5, MECH_SMASH_IMPACT_DELAY);
+	rr_mech_play_sfx_at(MECH_SMASH_SFX, task.entity.world_position.xy, 0.6, MECH_SMASH_IMPACT_DELAY); // metal-crunch wreck on the break
 
 	// Re-arm the per-smasher cooldown so they can't immediately smash the next panel.
 	rr_mech_arm_smash_cooldown(player);
@@ -2096,7 +2096,7 @@ rr_mech_find_task_near :: proc(pos: v2, range: float) -> Task_Interactable {
 	for t: component_iterator(Task_Interactable) {
 		if t == null || !#alive(t.entity) continue;
 		if !rr_mech_task_is_smashable(t) continue;
-		d := length_squared(t.entity.world_position - pos);
+		d := length_squared(t.entity.world_position.xy - pos);
 		if d <= best_d { best_d = d; best = t; }
 	}
 	return best;
@@ -2148,7 +2148,7 @@ rr_mech_spend_component_pool :: proc(owner: Player, kind: int, count: int) -> bo
 rr_mech_update_minion_delivery :: proc(mech_player: Player) {
 	if mech_player == null || !#alive(mech_player.entity) return;
 	if mech_player.player_state != Player_State.ALIVE return;
-	mech_pos := mech_player.entity.world_position;
+	mech_pos := mech_player.entity.world_position.xy;
 	for p: component_iterator(Player) {
 		if p == null || !#alive(p.entity) continue;
 		if p.player_state != Player_State.ALIVE continue;
@@ -2157,14 +2157,14 @@ rr_mech_update_minion_delivery :: proc(mech_player: Player) {
 		if minion.converted_by_mech_id != mech_player.entity.id continue;
 		held := minion.power_cells + minion.circuits + minion.schematics + minion.gears;
 		if held <= 0 continue;
-		if !in_range(p.entity.world_position - mech_pos, MECH_MINION_DELIVER_RANGE) continue;
+		if !in_range(p.entity.world_position.xy - mech_pos, MECH_MINION_DELIVER_RANGE) continue;
 		// Fly each held part over to the Mech (it banks into the Mech pool on arrival), then clear
 		// the Minion's stock. spawn_component_pickup arcs toward the smasher's owner = the Mech.
 		rr_mech_deliver_minion_kind(p, mech_player, MECH_COMPONENT_POWER_CELL, minion.power_cells); minion.power_cells = 0;
 		rr_mech_deliver_minion_kind(p, mech_player, MECH_COMPONENT_CIRCUIT, minion.circuits);       minion.circuits = 0;
 		rr_mech_deliver_minion_kind(p, mech_player, MECH_COMPONENT_SCHEMATIC, minion.schematics);   minion.schematics = 0;
 		rr_mech_deliver_minion_kind(p, mech_player, MECH_COMPONENT_GEAR, minion.gears);             minion.gears = 0;
-		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", p.entity.world_position, 0.3);
+		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", p.entity.world_position.xy, 0.3);
 	}
 }
 
@@ -2173,7 +2173,7 @@ rr_mech_update_minion_delivery :: proc(mech_player: Player) {
 rr_mech_deliver_minion_kind :: proc(minion_player: Player, mech_player: Player, kind: int, count: int) {
 	if count <= 0 return;
 	for i: 0..count-1 {
-		rr_mech_spawn_component_pickup(minion_player.entity.world_position, kind, mech_player);
+		rr_mech_spawn_component_pickup(minion_player.entity.world_position.xy, kind, mech_player);
 	}
 }
 
@@ -2271,12 +2271,12 @@ rr_mech_buy_upgrade :: proc(player: Player, upgrade_id: int) {
 		mech.wreckage_warp_unlocked = true; player.Notify("Unlocked Warp.");
 	}
 
-	rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", player.entity.world_position, 0.4);
+	rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", player.entity.world_position.xy, 0.4);
 	// A body-part build closes the bench so the reveal is visible; otherwise just flash.
 	if adds_body_part {
 		mech.workbench_ui_open = false;
 	} else {
-		rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.7}, 0.9, v4.{0.4, 0.85, 1.0, 0.6}, 0.32);
+		rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.7}, 0.9, v4.{0.4, 0.85, 1.0, 0.6}, 0.32);
 	}
 }
 
@@ -2306,13 +2306,13 @@ rr_mech_workbench_click_upgrade :: proc(player: Player, upgrade_id: int) {
 		player.Notify(format_string("You are missing %, use the map to find it!", .{name}));
 		mech.minimap_hint_kind = comp_kind; // 0 == any component → all four flash
 		mech.minimap_hint_until = get_time() + MECH_MINIMAP_HINT_SECONDS;
-		rr_mech_play_sfx_at("sfx/ui_error.wav", player.entity.world_position, 0.3);
+		rr_mech_play_sfx_at("sfx/ui_error.wav", player.entity.world_position.xy, 0.3);
 	} else if mech.power_cores < power_cost {
 		player.Notify("You are missing Power Cores — loot them from bodies you've killed!");
-		rr_mech_play_sfx_at("sfx/ui_error.wav", player.entity.world_position, 0.3);
+		rr_mech_play_sfx_at("sfx/ui_error.wav", player.entity.world_position.xy, 0.3);
 	} else if mech.magnet_cores < magnet_cost {
 		player.Notify("You are missing Magnet Charges — magnetise players with the Magnet Cannon!");
-		rr_mech_play_sfx_at("sfx/ui_error.wav", player.entity.world_position, 0.3);
+		rr_mech_play_sfx_at("sfx/ui_error.wav", player.entity.world_position.xy, 0.3);
 	}
 }
 
@@ -2354,10 +2354,10 @@ rr_mech_convert_target :: proc(mech_player: Player, target: Player) {
 		mech_player.Notify(format_string("% is Guardian.", .{target.entity.get_name()}));
 			// Denied reject: shield bounce + error sting, golden shield burst over the target.
 			// Conveys the attempt was repelled and tips the Mech off (no charge consumed).
-		rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", target.entity.world_position, 0.42);
-		rr_mech_play_sfx_at("sfx/ui_error.wav", mech_player.entity.world_position, 0.32);
-		rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 1.05, v4.{1.0, 0.95, 0.45, 0.75}, 0.3);
-		rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 0.55, v4.{1.0, 1.0, 0.85, 0.85}, 0.2);
+		rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", target.entity.world_position.xy, 0.42);
+		rr_mech_play_sfx_at("sfx/ui_error.wav", mech_player.entity.world_position.xy, 0.32);
+		rr_mech_spawn_flash(target.entity.world_position.xy + v2.{0, 0.55}, 1.05, v4.{1.0, 0.95, 0.45, 0.75}, 0.3);
+		rr_mech_spawn_flash(target.entity.world_position.xy + v2.{0, 0.55}, 0.55, v4.{1.0, 1.0, 0.85, 0.85}, 0.2);
 		rr_mech_add_screenshake(mech_player, 0.08, 0.2);
 		return;
 	}
@@ -2383,9 +2383,9 @@ rr_mech_convert_target :: proc(mech_player: Player, target: Player) {
 	mech.conversion_used = true;
 	target.entity.add_passive_effect(minion);
 	rr_mech_play_avatar_anim(mech_player, "009SG/Convert", false);
-	rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 0.75, v4.{0.35, 0.9, 1.0, 0.7}, 0.32);
+	rr_mech_spawn_flash(target.entity.world_position.xy + v2.{0, 0.55}, 0.75, v4.{0.35, 0.9, 1.0, 0.7}, 0.32);
 	mech_player.Notify(format_string("Converted %.", .{target.entity.get_name()}));
-	rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position, 0.35);
+	rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position.xy, 0.35);
 	// Converting spends the grab — put the grab/throw ability on cooldown so it can't be re-used instantly.
 	rr_mech_arm_grab_cooldown(mech_player);
 }
@@ -2402,7 +2402,7 @@ rr_mech_get_throw_direction :: proc(player: Player) -> v2 {
 rr_mech_is_near_magnet_node :: proc(pos: v2) -> bool {
 	for m: component_iterator(Mech_Magnet_Node) {
 		if m == null || !#alive(m.entity) continue;
-		if in_range(m.entity.world_position - pos, 1.15) return true;
+		if in_range(m.entity.world_position.xy - pos, 1.15) return true;
 	}
 	return false;
 }
@@ -2425,7 +2425,7 @@ rr_mech_find_throw_path_hit :: proc(carrier: Player, target: Player, start_pos: 
 
 	// If the launch offset itself sits over a boundary, fall back to the victim's
 	// current legal position rather than preserving an off-mesh start sample.
-	last_valid := rr_mech_clamp_to_ground(target.entity.world_position);
+	last_valid := rr_mech_clamp_to_ground(target.entity.world_position.xy);
 	traveled := min(MECH_THROW_STEP, travel_limit);
 	while traveled <= travel_limit && travel_limit > 0.0 {
 		sample := start_pos + dir * traveled;
@@ -2443,8 +2443,8 @@ rr_mech_find_throw_path_hit :: proc(carrier: Player, target: Player, start_pos: 
 
 		for m: component_iterator(Mech_Magnet_Node) {
 			if m == null || !#alive(m.entity) continue;
-			if !in_range(m.entity.world_position - sample, 1.15) continue;
-			end_pos = m.entity.world_position;
+			if !in_range(m.entity.world_position.xy - sample, 1.15) continue;
+			end_pos = m.entity.world_position.xy;
 			rr_mech_apply_stun(target, MECH_MAGNET_PULL_SECONDS);
 			rr_mech_spawn_flash(end_pos, 0.7, v4.{0.3, 0.8, 1.0, 0.6}, 0.28);
 			rr_mech_play_sfx_at("sfx/zap.wav", end_pos, 0.34);
@@ -2458,8 +2458,8 @@ rr_mech_find_throw_path_hit :: proc(carrier: Player, target: Player, start_pos: 
 		for p: component_iterator(Player) {
 			if p == null || p == target || p == carrier continue;
 			if p.player_state != Player_State.ALIVE continue;
-			if !in_range(p.entity.world_position - sample, 1.15) continue;
-			end_pos = p.entity.world_position;
+			if !in_range(p.entity.world_position.xy - sample, 1.15) continue;
+			end_pos = p.entity.world_position.xy;
 			target_helmet := target.entity.get_component(Mech_Helmeted_Status);
 			if target_helmet != null && target_helmet.active {
 				p.kill_with_killer(killer_id);
@@ -2633,7 +2633,7 @@ rr_mech_throw_player :: proc(carrier: Player, target: Player, killer_id: u64, ai
 	// Begin at the carrier's nearest legal navmesh point. Starting after a visual hand
 	// offset could put the first ray sample on the far side of a thin wall, letting the
 	// victim escape the room before collision validation even began.
-	start_pos := rr_mech_clamp_to_ground(carrier.entity.world_position);
+	start_pos := rr_mech_clamp_to_ground(carrier.entity.world_position.xy);
 	end_pos := start_pos + dir * MECH_THROW_DISTANCE;
 	path_hit := rr_mech_find_throw_path_hit(carrier, target, start_pos, dir, ref end_pos, killer_id);
 	// Toss the victim along a natural arc from the carrier to the landing spot
@@ -2647,7 +2647,7 @@ rr_mech_throw_player :: proc(carrier: Player, target: Player, killer_id: u64, ai
 	}
 	// Throw gesture rides the overlay track so the titan keeps locomoting underneath.
 	rr_mech_play_overlay_oneshot(carrier, "009SG/Throw_Player_AL");
-	rr_mech_play_sfx_at("sfx/killer_transform.wav", carrier.entity.world_position, 0.2);
+	rr_mech_play_sfx_at("sfx/killer_transform.wav", carrier.entity.world_position.xy, 0.2);
 	rr_mech_add_screenshake(carrier, 0.09, 0.18);
 	// Pull the thrower's camera out a touch so they watch the victim sail (eased back in rr_mech_update).
 	cmech := carrier.entity.get_component(Mech_Module);
@@ -2661,7 +2661,7 @@ rr_mech_throw_player :: proc(carrier: Player, target: Player, killer_id: u64, ai
 	for p: component_iterator(Player) {
 		if p == null || p == target || p == carrier continue;
 		if p.player_state != Player_State.ALIVE continue;
-		if !in_range(p.entity.world_position - end_pos, 1.2) continue;
+		if !in_range(p.entity.world_position.xy - end_pos, 1.2) continue;
 		target_helmet := target.entity.get_component(Mech_Helmeted_Status);
 		if target_helmet != null && target_helmet.active {
 			p.kill_with_killer(killer_id);
@@ -2812,8 +2812,8 @@ Mech_Workbench_Interactable :: class : Interactable {
 			mech.workbench_ui_open = true;
 			mech.visited_workbench = true; // completes the "Go to R&D Workbench" first objective
 		}
-		rr_mech_spawn_flash(entity.world_position + v2.{0, 0.55}, 0.75, v4.{0.25, 0.8, 1.0, 0.55}, 0.28);
-		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", entity.world_position, 0.35);
+		rr_mech_spawn_flash(entity.world_position.xy + v2.{0, 0.55}, 0.75, v4.{0.25, 0.8, 1.0, 0.55}, 0.28);
+		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", entity.world_position.xy, 0.35);
 	}
 }
 
@@ -2844,8 +2844,8 @@ Mech_Loot_Corpse_Interactable :: class : Interactable {
 		corpse.mech_core_looted = true;
 		mech.power_cores += 1;
 		rr_mech_play_avatar_anim(player, "009SG/Loot_Body", false);
-		rr_mech_spawn_flash(entity.world_position + v2.{0, 0.55}, 0.55, v4.{1.0, 0.15, 0.08, 0.65}, 0.35);
-		rr_mech_play_sfx_at("sfx/pick_up_item_a973cc.wav", entity.world_position, 0.32);
+		rr_mech_spawn_flash(entity.world_position.xy + v2.{0, 0.55}, 0.55, v4.{1.0, 0.15, 0.08, 0.65}, 0.35);
+		rr_mech_play_sfx_at("sfx/pick_up_item_a973cc.wav", entity.world_position.xy, 0.32);
 		player.Notify(format_string("+1 Power Core (% total)", .{mech.power_cores}));
 	}
 }
@@ -2885,9 +2885,9 @@ Mech_Magnet_Loot_Interactable :: class : Interactable {
 		mag.core_looted = true;
 		mech.magnet_cores += 1;
 		rr_mech_play_avatar_anim(player, "009SG/Loot_Body", false);
-		rr_mech_spawn_flash(entity.world_position + v2.{0, 0.55}, 0.6, v4.{0.3, 0.85, 1.0, 0.7}, 0.35);
-		rr_mech_spawn_lightning_strike(entity.world_position, 0.7);
-		rr_mech_play_sfx_at("sfx/zap.wav", entity.world_position, 0.34);
+		rr_mech_spawn_flash(entity.world_position.xy + v2.{0, 0.55}, 0.6, v4.{0.3, 0.85, 1.0, 0.7}, 0.35);
+		rr_mech_spawn_lightning_strike(entity.world_position.xy, 0.7);
+		rr_mech_play_sfx_at("sfx/zap.wav", entity.world_position.xy, 0.34);
 		player.Notify(format_string("+1 Magnet Charge (% total)", .{mech.magnet_cores}));
 	}
 }
@@ -2963,11 +2963,11 @@ rr_mech_invoke_minion :: proc(mech_player: Player) {
 		// movement lock / magnetised pose auto-release within a frame.
 		rr_mech_release_carried(minion);
 
-		from := minion.entity.world_position;
+		from := minion.entity.world_position.xy;
 		// Fan the recalled Minions out in a ring just beside the Mech, clamped onto walkable navmesh.
 		angle := 0.6 + n.(float) * 0.9;
 		offset := v2.{cos(angle), sin(angle)} * 1.4;
-		dest := rr_mech_clamp_to_ground(mech_player.entity.world_position + offset);
+		dest := rr_mech_clamp_to_ground(mech_player.entity.world_position.xy + offset);
 		rr_mech_spawn_recall_portal(from);
 		rr_mech_spawn_recall_portal(dest);
 		rr_mech_spawn_warp_vfx(from);
@@ -3052,7 +3052,7 @@ Mech_Smash_Interactable :: class : Interactable {
 		// Re-fire the smash swing twice per anim loop so it visibly hammers during the hold.
 		if get_time() < next_swing_at return;
 		next_swing_at = get_time() + MECH_SMASH_SWING_INTERVAL;
-		rr_mech_play_smash_gesture(player, entity.world_position);
+		rr_mech_play_smash_gesture(player, entity.world_position.xy);
 	}
 	on_interact :: method(player: Player) {
 		// Still cooling down — the prompt shows the countdown only, no smash.
@@ -3162,7 +3162,7 @@ Mech_Screenshake_Status :: class : Component {
 		if duration <= 0.0 return;
 		remaining := (ends_at - get_time()) / duration;
 		amp := intensity * remaining;
-		p.camera.position = p.entity.world_position + v2.{sin(get_time() * 80.0) * amp, cos(get_time() * 101.0) * amp * 0.7};
+		p.camera.position.xy = p.entity.world_position.xy + v2.{sin(get_time() * 80.0) * amp, cos(get_time() * 101.0) * amp * 0.7};
 	}
 }
 
@@ -3257,8 +3257,8 @@ rr_mech_missile_blast_aoe :: proc(using missile: Mech_Missile, at: v2) {
 		// Don't friendly-fire the Mech's own minion.
 		m := rr_mech_get_minion_effect(p);
 		if m != null && m.converted_by_mech_id == owner_id continue;
-		if !in_range(p.entity.world_position - at, MECH_MISSILE_BLAST_STUN_RADIUS) continue;
-		if rr_mech_is_near_magnet_node(p.entity.world_position) {
+		if !in_range(p.entity.world_position.xy - at, MECH_MISSILE_BLAST_STUN_RADIUS) continue;
+		if rr_mech_is_near_magnet_node(p.entity.world_position.xy) {
 			rr_mech_release_guardian_pickup_if_needed(p);
 			p.kill_with_killer(owner_id);
 		} else {
@@ -3323,11 +3323,11 @@ Mech_Fire_Pillar :: class : Component {
 
 		// Block passage. Stop once the outro is playing so the fire visibly dies before it lets go.
 		if ending return;
-		center := entity.world_position;
+		center := entity.world_position.xy;
 		for p: component_iterator(Player) {
 			if p == null || !#alive(p.entity) continue;
 			if p.player_state != Player_State.ALIVE continue;
-			delta := p.entity.world_position - center;
+			delta := p.entity.world_position.xy - center;
 			d := length(delta);
 			if d >= block_radius continue;
 			dir := d > 0.01 ? normalize(delta) : v2.{1, 0};
@@ -3440,13 +3440,13 @@ Mech_Component_Pickup :: class : Component {
 			if !rr_mech_is_valid_pickup_collector(target) {
 				arcing = false;
 				target_id = 0;
-				spawn_pos = entity.world_position;
+				spawn_pos = entity.world_position.xy;
 				spawn_time = get_time();
 				return;
 			}
 			t := clamp((get_time() - arc_start_time) / MECH_PICKUP_ARC_DURATION, 0.0, 1.0);
 			ease := 1.0 - (1.0 - t) * (1.0 - t);
-			to := target.entity.world_position + v2.{0, 0.7};
+			to := target.entity.world_position.xy + v2.{0, 0.7};
 			pos := lerp(arc_start_pos, to, ease);
 			pos.y += sin(t * PI) * MECH_PICKUP_ARC_HEIGHT;
 			scale := lerp(0.7, 0.35, ease);
@@ -3468,13 +3468,13 @@ Mech_Component_Pickup :: class : Component {
 		// Brief grace period so it's visible before it homes in.
 		if get_time() - spawn_time < 0.25 return;
 
-		collector := rr_mech_find_nearest_collector(entity.world_position, MECH_PICKUP_SEEK_RANGE);
+		collector := rr_mech_find_nearest_collector(entity.world_position.xy, MECH_PICKUP_SEEK_RANGE);
 		if collector == null return;
 		target_id = collector.entity.id;
-		arc_start_pos = entity.world_position;
+		arc_start_pos = entity.world_position.xy;
 		arc_start_time = get_time();
 		arcing = true;
-		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", entity.world_position, 0.18);
+		rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", entity.world_position.xy, 0.18);
 	}
 }
 
@@ -3528,8 +3528,8 @@ rr_mech_mark_warped :: proc(player: Player) {
 
 rr_mech_do_wreckage_warp :: proc(player: Player, wreckage: Mech_Wreckage) {
 	if player == null || wreckage == null || !#alive(wreckage.entity) return;
-	from := player.entity.world_position;
-	dest := wreckage.entity.world_position + v2.{0, 0.7};
+	from := player.entity.world_position.xy;
+	dest := wreckage.entity.world_position.xy + v2.{0, 0.7};
 
 	// Clamp the destination onto the navmesh so the +0.7 offset (or a wreckage left
 	// near a wall) can't drop the player outside walkable bounds and strand them.
@@ -3585,7 +3585,7 @@ rr_mech_draw_wreckage_warp_minimap_buttons :: proc(player: Player, map_rect: Rec
 		if !#alive(w.entity) continue;
 		if w.exploding continue;
 		any_wreckage = true;
-		p_ui := rr_minimap_world_to_ui(map_rect, w.entity.world_position);
+		p_ui := rr_minimap_world_to_ui(map_rect, w.entity.world_position.xy);
 		r := Rect{p_ui, p_ui}.grow_unscaled(size, size, size, size);
 
 		if !unlocked {
@@ -3888,9 +3888,9 @@ Mech_Helmeted_Status :: class : Component {
 			active = false;
 			expires_at = 0.0;
 			if p.is_local() {
-				rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.65}, 0.5, v4.{0.7, 0.9, 1.0, 0.55}, 0.22);
+				rr_mech_spawn_flash(p.entity.world_position.xy + v2.{0, 0.65}, 0.5, v4.{0.7, 0.9, 1.0, 0.55}, 0.22);
 			}
-			rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", p.entity.world_position, 0.22);
+			rr_mech_play_sfx_at("$AO/sfx/FUI Holo Mechanism Activate.wav", p.entity.world_position.xy, 0.22);
 		}
 		sync_helmet_skin(this, p, active);
 		// Blind overlay while the helmet is clamped on. The fog of war is ALSO collapsed via
@@ -3950,15 +3950,15 @@ Mech_Helmet_Trap :: class : Component {
 			if p.player_type == Player_Type.TRAITOR continue;
 			if p.player_state != Player_State.ALIVE continue;
 			if rr_ninja_light_feet(p) continue;
-			if !in_range(p.entity.world_position - entity.world_position, MECH_HELMET_TRAP_CATCH_RADIUS) continue;
+			if !in_range(p.entity.world_position.xy - entity.world_position.xy, MECH_HELMET_TRAP_CATCH_RADIUS) continue;
 			status := p.entity.get_component(Mech_Helmeted_Status);
 			if status == null { status = p.entity.add_component(Mech_Helmeted_Status); }
 			status.arm();
 			armed = false;
 			spine := entity.get_component(Spine_Animator);
 			if spine != null && spine.instance != null { spine.instance.set_animation("activate", false, 0); }
-			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.75}, 0.55, v4.{0.7, 0.9, 1.0, 0.65}, 0.22);
-			rr_mech_play_sfx_at("sfx/zap.wav", p.entity.world_position, 0.28);
+			rr_mech_spawn_flash(p.entity.world_position.xy + v2.{0, 0.75}, 0.55, v4.{0.7, 0.9, 1.0, 0.65}, 0.22);
+			rr_mech_play_sfx_at("sfx/zap.wav", p.entity.world_position.xy, 0.28);
 			break;
 		}
 	}
@@ -3992,9 +3992,9 @@ rr_mech_rod_electrocute :: proc(p: Player) {
 	if !stun.active {
 		stun.arm(MECH_STUN_SECONDS, true, true); // shock pose + from_rod (rod shows its own timer)
 		if p.is_local() {
-			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.7}, 0.55, v4.{0.55, 0.9, 1.0, 0.75}, 0.2);
+			rr_mech_spawn_flash(p.entity.world_position.xy + v2.{0, 0.7}, 0.55, v4.{0.55, 0.9, 1.0, 0.75}, 0.2);
 		}
-		rr_mech_play_sfx_at("sfx/zap.wav", p.entity.world_position, 0.32);
+		rr_mech_play_sfx_at("sfx/zap.wav", p.entity.world_position.xy, 0.32);
 	} else {
 		stun.ends_at = max(stun.ends_at, get_time() + 0.4);
 		stun.from_rod = true; // a victim re-zapped by the rod keeps its timer hidden
@@ -4017,8 +4017,8 @@ Mech_Magnet_Node :: class : Component {
 	// "Arc" anim supplies the vertical up-then-down.
 	ao_start :: method() {
 		start_time = get_time();
-		if length_squared(target_pos) < 0.0001 { target_pos = entity.world_position; }
-		if length_squared(start_pos) < 0.0001 { start_pos = entity.world_position; }
+		if length_squared(target_pos) < 0.0001 { target_pos = entity.world_position.xy; }
+		if length_squared(start_pos) < 0.0001 { start_pos = entity.world_position.xy; }
 		entity.set_local_rotation(0);
 		spine := entity.get_component(Spine_Animator);
 		if spine != null {
@@ -4112,7 +4112,7 @@ Mech_Magnet_Node :: class : Component {
 			if p.player_state != Player_State.ALIVE continue;
 			if p.entity.id == owner_id continue;
 			if p.player_type == Player_Type.TRAITOR continue;
-			to_node := entity.world_position - p.entity.world_position;
+			to_node := entity.world_position.xy - p.entity.world_position.xy;
 			dist := length(to_node);
 			if dist > MECH_MAGNET_RADIUS continue;
 
@@ -4145,7 +4145,7 @@ Mech_Magnet_Node :: class : Component {
 				pull := clamp(MECH_MAGNET_PULL_SPEED * (1.0 - dist / (MECH_MAGNET_RADIUS + 2.0)), 5.0, MECH_MAGNET_PULL_SPEED);
 				step := pull * dt;
 				if step > dist { step = dist; }
-				p.entity.set_local_position(p.entity.world_position + normalize(to_node) * step);
+				p.entity.set_local_position(p.entity.world_position.xy + normalize(to_node) * step);
 				p.agent.velocity = v2.{0, 0};
 			}
 		}
@@ -4234,15 +4234,15 @@ rr_mech_car_try_rod_kill :: proc(driver: Player, victim: Player) -> bool {
 	for node: component_iterator(Mech_Magnet_Node) {
 		if node == null || !#alive(node.entity) continue;
 		if !node.landed continue;
-		if !in_range(victim.entity.world_position - node.entity.world_position, MECH_CAR_ROD_KILL_RADIUS) continue;
-		at := node.entity.world_position;
+		if !in_range(victim.entity.world_position.xy - node.entity.world_position.xy, MECH_CAR_ROD_KILL_RADIUS) continue;
+		at := node.entity.world_position.xy;
 		// Electric overload blast — layered blue shockwave + white core.
 		rr_mech_spawn_shockwave(at, 0.4, 5.0, v4.{0.4, 0.85, 1.0, 0.8}, 0.4);
 		rr_mech_spawn_flash(at, 2.0, v4.{0.55, 0.9, 1.0, 0.85}, 0.32);
 		rr_mech_spawn_flash(at, 1.0, v4.{0.95, 1.0, 1.0, 0.95}, 0.2);
 		rr_mech_spawn_lightning_strike(at);
 		rr_mech_play_sfx_at("sfx/zap.wav", at, 0.5);
-		rr_mech_play_sfx_at("sfx/other_death.wav", victim.entity.world_position, 0.4);
+		rr_mech_play_sfx_at("sfx/other_death.wav", victim.entity.world_position.xy, 0.4);
 		rr_mech_add_screenshake(driver, 0.18, 0.3);
 		// Kill the victim and destroy the rod it overloaded.
 		rr_mech_release_guardian_pickup_if_needed(victim);
@@ -4304,7 +4304,7 @@ Mech_Ram_Charge_Status :: class : Component {
 			rr_mech_spawn_transform_vfx(p, rr_mech_anim_duration("009SG/Transform_Truck_out"));
 			rr_mech_add_screenshake(p, 0.06, 0.2);
 			// Engine ignition the instant the Ram is triggered.
-			rr_mech_play_sfx_at("sfx/imposter_car_start_47c7ab.wav", p.entity.world_position, 0.5);
+			rr_mech_play_sfx_at("sfx/imposter_car_start_47c7ab.wav", p.entity.world_position.xy, 0.5);
 		}
 		active = true;
 	}
@@ -4318,11 +4318,11 @@ Mech_Ram_Charge_Status :: class : Component {
 		boost_ends_at = get_time() + MECH_CAR_BOOST_SECONDS;
 		boost_cd_until = get_time() + MECH_CAR_BOOST_SECONDS + MECH_CAR_BOOST_COOLDOWN;
 		if p != null {
-			rr_mech_play_sfx_at("sfx/car_rev_up_03ff05.wav", p.entity.world_position, 0.6);
-			rr_mech_play_sfx_at("sfx/Whoosh_1e3125.wav", p.entity.world_position, 0.5);
+			rr_mech_play_sfx_at("sfx/car_rev_up_03ff05.wav", p.entity.world_position.xy, 0.6);
+			rr_mech_play_sfx_at("sfx/Whoosh_1e3125.wav", p.entity.world_position.xy, 0.5);
 			rr_mech_add_screenshake(p, 0.12, 0.25);
 			// Burst of fire out the exhaust as the turbo lights.
-			behind := p.entity.world_position - dir * 0.8 + v2.{0, 0.35};
+			behind := p.entity.world_position.xy - dir * 0.8 + v2.{0, 0.35};
 			rr_mech_spawn_flash(behind, 1.4, v4.{1.0, 0.45, 0.08, 0.85}, 0.3);
 			rr_mech_spawn_flash(behind, 0.8, v4.{1.0, 0.85, 0.4, 0.9}, 0.22);
 		}
@@ -4350,13 +4350,13 @@ Mech_Ram_Charge_Status :: class : Component {
 		// Anchor at the car's rear and ROTATE the flame so it shoots straight out the back instead of
 		// pointing up. The rig's flame points +Y at rotation 0, so rotate +Y to align with -dir
 		// (backwards along travel). Stretched along its length into a jet plume.
-		rear := p.entity.world_position - dir * 0.35 + v2.{0, 0.1};
+		rear := p.entity.world_position.xy - dir * 0.35 + v2.{0, 0.1};
 		boost_fire_entity.set_local_position(rear);
 		boost_fire_entity.set_local_rotation(to_degrees(atan2(-dir.y, -dir.x)) - 90.0);
 		boost_fire_entity.set_local_scale(v2.{0.8, 1.45}); // narrow + long = a jet plume
 		// Dense ember trail streaming off the back, along the exhaust line.
 		if get_time() >= next_boost_flame_at {
-			tail := p.entity.world_position - dir * 1.2 + v2.{0, 0.15};
+			tail := p.entity.world_position.xy - dir * 1.2 + v2.{0, 0.15};
 			rr_mech_spawn_flash(tail, 0.85, v4.{1.0, 0.4, 0.06, 0.6}, 0.22);
 			rr_mech_spawn_flash(rear + v2.{0, 0.1}, 0.6, v4.{1.0, 0.78, 0.28, 0.5}, 0.16);
 			next_boost_flame_at = get_time() + 0.04;
@@ -4366,7 +4366,7 @@ Mech_Ram_Charge_Status :: class : Component {
 	ensure_truck :: proc(using this: Mech_Ram_Charge_Status, p: Player) {
 		if truck_entity == null || !#alive(truck_entity) {
 			e := Scene.create_entity();
-			e.set_local_position(p.entity.world_position + v2.{0, 0.2});
+			e.set_local_position(p.entity.world_position.xy + v2.{0, 0.2});
 			anim := e.add_component(Spine_Animator);
 			anim.awaken();
 			anim.layer = 0;
@@ -4388,7 +4388,7 @@ Mech_Ram_Charge_Status :: class : Component {
 	// skins; side_view is mirrored via scale.x for left/right.
 	update_truck :: proc(using this: Mech_Ram_Charge_Status, p: Player) {
 		if truck_entity == null || !#alive(truck_entity) return;
-		truck_entity.set_local_position(p.entity.world_position + v2.{0, 0.2});
+		truck_entity.set_local_position(p.entity.world_position.xy + v2.{0, 0.2});
 		// Always the side view; just mirror it for left/right charges. Use the persisted facing so a
 		// straight up/down heading (dir.x ~ 0) doesn't snap the truck back to its right-facing side.
 		skin := "side_view";
@@ -4433,7 +4433,7 @@ Mech_Ram_Charge_Status :: class : Component {
 			restore_mech(this, p);
 			rr_mech_play_avatar_anim(p, "009SG/Transform_Truck_In", false);
 			rr_mech_spawn_transform_vfx(p);
-			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position, 0.3);
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position.xy, 0.3);
 			hit = true;
 			active = false;
 			return;
@@ -4449,9 +4449,9 @@ Mech_Ram_Charge_Status :: class : Component {
 				mech.creature_entity.set_local_enabled(false);
 			}
 			ensure_truck(this, p);
-			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position, 0.25);
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position.xy, 0.25);
 			// Engine revs up as the truck appears and barrels forward.
-			rr_mech_play_sfx_at("sfx/car_rev_up_03ff05.wav", p.entity.world_position, 0.55);
+			rr_mech_play_sfx_at("sfx/car_rev_up_03ff05.wav", p.entity.world_position.xy, 0.55);
 			truck_swapped = true;
 		}
 
@@ -4485,8 +4485,8 @@ Mech_Ram_Charge_Status :: class : Component {
 		// shoots out the far side still charging; pinned victims (plowed below off the new car_pos)
 		// ride through with it. SFX + a poof at both mouths to sell the warp.
 		if rr_portal_try_instant_teleport(p) {
-			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position, 0.3);
-			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.4}, 1.0, v4.{0.5, 0.4, 1.0, 0.7}, 0.25);
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", p.entity.world_position.xy, 0.3);
+			rr_mech_spawn_flash(p.entity.world_position.xy + v2.{0, 0.4}, 1.0, v4.{0.5, 0.4, 1.0, 0.7}, 0.25);
 		}
 
 		// --- APEX turbo boost: time out the surge, spew the fire jet. ---
@@ -4496,7 +4496,7 @@ Mech_Ram_Charge_Status :: class : Component {
 
 		// APEX power aura: a pulsing energy trail around the truck.
 		if apex && get_time() >= next_aura_at {
-			rr_mech_spawn_flash(p.entity.world_position + v2.{0, 0.4}, 1.1, v4.{1.0, 0.35, 0.08, 0.5}, 0.22);
+			rr_mech_spawn_flash(p.entity.world_position.xy + v2.{0, 0.4}, 1.1, v4.{1.0, 0.35, 0.08, 0.5}, 0.22);
 			next_aura_at = get_time() + 0.06;
 		}
 
@@ -4520,7 +4520,7 @@ Mech_Ram_Charge_Status :: class : Component {
 		// along with it (no longer a dash-kill, and no fling — they're held just in front, not given a
 		// big velocity). A victim shoved into a Magnet Rod by the car (either form) triggers an electric
 		// blast that destroys the rod and kills them (the only lethal outcome of the drive). ---
-		car_pos := p.entity.world_position;
+		car_pos := p.entity.world_position.xy;
 		forward := dir;
 		perp := v2.{-dir.y, dir.x};
 		for target: component_iterator(Player) {
@@ -4528,7 +4528,7 @@ Mech_Ram_Charge_Status :: class : Component {
 			if target.player_state != Player_State.ALIVE continue;
 			// Traitors (fellow traitors / Minions) get plowed too — the drive itself doesn't kill, it
 			// just pins them to the bumper. They're only spared the lethal rod combo below.
-			rel := target.entity.world_position - car_pos;
+			rel := target.entity.world_position.xy - car_pos;
 			fwd_dist := rel.x * forward.x + rel.y * forward.y;   // how far ahead along travel
 			lat := rel.x * perp.x + rel.y * perp.y;               // signed sideways offset from the path
 			// Only catch victims roughly in front of the car and within the plow lane.
@@ -4605,7 +4605,7 @@ Mech_Missile :: class : Component {
 		if length_squared(launch_dir) < 0.01 { launch_dir = v2.{0, 1}; }
 		heading = normalize(launch_dir);
 		t := get_player_by_entity_id(target_id);
-		if t != null { last_target_pos = t.entity.world_position; has_target_pos = true; }
+		if t != null { last_target_pos = t.entity.world_position.xy; has_target_pos = true; }
 		spine := entity.get_component(Spine_Animator);
 		if spine != null {
 			spine.awaken();
@@ -4696,7 +4696,7 @@ Mech_Missile :: class : Component {
 		if t >= 1.0 {
 			target := get_player_by_entity_id(target_id);
 			if target != null && target.player_state == Player_State.ALIVE {
-				if is_lethal || rr_mech_is_near_magnet_node(target.entity.world_position) {
+				if is_lethal || rr_mech_is_near_magnet_node(target.entity.world_position.xy) {
 					rr_mech_release_guardian_pickup_if_needed(target);
 					target.kill_with_killer(owner_id);
 				} else {
@@ -4722,7 +4722,7 @@ Mech_Missile :: class : Component {
 		// Steer toward the live target, or its last known position if it's already gone.
 		aim_pos := last_target_pos;
 		if target_alive {
-			aim_pos = target.entity.world_position;
+			aim_pos = target.entity.world_position.xy;
 			last_target_pos = aim_pos;
 			has_target_pos = true;
 		} else if !has_target_pos {
@@ -4733,7 +4733,7 @@ Mech_Missile :: class : Component {
 
 		// Burst out of the shoulder first, then curve onto the aim point so it reads as a
 		// shoulder-mounted launcher rather than a bee-line dart.
-		home := normalize(aim_pos - entity.world_position);
+		home := normalize(aim_pos - entity.world_position.xy);
 		desired := home;
 		if age < MECH_MISSILE_LAUNCH_SECONDS {
 			blend := clamp(age / MECH_MISSILE_LAUNCH_SECONDS, 0.0, 1.0);
@@ -4743,24 +4743,24 @@ Mech_Missile :: class : Component {
 		heading = normalize(lerp(heading, desired, clamp(dt * 9.0, 0.0, 1.0)));
 		cur := speed;
 		if age < MECH_MISSILE_LAUNCH_SECONDS { cur = speed * (0.55 + 0.45 * (age / MECH_MISSILE_LAUNCH_SECONDS)); }
-		entity.set_local_position(entity.world_position + heading * cur * dt);
+		entity.set_local_position(entity.world_position.xy + heading * cur * dt);
 		entity.set_local_rotation(to_degrees(atan2(heading.y, heading.x)));
 
 		if get_time() >= next_trail_at {
-			rr_mech_spawn_flash(entity.world_position, 0.2, v4.{1.0, 0.55, 0.1, 0.4}, 0.18);
+			rr_mech_spawn_flash(entity.world_position.xy, 0.2, v4.{1.0, 0.55, 0.1, 0.4}, 0.18);
 			next_trail_at = get_time() + 0.05;
 		}
 
-		if in_range(aim_pos - entity.world_position, MECH_MISSILE_HIT_RADIUS) {
+		if in_range(aim_pos - entity.world_position.xy, MECH_MISSILE_HIT_RADIUS) {
 			if target_alive {
 				// Lethal (End Game barrage) or the magnet-node combo kills outright; else stun.
-				if is_lethal || rr_mech_is_near_magnet_node(target.entity.world_position) {
+				if is_lethal || rr_mech_is_near_magnet_node(target.entity.world_position.xy) {
 					rr_mech_release_guardian_pickup_if_needed(target);
 					target.kill_with_killer(owner_id);
 				} else {
 					rr_mech_apply_stun(target, MECH_STUN_SECONDS);
 				}
-				detonate(this, target.entity.world_position);
+				detonate(this, target.entity.world_position.xy);
 			} else {
 				// Target already gone — just blow up at their last known position.
 				detonate(this, aim_pos);
@@ -4795,9 +4795,9 @@ Mech_Transform_Ability :: class : Ability_Base {
 			}
 			rr_mech_play_avatar_anim(player, anim_name, false);
 			mech.anim_lock_until = get_time() + anim_duration;
-			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.32);
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position.xy, 0.32);
 			color := mech.is_mech_form ? v4.{1.0, 0.32, 0.12, 0.7} : v4.{0.6, 0.85, 1.0, 0.6};
-			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.95, color, 0.3);
+			rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.55}, 0.95, color, 0.3);
 			rr_mech_add_screenshake(player, 0.07, 0.2);
 			current_cooldown = MECH_TRANSFORM_COOLDOWN;
 		}
@@ -4825,10 +4825,10 @@ rr_guardian_enter_guardian_form :: proc(player: Player) {
 	rr_mech_play_avatar_anim(player, anim_name, false);
 	guard.anim_lock_until = get_time() + anim_duration;
 	// Heroic stinger + bright reveal pop.
-	rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", player.entity.world_position, 0.35);
-	rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.28);
-	rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 1.25, v4.{0.85, 0.95, 0.3, 0.75}, 0.42);
-	rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.55, v4.{1.0, 1.0, 0.8, 0.85}, 0.22);
+	rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", player.entity.world_position.xy, 0.35);
+	rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position.xy, 0.28);
+	rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.55}, 1.25, v4.{0.85, 0.95, 0.3, 0.75}, 0.42);
+	rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.55}, 0.55, v4.{1.0, 1.0, 0.8, 0.85}, 0.22);
 	rr_mech_add_screenshake(player, 0.12, 0.28);
 }
 
@@ -4856,8 +4856,8 @@ Guardian_Transform_Ability :: class : Ability_Base {
 				guard.transform_anim_ends_at = get_time() + anim_duration;
 				rr_mech_play_avatar_anim(player, anim_name, false);
 				guard.anim_lock_until = get_time() + anim_duration;
-				rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.3);
-				rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.55}, 0.9, v4.{0.6, 0.85, 1.0, 0.6}, 0.28);
+				rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position.xy, 0.3);
+				rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.55}, 0.9, v4.{0.6, 0.85, 1.0, 0.6}, 0.28);
 				rr_mech_add_screenshake(player, 0.05, 0.16);
 			}
 			current_cooldown = MECH_TRANSFORM_COOLDOWN;
@@ -4969,7 +4969,7 @@ Guardian_Shock_Status :: class : Effect_Base {
 		// APEX is immune: if the victim is (or awakened into) an APEX Mech, the shock just fizzles off.
 		mech := player.entity.get_component(Mech_Module);
 		if mech != null && mech.is_apex {
-			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.7}, 0.8, v4.{0.6, 0.9, 1.0, 0.55}, 0.25, 5);
+			rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.7}, 0.8, v4.{0.6, 0.9, 1.0, 0.55}, 0.25, 5);
 			remove_effect(true);
 			return;
 		}
@@ -4989,7 +4989,7 @@ Guardian_Shock_Status :: class : Effect_Base {
 
 		// Crackle SFX on the same accelerating beat (the body itself now carries the red).
 		if get_time() >= next_zap_at {
-			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position, 0.16);
+			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position.xy, 0.16);
 			frac := clamp((warning_ends_at - get_time()) / W, 0.0, 1.0); // 1 at start -> 0 at end
 			next_zap_at = get_time() + lerp(0.1, 0.5, frac); // 0.5s apart at the start, ramping down to 0.1s near the end
 		}
@@ -4999,10 +4999,10 @@ Guardian_Shock_Status :: class : Effect_Base {
 			rr_mech_shock_restore_body_tint(player); // clear the red while the form is still up (resolver still finds the body)
 			do_revert(this);
 			rr_mech_put_all_abilities_on_cooldown(player, MECH_GUARDIAN_SHOCK_LOCKOUT);
-			rr_mech_spawn_shockwave(player.entity.world_position, 0.4, 4.0, v4.{0.5, 0.85, 1.0, 0.8}, 0.45, 5);
-			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.5}, 1.4, v4.{0.8, 0.95, 1.0, 0.85}, 0.3, 5);
-			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position, 0.4);
-			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.32);
+			rr_mech_spawn_shockwave(player.entity.world_position.xy, 0.4, 4.0, v4.{0.5, 0.85, 1.0, 0.8}, 0.45, 5);
+			rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.5}, 1.4, v4.{0.8, 0.95, 1.0, 0.85}, 0.3, 5);
+			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position.xy, 0.4);
+			rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position.xy, 0.32);
 			remove_effect(false); // natural end — the de-transform above already ran
 		}
 	}
@@ -5041,11 +5041,11 @@ RR_Trap_Stun_Vfx :: class : Effect_Base {
 		}
 
 		if get_time() >= next_zap_sfx_at {
-			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position, 0.16);
+			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position.xy, 0.16);
 			next_zap_sfx_at = get_time() + 0.3;
 		}
 		if get_time() >= next_spark_vfx_at {
-			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.5}, 0.6, v4.{1.0, 0.8, 0.2, 0.6}, 0.15, 5);
+			rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.5}, 0.6, v4.{1.0, 0.8, 0.2, 0.6}, 0.15, 5);
 			next_spark_vfx_at = get_time() + 0.4;
 		}
 
@@ -5084,7 +5084,7 @@ rr_guardian_is_shocked :: proc(p: Player) -> bool {
 // Slam + electrocute every transformed monster within the shockwave AOE.
 rr_guardian_fire_shockwave :: proc(player: Player) {
 	if player == null return;
-	origin := player.entity.world_position;
+	origin := player.entity.world_position.xy;
 	// Guardian attack animation + the slam's electric shockwave.
 	rr_mech_play_avatar_anim(player, "009SG/Smash_Task", false);
 	// Positive layer so the slam shockwave/flash render ON TOP of the floor + characters instead
@@ -5099,13 +5099,13 @@ rr_guardian_fire_shockwave :: proc(player: Player) {
 	for target: component_iterator(Player) {
 		if target == null || target == player continue;
 		if !rr_player_is_transformed_monster(target) continue;
-		if !in_range(target.entity.world_position - origin, MECH_GUARDIAN_SHOCK_RADIUS) continue;
+		if !in_range(target.entity.world_position.xy - origin, MECH_GUARDIAN_SHOCK_RADIUS) continue;
 		// APEX Mechs are immune — the shockwave just arcs harmlessly off them (VFX only, no disrupt).
 		tmech := target.entity.get_component(Mech_Module);
 		if tmech != null && tmech.is_apex {
-			rr_mech_spawn_shockwave(target.entity.world_position, 0.3, 3.0, v4.{0.5, 0.85, 1.0, 0.55}, 0.35, 5);
-			rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.8}, 1.2, v4.{0.7, 0.95, 1.0, 0.7}, 0.3, 5);
-			rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position, 0.4);
+			rr_mech_spawn_shockwave(target.entity.world_position.xy, 0.3, 3.0, v4.{0.5, 0.85, 1.0, 0.55}, 0.35, 5);
+			rr_mech_spawn_flash(target.entity.world_position.xy + v2.{0, 0.8}, 1.2, v4.{0.7, 0.95, 1.0, 0.7}, 0.3, 5);
+			rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position.xy, 0.4);
 			continue;
 		}
 		rr_guardian_apply_shock(target);
@@ -5118,9 +5118,9 @@ rr_guardian_apply_shock :: proc(target: Player) {
 	if target == null || !#alive(target.entity) return;
 	if rr_guardian_is_shocked(target) return; // already disrupted — don't re-trigger / extend the lock
 	target.entity.add_passive_effect(new(Guardian_Shock_Status));
-	rr_mech_spawn_shockwave(target.entity.world_position, 0.3, 3.5, v4.{0.5, 0.85, 1.0, 0.7}, 0.4, 5);
-	rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.7}, 1.0, v4.{0.7, 0.95, 1.0, 0.8}, 0.28, 5);
-	rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position, 0.4);
+	rr_mech_spawn_shockwave(target.entity.world_position.xy, 0.3, 3.5, v4.{0.5, 0.85, 1.0, 0.7}, 0.4, 5);
+	rr_mech_spawn_flash(target.entity.world_position.xy + v2.{0, 0.7}, 1.0, v4.{0.7, 0.95, 1.0, 0.8}, 0.28, 5);
+	rr_mech_play_sfx_at("sfx/zap.wav", target.entity.world_position.xy, 0.4);
 }
 
 Guardian_Shockwave_Ability :: class : Ability_Base {
@@ -5278,7 +5278,7 @@ Mech_Helmet_Trap_Ability :: class : Ability_Base {
 
 		// Clamp placement to a max range from the Mech (caps both the reticle and the spawn).
 		target_pos := get_mouse_world_position();
-		origin := player.entity.world_position;
+		origin := player.entity.world_position.xy;
 		to_aim := target_pos - origin;
 		aim_dist := length(to_aim);
 		if aim_dist > MECH_HELMET_PLACE_RANGE { target_pos = origin + normalize(to_aim) * MECH_HELMET_PLACE_RANGE; }
@@ -5368,7 +5368,7 @@ Mech_Pickup_Throw_Ability :: class : Ability_Base {
 		if params.clicked && params.can_use {
 			if mech.carried_corpse_id != 0 {
 				c := rr_drag_body_find_corpse_by_entity_id(mech.carried_corpse_id);
-				if c != null { c.entity.set_local_position(player.entity.world_position + rr_mech_get_throw_direction(player) * MECH_THROW_DISTANCE); }
+				if c != null { c.entity.set_local_position(player.entity.world_position.xy + rr_mech_get_throw_direction(player) * MECH_THROW_DISTANCE); }
 				mech.carried_corpse_id = 0;
 				current_cooldown = MECH_GRAB_COOLDOWN;
 				return;
@@ -5419,7 +5419,7 @@ Mech_Ram_Charge_Ability :: class : Ability_Base {
 			if st == null { st = player.entity.add_component(Mech_Ram_Charge_Status); }
 			st.owner_id = player.entity.id;
 			st.arm(rr_mech_get_throw_direction(player), MECH_RAM_SECONDS);
-			rr_mech_play_sfx_at("sfx/killer_transform.wav", player.entity.world_position, 0.35);
+			rr_mech_play_sfx_at("sfx/killer_transform.wav", player.entity.world_position.xy, 0.35);
 			current_cooldown = 60.0;
 		}
 	}
@@ -5487,7 +5487,7 @@ rr_mech_draw_car_hud :: proc(player: Player) {
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
 	// Float above the truck (the rig sits ~1.4 high); bias the sort key in front of it.
-	car_pos := player.entity.world_position;
+	car_pos := player.entity.world_position.xy;
 	rr_mech_draw_world_countdown(car_pos + v2.{0.0, 2.4}, car_pos.y - 2.0, rem, v4.{1.0, 0.78, 0.28, 1.0});
 }
 
@@ -5507,7 +5507,7 @@ rr_mech_shoulder_pos :: proc(player: Player, right: bool) -> v2 {
 	w := 0.5;
 	if mech != null && mech.is_apex { h = 1.7; w = 0.85; }
 	off := right ? v2.{w, h} : v2.{-w, h};
-	return player.entity.world_position + off;
+	return player.entity.world_position.xy + off;
 }
 
 // Ground placement reticle + a faint ring telegraphing the magnet's pull radius.
@@ -5534,7 +5534,7 @@ rr_mech_draw_magnet_ranges :: proc(pos: v2, alpha: float) {
 // once per placement (see Mech_Magnet_Cannon_Ability); the base Mech fires once.
 rr_mech_fire_magnet_cannon :: proc(player: Player, spot: v2) {
 	if player == null return;
-	from := player.entity.world_position + v2.{0, 1.0};
+	from := player.entity.world_position.xy + v2.{0, 1.0};
 	// Aim/fly-in are UNCLAMPED so the harpoon can arc over gaps to the exact aimed point;
 	// it clamps to the navmesh only on landing (see Mech_Magnet_Node.land). Set position +
 	// fields BEFORE add_component (Powder_Keg_Thrown pattern), and stamp start_time in ao_start.
@@ -5547,7 +5547,7 @@ rr_mech_fire_magnet_cannon :: proc(player: Player, spot: v2) {
 	node.target_pos = spot;
 	rr_mech_spawn_flash(from, 0.4, v4.{0.4, 0.85, 1.0, 0.65}, 0.18);
 	rr_mech_play_avatar_anim(player, "009SG/Magnet_Cannon_Shoot", false);
-	rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position, 0.3);
+	rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position.xy, 0.3);
 	rr_mech_add_screenshake(player, 0.07, 0.2);
 }
 
@@ -5601,8 +5601,8 @@ rr_mech_fire_missile_barrage :: proc(player: Player, points: []v2) {
 		m.has_target_pos = true;
 	}
 	rr_mech_play_avatar_anim(player, "009SG/Missile_Fire", false);
-	rr_mech_play_sfx_at("sfx/Whoosh_1e3125.wav", player.entity.world_position, 0.4);
-	rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position, 0.28);
+	rr_mech_play_sfx_at("sfx/Whoosh_1e3125.wav", player.entity.world_position.xy, 0.4);
+	rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position.xy, 0.28);
 	rr_mech_add_screenshake(player, 0.1, 0.22);
 }
 
@@ -5666,7 +5666,7 @@ Mech_Magnet_Cannon_Ability :: class : Ability_Base {
 		// Clamp placement to a max range from the Mech. Clamping target_pos here caps BOTH the
 		// fire below AND the reticle preview drawn from it, so the two always agree.
 		target_pos := get_mouse_world_position();
-		origin := player.entity.world_position;
+		origin := player.entity.world_position.xy;
 		to_aim := target_pos - origin;
 		aim_dist := length(to_aim);
 		if aim_dist > MECH_MAGNET_PLACE_RANGE {
@@ -5728,7 +5728,7 @@ Mech_Missile_Aim_Controller :: class : Component {
 	los_following: bool; // whether the recording-aid LOS is currently detached onto the aim camera
 	apply_camera :: proc(using this: Mech_Missile_Aim_Controller, p: Player, mech: Mech_Module) {
 		p.camera.follow_player = false;
-		p.camera.position = mech.missile_aim_center;
+		p.camera.position.xy = mech.missile_aim_center;
 		p.camera.size = MECH_AIM_CAMERA_SIZE;
 	}
 	// Pin the body to the synced anchor + kill input/velocity. Runs on EVERY client: each one
@@ -5837,7 +5837,7 @@ Mech_Missile_Barrage_Ability :: class : Ability_Base {
 		if player.is_local_or_server() { player.camera.size = max(player.camera.size, MECH_AIM_CAMERA_SIZE); }
 
 		// Map the drag off the button onto a forward strike point.
-		origin := player.entity.world_position;
+		origin := player.entity.world_position.xy;
 		drag_mag := clamp(length(params.drag_offset), 0.0, 1.0);
 		aiming := drag_mag > MECH_MISSILE_MOBILE_DEADZONE;
 		aim_point := origin;
@@ -5892,10 +5892,10 @@ Mech_Missile_Barrage_Ability :: class : Ability_Base {
 		// make sure the roam controller is attached (it pans the camera + freezes the avatar).
 		if !was_targeting {
 			mech.missile_aim_active = true;
-			mech.missile_aim_center = player.entity.world_position;
+			mech.missile_aim_center = player.entity.world_position.xy;
 			// Pin the body here for the whole placement so it can't drift while the camera roams.
 			// (The freeze controller is ensured on every client by rr_mech_update.)
-			mech.missile_aim_anchor = player.entity.world_position;
+			mech.missile_aim_anchor = player.entity.world_position.xy;
 			mech.missile_markers_placed = 0;
 			was_activate = false;
 		}
@@ -5994,11 +5994,11 @@ rr_mech_awaken_apex :: proc(player: Player) {
 	mech.anim_lock_until = get_time() + anim_dur;
 	player.add_disable_movement_input_reason(MECH_LOCK_REASON);
 	mech.apex_transform_locked = true;
-	rr_mech_spawn_flash(player.entity.world_position, 1.5, v4.{1.0, 0.25, 0.08, 0.75}, 0.45);
+	rr_mech_spawn_flash(player.entity.world_position.xy, 1.5, v4.{1.0, 0.25, 0.08, 0.75}, 0.45);
 	// Ground shockwave ring rippling out as the transform kicks off.
-	rr_mech_spawn_shockwave(player.entity.world_position, 0.6, 6.0, v4.{1.0, 0.45, 0.12, 0.85}, 0.6);
+	rr_mech_spawn_shockwave(player.entity.world_position.xy, 0.6, 6.0, v4.{1.0, 0.45, 0.12, 0.85}, 0.6);
 	rr_mech_add_screenshake(player, 0.18, 0.45);
-	rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", player.entity.world_position, 0.45);
+	rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", player.entity.world_position.xy, 0.45);
 }
 
 // While in APEX form the Mech shrugs off the anti-traitor roles (Hacker / Hunter / Sheriff).
@@ -6048,7 +6048,7 @@ rr_mech_trigger_end_game :: proc(player: Player) {
 
 	mech.endgame_active = true;
 	mech.endgame_started_at = get_time();
-	mech.endgame_anchor = player.entity.world_position;
+	mech.endgame_anchor = player.entity.world_position.xy;
 	mech.endgame_next_wave_at = get_time() + MECH_ENDGAME_FOCUS_SECONDS + MECH_ENDGAME_FLOAT_SECONDS;
 	mech.endgame_wave_index = 0;
 	// Resurrect the entire lobby so the finale barrage annihilates EVERYONE — no player who
@@ -6073,8 +6073,8 @@ rr_mech_trigger_end_game :: proc(player: Player) {
 	// Hold the flight pose for the whole cinematic so locomotion doesn't drag it back to Idle.
 	mech.anim_lock_until = get_time() + MECH_ENDGAME_FOCUS_SECONDS + MECH_ENDGAME_FLOAT_SECONDS + MECH_ENDGAME_BARRAGE_SECONDS + MECH_ENDGAME_FINISH_SECONDS + 0.5;
 	rr_mech_play_avatar_anim(player, "009SG/Fly_Idle", true);
-	rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", player.entity.world_position, 0.5);
-	rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.6}, 1.6, v4.{1.0, 0.45, 0.1, 0.7}, 0.45);
+	rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", player.entity.world_position.xy, 0.5);
+	rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.6}, 1.6, v4.{1.0, 0.45, 0.1, 0.7}, 0.45);
 	rr_mech_add_screenshake(player, 0.16, 0.5);
 }
 
@@ -6097,7 +6097,7 @@ rr_mech_fire_endgame_wave :: proc(player: Player) {
 	shoulder_h := 0.8;
 	spread := 0.6;
 	if mech != null && mech.is_apex { shoulder_h = 1.7; spread = 0.95; }
-	body := player.entity.world_position + v2.{0, MECH_ENDGAME_FLOAT_HEIGHT};
+	body := player.entity.world_position.xy + v2.{0, MECH_ENDGAME_FLOAT_HEIGHT};
 	wave := mech != null ? mech.endgame_wave_index : 0;
 	fired := 0;
 	// Several homing missiles PER victim — a saturating volley, not a single dart each.
@@ -6123,7 +6123,7 @@ rr_mech_fire_endgame_wave :: proc(player: Player) {
 			fan := (k.(float) - (MECH_ENDGAME_MISSILES_PER_VICTIM - 1).(float) * 0.5) * 0.8;
 			m.ballistic = true;
 			m.ballistic_start = from;
-			m.ballistic_target = p.entity.world_position + v2.{fan, 0};
+			m.ballistic_target = p.entity.world_position.xy + v2.{fan, 0};
 			m.travel_time = MECH_ENDGAME_MISSILE_TRAVEL + k.(float) * 0.18;
 			m.arc_height = MECH_ENDGAME_MISSILE_ARC;
 			fired += 1;
@@ -6160,8 +6160,8 @@ rr_mech_fire_endgame_wave :: proc(player: Player) {
 	if fired > 0 {
 		// Shoot_AL is an arm-layer overlay (track 1), so the Fly_Idle on track 0 keeps playing.
 		rr_mech_play_overlay_oneshot(player, "009SG/Shoot_AL");
-		rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position, 0.4);
-		rr_mech_play_sfx_at("sfx/Whoosh_1e3125.wav", player.entity.world_position, 0.42);
+		rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position.xy, 0.4);
+		rr_mech_play_sfx_at("sfx/Whoosh_1e3125.wav", player.entity.world_position.xy, 0.42);
 		rr_mech_spawn_flash(body + v2.{0, shoulder_h}, 1.3, v4.{1.0, 0.55, 0.15, 0.8}, 0.2);
 		// Heavy launch kick — this is what drives the synced cinematic camera shake on every client.
 		rr_mech_add_screenshake(player, 0.32, 0.26);
@@ -6225,7 +6225,7 @@ rr_mech_finish_end_game :: proc(player: Player, mech: Mech_Module) {
 		if p.player_type == Player_Type.TRAITOR continue;
 		p.kill_with_killer(player.entity.id);
 	}
-	rr_mech_play_sfx_at("sfx/ggg_explode.wav", player.entity.world_position, 0.45);
+	rr_mech_play_sfx_at("sfx/ggg_explode.wav", player.entity.world_position.xy, 0.45);
 	end_game_with_winners(Player_Type.TRAITOR, winners);
 }
 
@@ -6312,7 +6312,7 @@ rr_mech_update_endgame_camera :: proc(player: Player, dt: float) {
 		k := clamp(dt * 9.0, 0.0, 1.0);
 		player.camera.follow_player = false;
 		player.camera.size = lerp(player.camera.size, target_size, k);
-		player.camera.position = lerp(player.camera.position, focus, k) + shake_off;
+		player.camera.position.xy = lerp(player.camera.position.xy, focus, k) + shake_off;
 		player.mech_endgame_cam_overriding = true;
 		// Vision is blown out separately in update_local_vision_light so the whole map is lit.
 		return;
@@ -6392,9 +6392,9 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 				// the held player's allegiance to onlookers. The personal Notify below is local-only, so
 				// it can stay role-specific.
 				ally := target.player_type == Player_Type.CIVILIAN;
-				rr_mech_spawn_flash(target.entity.world_position + v2.{0, 0.55}, 0.9, v4.{0.45, 1.0, 0.55, 0.7}, 0.28);
-				rr_mech_play_sfx_at("sfx/swing_net_catch.wav", target.entity.world_position, 0.32);
-				rr_mech_play_sfx_at("sfx/pick_up_item_a973cc.wav", player.entity.world_position, 0.3);
+				rr_mech_spawn_flash(target.entity.world_position.xy + v2.{0, 0.55}, 0.9, v4.{0.45, 1.0, 0.55, 0.7}, 0.28);
+				rr_mech_play_sfx_at("sfx/swing_net_catch.wav", target.entity.world_position.xy, 0.32);
+				rr_mech_play_sfx_at("sfx/pick_up_item_a973cc.wav", player.entity.world_position.xy, 0.3);
 				rr_mech_add_screenshake(player, 0.08, 0.18);
 				if target.is_local() {
 					target.Notify(ally ? "Guardian has you safe!" : "Subdued by the Guardian!");
@@ -6417,9 +6417,9 @@ Guardian_Pickup_Throw_Ability :: class : Ability_Base {
 // brighter color flash and SFX appropriate to a protector hurling someone clear.
 rr_guardian_throw_player :: proc(carrier: Player, target: Player, killer_id: u64, aim_dir: v2) {
 	if carrier == null || target == null return;
-	rr_mech_play_sfx_at("sfx/swing_net.wav", carrier.entity.world_position, 0.4);
-	rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", carrier.entity.world_position, 0.25);
-	rr_mech_spawn_flash(carrier.entity.world_position + v2.{0, 0.7}, 0.7, v4.{0.85, 0.95, 0.3, 0.65}, 0.22);
+	rr_mech_play_sfx_at("sfx/swing_net.wav", carrier.entity.world_position.xy, 0.4);
+	rr_mech_play_sfx_at("sfx/transform_poof_2da056.wav", carrier.entity.world_position.xy, 0.25);
+	rr_mech_spawn_flash(carrier.entity.world_position.xy + v2.{0, 0.7}, 0.7, v4.{0.85, 0.95, 0.3, 0.65}, 0.22);
 	rr_mech_add_screenshake(carrier, 0.12, 0.22);
 	rr_mech_throw_player(carrier, target, killer_id, aim_dir);
 }
@@ -6443,7 +6443,7 @@ rr_guardian_has_showdown_target :: proc(player: Player) -> bool {
 		if p == null || p.player_state != Player_State.ALIVE continue;
 		mech := p.entity.get_component(Mech_Module);
 		if !rr_mech_is_showdown_target(mech) continue;
-		if in_range(p.entity.world_position - player.entity.world_position, MECH_MELEE_RANGE) return true;
+		if in_range(p.entity.world_position.xy - player.entity.world_position.xy, MECH_MELEE_RANGE) return true;
 	}
 	return false;
 }
@@ -6461,12 +6461,12 @@ rr_any_mech_apex_active :: proc() -> bool {
 }
 
 rr_guardian_find_showdown_target :: proc(player: Player) -> Player {
-	finder := make_finder(Player, player.entity.world_position, MECH_MELEE_RANGE);
+	finder := make_finder(Player, player.entity.world_position.xy, MECH_MELEE_RANGE);
 	for p: component_iterator(Player) {
 		if p == null || p.player_state != Player_State.ALIVE continue;
 		mech := p.entity.get_component(Mech_Module);
 		if !rr_mech_is_showdown_target(mech) continue;
-		finder.check(p, p.entity.world_position);
+		finder.check(p, p.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -6513,12 +6513,12 @@ rr_mech_begin_showdown :: proc(guard_p: Player, apex_p: Player) {
 	rr_mech_play_avatar_anim(guard_p, "009SG/Showdown_Start", false);
 	rr_mech_play_avatar_anim(apex_p, "009SG/Showdown_Start", false);
 	// Big square-up clash: dual roars, twin clash flash between the fighters, heavy screenshake.
-	rr_mech_play_sfx_at("sfx/roar_f23931.wav", guard_p.entity.world_position, 0.45);
+	rr_mech_play_sfx_at("sfx/roar_f23931.wav", guard_p.entity.world_position.xy, 0.45);
 	rr_mech_play_sfx_at("sfx/mim/UltimateTransform.wav", clash_pos, 0.42);
 	rr_mech_play_sfx_at("sfx/killer_transform.wav", clash_pos, 0.32);
 	// Cyan Guardian aura vs red-magenta APEX aura, white clash core between them.
-	rr_mech_spawn_flash(guard_p.entity.world_position + v2.{0, 0.7}, 1.3, v4.{0.45, 0.85, 1.0, 0.8}, 0.45);
-	rr_mech_spawn_flash(apex_p.entity.world_position + v2.{0, 0.7}, 1.3, v4.{1.0, 0.25, 0.45, 0.8}, 0.45);
+	rr_mech_spawn_flash(guard_p.entity.world_position.xy + v2.{0, 0.7}, 1.3, v4.{0.45, 0.85, 1.0, 0.8}, 0.45);
+	rr_mech_spawn_flash(apex_p.entity.world_position.xy + v2.{0, 0.7}, 1.3, v4.{1.0, 0.25, 0.45, 0.8}, 0.45);
 	rr_mech_spawn_flash(clash_pos + v2.{0, 0.6}, 1.6, v4.{1.0, 1.0, 0.95, 0.9}, 0.32);
 	rr_mech_add_screenshake(guard_p, 0.22, 0.55);
 	rr_mech_add_screenshake(apex_p, 0.22, 0.55);
@@ -6534,7 +6534,7 @@ rr_mech_has_showdown_guardian_target :: proc(player: Player) -> bool {
 		if p == null || p.player_state != Player_State.ALIVE continue;
 		guard := p.entity.get_component(Guardian_Module);
 		if guard == null || !guard.is_guardian_form || guard.showdown_active continue;
-		if in_range(p.entity.world_position - player.entity.world_position, MECH_MELEE_RANGE) return true;
+		if in_range(p.entity.world_position.xy - player.entity.world_position.xy, MECH_MELEE_RANGE) return true;
 	}
 	return false;
 }
@@ -6546,7 +6546,7 @@ rr_mech_find_showdown_guardian_target :: proc(player: Player) -> Player {
 		if p == null || p.player_state != Player_State.ALIVE continue;
 		guard := p.entity.get_component(Guardian_Module);
 		if guard == null || !guard.is_guardian_form || guard.showdown_active continue;
-		d2 := length_squared(p.entity.world_position - player.entity.world_position);
+		d2 := length_squared(p.entity.world_position.xy - player.entity.world_position.xy);
 		if d2 <= best_d2 { best_d2 = d2; best = p; }
 	}
 	return best;
@@ -6664,8 +6664,8 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 		mech := mech_player.entity.get_component(Mech_Module);
 		if mech != null { mech_mashes = mech.showdown_mashes; }
 	}
-	clash_pos := player.entity.world_position;
-	if mech_player != null { clash_pos = (player.entity.world_position + mech_player.entity.world_position) * 0.5; }
+	clash_pos := player.entity.world_position.xy;
+	if mech_player != null { clash_pos = (player.entity.world_position.xy + mech_player.entity.world_position.xy) * 0.5; }
 	if guard.showdown_mashes >= mech_mashes {
 		// The Guardian won — the Mech loses. Its fate depends on the form it lost in.
 		mech_was_apex := false; mech_went_down := false;
@@ -6721,7 +6721,7 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 		// Briefly lock the winner's kit so residual mash taps can't fire an ability.
 		rr_mech_put_all_abilities_on_cooldown(player, MECH_SHOWDOWN_WINNER_LOCK);
 		// Heroic Guardian victory burst — cyan + gold + white.
-		rr_mech_play_sfx_at("sfx/end_game_victory.wav", player.entity.world_position, 0.4);
+		rr_mech_play_sfx_at("sfx/end_game_victory.wav", player.entity.world_position.xy, 0.4);
 		rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", clash_pos, 0.45);
 		rr_mech_spawn_flash(clash_pos, 2.0, v4.{0.45, 0.85, 1.0, 0.8}, 0.5);
 		rr_mech_spawn_flash(clash_pos, 1.2, v4.{1.0, 0.85, 0.35, 0.85}, 0.36);
@@ -6761,7 +6761,7 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 			guard.anim_lock_until = guard.showdown_death_at;
 			// Brutal APEX defeat burst — red-magenta + purple.
 			rr_mech_play_sfx_at("sfx/ggg_explode.wav", clash_pos, 0.45);
-			rr_mech_play_sfx_at("sfx/other_death.wav", player.entity.world_position, 0.4);
+			rr_mech_play_sfx_at("sfx/other_death.wav", player.entity.world_position.xy, 0.4);
 			rr_mech_spawn_flash(clash_pos, 2.0, v4.{1.0, 0.22, 0.42, 0.85}, 0.5);
 			rr_mech_spawn_flash(clash_pos, 1.2, v4.{0.75, 0.3, 1.0, 0.85}, 0.36);
 			rr_mech_spawn_flash(clash_pos, 0.7, v4.{1.0, 0.95, 1.0, 0.95}, 0.3);
@@ -6778,11 +6778,11 @@ rr_mech_update_showdown_for_guardian :: proc(player: Player, guard: Guardian_Mod
 			rr_mech_apply_stun(player, MECH_GUARDIAN_SHOWDOWN_STUN_SECONDS);
 			rr_mech_put_all_abilities_on_cooldown(player, MECH_GUARDIAN_SHOWDOWN_STUN_SECONDS);
 			// Electric "overpowered" burst on the stunned titan — cyan shock palette + lightning.
-			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position, 0.45);
+			rr_mech_play_sfx_at("sfx/zap.wav", player.entity.world_position.xy, 0.45);
 			rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", clash_pos, 0.4);
-			rr_mech_spawn_lightning_strike(player.entity.world_position);
+			rr_mech_spawn_lightning_strike(player.entity.world_position.xy);
 			rr_mech_spawn_flash(clash_pos, 2.0, v4.{0.45, 0.85, 1.0, 0.8}, 0.5);
-			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.7}, 1.0, v4.{0.7, 0.95, 1.0, 0.9}, 0.3);
+			rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.7}, 1.0, v4.{0.7, 0.95, 1.0, 0.9}, 0.3);
 			rr_mech_add_screenshake(player, 0.22, 0.55);
 			rr_mech_add_screenshake(mech_player, 0.18, 0.45);
 			player.Notify("The Mech overpowered you — stunned!");
@@ -6816,7 +6816,7 @@ rr_mech_any_showdown_active :: proc() -> bool {
 rr_mech_showdown_clash_center :: proc(guard_p: Player) -> v2 {
 	if guard_p == null return v2.{0, 0};
 	guard := guard_p.entity.get_component(Guardian_Module);
-	if guard == null return guard_p.entity.world_position;
+	if guard == null return guard_p.entity.world_position.xy;
 	return guard.showdown_anchor;
 }
 
@@ -6850,7 +6850,7 @@ rr_mech_update_showdown_camera :: proc(player: Player, dt: float) {
 		k := clamp(dt * 9.0, 0.0, 1.0);
 		player.camera.follow_player = false;
 		player.camera.size = lerp(player.camera.size, target_size, k);
-		player.camera.position = lerp(player.camera.position, focus, k) + shake_off;
+		player.camera.position.xy = lerp(player.camera.position.xy, focus, k) + shake_off;
 		player.mech_showdown_cam_overriding = true;
 		return;
 	}
@@ -7096,9 +7096,9 @@ rr_mech_draw_showdown_hud :: proc(player: Player) {
 		if am_guard { guard.showdown_mashes += 1; }
 		else if apex_mech != null { apex_mech.showdown_mashes += 1; }
 		if player.is_local() {
-			rr_mech_play_sfx_at("sfx/metal_hit_827869.wav", player.entity.world_position, 0.35);
+			rr_mech_play_sfx_at("sfx/metal_hit_827869.wav", player.entity.world_position.xy, 0.35);
 			flash_col := am_guard ? v4.{0.5, 0.9, 1.0, 0.7} : v4.{1.0, 0.3, 0.5, 0.7};
-			rr_mech_spawn_flash(player.entity.world_position + v2.{0, 0.8}, 0.4, flash_col, 0.12);
+			rr_mech_spawn_flash(player.entity.world_position.xy + v2.{0, 0.8}, 0.4, flash_col, 0.12);
 			rr_mech_add_screenshake(player, 0.05, 0.09);
 		}
 	}
@@ -7172,7 +7172,7 @@ rr_mech_reset_guardian_showdown_cooldowns :: proc() {
 // rr_mech_draw_downed_revive_ui.
 rr_mech_call_minion :: proc(mech_player: Player) {
 	if mech_player == null || !#alive(mech_player.entity) return;
-	pos := mech_player.entity.world_position;
+	pos := mech_player.entity.world_position.xy;
 	rr_mech_play_sfx_at("sfx/roar_f23931.wav", pos, 0.45);
 	// Positive layers so the call-Minion burst/rings render ABOVE the floor (were buried at -7).
 	rr_mech_spawn_flash(pos + v2.{0, 0.7}, 1.3, v4.{1.0, 0.3, 0.3, 0.7}, 0.4, 6);
@@ -7221,7 +7221,7 @@ rr_mech_revive_downed :: proc(mech_player: Player) {
 	mech.last_overlay_anim = "";
 	// Brief kit lock so the Mech can't act on the very frame it gets back up.
 	rr_mech_put_all_abilities_on_cooldown(mech_player, MECH_SHOWDOWN_WINNER_LOCK);
-	pos := mech_player.entity.world_position;
+	pos := mech_player.entity.world_position.xy;
 	rr_mech_spawn_flash(pos + v2.{0, 0.7}, 1.4, v4.{0.4, 1.0, 0.5, 0.8}, 0.45); // healing green
 	rr_mech_spawn_shockwave(pos, 0.6, 6.0, v4.{0.4, 1.0, 0.5, 0.7}, 0.5);
 	rr_mech_add_screenshake(mech_player, 0.14, 0.35);
@@ -7704,11 +7704,11 @@ rr_mech_draw_rod_timers :: proc(viewer: Player) {
 		if remaining <= 0.0 continue;
 		if viewer != null {
 			radii := viewer.get_local_light_radii();
-			if length(node.entity.world_position - viewer.entity.world_position) > radii.y continue;
+			if length(node.entity.world_position.xy - viewer.entity.world_position.xy) > radii.y continue;
 		}
 		// Bias the sort key well in FRONT of the rod's base so the timer pill isn't occluded by the
 		// tall harpoon sprite (its base y alone tied with the rod and lost, drawing behind it).
-		rr_mech_draw_world_countdown(node.entity.world_position + v2.{0.0, 1.6}, node.entity.world_position.y - 2.0, remaining, v4.{0.55, 0.9, 1.0, 1.0});
+		rr_mech_draw_world_countdown(node.entity.world_position.xy + v2.{0.0, 1.6}, node.entity.world_position.y - 2.0, remaining, v4.{0.55, 0.9, 1.0, 1.0});
 	}
 }
 
@@ -7727,9 +7727,9 @@ rr_mech_draw_helmet_timers :: proc(viewer: Player) {
 		if remaining <= 0.0 continue;
 		if viewer != null {
 			radii := viewer.get_local_light_radii();
-			if length(helm.entity.world_position - viewer.entity.world_position) > radii.y continue;
+			if length(helm.entity.world_position.xy - viewer.entity.world_position.xy) > radii.y continue;
 		}
-		rr_mech_draw_world_countdown(helm.entity.world_position + v2.{0.0, 1.9}, helm.entity.world_position.y, remaining, v4.{0.7, 0.9, 1.0, 1.0});
+		rr_mech_draw_world_countdown(helm.entity.world_position.xy + v2.{0.0, 1.9}, helm.entity.world_position.y, remaining, v4.{0.7, 0.9, 1.0, 1.0});
 	}
 }
 
@@ -7801,9 +7801,9 @@ rr_mech_draw_workbench_guidance_arrow :: proc(player: Player) {
 	if mech.showdown_active || mech.showdown_downed return;
 	if mech.visited_workbench || mech_workbench_entity == null || !#alive(mech_workbench_entity) return;
 
-	wb_pos := mech_workbench_entity.world_position;
+	wb_pos := mech_workbench_entity.world_position.xy;
 	options := Tutorial_Arrow.default_options();
-	dist := length(player.entity.world_position - wb_pos);
+	dist := length(player.entity.world_position.xy - wb_pos);
 	options.alpha = clamp(1.0 - (dist - 3.0) / 22.0, 0.25, 1.0);
 	options.far = true;
 	options.near = true;
@@ -8122,7 +8122,7 @@ rr_mech_titan_apex_pressed :: proc(player: Player) {
 	need := max(MECH_LOOT_CORES_GOAL - mech.power_cores, 0);
 	if need <= 0 { return; }
 	player.Notify(format_string("Need % more % — obtain them by killing players!", .{need, rr_mech_plural("Power Core", need)}));
-	rr_mech_play_sfx_at("sfx/ui_error.wav", player.entity.world_position, 0.3);
+	rr_mech_play_sfx_at("sfx/ui_error.wav", player.entity.world_position.xy, 0.3);
 }
 
 // Custom bottom-middle widget for the "ultimate" buttons (APEX Awakening, End Game) plus the
@@ -8233,9 +8233,9 @@ rr_mech_draw_minion_carried_items :: proc(viewer: Player) {
 
 		// Hidden in shadow / outside the viewer's LOS, like the other world labels.
 		radii := viewer.get_local_light_radii();
-		if length(p.entity.world_position - viewer.entity.world_position) > radii.y continue;
+		if length(p.entity.world_position.xy - viewer.entity.world_position.xy) > radii.y continue;
 
-		base := p.entity.world_position;
+		base := p.entity.world_position.xy;
 		UI.push_z(base.y);
 
 		ICON :: 0.4;

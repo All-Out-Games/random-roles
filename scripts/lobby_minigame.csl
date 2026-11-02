@@ -133,7 +133,7 @@ Lobby_Minigame_Effect :: class : Effect_Base {
 		if player.camera_default_size_saved {
 			player.camera.size = player.camera_default_size;
 		}
-		player.camera.position = player.entity.world_position + v2.{shake_x, shake_y};
+		player.camera.position.xy = player.entity.world_position.xy + v2.{shake_x, shake_y};
 		camera_shaking = true;
 	}
 
@@ -153,7 +153,7 @@ Lobby_Minigame_Effect :: class : Effect_Base {
 			if now < mg.respawn_until continue;
 			if !mg.has_shield() continue;
 
-			pos := p.entity.world_position + v2.{0.0, 0.35};
+			pos := p.entity.world_position.xy + v2.{0.0, 0.35};
 			shield_rect := Rect{pos, pos}.grow(1.05, 1.05, 1.05, 1.05);
 			alpha: float;
 			if mg.shield_active {
@@ -623,12 +623,12 @@ rr_lobby_minigame_handle_projectile_hit :: proc(attacker: Player, target: Player
 	rr_lobby_minigame_burst(hit_pos, false);
 	t_mg.shake(0.035);
 	world_references.teleport_near_lobby(target);
-	rr_lobby_minigame_spawn_pop_vfx(target.entity.world_position, "minigame/Bubble Shield_16bc73.png", v4.{0.35, 1.0, 0.45, 0.75}, 0.4, 1.9);
+	rr_lobby_minigame_spawn_pop_vfx(target.entity.world_position.xy, "minigame/Bubble Shield_16bc73.png", v4.{0.35, 1.0, 0.45, 0.75}, 0.4, 1.9);
 	target.set_trigger("RESET");
 
 	rr_lobby_minigame_play_sfx_at("minigame/bonk_staff_77864c.wav", hit_pos, 0.1625, 0.08);
 	rr_lobby_minigame_play_sfx_at("minigame/imposter_slap_a3182b.wav", hit_pos, 0.08, 0.12);
-	rr_lobby_minigame_play_sfx_at("sfx/transform_poof_2da056.wav", target.entity.world_position, 0.1125, 0.18);
+	rr_lobby_minigame_play_sfx_at("sfx/transform_poof_2da056.wav", target.entity.world_position.xy, 0.1125, 0.18);
 }
 
 // Renders the start animation that slides/fades the title in with floating
@@ -677,7 +677,7 @@ Lobby_Minigame_Shoot_Ability :: class : Ability_Base {
 		targeting := player.active_ability == this.(Ability_Base);
 		if targeting {
 			player.set_mouse_ik_enabled(true);
-			player.set_aim_target(player.entity.world_position + player.last_aim_direction * 5.0);
+			player.set_aim_target(player.entity.world_position.xy + player.last_aim_direction * 5.0);
 		} else {
 			player.set_mouse_ik_enabled(false);
 		}
@@ -685,8 +685,8 @@ Lobby_Minigame_Shoot_Ability :: class : Ability_Base {
 		if activation.activate {
 			player.set_facing_right(activation.direction.x > 0);
 			player.set_trigger("shoot_gun");
-			player.set_aim_target(player.entity.world_position + activation.direction * 5.0);
-			proj := shoot_projectile(player.entity.world_position, activation.direction * 15.0, 1, 0.55, player.entity);
+			player.set_aim_target(player.entity.world_position.xy + activation.direction * 5.0);
+			proj := shoot_projectile(player.entity.world_position.xy, activation.direction * 15.0, 1, 0.55, player.entity);
 			if proj != null {
 				projectile := proj.get_component(RR_Projectile);
 				if projectile != null {
@@ -695,12 +695,12 @@ Lobby_Minigame_Shoot_Ability :: class : Ability_Base {
 				}
 			}
 			sfx := SFX.default_sfx_desc();
-			sfx.set_position(player.entity.world_position);
+			sfx.set_position(player.entity.world_position.xy);
 			sfx.volume = 0.095;
 			sfx.volume_perturb = 0.03;
 			sfx.speed_perturb = 0.12;
 			rr_play_sfx("sfx/shoot.wav", sfx);
-			rr_lobby_minigame_play_sfx_at("minigame/zap_19674e.wav", player.entity.world_position, 0.05, 0.18);
+			rr_lobby_minigame_play_sfx_at("minigame/zap_19674e.wav", player.entity.world_position.xy, 0.05, 0.18);
 			current_cooldown = 0.35;
 		}
 	}
@@ -738,8 +738,8 @@ Lobby_Minigame_Roll_Ability :: class : Ability_Base {
 			mg.roll_direction = activation.direction;
 			mg.roll_until = get_time() + 0.45;
 			player.set_trigger("dodge_roll");
-			rr_lobby_minigame_spawn_pop_vfx(player.entity.world_position, "minigame/Bubble Shield_16bc73.png", v4.{0.25, 1.0, 0.55, 0.65}, 0.25, 1.4);
-			rr_lobby_minigame_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position, 0.08, 0.18);
+			rr_lobby_minigame_spawn_pop_vfx(player.entity.world_position.xy, "minigame/Bubble Shield_16bc73.png", v4.{0.25, 1.0, 0.55, 0.65}, 0.25, 1.4);
+			rr_lobby_minigame_play_sfx_at("sfx/transform_poof_2da056.wav", player.entity.world_position.xy, 0.08, 0.18);
 			current_cooldown = 1.1;
 		}
 	}
@@ -770,9 +770,9 @@ Lobby_Minigame_Shield_Ability :: class : Ability_Base {
 			mg := rr_get_lobby_minigame_effect(player);
 			if mg == null return;
 			mg.shield_active = true;
-			rr_lobby_minigame_burst(player.entity.world_position, true);
-			rr_lobby_minigame_play_sfx_at("minigame/shield_block_390d4b.wav", player.entity.world_position, 0.0875, 0.08);
-			rr_lobby_minigame_play_sfx_at("minigame/bubble_pop_92af67.wav", player.entity.world_position, 0.07, 0.14);
+			rr_lobby_minigame_burst(player.entity.world_position.xy, true);
+			rr_lobby_minigame_play_sfx_at("minigame/shield_block_390d4b.wav", player.entity.world_position.xy, 0.0875, 0.08);
+			rr_lobby_minigame_play_sfx_at("minigame/bubble_pop_92af67.wav", player.entity.world_position.xy, 0.07, 0.14);
 		}
 	}
 

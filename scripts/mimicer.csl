@@ -642,7 +642,7 @@ rr_mimicer_update_prowl :: proc(player: Player, dt: float) {
 	mm := player.entity.get_component(Mimicer_Module);
 	if mm == null return;
 
-	pos := player.entity.world_position;
+	pos := player.entity.world_position.xy;
 
 	near_wall := false;
 	directions: [4]v2;
@@ -744,7 +744,7 @@ rr_mimicer_start_disguise_from_pillar :: proc(player: Player, pillar: Void_Pilla
 	mm.is_disguised = true;
 	mm.disguise_ends_at = get_time() + MIMICER_DISGUISE_DURATION;
 
-	rr_mimicer_spawn_vfx(player.entity.world_position, "004RAND/Mimic_Poof", 1.0);
+	rr_mimicer_spawn_vfx(player.entity.world_position.xy, "004RAND/Mimic_Poof", 1.0);
 
 	if Game.is_server() {
 		sfx_desc := SFX.default_sfx_desc();
@@ -783,7 +783,7 @@ rr_mimicer_end_disguise :: proc(player: Player, silent: bool = false) {
 	mm.disguise_target_name = "";
 
 	if !silent {
-		rr_mimicer_spawn_vfx(player.entity.world_position, "004RAND/Mimic_Poof", 1.0);
+		rr_mimicer_spawn_vfx(player.entity.world_position.xy, "004RAND/Mimic_Poof", 1.0);
 	}
 }
 
@@ -795,7 +795,7 @@ rr_mimicer_start_void_lunge :: proc(player: Player, target_pos: v2) {
 	mm := player.entity.get_component(Mimicer_Module);
 	if mm == null return;
 
-	start_pos := player.entity.world_position;
+	start_pos := player.entity.world_position.xy;
 	dir := v2.{target_pos.x - start_pos.x, target_pos.y - start_pos.y};
 	dist := length(dir);
 	if dist < 0.1 return;
@@ -858,7 +858,7 @@ rr_mimicer_update_void_lunge :: proc(player: Player, dt: float) {
 			if hit == null continue;
 			if hit.entity.id == player.entity.id continue;
 			if hit.player_state != Player_State.ALIVE continue;
-			if !in_range(hit.entity.world_position - mm.void_lunge_target_pos, MIMICER_VOID_LUNGE_HIT_RADIUS) continue;
+			if !in_range(hit.entity.world_position.xy - mm.void_lunge_target_pos, MIMICER_VOID_LUNGE_HIT_RADIUS) continue;
 			rr_mimicer_stun_player(hit, MIMICER_VOID_LUNGE_STUN_SECONDS);
 		}
 		return;
@@ -874,7 +874,7 @@ rr_mimicer_update_void_lunge :: proc(player: Player, dt: float) {
 		if hit == null continue;
 		if hit.entity.id == player.entity.id continue;
 		if hit.player_state != Player_State.ALIVE continue;
-		if !in_range(hit.entity.world_position - new_pos, MIMICER_VOID_LUNGE_HIT_RADIUS) continue;
+		if !in_range(hit.entity.world_position.xy - new_pos, MIMICER_VOID_LUNGE_HIT_RADIUS) continue;
 		rr_mimicer_stun_player(hit, MIMICER_VOID_LUNGE_STUN_SECONDS);
 	}
 }
@@ -1285,7 +1285,7 @@ Mimicer_Corrupt_Interactable :: class : Interactable {
 		corpse := entity.get_component(Corpse);
 		if corpse == null return;
 
-		pos := entity.world_position;
+		pos := entity.world_position.xy;
 
 		// Play corrupt animation on creature rig
 		mm := player.entity.get_component(Mimicer_Module);
@@ -1435,7 +1435,7 @@ rr_mimicer_teleport_to_pillar :: proc(player: Player, target_pillar: Entity) {
 	if vp == null return;
 	if vp.is_smoldered return;
 
-	pos := target_pillar.world_position;
+	pos := target_pillar.world_position.xy;
 	player.entity.set_local_position(pos);
 
 	rr_mimicer_spawn_vfx(pos, "004RAND/Teleport", 1.5);
@@ -1479,7 +1479,7 @@ rr_mimicer_teleport_to_next_pillar :: proc(player: Player) {
 		mm.teleport_pillar_index = 0;
 	}
 
-	pos := target_pillar.world_position;
+	pos := target_pillar.world_position.xy;
 	player.entity.set_local_position(pos);
 
 	rr_mimicer_spawn_vfx(pos, "004RAND/Teleport", 1.5);
@@ -1520,7 +1520,7 @@ rr_mimicer_is_near_active_pillar :: proc(player: Player) -> bool {
 	mm := player.entity.get_component(Mimicer_Module);
 	if mm == null return false;
 
-	pos := player.entity.world_position;
+	pos := player.entity.world_position.xy;
 	for i: 0..mm.void_pillars.count-1 {
 		if mm.void_pillars[i] == null continue;
 		if !#alive(mm.void_pillars[i]) continue;
@@ -1528,7 +1528,7 @@ rr_mimicer_is_near_active_pillar :: proc(player: Player) -> bool {
 		if vp == null continue;
 		if vp.is_smoldered continue;
 
-		pillar_pos := mm.void_pillars[i].world_position;
+		pillar_pos := mm.void_pillars[i].world_position.xy;
 		dist := length(v2.{pos.x - pillar_pos.x, pos.y - pillar_pos.y});
 		if dist <= MIMICER_VOID_TETHER_RANGE {
 			return true;
@@ -1538,7 +1538,7 @@ rr_mimicer_is_near_active_pillar :: proc(player: Player) -> bool {
 		if mm.unleash_pillars[i] == null continue;
 		if !#alive(mm.unleash_pillars[i]) continue;
 
-		pillar_pos := mm.unleash_pillars[i].world_position;
+		pillar_pos := mm.unleash_pillars[i].world_position.xy;
 		dist := length(v2.{pos.x - pillar_pos.x, pos.y - pillar_pos.y});
 		if dist <= MIMICER_VOID_TETHER_RANGE {
 			return true;
@@ -1753,7 +1753,7 @@ rr_mimicer_consume_unleash_pillar :: proc(player: Player, pillar_entity: Entity)
 	}
 
 	// Destroy the pillar
-	pos := pillar_entity.world_position;
+	pos := pillar_entity.world_position.xy;
 	pillar_entity.destroy();
 
 	rr_mimicer_spawn_vfx(pos, "004RAND/Teleport", 1.5);
@@ -1854,7 +1854,7 @@ rr_mimicer_draw_disguise_name :: proc(player: Player) {
 	if !mm.is_disguised return;
 	if mm.disguise_target_name == "" return;
 
-	pos := player.entity.world_position;
+	pos := player.entity.world_position.xy;
 	label_pos := pos + v2.{0.0, 1.6};
 	label_rect := Rect{label_pos, label_pos}.grow(0.10, 1.00, 0.10, 1.00);
 
@@ -1940,7 +1940,7 @@ Mimicer_Kill_Ability :: class : Ability_Base {
 		if mm == null return false;
 		if mm.void_lunge_active return false;
 		if mm.unleash_placing return false;
-		return get_closest_kill_target(this, player) != null || rr_ninja_closest_decoy(player, player.entity.world_position, rr_ninja_mimicer_kill_range(player)) != null;
+		return get_closest_kill_target(this, player) != null || rr_ninja_closest_decoy(player, player.entity.world_position.xy, rr_ninja_mimicer_kill_range(player)) != null;
 	}
 
 	get_closest_kill_target :: proc(instance: Mimicer_Kill_Ability, player: Player) -> Player {
@@ -1950,14 +1950,14 @@ Mimicer_Kill_Ability :: class : Ability_Base {
 			kill_range = MIMICER_KILL_RANGE_MONSTER;
 		}
 
-		finder := make_finder(Player, player.entity.world_position, kill_range);
+		finder := make_finder(Player, player.entity.world_position.xy, kill_range);
 		for target: component_iterator(Player) {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if rr_ninja_smoke_protects(target) continue;
 			if target.player_type == Player_Type.TRAITOR continue;
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -1974,7 +1974,7 @@ Mimicer_Kill_Ability :: class : Ability_Base {
 
 		if params.clicked && params.can_use {
 			closest := get_closest_kill_target(this, player);
-            if rr_ninja_hit_decoy(player, player.entity.world_position, rr_ninja_mimicer_kill_range(player), closest) {
+            if rr_ninja_hit_decoy(player, player.entity.world_position.xy, rr_ninja_mimicer_kill_range(player), closest) {
                 current_cooldown = effective_cd;
                 return;
             }
@@ -1987,7 +1987,7 @@ Mimicer_Kill_Ability :: class : Ability_Base {
 
 				if Game.is_server() {
 					sfx := SFX.default_sfx_desc();
-					sfx.set_position(closest.entity.world_position);
+					sfx.set_position(closest.entity.world_position.xy);
 					sfx.volume = 0.25;
 					rr_play_sfx("sfx/traitor_kill_death.wav", sfx);
 				}
@@ -2202,7 +2202,7 @@ Mimicer_Void_Lunge_Ability :: class : Ability_Base {
 			if current_cooldown > 0.0 return;
 
 			dir := activation.direction;
-			start := player.entity.world_position;
+			start := player.entity.world_position.xy;
 			target_pos := v2.{start.x + dir.x * MIMICER_VOID_LUNGE_DISTANCE, start.y + dir.y * MIMICER_VOID_LUNGE_DISTANCE};
 			rr_mimicer_start_void_lunge(player, target_pos);
 			current_cooldown = MIMICER_VOID_LUNGE_COOLDOWN;
@@ -2238,12 +2238,12 @@ Mimicer_Spew_Ability :: class : Ability_Base {
 	}
 
 	get_closest_spew_target :: proc(instance: Mimicer_Spew_Ability, player: Player) -> Player {
-		finder := make_finder(Player, player.entity.world_position, MIMICER_SPEW_RANGE);
+		finder := make_finder(Player, player.entity.world_position.xy, MIMICER_SPEW_RANGE);
 		for target: component_iterator(Player) {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -2267,7 +2267,7 @@ Mimicer_Spew_Ability :: class : Ability_Base {
 			UI.push_layer(-10);
 			UI.push_scale_factor(UI.get_current_scale_factor() * scale);
 
-			center := world_to_screen(player.entity.world_position);
+			center := world_to_screen(player.entity.world_position.xy);
 			edge := world_to_screen(v2.{player.entity.world_position.x + MIMICER_SPEW_RANGE, player.entity.world_position.y});
 			radius := abs(edge.x - center.x);
 

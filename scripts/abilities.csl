@@ -100,7 +100,7 @@ Kill_Ability :: class : Ability_Base {
 				kill_range = GGG_CREATURE_KILL_RANGE;
 			}
 		}
-        finder := make_finder(Player, player.entity.world_position, kill_range);
+        finder := make_finder(Player, player.entity.world_position.xy, kill_range);
         for i: 0..players.elements.count-1 {
             target := players.elements[i];
             if target == null {
@@ -136,7 +136,7 @@ Kill_Ability :: class : Ability_Base {
                     continue;
                 }
             }
-            finder.check(target, target.entity.world_position);
+            finder.check(target, target.entity.world_position.xy);
         }
         return finder.closest;
     }
@@ -146,7 +146,7 @@ Kill_Ability :: class : Ability_Base {
         if player.player_state != Player_State.ALIVE return false;
 		if player.has_task_in_progress() return false;
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
-        return get_closest_alive_player(this, player) != null || rr_ninja_closest_decoy(player, player.entity.world_position, rr_ninja_base_kill_range(player)) != null;
+        return get_closest_alive_player(this, player) != null || rr_ninja_closest_decoy(player, player.entity.world_position.xy, rr_ninja_base_kill_range(player)) != null;
     }
 
     on_update :: method(params: ref Ability_Update_Params) {
@@ -172,7 +172,7 @@ Kill_Ability :: class : Ability_Base {
 
         if params.clicked && params.can_use {
             closest_alive_player := get_closest_alive_player(this, player);
-            if rr_ninja_hit_decoy(player, player.entity.world_position, rr_ninja_base_kill_range(player), closest_alive_player) {
+            if rr_ninja_hit_decoy(player, player.entity.world_position.xy, rr_ninja_base_kill_range(player), closest_alive_player) {
                 current_cooldown = rr_ninja_base_kill_cooldown(player);
                 player.set_trigger("traitor_kill");
                 return;
@@ -183,7 +183,7 @@ Kill_Ability :: class : Ability_Base {
 				if rr_mech_is_transformed(player) {
 					rr_mech_play_avatar_anim(player, "009SG/Kill", false);
 					// Gun blast SFX synced to the Mech's shoot animation (the transformed kill is a gunshot).
-					rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position, 0.35);
+					rr_mech_play_sfx_at("sfx/shoot.wav", player.entity.world_position.xy, 0.35);
 				} else {
 					player.set_trigger("traitor_kill");
 				}
@@ -201,7 +201,7 @@ Kill_Ability :: class : Ability_Base {
 				// Traitor knife kill SFX (server-authoritative; replicates to clients).
 				if Game.is_server() && player != null && player.player_type == Player_Type.TRAITOR {
 					sfx := SFX.default_sfx_desc();
-					sfx.set_position(closest_alive_player.entity.world_position);
+					sfx.set_position(closest_alive_player.entity.world_position.xy);
 					sfx.volume = 0.35;
 					sfx.volume_perturb = 0.08;
 					sfx.speed_perturb = 0.06;
@@ -215,7 +215,7 @@ Kill_Ability :: class : Ability_Base {
 						gm := player.entity.get_component(GGG_Module);
 						if gm != null && gm.is_creature_form {
 							pounce_sfx := SFX.default_sfx_desc();
-							pounce_sfx.set_position(closest_alive_player.entity.world_position);
+							pounce_sfx.set_position(closest_alive_player.entity.world_position.xy);
 							pounce_sfx.volume = 0.15;
 							pounce_sfx.speed_perturb = 0.05;
 							rr_play_sfx("sfx/ggg_pounce_wrap.wav", pounce_sfx);
@@ -259,7 +259,7 @@ rr_drag_body_get_closest_draggable_corpse :: proc(player: Player) -> Corpse {
 	if player.player_state != Player_State.ALIVE return null;
 	if game_state != Game_State.INGAME return null;
 
-	finder := make_finder(Corpse, player.entity.world_position, DRAG_BODY_GRAB_RANGE);
+	finder := make_finder(Corpse, player.entity.world_position.xy, DRAG_BODY_GRAB_RANGE);
 	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
@@ -274,7 +274,7 @@ rr_drag_body_get_closest_draggable_corpse :: proc(player: Player) -> Corpse {
 			continue;
 		}
 
-		finder.check(corpse, corpse.entity.world_position);
+		finder.check(corpse, corpse.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -471,7 +471,7 @@ rr_werewolf_play_bite_sfx :: proc(player: Player) {
 	if player == null return;
 	if !#alive(player.entity) return;
 	sfx := SFX.default_sfx_desc();
-	sfx.set_position(player.entity.world_position);
+	sfx.set_position(player.entity.world_position.xy);
 	sfx.volume = 0.75;
 	sfx.volume_perturb = 0.1;
 	sfx.speed_perturb = 0.08;
@@ -560,7 +560,7 @@ rr_werewolf_clear_infection :: proc(player: Player) {
 
 rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_werewolf: bool, lethal: bool = false) -> Player {
 	if attacker == null return null;
-	finder := make_finder(Player, attacker.entity.world_position, range);
+	finder := make_finder(Player, attacker.entity.world_position.xy, range);
 	for i: 0..players.elements.count-1 {
 		target := players.elements[i];
 		if target == null continue;
@@ -584,7 +584,7 @@ rr_werewolf_find_melee_target :: proc(attacker: Player, range: float, exclude_we
 			}
 		}
 
-		finder.check(target, target.entity.world_position);
+		finder.check(target, target.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -597,7 +597,7 @@ rr_werewolf_find_claw_target :: proc(attacker: Player, direction: v2, range: flo
 	dir_len_sq := direction.x * direction.x + direction.y * direction.y;
 	if dir_len_sq < 0.0001 return null;
 	dir := direction / sqrt(dir_len_sq);
-	apos := attacker.entity.world_position;
+	apos := attacker.entity.world_position.xy;
 
 	best: Player = null;
 	best_dist := range + 1.0;
@@ -619,7 +619,7 @@ rr_werewolf_find_claw_target :: proc(attacker: Player, direction: v2, range: flo
 			}
 		}
 
-		offset := target.entity.world_position - apos;
+		offset := target.entity.world_position.xy - apos;
 		dist := length(offset);
 		if dist > range continue;
 		if dist <= 0.001 continue;
@@ -831,7 +831,7 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 		wm := player.entity.get_component(Werewolf_Module);
 		if wm == null return false;
 		if !wm.is_wolf_form return false;
-		return rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true, true) != null || rr_ninja_closest_decoy(player, player.entity.world_position, WEREWOLF_DEVOUR_RANGE) != null;
+		return rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true, true) != null || rr_ninja_closest_decoy(player, player.entity.world_position.xy, WEREWOLF_DEVOUR_RANGE) != null;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -842,7 +842,7 @@ Werewolf_Devour_Ability :: class : Ability_Base {
 
 		if params.clicked && params.can_use {
 			target := rr_werewolf_find_melee_target(player, WEREWOLF_DEVOUR_RANGE, true, true);
-            if rr_ninja_hit_decoy(player, player.entity.world_position, WEREWOLF_DEVOUR_RANGE, target) {
+            if rr_ninja_hit_decoy(player, player.entity.world_position.xy, WEREWOLF_DEVOUR_RANGE, target) {
                 current_cooldown = WEREWOLF_DEVOUR_COOLDOWN_SECONDS;
                 return;
             }
@@ -987,7 +987,7 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 			range := rng_range_float(ref rng, WEREWOLF_CLAW_RANGE_MIN, WEREWOLF_CLAW_RANGE_MAX);
 
 			target := rr_werewolf_find_claw_target(player, activation.direction, range);
-            if rr_ninja_hit_decoy_ray(player, player.entity.world_position, activation.direction, range, 1.0, target) {
+            if rr_ninja_hit_decoy_ray(player, player.entity.world_position.xy, activation.direction, range, 1.0, target) {
                 rr_werewolf_spawn_claw_slash_vfx(player, activation.direction);
                 current_cooldown = WEREWOLF_CLAW_COOLDOWN_SECONDS;
                 return;
@@ -1004,7 +1004,7 @@ Werewolf_Claw_Slash_Ability :: class : Ability_Base {
 			// Whoosh SFX, server-authoritative so it replicates.
 			if Game.is_server() {
 				sfx := SFX.default_sfx_desc();
-				sfx.set_position(player.entity.world_position);
+				sfx.set_position(player.entity.world_position.xy);
 				sfx.volume = 0.6;
 				sfx.volume_perturb = 0.1;
 				sfx.speed_perturb = 0.1;
@@ -1049,7 +1049,7 @@ Werewolf_Pass_Bite_Ability :: class : Ability_Base {
 
 	get_closest_pass_target :: proc(instance: Werewolf_Pass_Bite_Ability, biter: Player) -> Player {
 		if biter == null return null;
-		finder := make_finder(Player, biter.entity.world_position, WEREWOLF_PASS_BITE_RANGE);
+		finder := make_finder(Player, biter.entity.world_position.xy, WEREWOLF_PASS_BITE_RANGE);
 		for i: 0..players.elements.count-1 {
 			target := players.elements[i];
 			if target == null continue;
@@ -1057,7 +1057,7 @@ Werewolf_Pass_Bite_Ability :: class : Ability_Base {
 			if target == biter continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_role == Player_Role.WEREWOLF continue; // exclude werewolf(s)
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -1131,7 +1131,7 @@ Werewolf_Transform_Ability :: class : Ability_Base {
 				// Server-authoritative SFX (replicated to all clients).
 				if Game.is_server() {
 					sfx := SFX.default_sfx_desc();
-					sfx.set_position(player.entity.world_position);
+					sfx.set_position(player.entity.world_position.xy);
 					sfx.volume = 0.9;
 					sfx.volume_perturb = 0.05;
 					sfx.speed_perturb = 0.05;
@@ -1274,7 +1274,7 @@ Hitman_Mine_Fling :: class : Component {
 		end_time = get_time() + seconds;
 		active = true;
 		dir = direction;
-		last_pos = entity.world_position;
+		last_pos = entity.world_position.xy;
 		stuck_frames = 0;
 
 		p := entity.get_component(Player);
@@ -1304,7 +1304,7 @@ Hitman_Mine_Fling :: class : Component {
 		// Keep pushing until collision or timeout.
 		p.agent.velocity = dir * HITMAN_MINE_FLING_SPEED;
 
-		pos := entity.world_position;
+		pos := entity.world_position.xy;
 		moved := length(pos - last_pos);
 		last_pos = pos;
 
@@ -1339,7 +1339,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 	}
 
 	get_closest_alive_target :: proc(instance: Hitman_Neck_Snap_Ability, player: Player) -> Player {
-		finder := make_finder(Player, player.entity.world_position, KILL_RANGE);
+		finder := make_finder(Player, player.entity.world_position.xy, KILL_RANGE);
 		for i: 0..players.elements.count-1 {
 			target := players.elements[i];
 			if target == null continue;
@@ -1353,7 +1353,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 				continue;
 			}
 
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -1365,7 +1365,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 		if get_time() < post_meeting_kill_lockout_ends_at return false;
 		if player.player_type != Player_Type.TRAITOR return false;
 		if player.player_role != Player_Role.HITMAN return false;
-		return get_closest_alive_target(this, player) != null || rr_ninja_closest_decoy(player, player.entity.world_position, KILL_RANGE) != null;
+		return get_closest_alive_target(this, player) != null || rr_ninja_closest_decoy(player, player.entity.world_position.xy, KILL_RANGE) != null;
 	}
 
 	on_update :: method(params: ref Ability_Update_Params) {
@@ -1383,7 +1383,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 
 		if params.clicked && params.can_use {
 			target := get_closest_alive_target(this, player);
-            if rr_ninja_hit_decoy(player, player.entity.world_position, KILL_RANGE, target) {
+            if rr_ninja_hit_decoy(player, player.entity.world_position.xy, KILL_RANGE, target) {
                 current_cooldown = HITMAN_NECK_SNAP_COOLDOWN_SECONDS;
                 return;
             }
@@ -1403,7 +1403,7 @@ Hitman_Neck_Snap_Ability :: class : Ability_Base {
 				// Hitman strangle/neck-snap kill SFX (server-authoritative; replicates to clients).
 				if Game.is_server() {
 					sfx := SFX.default_sfx_desc();
-					sfx.set_position(target.entity.world_position);
+					sfx.set_position(target.entity.world_position.xy);
 					sfx.volume = 0.9;
 					sfx.volume_perturb = 0.08;
 					sfx.speed_perturb = 0.06;
@@ -1593,7 +1593,7 @@ Hitman_Sniper_Ability :: class : Ability_Base {
 				continue;
 			}
 
-			d := p.entity.world_position - point;
+			d := p.entity.world_position.xy - point;
 			dist_sq := length_squared(d);
 			if dist_sq > r_sq continue;
 
@@ -1723,19 +1723,19 @@ Resurrect_Ability :: class : Ability_Base {
     }
 
     get_closest_resurrectable_corpse :: proc(instance: Resurrect_Ability, doctor: Player) -> Corpse {
-        finder := make_finder(Corpse, doctor.entity.world_position, 5.0);
+        finder := make_finder(Corpse, doctor.entity.world_position.xy, 5.0);
         for corpse: component_iterator(Corpse) {
             // Corpse must belong to a currently-dead player.
             target := get_player_by_entity_id(corpse.owner_player_entity_id);
             if target == null continue;
             if target.player_state != Player_State.DEAD continue;
-            finder.check(corpse, corpse.entity.world_position);
+            finder.check(corpse, corpse.entity.world_position.xy);
         }
         return finder.closest;
     }
 
     get_closest_spew_victim :: proc(instance: Resurrect_Ability, doctor: Player) -> Player {
-        finder := make_finder(Player, doctor.entity.world_position, 5.0);
+        finder := make_finder(Player, doctor.entity.world_position.xy, 5.0);
         for p: component_iterator(Player) {
             if p == null continue;
             if p.entity.id == doctor.entity.id continue;
@@ -1743,7 +1743,7 @@ Resurrect_Ability :: class : Ability_Base {
             has_spew := p.mimicer_blinded || p.mimicer_distorted_until > 0.0;
             has_cocoon := p.bc_cocooned;
             if !has_spew && !has_cocoon && !rr_lily_is_player_strung_by_any(p) continue;
-            finder.check(p, p.entity.world_position);
+            finder.check(p, p.entity.world_position.xy);
         }
         return finder.closest;
     }
@@ -1802,7 +1802,7 @@ Resurrect_Ability :: class : Ability_Base {
             if target == null return;
             if target.player_state != Player_State.DEAD return;
 
-            revive_pos := corpse.entity.world_position;
+            revive_pos := corpse.entity.world_position.xy;
 
             // Consume a use.
             dm := instance.player.entity.get_component(Doctor_Module);
@@ -1913,7 +1913,7 @@ Coroner_DNA_Vial_Display :: class : Component {
 		t01 := clamp((now - start_time) / 0.35, 0.0, 1.0);
 		t := Ease.out_back(t01);
 
-		base := entity.world_position;
+		base := entity.world_position.xy;
 		// "Moves above the coroner's head"
 		y_off := lerp(0.6, 1.55, t);
 		pos := base + v2.{0, y_off};
@@ -1946,14 +1946,14 @@ DNA_Sample_Ability :: class : Ability_Base {
 	}
 
 	get_closest_sampleable_corpse :: proc(instance: DNA_Sample_Ability, coroner: Player) -> Corpse {
-		finder := make_finder(Corpse, coroner.entity.world_position, CORONER_DNA_SAMPLE_RANGE);
+		finder := make_finder(Corpse, coroner.entity.world_position.xy, CORONER_DNA_SAMPLE_RANGE);
 		for corpse: component_iterator(Corpse) {
 			if corpse.has_been_reported continue;
 			if corpse.has_dna_been_sampled continue;
 			if corpse.ggg_is_wrapped continue;
 			// Only corpses with known player killers yield a vial.
 			if corpse.killer_player_entity_id == 0 continue;
-			finder.check(corpse, corpse.entity.world_position);
+			finder.check(corpse, corpse.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -1966,7 +1966,7 @@ DNA_Sample_Ability :: class : Ability_Base {
 			if nest == null continue;
 			if nest.destroyed continue;
 			if nest.entity == null || !#alive(nest.entity) continue;
-			d := nest.entity.world_position - coroner.entity.world_position;
+			d := nest.entity.world_position.xy - coroner.entity.world_position.xy;
 			dist_sq := length_squared(d);
 			if dist_sq > r_sq continue;
 			if best == null || dist_sq < best_dist_sq {
@@ -2028,14 +2028,14 @@ DNA_Match_Ability :: class : Ability_Base {
 	}
 
 	get_closest_alive_other_player :: proc(instance: DNA_Match_Ability, coroner: Player) -> Player {
-		finder := make_finder(Player, coroner.entity.world_position, CORONER_DNA_MATCH_RANGE);
+		finder := make_finder(Player, coroner.entity.world_position.xy, CORONER_DNA_MATCH_RANGE);
 		for i: 0..players.elements.count-1 {
 			target := players.elements[i];
 			if target == null continue;
 			if !#alive(target.entity) continue;
 			if target == coroner continue;
 			if target.player_state != Player_State.ALIVE continue;
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -2230,7 +2230,7 @@ Shoot_Ability :: class : Ability_Base {
 		}
 		if targeting {
 			player.set_mouse_ik_enabled(true);
-			player.set_aim_target(player.entity.world_position + player.last_aim_direction * 5.0);
+			player.set_aim_target(player.entity.world_position.xy + player.last_aim_direction * 5.0);
 		} else {
 			player.set_mouse_ik_enabled(false);
 		}
@@ -2238,13 +2238,13 @@ Shoot_Ability :: class : Ability_Base {
         if params.can_use && activation.activate {
 			player.set_facing_right(activation.direction.x > 0);
 			player.set_trigger("shoot_gun");
-			player.set_aim_target(player.entity.world_position + activation.direction * 5.0);
+			player.set_aim_target(player.entity.world_position.xy + activation.direction * 5.0);
 			sfx := SFX.default_sfx_desc();
-			sfx.set_position(player.entity.local_position);
+			sfx.set_position(player.entity.local_position.xy);
 			sfx.volume = 0.5;
 			sfx.volume_perturb = 0.2;
 			sfx.speed_perturb = 0.1;
-			shoot_projectile(player.entity.world_position, activation.direction * 10.0, 1, 0.75, player.entity);
+			shoot_projectile(player.entity.world_position.xy, activation.direction * 10.0, 1, 0.75, player.entity);
 			// Global SFX mix: everything at 25% volume.
 			sfx.volume *= 0.25;
 			sfx.volume_perturb *= 0.25;
@@ -2330,7 +2330,7 @@ Black_Flag :: class : Component {
             if player.player_state != Player_State.ALIVE continue;
             if !player.is_local_or_server() continue;
             
-            distance := length(player.entity.world_position - entity.world_position);
+            distance := length(player.entity.world_position.xy - entity.world_position.xy);
             if distance < BLACK_FLAG_RADIUS {
                 // Check if this player is immune (the Pirate who placed it, or fellow traitors)
                 is_pirate_owner := #alive(owner_entity) && owner_entity == player.entity;
@@ -2397,7 +2397,7 @@ Black_Flag_Ability :: class : Ability_Base {
             // Spawn prefab (includes the spine setup already)
             prefab := get_asset(Prefab_Asset, "prefabs/black_flag.prefab");
             flag_entity := Scene.instantiate(prefab);
-            flag_entity.set_local_position(player.entity.local_position);
+            flag_entity.set_local_position(player.entity.local_position.xy);
 
             // Ensure gameplay component exists (drives fog + appear.idle)
             flag: Black_Flag;
@@ -2440,12 +2440,12 @@ Black_Flag_Ability :: class : Ability_Base {
 
 rr_pirate_get_closest_unlooted_corpse :: proc(pirate: Player) -> Corpse {
 	if pirate == null return null;
-	finder := make_finder(Corpse, pirate.entity.world_position, PIRATE_TREASURE_MAP_LOOT_RANGE);
+	finder := make_finder(Corpse, pirate.entity.world_position.xy, PIRATE_TREASURE_MAP_LOOT_RANGE);
 	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if corpse.has_been_reported continue;
 		if corpse.pirate_map_taken continue;
-		finder.check(corpse, corpse.entity.world_position);
+		finder.check(corpse, corpse.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -2636,7 +2636,7 @@ Pirate_Treasure_Map_Ability :: class : Ability_Base {
 
 			if Game.is_server() {
 				corpse.pirate_map_taken = true;
-				rr_pirate_spawn_dig_spot_for_player(player, corpse.entity.world_position);
+				rr_pirate_spawn_dig_spot_for_player(player, corpse.entity.world_position.xy);
 			}
 
 			player.Notify("Collected a treasure map!");
@@ -2771,7 +2771,7 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 		if owner_player != null && owner_player.player_type == Player_Type.TRAITOR && p.player_type == Player_Type.TRAITOR {
 			continue;
 		}
-		d := p.entity.world_position - position;
+		d := p.entity.world_position.xy - position;
 		dist_sq := length_squared(d);
 		if dist_sq > POWDER_KEG_EXPLOSION_RADIUS * POWDER_KEG_EXPLOSION_RADIUS continue;
 
@@ -2791,7 +2791,7 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 		nearest.kill_with_killer(killer_id);
 		{
 			sfx := SFX.default_sfx_desc();
-			sfx.set_position(nearest.entity.world_position);
+			sfx.set_position(nearest.entity.world_position.xy);
 			sfx.volume = 0.8;
 			// Explicit death SFX (`traitor_kill_death.wav` is reserved for knife/neck-snap).
 			// Global SFX mix: everything at 25% volume.
@@ -2811,7 +2811,7 @@ powder_keg_explode_at :: proc(owner: Entity, position: v2) {
 			continue;
 		}
 
-		d := p.entity.world_position - position;
+		d := p.entity.world_position.xy - position;
 		dist_sq := length_squared(d);
 		if dist_sq > POWDER_KEG_EXPLOSION_RADIUS * POWDER_KEG_EXPLOSION_RADIUS continue;
 
@@ -2990,7 +2990,7 @@ Powder_Keg_Ability :: class : Ability_Base {
 		target_pos := get_mouse_world_position();
 		{
 			// Clamp max throw distance so the keg can't be thrown across the map.
-			origin := player.entity.world_position;
+			origin := player.entity.world_position.xy;
 			delta := target_pos - origin;
 			max_r := POWDER_KEG_MAX_THROW_RANGE;
 			if length_squared(delta) > max_r * max_r {
@@ -3002,7 +3002,7 @@ Powder_Keg_Ability :: class : Ability_Base {
 				target_pos = origin + delta * max_r;
 			}
 		}
-		draw_aiming_line(player.entity.world_position, aiming.aim_direction, 1.0 / player.camera.size * 4);
+		draw_aiming_line(player.entity.world_position.xy, aiming.aim_direction, 1.0 / player.camera.size * 4);
 
 		// Optional: show a subtle circle at the target.
 		if player.is_local() {
@@ -3028,10 +3028,10 @@ Powder_Keg_Ability :: class : Ability_Base {
 
 			// Throw keg toward clicked point.
 			throw_entity := Scene.create_entity();
-			throw_entity.set_local_position(player.entity.world_position);
+			throw_entity.set_local_position(player.entity.world_position.xy);
 			throw_comp := throw_entity.add_component(Powder_Keg_Thrown);
 			throw_comp.owner = player.entity;
-			throw_comp.start_pos = player.entity.world_position;
+			throw_comp.start_pos = player.entity.world_position.xy;
 			throw_comp.target_pos = target_pos;
 			throw_comp.travel_time = POWDER_KEG_THROW_TRAVEL_TIME;
 
@@ -3109,7 +3109,7 @@ rr_pyro_get_closest_unlit_prop :: proc(player: Player) -> Entity {
 		// Only allow igniting props inside the pyro's assigned task rooms.
 		if !rr_pyro_is_task_room(player, room_root) continue;
 
-		d := e.world_position - player.entity.world_position;
+		d := e.world_position.xy - player.entity.world_position.xy;
 		dist_sq := length_squared(d);
 		if dist_sq > r_sq continue;
 
@@ -3130,7 +3130,7 @@ rr_pyro_get_closest_nest :: proc(player: Player) -> GGG_Nest {
 		if nest == null continue;
 		if nest.destroyed continue;
 		if nest.entity == null || !#alive(nest.entity) continue;
-		d := nest.entity.world_position - player.entity.world_position;
+		d := nest.entity.world_position.xy - player.entity.world_position.xy;
 		dist_sq := length_squared(d);
 		if dist_sq > r_sq continue;
 		if best == null || dist_sq < best_dist_sq {
@@ -3431,14 +3431,14 @@ Prank_Ability :: class : Ability_Base {
 	}
 
 	get_closest_prankable_player :: proc(instance: Prank_Ability, player: Player) -> Player {
-		finder := make_finder(Player, player.entity.world_position, PRANK_MELEE_RANGE);
+		finder := make_finder(Player, player.entity.world_position.xy, PRANK_MELEE_RANGE);
 		for i: 0..players.elements.count-1 {
 			target := players.elements[i];
 			if target == null continue;
 			if !#alive(target.entity) continue;
 			if target == player continue;
 			if target.player_state != Player_State.ALIVE continue;
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -3876,7 +3876,7 @@ Autograph_Ability :: class : Ability_Base {
 
 		target_pos := get_mouse_world_position();
 		{
-			origin := player.entity.world_position;
+			origin := player.entity.world_position.xy;
 			delta := target_pos - origin;
 			max_r := MOVIE_STAR_AUTOGRAPH_PLACE_DISTANCE;
 			if length_squared(delta) > max_r * max_r {

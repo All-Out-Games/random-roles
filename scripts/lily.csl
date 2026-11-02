@@ -1031,7 +1031,7 @@ Lily_Tree_Visibility :: class : Component {
 			return;
 		}
 		// Other players fade in when close
-		dist := length(local_player.entity.world_position - entity.world_position);
+		dist := length(local_player.entity.world_position.xy - entity.world_position.xy);
 		if dist <= LILY_TREE_VISIBILITY_RANGE {
 			alpha := 1.0 - clamp((dist - LILY_TREE_VISIBILITY_RANGE + 2.0) / 2.0, 0.0, 1.0);
 			alpha = clamp(alpha, 0.0, 1.0);
@@ -1140,12 +1140,12 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 		if target == null return;
 		if tree_entity == null return;
 
-		tree_pos := tree_entity.world_position;
-		dir := tree_pos - target.entity.world_position;
+		tree_pos := tree_entity.world_position.xy;
+		dir := tree_pos - target.entity.world_position.xy;
 		dist := length(dir);
 		if dist > 0.3 {
 			move := normalize(dir) * LILY_PULL_DRAG_SPEED * 0.016; // approximate frame dt
-			new_pos := target.entity.world_position + move;
+			new_pos := target.entity.world_position.xy + move;
 			nav_pt: v2;
 			tri_hint: s64;
 			try_find_closest_point_on_navmesh(new_pos, ref nav_pt, ref tri_hint);
@@ -1160,7 +1160,7 @@ Lily_Tree_Pull_Interactable :: class : Interactable {
 		if target == null return;
 		if tree_entity == null return;
 
-		tree_pos := tree_entity.world_position;
+		tree_pos := tree_entity.world_position.xy;
 		nav_pt: v2;
 		tri_hint: s64;
 		try_find_closest_point_on_navmesh(tree_pos, ref nav_pt, ref tri_hint);
@@ -1227,12 +1227,12 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 	// Find a living strung player near the tree (also checks carried trap victims)
 	find_alive_strung_near_tree :: method(lm: Lily_Module) -> Player {
 		if tree_entity == null return null;
-		tree_pos := tree_entity.world_position;
+		tree_pos := tree_entity.world_position.xy;
 		for i: 0..lm.strung_player_ids.count-1 {
 			target := get_player_by_entity_id(lm.strung_player_ids[i]);
 			if target == null continue;
 			if target.player_state != Player_State.ALIVE continue;
-			dist := length(target.entity.world_position - tree_pos);
+			dist := length(target.entity.world_position.xy - tree_pos);
 			if dist <= LILY_TREE_DELIVER_RANGE {
 				return target;
 			}
@@ -1241,7 +1241,7 @@ Lily_Tree_Deliver_Interactable :: class : Interactable {
 		if lm.dragging_live_player_id != 0 {
 			target := get_player_by_entity_id(lm.dragging_live_player_id);
 			if target != null && target.player_state == Player_State.ALIVE {
-				dist := length(target.entity.world_position - tree_pos);
+				dist := length(target.entity.world_position.xy - tree_pos);
 				if dist <= LILY_TREE_DELIVER_RANGE {
 					return target;
 				}
@@ -1401,7 +1401,7 @@ rr_lily_place_hair_tree :: proc(player: Player) {
 	// One-time use — cannot plant again once placed
 	if lm.hair_tree_planted return;
 
-	pos := player.entity.world_position;
+	pos := player.entity.world_position.xy;
 	// Snap to navmesh
 	nav_point: v2;
 	triangle_hint: s64;
@@ -1474,7 +1474,7 @@ rr_lily_teleport_to_tree :: proc(player: Player) {
 
 	nav_point: v2;
 	triangle_hint: s64;
-	try_find_closest_point_on_navmesh(lm.hair_tree_entity.world_position, ref nav_point, ref triangle_hint);
+	try_find_closest_point_on_navmesh(lm.hair_tree_entity.world_position.xy, ref nav_point, ref triangle_hint);
 	player.entity.set_local_position(nav_point);
 	lm.tree_teleport_cooldown = LILY_TREE_TELEPORT_COOLDOWN;
 
@@ -1751,7 +1751,7 @@ Lily_Tea_Cup_Follower :: class : Component {
 
 		if settled {
 			// Lerp toward settle position
-			current := entity.local_position;
+			current := entity.local_position.xy;
 			dir := settle_target - current;
 			dist := length(dir);
 			if dist > 0.01 {
@@ -1814,7 +1814,7 @@ rr_lily_get_seat_position :: proc(lm: Lily_Module, seat_index: int) -> v2 {
 	if lm.tea_table_animator.instance == null return v2.{0, 0};
 	bone_name := format_string("PLAYER%", {seat_index});
 	bone_local := lm.tea_table_animator.instance.get_bone_local_position(bone_name);
-	return lm.tea_table_animator.entity.world_position + bone_local;
+	return lm.tea_table_animator.entity.world_position.xy + bone_local;
 }
 
 rr_lily_place_strung_players_at_table :: proc(player: Player) {
@@ -1844,7 +1844,7 @@ rr_lily_start_tea_party :: proc(player: Player, target: Player) {
 	if target == null return;
 
 	// Place table between Lily and victim
-	mid := (player.entity.world_position + target.entity.world_position) * 0.5;
+	mid := (player.entity.world_position.xy + target.entity.world_position.xy) * 0.5;
 	nav_point: v2;
 	triangle_hint: s64;
 	try_find_closest_point_on_navmesh(mid, ref nav_point, ref triangle_hint);
@@ -1964,15 +1964,15 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 	// Keep victim locked at seat, facing the table
 	seat_world := rr_lily_get_seat_position(lm, 1);
 	victim.entity.set_local_position(seat_world);
-	table_pos := lm.tea_table_entity.world_position;
+	table_pos := lm.tea_table_entity.world_position.xy;
 	victim.set_facing_right(table_pos.x > seat_world.x);
 
 	// Focus victim's camera on the table every frame (server sync). Lily's own camera
 	// is intentionally left on her regular follow camera.
 	if victim.is_local_or_server() {
-		table_pos := lm.tea_table_entity.world_position;
+		table_pos := lm.tea_table_entity.world_position.xy;
 		victim.camera.follow_player = false;
-		victim.camera.position = table_pos;
+		victim.camera.position.xy = table_pos;
 		victim.camera.size = LILY_TEA_PARTY_CAMERA_SIZE;
 	}
 
@@ -2064,8 +2064,8 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 		lm.tea_party_settle_at = now + 1.5;
 
 		// Calculate settle position: same radius from table center, angled toward victim
-		table_pos := lm.tea_table_entity.world_position;
-		victim_pos := victim.entity.world_position;
+		table_pos := lm.tea_table_entity.world_position.xy;
+		victim_pos := victim.entity.world_position.xy;
 		dir_to_victim := victim_pos - table_pos;
 		cup_radius := 0.0;
 
@@ -2077,7 +2077,7 @@ rr_lily_update_tea_party :: proc(player: Player, dt: float) {
 
 			if c == (victim_picked - 1) {
 				// Get current radius from table center
-				cup_radius = length(cup.local_position);
+				cup_radius = length(cup.local_position.xy);
 				if cup_radius < 0.1 cup_radius = 1.0;
 
 				// Target: same radius, direction toward victim (in local space)
@@ -2131,7 +2131,7 @@ rr_lily_tea_party_resolve :: proc(player: Player, victim: Player, chosen_cup: in
 		// Poison — legs fall off (crawl effect) + spawn leg pickup
 		victim.remove_freeze_reason(LILY_TEA_PARTY_SIT_REASON);
 		rr_lily_apply_crawl(victim);
-		drop_pos := victim.entity.world_position + v2.{0.0, -0.3};
+		drop_pos := victim.entity.world_position.xy + v2.{0.0, -0.3};
 		rr_lily_spawn_leg_pickup(player, victim.entity.id, drop_pos);
 		if player.is_local_or_server() {
 			Notifier.notify(player, format_string("%'s legs fell off!", {victim.get_username()}));
@@ -2220,7 +2220,7 @@ rr_lily_draw_cup_glow :: proc(player: Player) {
 		if cup == null continue;
 		if !#alive(cup) continue;
 
-		cup_pos := cup.world_position;
+		cup_pos := cup.world_position.xy;
 		UI.push_z(cup_pos.y - 0.1);
 
 		effect := lm.tea_party_cup_effects[i];
@@ -2463,7 +2463,7 @@ Lily_Caffeine_Timer :: class : Component {
 				p.lily_no_eyes_until = get_time() + LILY_BLIND_DURATION;
 				lily_player := get_player_by_entity_id(lily_entity_id);
 				if lily_player != null {
-					drop_pos := p.entity.world_position + v2.{0.0, -0.3};
+					drop_pos := p.entity.world_position.xy + v2.{0.0, -0.3};
 					rr_lily_spawn_eye_pickup(lily_player, p.entity.id, drop_pos);
 				}
 				if p.is_local_or_server() {
@@ -2524,7 +2524,7 @@ rr_lily_start_pull :: proc(player: Player) {
 
 	tree := rr_lily_get_nearest_tree(player);
 	if tree == null return;
-	if length(player.entity.world_position - tree.world_position) > LILY_TREE_INTERACT_RADIUS return;
+	if length(player.entity.world_position.xy - tree.world_position.xy) > LILY_TREE_INTERACT_RADIUS return;
 
 	lm.pull_active = true;
 	lm.pull_progress = 0.0;
@@ -2572,11 +2572,11 @@ rr_lily_update_pull :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	tree_pos := lm.pull_tree_entity.world_position;
+	tree_pos := lm.pull_tree_entity.world_position.xy;
 
 	// Snap phase: fast drag to tree
 	if lm.pull_snapping {
-		dir := tree_pos - target.entity.world_position;
+		dir := tree_pos - target.entity.world_position.xy;
 		dist := length(dir);
 		if dist < 0.5 {
 			// Arrived at tree — freeze them there
@@ -2593,7 +2593,7 @@ rr_lily_update_pull :: proc(player: Player, dt: float) {
 			return;
 		}
 		move := normalize(dir) * LILY_PULL_SNAP_SPEED * dt;
-		new_pos := target.entity.world_position + move;
+		new_pos := target.entity.world_position.xy + move;
 		nav_point: v2;
 		triangle_hint: s64;
 		try_find_closest_point_on_navmesh(new_pos, ref nav_point, ref triangle_hint);
@@ -2602,11 +2602,11 @@ rr_lily_update_pull :: proc(player: Player, dt: float) {
 	}
 
 	// Slow drag phase: lerp toward tree
-	dir := tree_pos - target.entity.world_position;
+	dir := tree_pos - target.entity.world_position.xy;
 	dist := length(dir);
 	if dist > 0.1 {
 		move := normalize(dir) * LILY_PULL_DRAG_SPEED * dt;
-		new_pos := target.entity.world_position + move;
+		new_pos := target.entity.world_position.xy + move;
 		nav_point: v2;
 		triangle_hint: s64;
 		try_find_closest_point_on_navmesh(new_pos, ref nav_point, ref triangle_hint);
@@ -2726,7 +2726,7 @@ Lily_Mind_Control_Puppet :: class : Component {
 			UI.push_world_draw_context();
 			defer UI.pop_draw_context();
 
-			head_pos := p.entity.world_position + v2.{0, 2.2};
+			head_pos := p.entity.world_position.xy + v2.{0, 2.2};
 			UI.push_z(head_pos.y + 0.01);
 			defer UI.pop_z();
 
@@ -2745,12 +2745,12 @@ Lily_Mind_Control_Puppet :: class : Component {
 			UI.text(text_rect, ts, "Mind Controlled!");
 		}
 
-		target_pos := p.entity.world_position;
+		target_pos := p.entity.world_position.xy;
 
 		// Snap camera to the puppet — the engine already smooths the target's position,
 		// so an extra lerp here would just add phase lag and visible wobble.
 		lily.camera.follow_player = false;
-		lily.camera.position = target_pos;
+		lily.camera.position.xy = target_pos;
 
 		// LOS light follows the puppet (local-only cosmetic).
 		if lily.is_local() {
@@ -2826,7 +2826,7 @@ Lily_String_Trap :: class : Component {
 		// Proximity check — server triggers the trap
 		if !Game.is_server() return;
 
-		trap_pos := entity.world_position;
+		trap_pos := entity.world_position.xy;
 		for p: component_iterator(Player) {
 			if p == null continue;
 			if p.player_state != Player_State.ALIVE continue;
@@ -2834,7 +2834,7 @@ Lily_String_Trap :: class : Component {
 			if p.entity.id == lily_entity_id continue;
 			if rr_ninja_light_feet(p) continue;
 
-			dist := length(p.entity.world_position - trap_pos);
+			dist := length(p.entity.world_position.xy - trap_pos);
 			if dist < LILY_STRING_TRAP_TRIGGER_RADIUS {
 				rr_lily_trigger_string_trap(this, p);
 				return;
@@ -2977,7 +2977,7 @@ rr_lily_get_closest_draggable_trapped_player :: proc(player: Player) -> Player {
 		if !rr_lily_is_target_immobile(p) continue;
 		// Skip whoever is already being dragged
 		if lm != null && lm.dragging_live_player_id == p.entity.id continue;
-		dist := length(p.entity.world_position - player.entity.world_position);
+		dist := length(p.entity.world_position.xy - player.entity.world_position.xy);
 		if dist < best_dist {
 			best_dist = dist;
 			best = p;
@@ -3033,10 +3033,10 @@ rr_lily_update_live_drag :: proc(player: Player, dt: float) {
 	}
 
 	// Move victim to follow Lily (offset behind)
-	player_pos := player.entity.world_position;
-	target_pos := target.entity.world_position;
+	player_pos := player.entity.world_position.xy;
+	target_pos := target.entity.world_position.xy;
 	follow_pos := player_pos;
-	s := player.entity.local_scale;
+	s := player.entity.local_scale.xy;
 	offset_x := -0.5;
 	if s.x < 0.0 { offset_x = 0.5; }
 	follow_pos.x = follow_pos.x + offset_x;
@@ -3285,7 +3285,7 @@ rr_lily_start_mind_control :: proc(player: Player, target: Player) {
 	// Snap Lily's camera onto the puppet on start so the subsequent lerp
 	// (in Lily_Mind_Control_Puppet.ao_late_update) doesn't slide in from Lily's old position.
 	player.camera.follow_player = false;
-	player.camera.position = target.entity.world_position;
+	player.camera.position.xy = target.entity.world_position.xy;
 
 	// Block target's own input — Lily's input is forwarded via the Puppet component
 	target.add_disable_movement_input_reason(LILY_MIND_CONTROL_PUPPET_REASON);
@@ -3346,8 +3346,8 @@ rr_lily_update_mind_control :: proc(player: Player, dt: float) {
 
 	// Check if target is near the tree — auto-deliver for Alive Player request
 	if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
-		tree_pos := lm.hair_tree_entity.world_position;
-		tree_dist := length(target.entity.world_position - tree_pos);
+		tree_pos := lm.hair_tree_entity.world_position.xy;
+		tree_dist := length(target.entity.world_position.xy - tree_pos);
 		if tree_dist <= LILY_TREE_DELIVER_RANGE {
 			tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 			if tree_comp != null {
@@ -3402,7 +3402,7 @@ rr_lily_draw_mind_control_ui :: proc(player: Player) {
 	UI.push_layer(9999);
 	defer UI.pop_layer();
 
-	head_pos := target.entity.world_position + v2.{0, 2.2};
+	head_pos := target.entity.world_position.xy + v2.{0, 2.2};
 	text_rect := Rect.{head_pos, head_pos}.grow(0.15, 1.5, 0.15, 1.5);
 
 	// Timer
@@ -3421,7 +3421,7 @@ rr_lily_draw_mind_control_ui :: proc(player: Player) {
 	UI.text(text_rect, ts, "%", {remaining_i});
 
 	// Name label below timer
-	name_pos := target.entity.world_position + v2.{0, 1.8};
+	name_pos := target.entity.world_position.xy + v2.{0, 1.8};
 	name_rect := Rect.{name_pos, name_pos}.grow(0.15, 1.5, 0.15, 1.5);
 	name_ts := UI.default_text_settings();
 	name_ts.size = 0.22;
@@ -3591,15 +3591,15 @@ rr_lily_draw_web_sense :: proc(player: Player) {
 		if target.player_state != Player_State.ALIVE continue;
 		if !#alive(target.entity) continue;
 
-		target_pos := target.entity.world_position;
+		target_pos := target.entity.world_position.xy;
 		Tutorial_Arrow.draw(player, target.entity, options);
 
 		// Draw name next to the arrow (replicate arrow positioning)
 		max_distance := player.camera.size * 0.8;
-		offset_to_target := normalize_vector_to_radius(target_pos - player.entity.world_position, max_distance) * max_distance;
-		arrow_pos := player.entity.world_position + offset_to_target;
-		previous_player_pos := player.entity.world_position - player.entity.calculate_interpolation_offset();
-		previous_target_pos := target_pos - target.entity.calculate_interpolation_offset();
+		offset_to_target := normalize_vector_to_radius(target_pos - player.entity.world_position.xy, max_distance) * max_distance;
+		arrow_pos := player.entity.world_position.xy + offset_to_target;
+		previous_player_pos := player.entity.world_position.xy - player.entity.calculate_interpolation_offset().xy;
+		previous_target_pos := target_pos - target.entity.calculate_interpolation_offset().xy;
 		previous_max_distance := player.camera.size_last_frame * 0.8;
 		previous_offset_to_target := normalize_vector_to_radius(previous_target_pos - previous_player_pos, previous_max_distance) * previous_max_distance;
 		previous_arrow_pos := previous_player_pos + previous_offset_to_target;
@@ -3711,9 +3711,9 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	// Mouth spawns at conference room center (voting_spawn), not at the tree
 	center_pos := v2.{0, 0};
 	if world_references != null && world_references.voting_spawn != null && #alive(world_references.voting_spawn) {
-		center_pos = world_references.voting_spawn.world_position;
+		center_pos = world_references.voting_spawn.world_position.xy;
 	} else {
-		center_pos = tree_entity.world_position; // fallback
+		center_pos = tree_entity.world_position.xy; // fallback
 	}
 
 	// Save camera size for restore
@@ -3757,7 +3757,7 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 	for p: component_iterator(Player) {
 		if p == null continue;
 		if p.player_state != Player_State.ALIVE continue;
-		to_p := p.entity.world_position - center_pos;
+		to_p := p.entity.world_position.xy - center_pos;
 		d := length(to_p);
 		if d >= LILY_DEATHBRAID_MIN_VICTIM_DIST continue;
 		dir: v2 = v2.{1, 0};
@@ -3783,7 +3783,7 @@ rr_lily_trigger_deathbraid :: proc(player: Player, tree_entity: Entity) {
 		if p.player_type == Player_Type.TRAITOR continue;
 		lm.deathbraid_pull_order.append(p.entity.id);
 
-		pull_dists.append(length(p.entity.world_position - center_pos));
+		pull_dists.append(length(p.entity.world_position.xy - center_pos));
 	}
 
 	// Simple insertion sort by distance (farthest first)
@@ -3812,12 +3812,12 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 
 	tree_pos := v2.{0, 0};
 	if lm.deathbraid_tree_entity != null && #alive(lm.deathbraid_tree_entity) {
-		tree_pos = lm.deathbraid_tree_entity.world_position;
+		tree_pos = lm.deathbraid_tree_entity.world_position.xy;
 	}
 
 	focus_pos := tree_pos;
 	if lm.deathbraid_mouth_entity != null && #alive(lm.deathbraid_mouth_entity) {
-		focus_pos = lm.deathbraid_mouth_entity.world_position;
+		focus_pos = lm.deathbraid_mouth_entity.world_position.xy;
 	}
 
 	// Camera/LOS/letterbox handled by rr_lily_update_deathbraid_camera (runs for ALL players)
@@ -3972,7 +3972,7 @@ rr_lily_update_deathbraid :: proc(player: Player, dt: float) {
 			if pull_elapsed < stagger_time continue;
 
 			// Drag toward mouth slowly
-			current := p.entity.world_position;
+			current := p.entity.world_position.xy;
 			diff := focus_pos - current;
 			dist := length(diff);
 
@@ -4151,9 +4151,9 @@ rr_lily_update_deathbraid_camera :: proc(player: Player) {
 
 		focus_pos := v2.{0, 0};
 		if lm.deathbraid_mouth_entity != null && #alive(lm.deathbraid_mouth_entity) {
-			focus_pos = lm.deathbraid_mouth_entity.world_position;
+			focus_pos = lm.deathbraid_mouth_entity.world_position.xy;
 		} else if lm.deathbraid_tree_entity != null && #alive(lm.deathbraid_tree_entity) {
-			focus_pos = lm.deathbraid_tree_entity.world_position;
+			focus_pos = lm.deathbraid_tree_entity.world_position.xy;
 		}
 
 		zoom_t := clamp(elapsed / LILY_DEATHBRAID_FREEZE_PHASE, 0.0, 1.0);
@@ -4181,7 +4181,7 @@ rr_lily_update_deathbraid_camera :: proc(player: Player) {
 
 		player.camera.follow_player = false;
 		player.camera.size = target_size;
-		player.camera.position = v2.{focus_pos.x + shake_x, focus_pos.y + shake_y};
+		player.camera.position.xy = v2.{focus_pos.x + shake_x, focus_pos.y + shake_y};
 		player.lily_deathbraid_cam_overriding = true;
 
 		if player.local_light_entity != null && #alive(player.local_light_entity) {
@@ -4352,11 +4352,11 @@ Lily_Kill_Ability :: class : Ability_Base {
 		}
 
 		// During Mind Control, search from puppet position
-		search_pos := player.entity.world_position;
+		search_pos := player.entity.world_position.xy;
 		if lm != null && lm.mind_control_active {
 			puppet := get_player_by_entity_id(lm.mind_control_target_id);
 			if puppet != null {
-				search_pos = puppet.entity.world_position;
+				search_pos = puppet.entity.world_position.xy;
 			}
 		}
 
@@ -4369,7 +4369,7 @@ Lily_Kill_Ability :: class : Ability_Base {
 			if target.player_type == Player_Type.TRAITOR continue;
 			// During Mind Control, don't target the controlled player
 			if lm != null && lm.mind_control_active && target.entity.id == lm.mind_control_target_id continue;
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -4417,7 +4417,7 @@ Lily_Kill_Ability :: class : Ability_Base {
 
 				if Game.is_server() {
 					sfx := SFX.default_sfx_desc();
-					sfx.set_position(closest.entity.world_position);
+					sfx.set_position(closest.entity.world_position.xy);
 					sfx.volume = 0.25;
 					rr_play_sfx(LILY_SFX_KILL, sfx);
 				}
@@ -4624,13 +4624,13 @@ Lily_String_Ability :: class : Ability_Base {
 	}
 
 	get_closest_string_target :: proc(instance: Lily_String_Ability, player: Player) -> Player {
-		finder := make_finder(Player, player.entity.world_position, LILY_STRING_RANGE);
+		finder := make_finder(Player, player.entity.world_position.xy, LILY_STRING_RANGE);
 		for target: component_iterator(Player) {
 			if target == null continue;
 			if target.entity.id == player.entity.id continue;
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -4700,7 +4700,7 @@ rr_lily_spawn_spider :: proc(player: Player) {
 	if lm == null return;
 	if lm.spider_active return;
 
-	spawn_pos := player.entity.world_position;
+	spawn_pos := player.entity.world_position.xy;
 
 	// Create spider entity at player position
 	se := Scene.create_entity();
@@ -4867,13 +4867,13 @@ rr_lily_update_spider :: proc(player: Player, dt: float) {
 
 	// Teleport Lily's player entity to the spider every frame so voice/SFX emit from there;
 	// the detached creature rig stays at lm.ability_origin_pos as the ghost marker.
-	spider_pos := lm.spider_entity.world_position;
+	spider_pos := lm.spider_entity.world_position.xy;
 	player.entity.set_local_position(spider_pos);
 
 	// Camera and LOS follow the spider (every frame, server sync overwrites)
 	if player.is_local() {
 		player.camera.follow_player = false;
-		player.camera.position = spider_pos;
+		player.camera.position.xy = spider_pos;
 
 		// Unparent light and set world position directly (avoids parent scale flip issues)
 		if player.local_light_entity != null && #alive(player.local_light_entity) {
@@ -4937,7 +4937,7 @@ Lily_Spider :: class : Component {
 		if lm.spider_has_legs { speed *= LILY_SPIDER_RETURN_SPEED_MULT; }
 		if length_squared(input) > 0.01 {
 			dir := normalize(input);
-			desired := entity.local_position + dir * speed * dt;
+			desired := entity.local_position.xy + dir * speed * dt;
 			nav_pt: v2;
 			tri_hint: s64;
 			if try_find_closest_point_on_navmesh(desired, ref nav_pt, ref tri_hint) {
@@ -4969,7 +4969,7 @@ Lily_Spider :: class : Component {
 			}
 		}
 
-		spider_pos := entity.world_position;
+		spider_pos := entity.world_position.xy;
 
 		// If spider has legs, check if near Lily's ghost (origin) to deliver.
 		// Lily's player entity tracks the spider so we can't use it for this distance.
@@ -5041,7 +5041,7 @@ rr_lily_spider_chomp :: proc(player: Player) {
 	if lm.spider_has_legs return;
 	if lm.spider_entity == null || !#alive(lm.spider_entity) return;
 
-	spider_pos := lm.spider_entity.world_position;
+	spider_pos := lm.spider_entity.world_position.xy;
 
 	finder := make_finder(Player, spider_pos, LILY_SPIDER_ATTACK_RANGE);
 	for target: component_iterator(Player) {
@@ -5050,7 +5050,7 @@ rr_lily_spider_chomp :: proc(player: Player) {
 		if target.player_state != Player_State.ALIVE continue;
 		if target.player_type == Player_Type.TRAITOR continue;
 		if target.lily_crawling continue;
-		finder.check(target, target.entity.world_position);
+		finder.check(target, target.entity.world_position.xy);
 	}
 
 	closest := finder.closest;
@@ -5088,7 +5088,7 @@ Lily_Spider_Attack_Ability :: class : Ability_Base {
 		if lm == null return null;
 		if lm.spider_entity == null || !#alive(lm.spider_entity) return null;
 
-		spider_pos := lm.spider_entity.world_position;
+		spider_pos := lm.spider_entity.world_position.xy;
 		finder := make_finder(Player, spider_pos, LILY_SPIDER_ATTACK_RANGE);
 		for target: component_iterator(Player) {
 			if target == null continue;
@@ -5096,7 +5096,7 @@ Lily_Spider_Attack_Ability :: class : Ability_Base {
 			if target.player_state != Player_State.ALIVE continue;
 			if target.player_type == Player_Type.TRAITOR continue;
 			if target.lily_crawling continue;
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -5185,7 +5185,7 @@ rr_lily_draw_spider_timer :: proc(player: Player) {
 	frac := remaining - secs.(float);
 	if frac > 0.001 { secs += 1; }
 
-	spider_pos := lm.spider_entity.world_position;
+	spider_pos := lm.spider_entity.world_position.xy;
 
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
@@ -5225,7 +5225,7 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 	if lm == null return;
 	if lm.eye_machine_active return;
 
-	spawn_pos := player.entity.world_position;
+	spawn_pos := player.entity.world_position.xy;
 	lm.eye_machine_pos = spawn_pos;
 
 	// Create suction tube: two parented spine entities.
@@ -5306,7 +5306,7 @@ rr_lily_spawn_eye_machine :: proc(player: Player) {
 		lm.eye_machine_camera_saved_follow = player.camera.follow_player;
 		player.camera.follow_player = false;
 		player.camera.size = LILY_EYE_MACHINE_ZOOM_SIZE;
-		player.camera.position = spawn_pos;
+		player.camera.position.xy = spawn_pos;
 	}
 
 	// Leave Lily's creature rig at origin as a ghost; player entity teleports to the
@@ -5367,7 +5367,7 @@ rr_lily_end_eye_machine :: proc(player: Player) {
 	// Restore camera — set position before re-enabling follow to avoid a black frame. Must run
 	// on both server & client so sync reconciliation doesn't overwrite the restored state.
 	if player.is_local_or_server() {
-		player.camera.position = player.entity.world_position;
+		player.camera.position.xy = player.entity.world_position.xy;
 		player.camera.size = lm.eye_machine_camera_saved_size;
 		player.camera.follow_player = lm.eye_machine_camera_saved_follow;
 	}
@@ -5393,7 +5393,7 @@ rr_lily_apply_eye_machine_camera :: proc(player: Player) {
 		// Guard: if server sync cleared eye_machine_active without end proc running,
 		// restore camera to avoid black flash / stale zoom.
 		if lm.eye_machine_camera_saved_size > 0.0 {
-			player.camera.position = player.entity.world_position;
+			player.camera.position.xy = player.entity.world_position.xy;
 			player.camera.size = lm.eye_machine_camera_saved_size;
 			player.camera.follow_player = lm.eye_machine_camera_saved_follow;
 			lm.eye_machine_camera_saved_size = 0.0;
@@ -5425,7 +5425,7 @@ rr_lily_apply_eye_machine_camera :: proc(player: Player) {
 			cam_y = cam_y + cos(now * LILY_EYE_MACHINE_SHAKE_SPEED * 1.3) * shake_str * 0.7;
 		}
 
-		player.camera.position = v2.{cam_x, cam_y};
+		player.camera.position.xy = v2.{cam_x, cam_y};
 
 	} else if lm.eye_machine_linger_until > 0.0 {
 		linger_elapsed := now - lm.eye_machine_linger_start;
@@ -5438,7 +5438,7 @@ rr_lily_apply_eye_machine_camera :: proc(player: Player) {
 		shake_y := cos(now * LILY_EYE_MACHINE_SHAKE_SPEED * 1.3) * shake_str * 0.7;
 
 		player.camera.size = LILY_EYE_MACHINE_ZOOM_ATTACK;
-		player.camera.position = v2.{
+		player.camera.position.xy = v2.{
 			lm.eye_machine_victim_pos.x + shake_x,
 			lm.eye_machine_victim_pos.y + shake_y
 		};
@@ -5446,7 +5446,7 @@ rr_lily_apply_eye_machine_camera :: proc(player: Player) {
 	} else {
 		// Phase: IDLE/MOVING — normal overview
 		player.camera.size = LILY_EYE_MACHINE_ZOOM_SIZE;
-		player.camera.position = lm.eye_machine_pos;
+		player.camera.position.xy = lm.eye_machine_pos;
 	}
 }
 
@@ -5462,7 +5462,7 @@ rr_lily_update_eye_machine :: proc(player: Player, dt: float) {
 	// Teleport Lily's player entity to follow the tube every frame (voice/SFX anchor).
 	// Detached creature rig stays at lm.ability_origin_pos as the ghost marker.
 	if lm.eye_machine_tube_entity != null && #alive(lm.eye_machine_tube_entity) {
-		player.entity.set_local_position(lm.eye_machine_tube_entity.world_position);
+		player.entity.set_local_position(lm.eye_machine_tube_entity.world_position.xy);
 	}
 
 	// Letterbox bars (UI render — local-only) for the cinematic phases.
@@ -5600,7 +5600,7 @@ rr_lily_eye_machine_find_target :: proc(player: Player) -> Player {
 		if target.player_state != Player_State.ALIVE continue;
 		if target.player_type == Player_Type.TRAITOR continue;
 		if target.lily_no_eyes continue; // already blinded
-		finder.check(target, target.entity.world_position);
+		finder.check(target, target.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -5631,7 +5631,7 @@ rr_lily_eye_machine_start_attack :: proc(player: Player) {
 	lm.eye_machine_lowering = true;
 	lm.eye_machine_lower_start_at = now;
 	lm.eye_machine_lower_done_at = now + LILY_EYE_MACHINE_ZOOM_DURATION + LILY_EYE_MACHINE_SUCTION_DURATION;
-	lm.eye_machine_victim_pos = closest.entity.world_position;
+	lm.eye_machine_victim_pos = closest.entity.world_position.xy;
 	lm.eye_machine_victim_id = closest.entity.id;
 
 	// Freeze the victim in place — freeze blocks physics/agent work but not input,
@@ -5679,7 +5679,7 @@ rr_lily_eye_machine_finish_attack :: proc(player: Player) {
 		// Keep the victim locked until the No_Eyes_Start intro animation is done.
 
 		// Spawn eye pickup slightly in front of the victim
-		drop_pos := victim.entity.world_position + v2.{0.0, -0.3};
+		drop_pos := victim.entity.world_position.xy + v2.{0.0, -0.3};
 		rr_lily_spawn_eye_pickup(player, victim.entity.id, drop_pos);
 
 		if player.is_local_or_server() {
@@ -6134,12 +6134,12 @@ Lily_Tea_Party_Ability :: class : Ability_Base {
 
 	get_closest_tea_target :: proc(instance: Lily_Tea_Party_Ability, player: Player) -> Player {
 		// Find closest alive non-traitor player within range
-		finder := make_finder(Player, player.entity.world_position, LILY_TEA_PARTY_RANGE);
+		finder := make_finder(Player, player.entity.world_position.xy, LILY_TEA_PARTY_RANGE);
 		for p: component_iterator(Player) {
 			if p.entity.id == player.entity.id continue;
 			if p.player_state != Player_State.ALIVE continue;
 			if p.player_type == Player_Type.TRAITOR continue;
-			finder.check(p, p.entity.world_position);
+			finder.check(p, p.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -6379,7 +6379,7 @@ Lily_String_Trap_Ability :: class : Ability_Base {
 
 		target_pos := get_mouse_world_position();
 		{
-			origin := player.entity.world_position;
+			origin := player.entity.world_position.xy;
 			delta := target_pos - origin;
 			max_r := LILY_STRING_TRAP_PLACE_DISTANCE;
 			if length_squared(delta) > max_r * max_r {
@@ -6603,7 +6603,7 @@ rr_lily_draw_tree_request_icon :: proc(player: Player) {
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
 
-	tree_pos := lm.hair_tree_entity.world_position;
+	tree_pos := lm.hair_tree_entity.world_position.xy;
 	UI.push_z(tree_pos.y + 0.01);
 	defer UI.pop_z();
 

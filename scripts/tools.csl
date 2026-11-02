@@ -5,7 +5,7 @@ Finder :: struct(T: typeid) {
     closest_distance: float;
     closest: T;
 
-    check :: proc(using f: *Finder(T), item: T, item_position: v2, required_range: float = -1) {
+    check :: proc(using f: ref Finder(T), item: T, item_position: v2, required_range: float = -1) {
         distance := length_squared(position - item_position);
         // required_range is an OPTIONAL extra per-item gate. <0 means "no extra gate —
         // just use the finder's own range" (closest_distance, set squared by make_finder).
@@ -18,8 +18,8 @@ Finder :: struct(T: typeid) {
         }
     }
 
-    check :: proc(using f: *Finder(T), item: T, required_range: float = -1) {
-        distance := length_squared(position - item.entity.world_position);
+    check :: proc(using f: ref Finder(T), item: T, required_range: float = -1) {
+        distance := length_squared(position - item.entity.world_position.xy);
         if required_range >= 0 && distance > (required_range*required_range) {
             return;
         }
@@ -93,7 +93,7 @@ rr_play_call_meeting_sound :: proc(caller: Player) {
 
     sfx := SFX.default_sfx_desc();
     if caller != null {
-        sfx.set_position(caller.entity.world_position);
+        sfx.set_position(caller.entity.world_position.xy);
     }
     sfx.volume = 0.9;
     sfx.volume_perturb = 0.05;
@@ -165,11 +165,11 @@ leaderboard_increment_score :: proc(player: Player, leaderboard_id: string, amou
     data.leaderboard_id = leaderboard_id;
     data.user_id = player.get_user_id();
     data.amount = amount;
-    #unsafe #rootify_object(data);
+
     Save.ordered_get(leaderboard_id, data.user_id, 0.0, data, proc(entry: Ordered_Save_Entry, userdata: Object) {
         d := userdata.(Leaderboard_Increment_Data);
         new_score := entry.value + d.amount;
         Save.ordered_set(d.leaderboard_id, d.user_id, new_score);
-        #unsafe #free_root(d);
+
     });
 }

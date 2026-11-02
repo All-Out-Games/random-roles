@@ -31,7 +31,7 @@ Ninja_Decoy :: class : Component {
         s := entity.add_component(Sprite_Renderer);
         s.set_texture(get_asset(Texture_Asset, "decoy_log_86bf47.png"));
         s.layer = 0;
-        rr_ninja_spawn_puff(entity.world_position);
+        rr_ninja_spawn_puff(entity.world_position.xy);
         desc := SFX.default_sfx_desc();
         desc.entity_to_follow = entity.id;
         desc.volume = 0.3;
@@ -44,8 +44,8 @@ Ninja_Decoy :: class : Component {
 
 rr_ninja_spawn_decoy :: proc(p: Player, afterimage: bool) {
     e := Scene.create_entity();
-    e.set_world_position(p.entity.world_position);
-    e.set_local_scale(p.entity.local_scale);
+    e.set_world_position(p.entity.world_position.xy);
+    e.set_local_scale(p.entity.local_scale.xy);
     d := e.add_component(Ninja_Decoy);
     d.owner_user_id = p.get_user_id();
     d.afterimage = afterimage;
@@ -73,9 +73,9 @@ rr_ninja_closest_decoy :: proc(attacker: Player, origin: v2, range: float) -> Ni
     best: Ninja_Decoy;
     best_dist := range * range;
     for d: component_iterator(Ninja_Decoy) {
-        if d.spent || d.afterimage || rr_ninja_smoke_at(d.entity.world_position) continue;
+        if d.spent || d.afterimage || rr_ninja_smoke_at(d.entity.world_position.xy) continue;
         if #alive(attacker) && d.owner_user_id == attacker.get_user_id() continue;
-        dist := length_squared(d.entity.world_position - origin);
+        dist := length_squared(d.entity.world_position.xy - origin);
         if dist <= best_dist { best = d; best_dist = dist; }
     }
     return best;
@@ -84,7 +84,7 @@ rr_ninja_closest_decoy :: proc(attacker: Player, origin: v2, range: float) -> Ni
 rr_ninja_hit_decoy :: proc(attacker: Player, origin: v2, range: float, real_target: Player) -> bool {
     d := rr_ninja_closest_decoy(attacker, origin, range);
     if d == null return false;
-    if #alive(real_target) && length_squared(real_target.entity.world_position - origin) < length_squared(d.entity.world_position - origin) return false;
+    if #alive(real_target) && length_squared(real_target.entity.world_position.xy - origin) < length_squared(d.entity.world_position.xy - origin) return false;
     d.burst();
     return true;
 }
@@ -93,13 +93,13 @@ rr_ninja_hit_decoy_ray :: proc(attacker: Player, origin: v2, direction: v2, rang
     best: Ninja_Decoy;
     best_along := range;
     if #alive(real_target) {
-        delta := real_target.entity.world_position - origin;
+        delta := real_target.entity.world_position.xy - origin;
         best_along = min(best_along, max(0.0, delta.x * direction.x + delta.y * direction.y));
     }
     for d: component_iterator(Ninja_Decoy) {
-        if d.spent || d.afterimage || rr_ninja_smoke_at(d.entity.world_position) continue;
+        if d.spent || d.afterimage || rr_ninja_smoke_at(d.entity.world_position.xy) continue;
         if #alive(attacker) && d.owner_user_id == attacker.get_user_id() continue;
-        delta := d.entity.world_position - origin;
+        delta := d.entity.world_position.xy - origin;
         along := delta.x * direction.x + delta.y * direction.y;
         if along < 0 || along > best_along continue;
         if length_squared(delta - direction * along) > radius * radius continue;
@@ -118,7 +118,7 @@ rr_ninja_projectile_body :: proc(attacker: Player, origin: v2, head: v2, radius:
     best_dist := 1000000.0;
     for p: component_iterator(Player) {
         if p == attacker || p.player_state != Player_State.ALIVE || rr_ninja_smoke_protects(p) continue;
-        if !in_range(p.entity.world_position - head, radius) continue;
+        if !in_range(p.entity.world_position.xy - head, radius) continue;
         if hunter {
             if !rr_guardian_is_carrying(p) && !rr_hunter_is_player_pierced(p) continue;
             if #alive(attacker) {
@@ -128,7 +128,7 @@ rr_ninja_projectile_body :: proc(attacker: Player, origin: v2, head: v2, radius:
         } else if #alive(attacker) && attacker.player_type == Player_Type.TRAITOR && p.player_type == Player_Type.TRAITOR {
             if !rr_guardian_is_carrying(p) && !(MECH_MINIONS_KILLABLE && rr_mech_is_minion_active(p)) continue;
         }
-        dist := length_squared(p.entity.world_position - origin);
+        dist := length_squared(p.entity.world_position.xy - origin);
         if dist < best_dist { best = p; best_dist = dist; }
     }
     return best;

@@ -98,7 +98,7 @@ rr_hacker_is_task_hacked :: proc(task_entity_id: u64) -> bool {
 
 rr_hacker_find_nearby_task :: proc(player: Player) -> Task_Interactable {
 	if player == null return null;
-	finder := make_finder(Task_Interactable, player.entity.world_position, HACKER_HACK_TASK_RANGE);
+	finder := make_finder(Task_Interactable, player.entity.world_position.xy, HACKER_HACK_TASK_RANGE);
 	for task_interactable: component_iterator(Task_Interactable) {
 		if task_interactable == null continue;
 		if !#alive(task_interactable.entity) continue;
@@ -106,7 +106,7 @@ rr_hacker_find_nearby_task :: proc(player: Player) -> Task_Interactable {
 		task_id := task_interactable.get_task_id();
 		if !rr_hacker_is_normal_task_id(task_id) continue;
 		if rr_hacker_is_task_hacked(task_interactable.entity.id) continue;
-		finder.check(task_interactable, task_interactable.entity.world_position);
+		finder.check(task_interactable, task_interactable.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -228,18 +228,18 @@ rr_hacker_electrocute_player :: proc(player: Player) {
 
 rr_hacker_find_nearby_corpse :: proc(player: Player) -> Corpse {
 	if player == null return null;
-	finder := make_finder(Corpse, player.entity.world_position, HACKER_IDENTITY_THEFT_RANGE);
+	finder := make_finder(Corpse, player.entity.world_position.xy, HACKER_IDENTITY_THEFT_RANGE);
 	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
-		finder.check(corpse, corpse.entity.world_position);
+		finder.check(corpse, corpse.entity.world_position.xy);
 	}
 	return finder.closest;
 }
 
 rr_hacker_find_nearby_civilian_corpse :: proc(player: Player) -> Corpse {
 	if player == null return null;
-	finder := make_finder(Corpse, player.entity.world_position, HACKER_IDENTITY_THEFT_RANGE);
+	finder := make_finder(Corpse, player.entity.world_position.xy, HACKER_IDENTITY_THEFT_RANGE);
 	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		if !#alive(corpse.entity) continue;
@@ -248,7 +248,7 @@ rr_hacker_find_nearby_civilian_corpse :: proc(player: Player) -> Corpse {
 		if owner == null continue;
 		if owner.player_type != Player_Type.CIVILIAN continue;
 		if owner.player_role == Player_Role.NONE continue;
-		finder.check(corpse, corpse.entity.world_position);
+		finder.check(corpse, corpse.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -498,7 +498,7 @@ rr_hacker_start_win_cinematic :: proc(caller: Player) {
 	game_state = Game_State.ANIM_HACKER_WIN;
 	close_all_doors();
 
-	center := caller.entity.world_position;
+	center := caller.entity.world_position.xy;
 	total := max(1, players.elements.count);
 	for i: 0..players.elements.count-1 {
 		p := players.elements[i];
@@ -613,7 +613,7 @@ rr_hacker_draw_task_rings :: proc(player: Player) {
 		task_id := task_interactable.get_task_id();
 		if !rr_hacker_is_normal_task_id(task_id) continue;
 
-		pos := task_interactable.entity.world_position;
+		pos := task_interactable.entity.world_position.xy;
 		UI.push_z(pos.y);
 		rect := Rect{pos, pos}.grow(0.9, 0.9, 0.9, 0.9);
 		col := v4.{0.05, 1.0, 0.25, 0.65};

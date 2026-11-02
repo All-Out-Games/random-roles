@@ -237,7 +237,7 @@ RR_Portal_Bolt :: class : Component {
 		time_alive := now - spawn_time;
 
 		// If we cross into non-walkable area (walls/objects), land at the closest navmesh point.
-		land_pos := entity.world_position;
+		land_pos := entity.world_position.xy;
 		should_land := false;
 
 		point: v2;
@@ -271,7 +271,7 @@ rr_portal_maker_fire_bolt :: proc(owner: Player, is_red: bool, direction: v2) {
 
 	// Spawn bolt entity
 	e := Scene.create_entity();
-	spawn_pos := owner.entity.world_position + direction * 0.6;
+	spawn_pos := owner.entity.world_position.xy + direction * 0.6;
 	e.set_local_position(spawn_pos);
 	e.set_local_rotation(0.0);
 	e.set_local_scale(v2.{0.65, 0.65});
@@ -307,7 +307,7 @@ rr_update_portal_teleport_for_player :: proc(player: Player, dt: float) {
 
 	// Block instant bounce-back: if we're standing on the destination portal, do nothing until we step off.
 	if player.portal_blocked_portal != null && #alive(player.portal_blocked_portal) {
-		if in_range(player.entity.world_position - player.portal_blocked_portal.world_position, PORTAL_MAKER_PORTAL_RADIUS) {
+		if in_range(player.entity.world_position.xy - player.portal_blocked_portal.world_position.xy, PORTAL_MAKER_PORTAL_RADIUS) {
 			player.portal_standing_on_portal = null;
 			player.portal_standing_seconds = 0.0;
 			return;
@@ -327,7 +327,7 @@ rr_update_portal_teleport_for_player :: proc(player: Player, dt: float) {
 		if portal == null continue;
 		if !#alive(portal.entity) continue;
 
-		delta := player.entity.world_position - portal.entity.world_position;
+		delta := player.entity.world_position.xy - portal.entity.world_position.xy;
 		dist_sq := length_squared(delta);
 		if dist_sq <= radius_sq && dist_sq < best_dist_sq {
 			best = portal;
@@ -368,7 +368,7 @@ rr_update_portal_teleport_for_player :: proc(player: Player, dt: float) {
 		return;
 	}
 
-	player.entity.set_local_position(dest.world_position);
+	player.entity.set_local_position(dest.world_position.xy);
 	player.portal_blocked_portal = dest;
 	player.portal_standing_on_portal = null;
 	player.portal_standing_seconds = 0.0;
@@ -383,7 +383,7 @@ rr_portal_try_instant_teleport :: proc(player: Player) -> bool {
 
 	// Respect the bounce-block: don't re-teleport while still on the destination we just arrived at.
 	if player.portal_blocked_portal != null && #alive(player.portal_blocked_portal) {
-		if in_range(player.entity.world_position - player.portal_blocked_portal.world_position, PORTAL_MAKER_PORTAL_RADIUS) {
+		if in_range(player.entity.world_position.xy - player.portal_blocked_portal.world_position.xy, PORTAL_MAKER_PORTAL_RADIUS) {
 			return false;
 		}
 		player.portal_blocked_portal = null;
@@ -397,7 +397,7 @@ rr_portal_try_instant_teleport :: proc(player: Player) -> bool {
 	for portal: component_iterator(RR_Portal) {
 		if portal == null continue;
 		if !#alive(portal.entity) continue;
-		delta := player.entity.world_position - portal.entity.world_position;
+		delta := player.entity.world_position.xy - portal.entity.world_position.xy;
 		dist_sq := length_squared(delta);
 		if dist_sq <= radius_sq && dist_sq < best_dist_sq {
 			best = portal;
@@ -409,7 +409,7 @@ rr_portal_try_instant_teleport :: proc(player: Player) -> bool {
 	dest := best.linked_portal;
 	if dest == null || !#alive(dest) return false;
 
-	player.entity.set_local_position(dest.world_position);
+	player.entity.set_local_position(dest.world_position.xy);
 	player.portal_blocked_portal = dest;
 	player.portal_standing_on_portal = null;
 	player.portal_standing_seconds = 0.0;

@@ -245,14 +245,14 @@ Hunter_Crossbow_Bolt :: class : Component {
                 camera_follow_active = true;
             }
             owner_player.camera.follow_player = false;
-            owner_player.camera.position = entity.world_position;
+            owner_player.camera.position.xy = entity.world_position.xy;
             owner_player.camera.size = HUNTER_KILL_SHOT_CAMERA_SIZE;
         }
 
         // Collision with players.
         body: Player;
-        if is_kill_shot { body = rr_ninja_projectile_body(owner_player, entity.world_position - velocity * dt, entity.world_position, HUNTER_BOLT_HIT_RADIUS, true); }
-        if is_kill_shot && rr_ninja_hit_decoy_ray(owner_player, entity.world_position - velocity * dt, normalize(velocity), length(velocity) * dt + HUNTER_BOLT_HIT_RADIUS, HUNTER_BOLT_HIT_RADIUS, body) {
+        if is_kill_shot { body = rr_ninja_projectile_body(owner_player, entity.world_position.xy - velocity * dt, entity.world_position.xy, HUNTER_BOLT_HIT_RADIUS, true); }
+        if is_kill_shot && rr_ninja_hit_decoy_ray(owner_player, entity.world_position.xy - velocity * dt, normalize(velocity), length(velocity) * dt + HUNTER_BOLT_HIT_RADIUS, HUNTER_BOLT_HIT_RADIUS, body) {
             entity.destroy();
             return;
         }
@@ -263,15 +263,15 @@ Hunter_Crossbow_Bolt :: class : Component {
 			if is_kill_shot && rr_ninja_smoke_protects(target) continue;
             if owner_alive && target.entity == owner continue;
 
-			if !in_range(target.entity.world_position - entity.world_position, HUNTER_BOLT_HIT_RADIUS) {
+			if !in_range(target.entity.world_position.xy - entity.world_position.xy, HUNTER_BOLT_HIT_RADIUS) {
 				continue;
 			}
 
 			// Guardian carry protection resolves before Pierce/Kill Shot checks so neither
 			// outcome can reveal the held player's team.
 			if rr_guardian_is_carrying(target) {
-				rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", target.entity.world_position, 0.4);
-				rr_mech_spawn_flash(entity.world_position, 0.7, v4.{0.45, 1.0, 0.55, 0.75}, 0.22);
+				rr_mech_play_sfx_at("minigame/shield_block_390d4b.wav", target.entity.world_position.xy, 0.4);
+				rr_mech_spawn_flash(entity.world_position.xy, 0.7, v4.{0.45, 1.0, 0.55, 0.75}, 0.22);
 				destroy_self = true;
 				break;
 			}
@@ -302,7 +302,7 @@ Hunter_Crossbow_Bolt :: class : Component {
                 }
 
                 sfx := SFX.default_sfx_desc();
-                sfx.set_position(target.entity.world_position);
+                sfx.set_position(target.entity.world_position.xy);
                 sfx.volume = 0.8;
                 sfx.volume_perturb = 0.1;
                 sfx.speed_perturb = 0.08;
@@ -329,7 +329,7 @@ Hunter_Crossbow_Bolt :: class : Component {
                     eff.arm(owner_player);
 
                     sfx := SFX.default_sfx_desc();
-                    sfx.set_position(target.entity.world_position);
+                    sfx.set_position(target.entity.world_position.xy);
                     sfx.volume = 0.7;
                     sfx.volume_perturb = 0.08;
                     sfx.speed_perturb = 0.06;
@@ -353,8 +353,8 @@ Hunter_Crossbow_Bolt :: class : Component {
                 destroy_self = true;
             } else {
                 point: v2;
-                if try_find_closest_point_on_navmesh(entity.world_position, ref point, ref triangle_hint) {
-                    if !in_range(point - entity.world_position, 0.02) {
+                if try_find_closest_point_on_navmesh(entity.world_position.xy, ref point, ref triangle_hint) {
+                    if !in_range(point - entity.world_position.xy, 0.02) {
                         destroy_self = true;
                     }
                 }
@@ -371,7 +371,7 @@ Hunter_Crossbow_Bolt :: class : Component {
 rr_hunter_shoot_bolt :: proc(hunter: Player, direction: v2, is_kill_shot: bool) {
     if hunter == null return;
     e := Scene.create_entity();
-    e.set_local_position(hunter.entity.world_position);
+    e.set_local_position(hunter.entity.world_position.xy);
     e.set_local_rotation(to_degrees(atan2(direction.y, direction.x)));
 
     scale := HUNTER_BOLT_SPRITE_SCALE;
@@ -523,11 +523,11 @@ Hunter_Campfire :: class : Component {
 rr_hunter_is_player_in_campfire_buff_range :: proc(p: Player) -> bool {
     if p == null return false;
     if !#alive(p.entity) return false;
-    pos := p.entity.world_position;
+    pos := p.entity.world_position.xy;
     for cf: component_iterator(Hunter_Campfire) {
         if cf == null continue;
         if !#alive(cf.entity) continue;
-        d := pos - cf.entity.world_position;
+        d := pos - cf.entity.world_position.xy;
         if length_squared(d) <= HUNTER_CAMPFIRE_BUFF_RADIUS * HUNTER_CAMPFIRE_BUFF_RADIUS {
             return true;
         }
@@ -740,7 +740,7 @@ rr_hunter_update_footprints :: proc(hunter: Player, dt: float) {
     }
 
     now := get_time();
-    hunter_pos := hunter.entity.world_position;
+    hunter_pos := hunter.entity.world_position.xy;
 
     for p: component_iterator(Player) {
         if p == null continue;
@@ -750,7 +750,7 @@ rr_hunter_update_footprints :: proc(hunter: Player, dt: float) {
         if !rr_hunter_player_is_transformed(p) continue;
 
         // Limit to a reasonable radius so we don't blanket the whole map.
-        d := p.entity.world_position - hunter_pos;
+        d := p.entity.world_position.xy - hunter_pos;
         if length_squared(d) > HUNTER_FOOTPRINT_REVEAL_RADIUS * HUNTER_FOOTPRINT_REVEAL_RADIUS continue;
 
         // Find / create per-player tracking slot.
@@ -762,22 +762,22 @@ rr_hunter_update_footprints :: proc(hunter: Player, dt: float) {
         if idx < 0 {
             hm.footprint_emit_player_ids.append(pid);
             hm.footprint_emit_last_times.append(now);
-            hm.footprint_emit_last_positions.append(p.entity.world_position);
+            hm.footprint_emit_last_positions.append(p.entity.world_position.xy);
             continue;
         }
 
         last_pos := hm.footprint_emit_last_positions[idx];
         last_time := hm.footprint_emit_last_times[idx];
-        delta := p.entity.world_position - last_pos;
+        delta := p.entity.world_position.xy - last_pos;
         moved_sq := length_squared(delta);
 
         if (now - last_time) < HUNTER_FOOTPRINT_EMIT_INTERVAL continue;
         if moved_sq < HUNTER_FOOTPRINT_MOVE_THRESHOLD * HUNTER_FOOTPRINT_MOVE_THRESHOLD continue;
 
         dir := normalize(delta);
-        rr_hunter_spawn_footprint(p.entity.world_position, dir);
+        rr_hunter_spawn_footprint(p.entity.world_position.xy, dir);
         hm.footprint_emit_last_times[idx] = now;
-        hm.footprint_emit_last_positions[idx] = p.entity.world_position;
+        hm.footprint_emit_last_positions[idx] = p.entity.world_position.xy;
     }
 }
 
@@ -801,7 +801,7 @@ rr_hunter_draw_campfire_buff_icons :: proc(viewer: Player) {
         if p.player_state != Player_State.ALIVE continue;
         if !has_effect(p.entity, Hunter_Campfire_Buff_Effect) continue;
 
-        pos := p.entity.world_position;
+        pos := p.entity.world_position.xy;
         // Sit above the nameplate (FNPLATE_Y_OFFSET = 1.45) so we don't cover the name.
         icon_pos := v2.{pos.x, pos.y + 2.2};
 
@@ -844,7 +844,7 @@ rr_hunter_draw_campfire_low_time_countdown :: proc(viewer: Player) {
         if frac > 0.001 { secs_i += 1; }
         if secs_i < 1 { secs_i = 1; }
 
-        pos := cf.entity.world_position;
+        pos := cf.entity.world_position.xy;
 
         UI.push_z(pos.y);
         defer UI.pop_z();
@@ -1026,13 +1026,13 @@ Hunter_Cripple_Ability :: class : Ability_Base {
 
             player.set_facing_right(activation.direction.x > 0);
             player.set_trigger("shoot_gun");
-            player.set_aim_target(player.entity.world_position + activation.direction * 5.0);
+            player.set_aim_target(player.entity.world_position.xy + activation.direction * 5.0);
             player.gun_visible_until = get_time() + HUNTER_CROSSBOW_VISIBLE_SECONDS;
 
             rr_hunter_shoot_bolt(player, activation.direction, false);
 
             sfx := SFX.default_sfx_desc();
-            sfx.set_position(player.entity.world_position);
+            sfx.set_position(player.entity.world_position.xy);
             sfx.volume = 0.5;
             sfx.volume_perturb = 0.1;
             sfx.speed_perturb = 0.1;
@@ -1089,7 +1089,7 @@ rr_hunter_update_crossbow_visibility :: proc(player: Player, ability: Ability_Ba
     }
     if targeting {
         player.set_mouse_ik_enabled(true);
-        player.set_aim_target(player.entity.world_position + player.last_aim_direction * 5.0);
+        player.set_aim_target(player.entity.world_position.xy + player.last_aim_direction * 5.0);
     } else {
         player.set_mouse_ik_enabled(false);
     }
@@ -1134,13 +1134,13 @@ Hunter_Kill_Shot_Ability :: class : Ability_Base {
 
             player.set_facing_right(activation.direction.x > 0);
             player.set_trigger("shoot_gun");
-            player.set_aim_target(player.entity.world_position + activation.direction * 5.0);
+            player.set_aim_target(player.entity.world_position.xy + activation.direction * 5.0);
             player.gun_visible_until = get_time() + HUNTER_CROSSBOW_VISIBLE_SECONDS;
 
             rr_hunter_shoot_bolt(player, activation.direction, true);
 
             sfx := SFX.default_sfx_desc();
-            sfx.set_position(player.entity.world_position);
+            sfx.set_position(player.entity.world_position.xy);
             sfx.volume = 0.65;
             sfx.volume_perturb = 0.1;
             sfx.speed_perturb = 0.08;
@@ -1247,7 +1247,7 @@ Hunter_Campfire_Ability :: class : Ability_Base {
 
         target_pos := get_mouse_world_position();
         {
-            origin := player.entity.world_position;
+            origin := player.entity.world_position.xy;
             delta := target_pos - origin;
             max_r := HUNTER_CAMPFIRE_PLACE_DISTANCE;
             if length_squared(delta) > max_r * max_r {

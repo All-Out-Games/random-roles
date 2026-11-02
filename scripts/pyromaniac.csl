@@ -163,10 +163,10 @@ rr_pyro_get_room_bounds :: proc(room_root: Entity, min_pos: ref v2, max_pos: ref
 	while child != null {
 		if child != null && #alive(child) {
 			if child.compare_name("MIN") {
-				raw_min = child.world_position;
+				raw_min = child.world_position.xy;
 				found_min = true;
 			} else if child.compare_name("MAX") {
-				raw_max = child.world_position;
+				raw_max = child.world_position.xy;
 				found_max = true;
 			}
 		}
@@ -230,7 +230,7 @@ rr_navmesh_away_from_border :: proc(pos: v2, border_dist: float) -> bool {
 rr_pyro_player_in_fiery_room :: proc(player: Player) -> bool {
 	if player == null return false;
 	if !#alive(player.entity) return false;
-	pos := player.entity.world_position;
+	pos := player.entity.world_position.xy;
 
 	for room_state: component_iterator(RR_Pyro_Room_Fire_State) {
 		if room_state == null continue;
@@ -321,7 +321,7 @@ rr_pyro_draw_room_exposure_timer :: proc(player: Player) {
 	UI.push_world_draw_context();
 	defer UI.pop_draw_context();
 
-	pos := player.entity.world_position;
+	pos := player.entity.world_position.xy;
 	UI.push_z(pos.y);
 	defer UI.pop_z();
 
@@ -525,14 +525,14 @@ rr_pyro_get_or_create_room_state :: proc(room_root: Entity) -> RR_Pyro_Room_Fire
 
 rr_pyro_find_burnable_corpse :: proc(pyro: Player) -> Corpse {
 	if pyro == null return null;
-	finder := make_finder(Corpse, pyro.entity.world_position, PYRO_LIGHT_CORPSE_RANGE);
+	finder := make_finder(Corpse, pyro.entity.world_position.xy, PYRO_LIGHT_CORPSE_RANGE);
 	for corpse: component_iterator(Corpse) {
 		if corpse == null continue;
 		// Pyro can burn both reported and unreported corpses.
 		if corpse.pyro_has_been_burned continue;
 		// Must still have a live entity.
 		if !#alive(corpse.entity) continue;
-		finder.check(corpse, corpse.entity.world_position);
+		finder.check(corpse, corpse.entity.world_position.xy);
 	}
 	return finder.closest;
 }
@@ -541,7 +541,7 @@ rr_pyro_start_burning_corpse_visual :: proc(corpse_entity: Entity) -> Entity {
 	if corpse_entity == null || !#alive(corpse_entity) return null;
 
 	fire_entity := Scene.create_entity();
-	fire_entity.set_local_position(corpse_entity.world_position + v2.{PYRO_FIRE_ATTACH_OFFSET_X, PYRO_FIRE_ATTACH_OFFSET_Y});
+	fire_entity.set_local_position(corpse_entity.world_position.xy + v2.{PYRO_FIRE_ATTACH_OFFSET_X, PYRO_FIRE_ATTACH_OFFSET_Y});
 	fire_entity.set_local_rotation(0.0);
 	fire_entity.set_local_scale(v2.{1.0, 1.0});
 
@@ -587,7 +587,7 @@ RR_Pyro_Burning_Corpse :: class : Component {
 	ao_update :: proc(using this: RR_Pyro_Burning_Corpse, dt: float) {
 		// Follow the corpse while it exists.
 		if !did_extinguish && corpse_entity != null && #alive(corpse_entity) {
-			entity.set_local_position(corpse_entity.world_position + v2.{PYRO_FIRE_ATTACH_OFFSET_X, PYRO_FIRE_ATTACH_OFFSET_Y});
+			entity.set_local_position(corpse_entity.world_position.xy + v2.{PYRO_FIRE_ATTACH_OFFSET_X, PYRO_FIRE_ATTACH_OFFSET_Y});
 		}
 
 		if did_extinguish return;

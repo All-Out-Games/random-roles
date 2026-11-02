@@ -337,7 +337,7 @@ rr_backup_fill_entry :: proc(e: Backup_Player_Entry, p: Player) {
 	e.role_i = p.player_role.(int);
 	e.type_i = p.player_type.(int);
 	e.state_i = p.player_state.(int);
-	e.world_pos = p.entity.world_position;
+	e.world_pos = p.entity.world_position.xy;
 	e.werewolf_kills = rr_backup_get_werewolf_kills(p);
 	e.hitman_kills = rr_backup_get_hitman_kills(p);
 	e.pirate_treasure = rr_backup_get_pirate_treasure(p);
@@ -358,7 +358,7 @@ rr_backup_fill_entry :: proc(e: Backup_Player_Entry, p: Player) {
 	lm := p.entity.get_component(Lily_Module);
 	if lm != null {
 		if lm.hair_tree_entity != null && #alive(lm.hair_tree_entity) {
-			e.lily_tree_pos = lm.hair_tree_entity.world_position;
+			e.lily_tree_pos = lm.hair_tree_entity.world_position.xy;
 			tree_comp := lm.hair_tree_entity.get_component(Lily_Hair_Tree);
 			if tree_comp != null {
 				e.lily_tree_fulfilled = tree_comp.fulfilled_count;
@@ -384,10 +384,10 @@ rr_backup_fill_entry :: proc(e: Backup_Player_Entry, p: Player) {
 	pmm := p.entity.get_component(Portal_Maker_Module);
 	if pmm != null {
 		if pmm.red_portal != null && #alive(pmm.red_portal) {
-			e.portal_red_pos = pmm.red_portal.world_position;
+			e.portal_red_pos = pmm.red_portal.world_position.xy;
 		}
 		if pmm.blue_portal != null && #alive(pmm.blue_portal) {
-			e.portal_blue_pos = pmm.blue_portal.world_position;
+			e.portal_blue_pos = pmm.blue_portal.world_position.xy;
 		}
 	}
 
@@ -473,7 +473,7 @@ rr_backup_capture :: proc() {
 		if !#alive(c.entity) continue;
 		ce := new(Backup_Corpse_Entry);
 		ce.owner_user_id = rr_backup_user_id_for_entity_id(c.owner_player_entity_id);
-		ce.world_pos = c.entity.world_position;
+		ce.world_pos = c.entity.world_position.xy;
 		ce.death_anim = c.death_anim;
 		f := 0;
 		if c.has_been_reported      f |= CBF_REPORTED;
@@ -529,7 +529,7 @@ rr_backup_state_changed :: proc() -> bool {
 			if !rr_backup_completed_tasks_match(e, p) return true;
 
 			// Player moved far enough to be worth re-snapshotting (see BACKUP_POSITION_EPSILON_SQ).
-			if length_squared(p.entity.world_position - e.world_pos) >= BACKUP_POSITION_EPSILON_SQ return true;
+			if length_squared(p.entity.world_position.xy - e.world_pos) >= BACKUP_POSITION_EPSILON_SQ return true;
 
 			// All per-role world-state bools in one compare.
 			if e.role_flags != rr_backup_role_flags(p) return true;

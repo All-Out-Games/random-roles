@@ -143,7 +143,7 @@ ninja_mech_smoke_test :: proc(player: Player) {
     probe := player.entity.get_component(Ninja_Debug);
     if probe == null probe = player.entity.add_component(Ninja_Debug);
     e := Scene.create_entity();
-    e.set_world_position(player.entity.world_position);
+    e.set_world_position(player.entity.world_position.xy);
     node := e.add_component(Mech_Magnet_Node);
     node.owner_id = driver.entity.id;
     node.landed = true;
@@ -166,11 +166,11 @@ ninja_probe :: proc(player: Player, dx: float = 1.0, dy: float = 0.0) {
             if i < player.meeting_saved_cooldowns.count probe.clone_meeting_snapshot = player.meeting_saved_cooldowns[i];
         }
     }
-    probe.point_clear = rr_ninja_point_clear(player.entity.world_position);
-    probe.landing_clear = rr_ninja_landing_clear(player.entity.world_position);
+    probe.point_clear = rr_ninja_point_clear(player.entity.world_position.xy);
+    probe.landing_clear = rr_ninja_landing_clear(player.entity.world_position.xy);
     direction := v2.{dx, dy};
     if length_squared(direction) < 0.001 direction = v2.{1, 0};
-    probe.destination = rr_ninja_step_destination(player.entity.world_position, normalize(direction));
+    probe.destination = rr_ninja_step_destination(player.entity.world_position.xy, normalize(direction));
     if player.active_ability != null && player.active_ability.type == Ninja_Shadow_Step_Ability {
         probe.destination = player.active_ability.(Ninja_Shadow_Step_Ability).preview_destination;
     }
@@ -231,7 +231,7 @@ ninja_smoke_shot :: proc(player: Player) {
     if !peer_found { Notifier.notify(player, "Connect a second player first."); return; }
     ninja_fixture(player, "sheriff_smoke");
     ninja_probe(player);
-    shoot_projectile(player.entity.world_position, v2.{-10, 0}, 1, 0.75, player.entity);
+    shoot_projectile(player.entity.world_position.xy, v2.{-10, 0}, 1, 0.75, player.entity);
     probe := player.entity.get_component(Ninja_Debug);
     probe.protected_at_start = false;
     probe.shot_blocked = false;
@@ -257,14 +257,14 @@ ninja_traps :: proc(player: Player) {
     for trap: component_iterator(Lily_String_Trap) { trap.entity.destroy(); }
     for trap: component_iterator(Mech_Helmet_Trap) { trap.entity.destroy(); }
     peer.player_role = Player_Role.HITMAN;
-    rr_hitman_place_mine(peer, player.entity.world_position);
-    rr_add_autograph_trap(peer, player.entity.world_position);
-    rr_ggg_place_trap(peer, player.entity.world_position);
+    rr_hitman_place_mine(peer, player.entity.world_position.xy);
+    rr_add_autograph_trap(peer, player.entity.world_position.xy);
+    rr_ggg_place_trap(peer, player.entity.world_position.xy);
     strings := Scene.create_entity();
-    strings.set_world_position(player.entity.world_position);
+    strings.set_world_position(player.entity.world_position.xy);
     strings.add_component(Lily_String_Trap).lily_entity_id = peer.entity.id;
     helmet := Scene.create_entity();
-    helmet.set_world_position(player.entity.world_position);
+    helmet.set_world_position(player.entity.world_position.xy);
     helmet.add_component(Mech_Helmet_Trap).owner_id = peer.entity.id;
     ninja_probe(player);
     probe := player.entity.get_component(Ninja_Debug);
@@ -323,7 +323,7 @@ ninja_fixture :: proc(player: Player, mode: string) {
             m.gun_ammo = 1;
         }
         e := Scene.create_entity();
-        e.set_world_position(peer.entity.world_position);
+        e.set_world_position(peer.entity.world_position.xy);
         e.add_component(Ninja_Smoke, userdata=peer, on_before_start=proc(c: Component, data: Object) {
             c.(Ninja_Smoke).owner_user_id = data.(Player).get_user_id();
         });

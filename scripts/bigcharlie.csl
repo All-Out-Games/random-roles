@@ -494,7 +494,7 @@ BC_Lil_Nugget :: class : Component {
 			return;
 		}
 
-		dist := length(local_player.entity.world_position - entity.world_position);
+		dist := length(local_player.entity.world_position.xy - entity.world_position.xy);
 		if dist <= BC_NUGGET_VISIBILITY_RANGE {
 			alpha := 1.0 - clamp((dist - BC_NUGGET_VISIBILITY_RANGE + 2.0) / 2.0, 0.0, 1.0);
 			alpha = clamp(alpha, 0.0, 1.0);
@@ -519,7 +519,7 @@ BC_Lil_Nugget :: class : Component {
 		// Mass Birth: nugget heads to its outer-ring slot (target set by BC),
 		// then switches to the chant loop on arrival.
 		if is_stampeding {
-			cur := entity.world_position;
+			cur := entity.world_position.xy;
 			diff := stampede_target_pos - cur;
 			dist := length(diff);
 			if dist > 0.2 {
@@ -554,8 +554,8 @@ BC_Lil_Nugget :: class : Component {
 				return;
 			}
 
-			center := target.entity.world_position;
-			cur := entity.world_position;
+			center := target.entity.world_position.xy;
+			cur := entity.world_position.xy;
 			velocity := target.agent.velocity;
 			speed := length(velocity);
 			from_player := cur - center;
@@ -629,7 +629,7 @@ BC_Lil_Nugget :: class : Component {
 				if c == null continue;
 				if c.entity != null && c.entity.id == incubate_cocoon_id {
 					cocoon_entity = c.entity;
-					incubate_target_pos = c.entity.world_position;
+					incubate_target_pos = c.entity.world_position.xy;
 					break;
 				}
 			}
@@ -639,7 +639,7 @@ BC_Lil_Nugget :: class : Component {
 				return;
 			}
 
-			cur := entity.world_position;
+			cur := entity.world_position.xy;
 			diff := incubate_target_pos - cur;
 			dist := length(diff);
 			if dist <= BC_INCUBATE_NUGGET_ARRIVAL {
@@ -755,7 +755,7 @@ rr_bc_spawn_follower_nugget :: proc(bc_player: Player, victim: Player) -> Entity
 	if bc == null return null;
 
 	ne := Scene.create_entity();
-	ne.set_local_position(victim.entity.world_position + BC_NUGGET_FOLLOWER_OFFSET);
+	ne.set_local_position(victim.entity.world_position.xy + BC_NUGGET_FOLLOWER_OFFSET);
 	ne.set_local_scale(v2.{1.0, 1.0});
 
 	spine := ne.add_component(Spine_Animator);
@@ -770,7 +770,7 @@ rr_bc_spawn_follower_nugget :: proc(bc_player: Player, victim: Player) -> Entity
 
 	nugget := ne.add_component(BC_Lil_Nugget);
 	nugget.owner_player_entity_id = bc_player.entity.id;
-	nugget.spawn_pos = victim.entity.world_position;
+	nugget.spawn_pos = victim.entity.world_position.xy;
 	nugget.is_follower = true;
 	nugget.follower_target_id = victim.entity.id;
 
@@ -897,7 +897,7 @@ BC_Flesh_Cocoon :: class : Component {
 		// Pin victim into the cocoon position (in case anything else moved them).
 		victim := get_player_by_entity_id(victim_player_entity_id);
 		if victim != null && victim.player_state == Player_State.ALIVE && victim.bc_cocooned {
-			victim.entity.set_local_position(entity.world_position);
+			victim.entity.set_local_position(entity.world_position.xy);
 		}
 	}
 }
@@ -977,7 +977,7 @@ BC_Cocoon_Incubate_Interactable :: class : Interactable {
 		if bc == null || !bc.is_big_charlie_form return false;
 		// Must own the cocoon and have a nugget within search range.
 		if cocoon.bc_player_entity_id != player.entity.id return false;
-		return rr_bc_find_nearest_planted_nugget_for_incubate(player, cocoon.entity.world_position) != null;
+		return rr_bc_find_nearest_planted_nugget_for_incubate(player, cocoon.entity.world_position.xy) != null;
 	}
 
 	on_interact :: method(player: Player) {
@@ -987,7 +987,7 @@ BC_Cocoon_Incubate_Interactable :: class : Interactable {
 		bc := player.entity.get_component(Big_Charlie_Module);
 		if bc == null return;
 
-		nugget := rr_bc_find_nearest_planted_nugget_for_incubate(player, cocoon.entity.world_position);
+		nugget := rr_bc_find_nearest_planted_nugget_for_incubate(player, cocoon.entity.world_position.xy);
 		if nugget == null return;
 
 		nugget_comp := nugget.get_component(BC_Lil_Nugget);
@@ -995,7 +995,7 @@ BC_Cocoon_Incubate_Interactable :: class : Interactable {
 
 		nugget_comp.is_incubating = true;
 		nugget_comp.incubate_cocoon_id = cocoon.entity.id;
-		nugget_comp.incubate_target_pos = cocoon.entity.world_position;
+		nugget_comp.incubate_target_pos = cocoon.entity.world_position.xy;
 		cocoon.incubation_dispatched = true;
 
 		if Game.is_server() {
@@ -1025,7 +1025,7 @@ rr_bc_find_nearest_planted_nugget_for_incubate :: proc(player: Player, pos: v2) 
 		if n.is_incubating continue;       // already busy
 		if n.is_stampeding continue;
 		if n.pending_destroy continue;
-		dist := length(e.world_position - pos);
+		dist := length(e.world_position.xy - pos);
 		if dist < best_dist {
 			best_dist = dist;
 			best = e;
@@ -1050,7 +1050,7 @@ rr_bc_create_cocoon :: proc(player: Player, victim: Player) -> Entity {
 	if bc == null return null;
 	if !bc.is_big_charlie_form return null;
 
-	pos := victim.entity.world_position;
+	pos := victim.entity.world_position.xy;
 
 	ce := Scene.create_entity();
 	ce.set_local_position(pos);
@@ -1513,7 +1513,7 @@ rr_bc_start_mass_birth :: proc(player: Player) {
 		victim.bc_is_mini_charlie = true;
 		victim.bc_mini_chant_angle = angle;
 		victim.bc_mini_chanting = false;
-		victim.entity.set_local_position(victim.entity.world_position);
+		victim.entity.set_local_position(victim.entity.world_position.xy);
 		victim.add_disable_movement_input_reason(BC_MASS_BIRTH_LOCK_REASON);
 	}
 
@@ -1546,7 +1546,7 @@ rr_bc_start_mass_birth :: proc(player: Player) {
 		n.is_incubating = false;
 		n.chanting = false;
 		n.chant_angle = (i.(float) / max(nugget_count, 1).(float)) * 2.0 * PI;
-		n.stampede_target_pos = player.entity.world_position
+		n.stampede_target_pos = player.entity.world_position.xy
 			+ v2.{cos(n.chant_angle), sin(n.chant_angle)} * BC_MASS_BIRTH_NUGGET_RADIUS;
 	}
 
@@ -1575,7 +1575,7 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 	now := get_time();
 	if now < bc.mass_birth_started_at + BC_MASS_BIRTH_STAMPEDE_DELAY return;
 
-	bc_pos := player.entity.world_position;
+	bc_pos := player.entity.world_position.xy;
 
 	// Track which mini IDs we've already moved this frame so re-infections
 	// (duplicate entries in infected_player_ids) don't double-step the same victim.
@@ -1608,7 +1608,7 @@ rr_bc_update_mass_birth :: proc(player: Player, dt: float) {
 		}
 
 		slot_pos := bc_pos + v2.{cos(chaser.bc_mini_chant_angle), sin(chaser.bc_mini_chant_angle)} * BC_MASS_BIRTH_CHANT_RADIUS;
-		cur := chaser.entity.world_position;
+		cur := chaser.entity.world_position.xy;
 		diff := slot_pos - cur;
 		dist := length(diff);
 
@@ -1798,7 +1798,7 @@ rr_bc_update :: proc(player: Player, dt: float) {
 		player.camera.size = player.camera_default_size;
 		nugget := rr_bc_get_active_camera_nugget(player);
 		if nugget != null && #alive(nugget) {
-			player.camera.position = nugget.world_position;
+			player.camera.position.xy = nugget.world_position.xy;
 		} else {
 			rr_bc_exit_camera(player);
 		}
@@ -2145,7 +2145,7 @@ BC_Birth_Nugget_Ability :: class : Ability_Base {
 	on_update :: method(params: ref Ability_Update_Params) {
 		if !params.clicked return;
 		if !params.can_use return;
-		spawned := rr_bc_spawn_planted_nugget(player, player.entity.world_position);
+		spawned := rr_bc_spawn_planted_nugget(player, player.entity.world_position.xy);
 		if spawned != null {
 			current_cooldown = BC_NUGGET_COOLDOWN;
 			rr_bc_creature_trigger(player, "birth");
@@ -2224,7 +2224,7 @@ BC_Flesh_Cocoon_Ability :: class : Ability_Base {
 	}
 
 	get_target :: proc(instance: BC_Flesh_Cocoon_Ability, p: Player) -> Player {
-		finder := make_finder(Player, p.entity.world_position, BC_COCOON_RANGE);
+		finder := make_finder(Player, p.entity.world_position.xy, BC_COCOON_RANGE);
 		for target: component_iterator(Player) {
 			if target == null continue;
 			if !#alive(target.entity) continue;
@@ -2232,7 +2232,7 @@ BC_Flesh_Cocoon_Ability :: class : Ability_Base {
 			if target.player_state != Player_State.ALIVE continue;
 			if target.bc_cocooned continue;
 			if target.bc_is_mini_charlie continue;
-			finder.check(target, target.entity.world_position);
+			finder.check(target, target.entity.world_position.xy);
 		}
 		return finder.closest;
 	}
@@ -2356,7 +2356,7 @@ BC_Shockwave_Knockback :: class : Component {
 		end_time = get_time() + seconds;
 		active = true;
 		dir = direction;
-		last_pos = entity.world_position;
+		last_pos = entity.world_position.xy;
 		stuck_frames = 0;
 
 		p := entity.get_component(Player);
@@ -2387,7 +2387,7 @@ BC_Shockwave_Knockback :: class : Component {
 		// Keep pushing every frame until something stops us.
 		p.agent.velocity = dir * BC_SHOCKWAVE_FLING_SPEED;
 
-		pos := entity.world_position;
+		pos := entity.world_position.xy;
 		moved := length(pos - last_pos);
 		last_pos = pos;
 
@@ -2461,7 +2461,7 @@ BC_Shockwave_Stun :: class : Component {
 // Knock every alive, non-cocooned player in range outward from Charlie. Walls
 // block the wave (navmesh-sampled); each victim is flung to a wall, then stunned.
 rr_bc_apply_shockwave :: proc(player: Player) {
-	origin := player.entity.world_position;
+	origin := player.entity.world_position.xy;
 	range_sq := BC_SHOCKWAVE_RANGE * BC_SHOCKWAVE_RANGE;
 	for p: component_iterator(Player) {
 		if p == null continue;
@@ -2476,12 +2476,12 @@ rr_bc_apply_shockwave :: proc(player: Player) {
 		if (mech_showdown != null && mech_showdown.showdown_active) ||
 			(guard_showdown != null && guard_showdown.showdown_active) continue;
 
-		d := p.entity.world_position - origin;
+		d := p.entity.world_position.xy - origin;
 		dist_sq := length_squared(d);
 		if dist_sq > range_sq continue;
 
 		// Wall-stop: the wave only reaches players with an unobstructed path.
-		if !rr_bc_line_clear_on_navmesh(origin, p.entity.world_position) continue;
+		if !rr_bc_line_clear_on_navmesh(origin, p.entity.world_position.xy) continue;
 
 		dir := d;
 		if length_squared(dir) < 0.001 {

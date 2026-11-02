@@ -39,7 +39,7 @@ Ninja_Clone_Test :: class : Component {
     clone_at :: method(pos: v2) -> bool {
         for clone: component_iterator(Ninja_Decoy) {
             if clone.owner_user_id == owner_user_id && !clone.spent && !clone.afterimage &&
-                length_squared(clone.entity.world_position - pos) < 0.0025 return true;
+                length_squared(clone.entity.world_position.xy - pos) < 0.0025 return true;
         }
         return false;
     }
@@ -59,7 +59,7 @@ Ninja_Clone_Test :: class : Component {
     }
 
     begin_cast :: method(p: Player) {
-        cast_origin = entity.world_position;
+        cast_origin = entity.world_position.xy;
         p.input_override = v2.{1, 0};
         set_active_effect(entity, new(Ninja_Clone_Cast_Effect));
         started = get_time();
@@ -106,7 +106,7 @@ Ninja_Clone_Test :: class : Component {
         if stage == 1 && elapsed >= 0.125 {
             // Allow fixture entity destruction to settle, then give the existing
             // clone a different position from the replacement cast.
-            original_clone_position = entity.world_position;
+            original_clone_position = entity.world_position.xy;
             rr_ninja_spawn_decoy(p, false);
             entity.set_world_position(original_clone_position + v2.{1.25, 0});
             entity.mark_teleported();
@@ -116,7 +116,7 @@ Ninja_Clone_Test :: class : Component {
         }
         if stage == 2 && elapsed >= 0.375 {
             cast_pose_played = cast_pose_is(p, "Emote/Summoning_Jutsu");
-            cast_freezes_movement = length_squared(entity.world_position - cast_origin) < 0.0025;
+            cast_freezes_movement = length_squared(entity.world_position.xy - cast_origin) < 0.0025;
             remove_effect(entity, Ninja_Clone_Cast_Effect, true);
             stage = 3;
             return;
@@ -125,7 +125,7 @@ Ninja_Clone_Test :: class : Component {
             interrupted_clone_preserved = active_clone_count() == 1 && clone_at(original_clone_position);
             interrupt_effect_cleared = entity.get_active_effect() == null;
             interrupt_pose_cleared = cast_pose_is(p, "__CLEAR_TRACK__");
-            interrupt_freeze_released = length_squared(entity.world_position - cast_origin) > 0.01;
+            interrupt_freeze_released = length_squared(entity.world_position.xy - cast_origin) > 0.01;
             restore_input();
             begin_cast(p);
             stage = 4;
@@ -145,7 +145,7 @@ Ninja_Clone_Test :: class : Component {
             exactly_one_replacement = replacement_count == 1 && clone_at(cast_origin) && !clone_at(original_clone_position);
             completion_effect_cleared = entity.get_active_effect() == null;
             completion_pose_cleared = cast_pose_is(p, "__CLEAR_TRACK__");
-            completion_freeze_released = length_squared(entity.world_position - cast_origin) > 0.01;
+            completion_freeze_released = length_squared(entity.world_position.xy - cast_origin) > 0.01;
             restore_input();
             // Real meeting entry interrupts a third cast before its spawn beat.
             set_active_effect(entity, new(Ninja_Clone_Cast_Effect));
