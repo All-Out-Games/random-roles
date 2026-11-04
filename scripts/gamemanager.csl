@@ -1957,6 +1957,7 @@ meeting_called_popup: Meeting_Called_Popup;
 role_spin_popup: Role_Spin_Popup;
 intro_popup: Intro_Popup;
 victory_popup: Victory_Popup;
+rr_scene_initialized: bool;
 
 // Popups are part of the pre-start scene state, including late-join baselines.
 ao_before_scene_load :: proc() {
@@ -1976,9 +1977,12 @@ ao_start :: proc() {
 	rr_set_matchmaking(0);
 	rr_refresh_rng_state();
 	setup_lobby();
+	rr_scene_initialized = true;
 }
 
 ao_update :: proc(dt: float) {
+	// Clients can update the temporary scene before the first server snapshot arrives.
+	if !rr_scene_initialized return;
 	rr_update_matchmaking_priority();
 
 	// Keep timed sabotages progressing regardless of game_state (e.g., lockdown during voting).
